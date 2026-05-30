@@ -608,7 +608,7 @@ fn dequantize_per_expert_mxfp4(
     tensor_names: &[String],
     prefixes: &[&str],
     tensors: &mut HashMap<String, crate::WeightArray>,
-) -> Result<std::collections::HashSet<String>, ModelError> {
+) -> Result<HashSet<String>, ModelError> {
     let mut consumed: HashSet<String> = HashSet::new();
 
     // Match V4-style per-expert weights: any tensor name containing

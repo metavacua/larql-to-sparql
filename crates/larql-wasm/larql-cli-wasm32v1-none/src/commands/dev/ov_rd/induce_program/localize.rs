@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // Diagnostic-capture structs accumulate per-prompt fields (clears_failure,
 // metrics, worst_prompt_kl, …) for a future dump/serializer; suppress until
 // the viewer is wired.

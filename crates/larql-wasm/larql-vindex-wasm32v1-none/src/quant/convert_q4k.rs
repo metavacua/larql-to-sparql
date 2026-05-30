@@ -26,6 +26,10 @@ use crate::config::types::VindexConfig;
 use crate::error::VindexError;
 use crate::format::filenames::*;
 use crate::format::weights::{
+    load_model_weights, write_model_weights_q4k_with_opts, Q4kWriteOptions,
+};
+use crate::index::storage::ffn_store::{FFN_COMPONENTS_PER_LAYER, FFN_DOWN};
+use crate::IndexLoadCallbacks;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -34,10 +38,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    load_model_weights, write_model_weights_q4k_with_opts, Q4kWriteOptions,
-};
-use crate::index::storage::ffn_store::{FFN_COMPONENTS_PER_LAYER, FFN_DOWN};
-use crate::IndexLoadCallbacks;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 #[derive(Debug, Clone, Default)]
 pub struct Q4kConvertConfig {
@@ -163,7 +166,7 @@ pub fn vindex_to_q4k(
     // Hard-link auxiliary files: gate_vectors (KNN still needs the
     // float matrix), embeddings, down_meta, tokenizer, feature_labels.
     // Excludes the f32 weight files that the Q4K path replaces.
-    let handled_by_writer: std::collections::HashSet<&str> = [
+    let handled_by_writer: HashSet<&str> = [
         INDEX_JSON,
         // Written by write_model_weights_q4k:
         ATTN_WEIGHTS_Q4K_BIN,
@@ -176,7 +179,7 @@ pub fn vindex_to_q4k(
     .iter()
     .copied()
     .collect();
-    let skip_from_src: std::collections::HashSet<&str> = [
+    let skip_from_src: HashSet<&str> = [
         // The f32 weight files that the Q4K path replaces — don't
         // hard-link these, they'd bloat the output and be unused.
         ATTN_WEIGHTS_BIN,

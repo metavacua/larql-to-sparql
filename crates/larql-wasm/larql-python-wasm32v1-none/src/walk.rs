@@ -12,14 +12,6 @@ use std::path::Path;
 
 use larql_inference::ffn::FfnBackend;
 use larql_inference::forward::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     capture_donor_state_with_ffn, embedding_neighbors as li_embedding_neighbors,
     embedding_row as li_embedding_row, embedding_row_scaled as li_embedding_row_scaled,
     generate_cached_hooked, logit_lens_topk, patch_and_trace_with_ffn,
@@ -37,6 +29,17 @@ use larql_vindex::{
 };
 
 use crate::trace_py;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Mmap'd weight file — kept alive so Array2 views remain valid.
 struct WeightMmap {
     _file: std::fs::File,
@@ -491,7 +494,7 @@ impl PyWalkModel {
         let floats: &[f32] =
             unsafe { core::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
 
-        let mut best: std::collections::HashMap<usize, f32> = HashMap::new();
+        let mut best: HashMap<usize, f32> = HashMap::new();
         for s in 0..seq_len {
             let row = &floats[s * hidden..(s + 1) * hidden];
             let arr = ndarray::Array1::from_vec(row.to_vec());

@@ -1,16 +1,6 @@
 //! CSV I/O for knowledge graphs.
 //!
 //! Format: subject,relation,object,confidence,source
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
 
 use std::io::Write;
 use std::path::Path;
@@ -18,6 +8,17 @@ use std::path::Path;
 use crate::core::edge::Edge;
 use crate::core::enums::SourceType;
 use crate::core::graph::{Graph, GraphError};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const CSV_HEADER: [&str; 5] = ["subject", "relation", "object", "confidence", "source"];
 
 /// Load a graph from CSV. Expected columns: subject,relation,object,confidence,source

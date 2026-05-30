@@ -13,6 +13,13 @@
 
 use crate::error::VindexError;
 use crate::format::filenames::{
+    DOWN_FEATURES_Q4K_BIN, DOWN_FEATURES_Q4K_MANIFEST_JSON, INTERLEAVED_Q4K_BIN,
+    INTERLEAVED_Q4K_MANIFEST_JSON,
+};
+use crate::format::weights::Q4kManifestEntry;
+use crate::index::core::VectorIndex;
+use crate::index::storage::vindex_storage::VindexStorage;
+use crate::mmap_util::mmap_demand_paged;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,13 +28,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    DOWN_FEATURES_Q4K_BIN, DOWN_FEATURES_Q4K_MANIFEST_JSON, INTERLEAVED_Q4K_BIN,
-    INTERLEAVED_Q4K_MANIFEST_JSON,
-};
-use crate::format::weights::Q4kManifestEntry;
-use crate::index::core::VectorIndex;
-use crate::index::storage::vindex_storage::VindexStorage;
-use crate::mmap_util::mmap_demand_paged;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 #[cfg(unix)]
 use super::FFN_DOWN;

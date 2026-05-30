@@ -8,14 +8,6 @@ use core::hash::{Hash, Hasher};
 use std::time::Duration;
 
 use larql_router_protocol::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     AnnounceMsg, DroppingMsg, GridServiceClient, HeartbeatMsg, RouterPayload, ServerMessage,
     ServerPayload,
 };
@@ -24,6 +16,17 @@ use crate::metrics::LayerLatencyTracker;
 use tokio_stream::StreamExt;
 use tonic::metadata::AsciiMetadataValue;
 use tracing::{error, info, warn};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 // ── Tunables ───────────────────────────────────────────────────────────────────
 

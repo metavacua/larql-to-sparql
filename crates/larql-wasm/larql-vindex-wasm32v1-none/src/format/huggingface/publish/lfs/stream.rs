@@ -15,6 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// PUT the file contents to the signed LFS URL, streaming through a
 /// `CountingReader` so the worker thread can report progress.
 pub(super) fn stream_put_with_progress(

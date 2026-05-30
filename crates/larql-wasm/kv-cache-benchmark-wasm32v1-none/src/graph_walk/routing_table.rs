@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Routing table: template → layer features mapping.
 ///
 /// 23,697 unique features from 240 passes. 44 sub-centroids,

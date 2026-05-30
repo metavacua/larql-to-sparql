@@ -19,6 +19,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Common English function/closed-class words that get capitalised
 /// at sentence starts but aren't named entities. Pulling this out as
 /// a `const` makes the heuristic auditable and keeps the verb body
@@ -92,7 +95,7 @@ impl Session {
         };
 
         // Aggregate: token → (occurrence count, max c_score across layers).
-        let mut entity_counts: std::collections::HashMap<String, (usize, f32)> =
+        let mut entity_counts: HashMap<String, (usize, f32)> =
             HashMap::new();
 
         for layer in &scan_layers {

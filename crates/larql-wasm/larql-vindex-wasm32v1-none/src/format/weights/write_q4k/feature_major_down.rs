@@ -32,6 +32,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// In-flight state for the W2 feature-major down emission. Lives only
 /// while the FFN write loop is running; collapsed into the manifest
 /// JSON at end-of-loop. Each field has a name at the call sites

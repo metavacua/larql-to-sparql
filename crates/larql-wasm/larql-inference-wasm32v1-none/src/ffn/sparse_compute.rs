@@ -22,6 +22,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Compute FFN output for a pre-selected set of features.
 ///
 /// Architecture-correct: reads ffn_type, activation, and bias from the model.
@@ -133,7 +136,7 @@ fn sparse_ffn_forward_impl(
     let down_view = ndarray::ArrayView2::from_shape((hidden, k), &down_sub).unwrap();
 
     // Override lookup (only built when overrides are present)
-    let override_map: std::collections::HashMap<usize, &[f32]> = if overrides.is_empty() {
+    let override_map: HashMap<usize, &[f32]> = if overrides.is_empty() {
         HashMap::new()
     } else {
         overrides.iter().copied().collect()
@@ -269,7 +272,7 @@ fn sparse_ffn_forward_full_impl(
     let down_view = ndarray::ArrayView2::from_shape((hidden, k), &down_sub).unwrap();
 
     // Per-feature override lookup. Built once.
-    let override_map: std::collections::HashMap<usize, &FeatureSlotOverride<'_>> =
+    let override_map: HashMap<usize, &FeatureSlotOverride<'_>> =
         overrides.iter().map(|o| (o.feature, o)).collect();
 
     let mut full_activation = Array2::<f32>::zeros((seq_len, intermediate));

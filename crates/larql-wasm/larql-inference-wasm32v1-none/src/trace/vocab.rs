@@ -11,6 +11,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Project a vector through final_norm → lm_head → logits.
 pub fn project_to_logits(weights: &ModelWeights, vec: &[f32]) -> Vec<f32> {
     let hidden = weights.hidden_size;

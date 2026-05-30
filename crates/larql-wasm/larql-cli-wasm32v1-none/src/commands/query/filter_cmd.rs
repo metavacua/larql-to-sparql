@@ -10,6 +10,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const METADATA_LAYER: &str = "layer";
 const METADATA_SELECTIVITY: &str = "selectivity";
 const METADATA_C_IN: &str = "c_in";

@@ -19,6 +19,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub fn run(args: CompileArgs) -> Result<(), Box<dyn core::error::Error>> {
     let vindex_path = args.vindex.as_ref().unwrap();
     eprintln!("LARQL AOT Compiler — patch mode");

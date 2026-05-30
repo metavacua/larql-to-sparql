@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Residual checkpointing for fast reconstruction.
 ///
 /// Stores residual snapshots at key layers (e.g., L0, L8, L16, L24, L33).

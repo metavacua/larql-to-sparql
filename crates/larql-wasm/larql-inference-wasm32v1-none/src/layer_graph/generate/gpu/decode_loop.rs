@@ -23,6 +23,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Aggregated output of the decode-loop phase.
 pub(super) struct DecodeLoopOutcome {
     /// `(text, prob)` per generated token (excluding the first, which the

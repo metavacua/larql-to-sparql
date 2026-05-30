@@ -68,6 +68,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const CHAT_COMPLETION_OBJECT: &str = "chat.completion";
 const CHAT_COMPLETION_CHUNK_OBJECT: &str = "chat.completion.chunk";
 const ASSISTANT_ROLE: &str = "assistant";
@@ -1082,7 +1085,7 @@ fn schema_for_response_format(
 /// vocab.
 fn resolve_eos_token_ids(
     tokenizer: &larql_inference::tokenizers::Tokenizer,
-) -> std::collections::HashSet<u32> {
+) -> HashSet<u32> {
     let mut ids = HashSet::new();
     for tok in [
         "<end_of_turn>",

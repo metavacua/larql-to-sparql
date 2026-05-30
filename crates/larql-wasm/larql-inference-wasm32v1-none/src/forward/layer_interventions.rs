@@ -20,6 +20,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Run a single transformer layer while zeroing selected pre-W_O attention heads.
 ///
 /// This is intended for OV ablation diagnostics: the selected query-head slices

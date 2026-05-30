@@ -24,6 +24,13 @@
 use ndarray::Array2;
 
 use crate::attention::{
+    run_attention_block_decode_step_backend, run_attention_with_kv_backend, KvCache,
+};
+use crate::ffn::FfnBackend;
+use crate::forward::hooks::{LayerHook, NoopHook};
+use crate::forward::predict::hidden_to_raw_logits;
+use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
+use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -32,13 +39,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    run_attention_block_decode_step_backend, run_attention_with_kv_backend, KvCache,
-};
-use crate::ffn::FfnBackend;
-use crate::forward::hooks::{LayerHook, NoopHook};
-use crate::forward::predict::hidden_to_raw_logits;
-use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
-use crate::model::ModelWeights;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Stream autoregressive generation with a KV cache.
 ///
@@ -536,7 +539,7 @@ mod tests {
         let tokenizer = make_test_tokenizer(weights.vocab_size);
         let ffn = WeightFfn { weights: &weights };
         // Allow only tokens 0..8 by masking the rest to NEG_INFINITY
-        let allowed: std::collections::HashSet<u32> = (0u32..8).collect();
+        let allowed: HashSet<u32> = (0u32..8).collect();
         let ids = generate_cached_constrained(
             &weights,
             &tokenizer,
@@ -609,7 +612,7 @@ mod tests {
         // RecordHook should fire on every layer of every step (prefill +
         // each decode step). Test by counting on_post_layer calls.
         struct CountHook {
-            calls: std::collections::HashMap<usize, usize>,
+            calls: HashMap<usize, usize>,
         }
         impl LayerHook for CountHook {
             fn on_post_layer(&mut self, layer: usize, _h: &mut Array2<f32>) {

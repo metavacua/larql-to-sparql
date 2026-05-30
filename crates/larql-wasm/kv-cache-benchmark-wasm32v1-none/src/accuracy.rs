@@ -13,6 +13,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Result of an accuracy test for one strategy on one prompt.
 #[derive(Debug, Clone, Serialize)]
 pub struct AccuracyResult {
@@ -114,8 +117,8 @@ pub fn softmax(logits: &[f32]) -> Vec<f64> {
 
 /// Top-K overlap: fraction of top-K tokens shared between two ranked lists.
 pub fn top_k_overlap(a: &[u32], b: &[u32], k: usize) -> f32 {
-    let a_set: std::collections::HashSet<u32> = a.iter().take(k).copied().collect();
-    let b_set: std::collections::HashSet<u32> = b.iter().take(k).copied().collect();
+    let a_set: HashSet<u32> = a.iter().take(k).copied().collect();
+    let b_set: HashSet<u32> = b.iter().take(k).copied().collect();
     let intersection = a_set.intersection(&b_set).count();
     intersection as f32 / k as f32
 }

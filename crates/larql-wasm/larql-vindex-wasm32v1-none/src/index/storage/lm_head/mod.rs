@@ -21,6 +21,10 @@
 //! tests (which span loader + KNN seams) stay here.
 
 use larql_models::quant::ggml::{
+    Q4_0_BLOCK_BYTES, Q4_0_BLOCK_ELEMS, Q4_K_BLOCK_BYTES, Q4_K_BLOCK_ELEMS,
+};
+
+use crate::format::filenames::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -29,10 +33,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    Q4_0_BLOCK_BYTES, Q4_0_BLOCK_ELEMS, Q4_K_BLOCK_BYTES, Q4_K_BLOCK_ELEMS,
-};
-
-use crate::format::filenames::*;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 mod knn;
 mod loaders;
@@ -166,7 +169,7 @@ mod tests {
         assert_eq!(out.len(), 3);
         let probs: Vec<f32> = out.iter().map(|(_, s)| *s).collect();
         assert!(probs.windows(2).all(|w| w[0] >= w[1]));
-        let tokens: std::collections::HashSet<u32> = out.iter().map(|(t, _)| *t).collect();
+        let tokens: HashSet<u32> = out.iter().map(|(t, _)| *t).collect();
         assert_eq!(tokens.len(), 3, "no duplicate token ids in top-k output");
     }
 

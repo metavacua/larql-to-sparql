@@ -25,7 +25,7 @@
 //! populates it (Metal full-K decode streams Q4_K bytes through
 //! `compute::q4k_dispatch::q4k_matmul_transb`).
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex};
 
 use crate::index::core::VectorIndex;
 #[allow(unused_imports)]
@@ -36,6 +36,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Number of FFN component tensors per transformer layer: gate, up, down
 /// — in that order. Used everywhere the FFN manifest is indexed
 /// (`layer * FFN_COMPONENTS_PER_LAYER + component`) and as the inner

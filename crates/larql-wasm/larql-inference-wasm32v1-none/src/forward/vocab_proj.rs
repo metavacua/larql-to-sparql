@@ -28,6 +28,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Raw row of `W_E` for `token_id`. Returns `None` if the id is out of
 /// range. Does **not** apply the architecture's `embed_scale` — this is
 /// the matrix as stored. Use [`embedding_row_scaled`] if you want what

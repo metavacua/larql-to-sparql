@@ -11,6 +11,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── Cached: precomputed layer output for fixed-routing regimes ──
 
 /// Cached layer graph: returns a precomputed residual instead of computing.
@@ -20,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 /// then storing them. At inference, skip the computation entirely.
 pub struct CachedLayerGraph {
     /// layer → cached residual [seq_len, hidden]. Keyed by layer index.
-    cache: std::collections::HashMap<usize, Array2<f32>>,
+    cache: HashMap<usize, Array2<f32>>,
 }
 
 impl CachedLayerGraph {

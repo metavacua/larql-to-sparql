@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── Local routing math ────────────────────────────────────────────────────────
 // Mirrored from larql-compute cpu/ops/moe.rs so the client can route without
 // having the expert weights locally.

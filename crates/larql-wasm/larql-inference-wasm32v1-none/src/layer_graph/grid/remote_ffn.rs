@@ -7,6 +7,13 @@ use crate::forward::apply_norm;
 use crate::layer_graph::generate::detok::Detokenizer;
 use crate::layer_graph::generate::eos::EosConfig;
 use crate::layer_graph::generate::policy::{
+    build_special_suppress_set_with_policy, pick_next_filtered_with_policy,
+};
+use crate::residual::rms_norm;
+use larql_compute::cpu::ops::q4k_q8k_dot::{quantize_x_to_q8k, Q8KActivation};
+use larql_compute::prelude::*;
+use larql_models::ModelWeights;
+use larql_vindex::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,13 +22,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    build_special_suppress_set_with_policy, pick_next_filtered_with_policy,
-};
-use crate::residual::rms_norm;
-use larql_compute::cpu::ops::q4k_q8k_dot::{quantize_x_to_q8k, Q8KActivation};
-use larql_compute::prelude::*;
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Autoregressive generation with Metal GPU attention and remote dense FFN.
 ///
 /// For dense models (not MoE) where the entire FFN should be offloaded to a

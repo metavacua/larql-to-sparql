@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Compute a short ETag from a JSON response body.
 pub fn compute_etag(body: &serde_json::Value) -> String {
     let mut hasher = DefaultHasher::new();

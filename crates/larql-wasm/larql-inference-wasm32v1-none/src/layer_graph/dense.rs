@@ -12,6 +12,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Dense baseline: standard matmul attention + pluggable FFN backend.
 /// This is today's working path — nothing changes, just wrapped in the trait.
 pub struct DenseLayerGraph<'a> {

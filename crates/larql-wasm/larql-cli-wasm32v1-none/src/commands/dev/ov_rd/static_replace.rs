@@ -7,14 +7,6 @@ use larql_inference::forward::ple::precompute_per_layer_inputs;
 use larql_inference::forward::{embed_tokens_pub, run_layer_with_ffn};
 use larql_inference::{encode_prompt, hidden_to_raw_logits, WeightFfn};
 use larql_vindex::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     load_model_weights_q4k, load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex,
 };
 use ndarray::{s, Array2};
@@ -28,6 +20,17 @@ use super::reports::{
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::{StaticHeadAccumulator, StaticHeadMeans};
 use super::types::{HeadId, PromptRecord};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub(super) struct StaticReplaceArgs {
     /// Self-contained Q4K vindex directory.

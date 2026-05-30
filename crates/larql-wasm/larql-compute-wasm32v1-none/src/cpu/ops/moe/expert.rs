@@ -4,16 +4,6 @@
 //! remote expert server endpoint when one expert's work is delegated to a
 //! shard. The BF16 expert weights are dequantized on demand so only the
 //! selected experts pay the conversion cost.
-
-#[cfg(not(target_arch = "wasm32"))]
-use super::cache::{try_cached_dequant, ExpertF32};
-#[cfg(not(target_arch = "wasm32"))]
-use super::math::{gelu_tanh, matmul_vec, matmul_vec_into, rms_norm, silu};
-use crate::cpu::ops::q4_common::q4k_matvec_into;
-use crate::cpu::ops::q4k_q8k_dot::{
-    q4k_q8k_matvec_into, quantize_x_to_q8k, quantize_x_to_q8k_into, Q8KActivation,
-};
-use crate::options;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +15,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::cache::{try_cached_dequant, ExpertF32};
+#[cfg(not(target_arch = "wasm32"))]
+use super::math::{gelu_tanh, matmul_vec, matmul_vec_into, rms_norm, silu};
+use crate::cpu::ops::q4_common::q4k_matvec_into;
+use crate::cpu::ops::q4k_q8k_dot::{
+    q4k_q8k_matvec_into, quantize_x_to_q8k, quantize_x_to_q8k_into, Q8KActivation,
+};
+use crate::options;
 // `q4k_q8k_gate_up_into` exists for future kernel exploration but is not
 // wired into the hot path — see comment in `run_single_expert_q4k_q8k_into`.
 

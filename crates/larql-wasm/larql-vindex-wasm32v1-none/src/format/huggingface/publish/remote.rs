@@ -13,6 +13,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// List remote files and return `filename → lfs.oid` for every LFS-tracked
 /// file at the repo root. Files without an `lfs.oid` (git-tracked small
 /// text) are omitted; callers skip only what's in the map.

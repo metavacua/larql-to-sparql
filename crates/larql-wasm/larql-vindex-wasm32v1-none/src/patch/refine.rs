@@ -25,6 +25,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Input to the refine pass: a single fact's identifying coordinates
 /// plus the unrefined gate vector synthesised at INSERT time.
 #[derive(Debug, Clone)]

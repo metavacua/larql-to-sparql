@@ -13,7 +13,7 @@
 //! `LARQL_MOE_WIRE_F16=1` for LAN deployments where the savings cancel
 //! the conversion CPU cost.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{OnceLock};
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -22,14 +22,6 @@ use axum::response::Response;
 use tokio::sync::Semaphore;
 
 use larql_inference::ffn::moe_remote::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     decode_layer_batch_request, decode_layer_batch_request_f16, encode_layer_batch_response,
     encode_layer_batch_response_f16, LAYER_BATCH_CONTENT_TYPE, LAYER_BATCH_F16_CONTENT_TYPE,
 };
@@ -39,6 +31,17 @@ use crate::error::ServerError;
 use crate::state::AppState;
 
 use super::cpu::run_experts_cpu_batch;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 // Limits concurrent `run_experts_cpu_batch` calls to the number of logical
 // CPUs on the machine.  Without this, 30 simultaneous predispatch requests

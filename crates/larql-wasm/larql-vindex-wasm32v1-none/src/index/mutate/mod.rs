@@ -11,6 +11,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub mod loaders;
 
 use std::io::{BufWriter, Write};
@@ -81,7 +84,7 @@ impl VectorIndex {
     ///
     /// For a single (layer, feature) lookup, use `down_override_at` —
     /// it has the same shape as `PatchedVindex::overrides_gate_at`.
-    pub fn down_overrides(&self) -> &std::collections::HashMap<(usize, usize), Vec<f32>> {
+    pub fn down_overrides(&self) -> &HashMap<(usize, usize), Vec<f32>> {
         &self.metadata.down_overrides
     }
 
@@ -106,7 +109,7 @@ impl VectorIndex {
     /// All in-memory up vector overrides keyed by `(layer, feature)`.
     /// Parallel to `down_overrides()`. Used by `COMPILE INTO VINDEX` to
     /// bake the overrides into a fresh copy of `up_features.bin`.
-    pub fn up_overrides(&self) -> &std::collections::HashMap<(usize, usize), Vec<f32>> {
+    pub fn up_overrides(&self) -> &HashMap<(usize, usize), Vec<f32>> {
         &self.metadata.up_overrides
     }
 

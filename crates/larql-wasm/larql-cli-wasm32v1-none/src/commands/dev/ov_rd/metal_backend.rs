@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Metal compute backend initialization for AHORD evaluation commands.
 ///
 /// Shared by `eval-program` and `induce-program`. Returns `None` when Metal

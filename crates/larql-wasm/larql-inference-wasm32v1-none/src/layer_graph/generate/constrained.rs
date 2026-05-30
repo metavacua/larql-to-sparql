@@ -1,14 +1,6 @@
 //! Constrained generation over the GPU/vindex decode path.
 
 use super::cpu::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     backend_supports_fused_q4_pipeline, generate_constrained_via_cpu_q4k_streaming_sampled,
 };
 use super::eos::EosConfig;
@@ -21,6 +13,17 @@ use super::types::{GenerateError, GenerateResult, StageTimings};
 use crate::layer_graph::CachedLayerGraph;
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Constrained variant of [`super::generate`] for grammar-controlled decoding.
 ///
 /// Differs from unconstrained generation in two places only:

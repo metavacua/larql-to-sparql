@@ -7,6 +7,13 @@ use crate::attention::SharedKV;
 use crate::forward::embed_tokens_pub;
 use crate::forward::ple::precompute_per_layer_inputs;
 use crate::forward::{
+    run_layer_with_ffn, run_layer_with_mapped_head_residual_delta,
+    run_layer_with_mapped_pre_o_head, run_layer_with_original_head_residual_delta,
+    run_layer_with_replaced_head_residual_delta, run_layer_with_replaced_pre_o_head,
+    run_layer_with_subtracted_pre_o_heads, run_layer_with_zeroed_pre_o_heads,
+};
+
+use super::tensors::{insert_q4k_layer_tensors, remove_layer_tensors};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,13 +22,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    run_layer_with_ffn, run_layer_with_mapped_head_residual_delta,
-    run_layer_with_mapped_pre_o_head, run_layer_with_original_head_residual_delta,
-    run_layer_with_replaced_head_residual_delta, run_layer_with_replaced_pre_o_head,
-    run_layer_with_subtracted_pre_o_heads, run_layer_with_zeroed_pre_o_heads,
-};
-
-use super::tensors::{insert_q4k_layer_tensors, remove_layer_tensors};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[allow(clippy::type_complexity)]
 fn predict_q4k_hidden_with_target_layer_step<F>(
     weights: &mut ModelWeights,

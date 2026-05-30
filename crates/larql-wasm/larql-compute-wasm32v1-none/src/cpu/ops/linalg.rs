@@ -2,9 +2,6 @@
 //!
 //! All operations use f64 for numerical stability (the MEMIT covariance
 //! inverse is ill-conditioned at f32 for ffn_dim > 2048).
-
-#[cfg(not(target_arch = "wasm32"))]
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +13,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
 #[cfg(not(target_arch = "wasm32"))]
 /// Cholesky decomposition of a symmetric positive-definite matrix.
 /// Returns the lower-triangular factor L such that A = L L^T.

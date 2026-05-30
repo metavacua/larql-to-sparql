@@ -4,14 +4,6 @@ use std::time::Instant;
 use clap::Args;
 use larql_inference::{encode_prompt, hidden_to_raw_logits};
 use larql_vindex::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     load_model_weights_q4k, load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex,
 };
 use ndarray::{s, Array2};
@@ -21,6 +13,17 @@ use super::metrics::{kl_logp, log_softmax, max_abs_diff, mean};
 use super::reports::{SanityCheckReport, SanityHeadReport, SanityPromptReport};
 use super::types::HeadId;
 use super::zero_ablate::forward_q4k_zero_pre_o_head;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub(super) struct SanityCheckArgs {
     /// Self-contained Q4K vindex directory.

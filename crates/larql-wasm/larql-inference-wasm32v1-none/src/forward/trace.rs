@@ -3,6 +3,13 @@
 use super::embed::embed_tokens;
 use super::hooks::{LayerHook, NoopHook};
 use super::layer::{
+    apply_layer_scalar, run_attention, run_ffn, run_layer_with_capture_hooked, run_layer_with_ffn,
+};
+use super::ple::{apply_per_layer_embedding, precompute_per_layer_inputs};
+use super::{LayerAttentionCapture, TraceResult};
+use crate::ffn::{FfnBackend, WeightFfn};
+use crate::model::ModelWeights;
+use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -11,13 +18,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    apply_layer_scalar, run_attention, run_ffn, run_layer_with_capture_hooked, run_layer_with_ffn,
-};
-use super::ple::{apply_per_layer_embedding, precompute_per_layer_inputs};
-use super::{LayerAttentionCapture, TraceResult};
-use crate::ffn::{FfnBackend, WeightFfn};
-use crate::model::ModelWeights;
-use ndarray::Array2;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Per-layer residuals captured for speculation error analysis.
 pub struct SpecCapture {

@@ -29,6 +29,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Holds the inputs + accumulators for the streaming-extract pipeline.
 pub(super) struct StreamingContext<'a> {
     // Inputs (borrowed from caller)

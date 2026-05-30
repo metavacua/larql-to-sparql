@@ -1,7 +1,11 @@
-use std::collections::{BTreeMap, HashMap};
 
 use super::metrics::{bool_rate, mean, percentile};
 use super::reports::{
+    AddressCorruptionReport, AddressGroupImportanceReport, AddressProbePromptReport,
+    AddressProbeReport, AddressProbeStratumReport, CodeStabilityReport, OraclePqPointReport,
+    OraclePqPromptReport,
+};
+use super::types::PqConfig;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -10,11 +14,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    AddressCorruptionReport, AddressGroupImportanceReport, AddressProbePromptReport,
-    AddressProbeReport, AddressProbeStratumReport, CodeStabilityReport, OraclePqPointReport,
-    OraclePqPromptReport,
-};
-use super::types::PqConfig;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Debug)]
 pub(super) struct OraclePqPointAccumulator {
     prompts: Vec<OraclePqPromptReport>,

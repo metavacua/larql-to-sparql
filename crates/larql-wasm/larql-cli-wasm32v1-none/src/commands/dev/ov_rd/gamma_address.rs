@@ -7,14 +7,6 @@ use larql_vindex::VectorIndex;
 use ndarray::{s, Array2};
 
 use super::address::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     predict_code_from_hyperplanes, train_binary_hyperplane, AddressSupervisedGroupModel,
 };
 use super::basis::{WoRoundtripBasis, ZPcaBasis};
@@ -23,6 +15,17 @@ use super::pq::PqCodebook;
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PqConfig, PromptRecord};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Debug, Clone)]
 pub(super) struct GammaProjectedAddressModel {
     pub(super) name: String,

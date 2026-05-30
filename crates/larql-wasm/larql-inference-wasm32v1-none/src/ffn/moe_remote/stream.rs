@@ -7,6 +7,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Receiver end of a shard stream's per-collect result channel.
 /// Inner item is `(h2, server_compute_ms)`.
 type ShardStreamResultRx =

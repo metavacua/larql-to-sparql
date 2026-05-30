@@ -23,6 +23,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Load `ModelWeights` from a vindex directory, skipping component
 /// tensors per [`LoadWeightsOptions`].
 pub fn load_model_weights_with_opts(

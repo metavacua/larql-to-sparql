@@ -15,6 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Run one expert's gate/up/down compute on the given residual. Used by both
 /// the HTTP handler below and the gRPC expert path in `grpc_expert.rs`.
 ///

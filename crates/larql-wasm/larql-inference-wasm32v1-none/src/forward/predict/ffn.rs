@@ -16,6 +16,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Run a full forward pass with a custom FFN backend for all layers.
 pub fn predict_with_ffn(
     weights: &ModelWeights,
@@ -28,7 +31,7 @@ pub fn predict_with_ffn(
     let mut h = embed_tokens(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
 
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
 
     for layer in 0..num_layers {
         let shared_kv = weights

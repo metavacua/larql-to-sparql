@@ -37,6 +37,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Fixed block geometry for v1. `sub_block` matches MXFP4's 1×32.
 pub const SUB_BLOCK_SIZE: usize = 32;
 

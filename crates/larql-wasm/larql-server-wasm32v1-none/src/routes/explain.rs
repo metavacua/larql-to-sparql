@@ -15,6 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct ExplainRequest {
     pub prompt: String,
@@ -150,7 +153,7 @@ fn explain_infer(
     let trace_layers = larql_inference::walk_trace_from_residuals(&residuals, &patched);
 
     // Build logit lens: layer → (top_token, probability)
-    let lens_map: std::collections::HashMap<usize, (String, f64)> = lens_residuals
+    let lens_map: HashMap<usize, (String, f64)> = lens_residuals
         .iter()
         .filter_map(|(layer, residual)| {
             let pred = larql_inference::logit_lens_top1(weights, &model.tokenizer, residual)?;
@@ -159,7 +162,7 @@ fn explain_infer(
         .collect();
 
     // Build attention lookup: layer → top attended tokens
-    let attention_map: std::collections::HashMap<usize, Vec<(String, f32)>> = {
+    let attention_map: HashMap<usize, Vec<(String, f32)>> = {
         let mut map = HashMap::new();
         for cap in &attention_captures {
             let n_heads = cap.weights.heads.len();

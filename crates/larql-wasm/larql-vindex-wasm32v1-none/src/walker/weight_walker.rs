@@ -23,6 +23,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Result of walking a single layer.
 #[derive(Debug, Clone)]
 pub struct LayerResult {
@@ -248,9 +251,9 @@ impl WeightWalker {
         let mut conf_thresholds = ThresholdCounts::default();
         let mut sel_thresholds = ThresholdCounts::default();
 
-        let mut subj_counts: std::collections::HashMap<String, (usize, f64)> =
+        let mut subj_counts: HashMap<String, (usize, f64)> =
             HashMap::new();
-        let mut obj_counts: std::collections::HashMap<String, (usize, f64)> =
+        let mut obj_counts: HashMap<String, (usize, f64)> =
             HashMap::new();
 
         // Phase 3: add normalized edges to graph

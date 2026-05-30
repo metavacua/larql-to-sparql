@@ -13,6 +13,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 mod atomic;
 mod bake;
 mod into_model;
@@ -98,7 +101,7 @@ fn collect_memit_facts_with_recording(
     let push_fact = |op: &larql_vindex::PatchOp,
                      facts: &mut Vec<larql_inference::MemitFact>,
                      warnings: &mut Vec<String>,
-                     seen: &mut std::collections::HashSet<_>|
+                     seen: &mut HashSet<_>|
      -> Result<(), LqlError> {
         if let larql_vindex::PatchOp::Insert {
             layer,

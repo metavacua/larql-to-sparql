@@ -42,6 +42,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Content-type for the Q8K dense-FFN batch protocol.
 pub const Q8K_BATCH_CT: &str = "application/x-larql-ffn-q8k-batch";
 

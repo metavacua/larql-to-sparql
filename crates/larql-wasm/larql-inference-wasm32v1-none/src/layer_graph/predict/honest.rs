@@ -20,6 +20,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Honest production pipeline: real computation, no over-caching.
 ///
 /// - L0-12: cached (template-fixed, proven at 0.999 cosine — legitimate)

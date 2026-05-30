@@ -34,6 +34,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Default sibling slice presets when `--slices` is not given. Covers
 /// every deployment shape ADR-0007 and ADR-0008 support today:
 ///

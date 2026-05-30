@@ -18,6 +18,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Files we opportunistically copy from the HF source directory. Names
 /// match the upstream HF layout so a round-trip back to a HF-shaped model
 /// dir is possible without renaming.

@@ -7,6 +7,12 @@ use super::store::RsStore;
 use crate::profiler::EngineProfiler;
 use larql_inference::attention::SharedKV;
 use larql_inference::attention::{
+    apply_rope_partial_at, run_attention_block_decode_step_backend, run_attention_with_kv_backend,
+};
+use larql_inference::ffn::BackendFfn;
+use larql_inference::forward::{add_bias, apply_norm, embed_tokens_pub, run_ffn};
+use larql_inference::model::ModelWeights;
+use larql_inference::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,12 +21,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    apply_rope_partial_at, run_attention_block_decode_step_backend, run_attention_with_kv_backend,
-};
-use larql_inference::ffn::BackendFfn;
-use larql_inference::forward::{add_bias, apply_norm, embed_tokens_pub, run_ffn};
-use larql_inference::model::ModelWeights;
-use larql_inference::residual::{rms_norm_heads, rms_norm_heads_no_weight};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 pub struct RsPrefillResult {
     pub hidden: Array2<f32>,

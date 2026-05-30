@@ -10,6 +10,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const MEMIT_MIN_HIDDEN_DIM: usize = 1024;
 
 pub struct StorageEngine {
@@ -68,7 +71,7 @@ impl StorageEngine {
     pub fn compact_status(&self) -> CompactStatus {
         let l0_entries = self.patched.knn_store.len();
         let l1_edges = self.patched.num_overrides();
-        let l1_layers: std::collections::HashSet<usize> = self
+        let l1_layers: HashSet<usize> = self
             .patched
             .overrides_gate_iter()
             .map(|(layer, _, _)| layer)

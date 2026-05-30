@@ -19,6 +19,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl PatchedVindex {
     /// Apply a patch. Operations are resolved into the override maps.
     pub fn apply_patch(&mut self, patch: VindexPatch) {

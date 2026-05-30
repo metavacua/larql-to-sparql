@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Build a WordLevel tokenizer with a fixed vocab. Only the listed
 /// words exist; everything else falls back to `[UNK]` (id 0).
 pub(super) fn vocab_tokenizer(words: &[&str]) -> tokenizers::Tokenizer {

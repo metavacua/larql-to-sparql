@@ -17,6 +17,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Compute the final hidden state for `token_ids` against a Q4_K/Q6_K
 /// vindex, dequantising attn + FFN one layer at a time. Returns the
 /// `[seq_len, hidden]` array; caller owns the lm_head step.

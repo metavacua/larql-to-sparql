@@ -11,6 +11,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Set `LARQL_HF_BASE_URL` for the lifetime of the guard, restoring the
 /// previous value on drop. Wraps the env var that
 /// `super::super::protocol::hf_base()` reads, letting tests point all

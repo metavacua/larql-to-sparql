@@ -1,13 +1,5 @@
 
 use larql_inference::attention::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     run_attention_block_with_pre_o, run_attention_block_with_pre_o_and_all_attention_weights,
     run_attention_block_with_pre_o_and_reduced_qk_attention_weights,
 };
@@ -34,6 +26,17 @@ use super::reports::CodeOccurrenceRecord;
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PqConfig, PromptRecord};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 type SampleVisitResult = Result<(), Box<dyn core::error::Error>>;
 
 #[derive(Debug, Clone)]

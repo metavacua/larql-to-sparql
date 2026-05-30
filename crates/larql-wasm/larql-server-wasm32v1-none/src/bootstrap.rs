@@ -6,14 +6,6 @@ use axum::middleware;
 use clap::Parser;
 use larql_vindex::format::filenames::*;
 use larql_vindex::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer, PatchedVindex,
     SilentLoadCallbacks, VectorIndex,
 };
@@ -24,6 +16,17 @@ use crate::cache::DescribeCache;
 use crate::session::SessionManager;
 use crate::state::{load_probe_labels, model_id_from_name, AppState, LoadedModel};
 use crate::{announce, auth, grpc, grpc_expert, ratelimit, routes};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 pub type BoxError = Box<dyn core::error::Error + Send + Sync>;
 
@@ -96,7 +99,7 @@ pub struct LoadVindexOptions {
     /// Fine-grained per-(layer, expert) ownership.  When `Some`, takes
     /// precedence over `expert_filter` for `run_expert`'s ownership check
     /// and for the HNSW / Metal warmup loops.  Loaded from `--units` JSON.
-    pub unit_filter: Option<Arc<std::collections::HashSet<(usize, usize)>>>,
+    pub unit_filter: Option<Arc<HashSet<(usize, usize)>>>,
     /// Server-side remote MoE backend. When `Some`, the walk-ffn handler
     /// delegates MoE expert dispatch to remote shard servers.
     pub moe_remote: Option<Arc<larql_inference::ffn::RemoteMoeBackend>>,
@@ -114,7 +117,7 @@ impl UnitManifest {
     /// Expand the per-layer range list into the flat `(layer, expert_id)`
     /// set used by ownership checks.  Reports the first malformed entry in
     /// the error path so the operator can fix it without grepping.
-    pub fn into_unit_set(self) -> Result<std::collections::HashSet<(usize, usize)>, BoxError> {
+    pub fn into_unit_set(self) -> Result<HashSet<(usize, usize)>, BoxError> {
         let mut units = HashSet::new();
         for (layer_str, ranges) in self.layer_experts {
             let layer: usize = layer_str.parse().map_err(|_| -> BoxError {
@@ -139,7 +142,7 @@ impl UnitManifest {
 /// Parse `--units PATH` into the canonical `(layer, expert_id)` ownership set.
 pub fn parse_unit_manifest(
     path: &Path,
-) -> Result<std::collections::HashSet<(usize, usize)>, BoxError> {
+) -> Result<HashSet<(usize, usize)>, BoxError> {
     let bytes = std::fs::read(path)
         .map_err(|e| -> BoxError { format!("--units: read {}: {e}", path.display()).into() })?;
     let manifest: UnitManifest = serde_json::from_slice(&bytes)
@@ -683,7 +686,7 @@ pub async fn serve(cli: Cli) -> Result<(), BoxError> {
             u.len(),
             u.iter()
                 .map(|(l, _)| *l)
-                .collect::<std::collections::HashSet<_>>()
+                .collect::<HashSet<_>>()
                 .len(),
         );
     }
@@ -1175,7 +1178,7 @@ mod tests {
         let units = parse_unit_manifest(&path).unwrap();
         // Layer 0: experts 0..=2 → (0,0), (0,1), (0,2)
         // Layer 3: experts 5..=7 + 10 → (3,5), (3,6), (3,7), (3,10)
-        let expected: std::collections::HashSet<(usize, usize)> =
+        let expected: HashSet<(usize, usize)> =
             [(0, 0), (0, 1), (0, 2), (3, 5), (3, 6), (3, 7), (3, 10)]
                 .into_iter()
                 .collect();

@@ -30,6 +30,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Per-comparison knobs. Kept minimal; future options added as fields.
 #[derive(Debug, Clone)]
 pub struct ComparisonConfig {

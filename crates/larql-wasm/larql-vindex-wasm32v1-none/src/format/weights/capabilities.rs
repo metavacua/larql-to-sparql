@@ -8,6 +8,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub(super) const SURFACE_F32_WEIGHT_WRITER: &str = "f32 weight writer";
 pub(super) const SURFACE_Q4K_WEIGHT_WRITER: &str = "q4k weight writer";
 pub(crate) const SURFACE_EXTRACT_PIPELINE: &str = "extract pipeline";

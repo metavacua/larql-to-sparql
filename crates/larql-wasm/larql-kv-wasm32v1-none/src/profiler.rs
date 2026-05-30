@@ -16,6 +16,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Accumulator for a single timing stage. Add new samples with `record`.
 #[derive(Debug, Clone, Default)]
 pub struct StageAccumulator {

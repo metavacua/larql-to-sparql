@@ -19,6 +19,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Number of attention projection tensors recorded per layer in every
 /// `attn_weights_*.bin` manifest: Q, K, V, O — in that order.
 pub(crate) const ATTN_TENSORS_PER_LAYER: usize = 4;

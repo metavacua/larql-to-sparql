@@ -23,6 +23,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Write the FFN gate/up/down legs of every layer to
 /// `interleaved_q4k.bin` in `[gate Q4_K | up Q4_K | down Q6_K]`
 /// layer-major order, plus a sidecar manifest. When

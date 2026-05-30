@@ -35,6 +35,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// (context_tokens, injection_delta, boundary_residual, crystal_layer)
 type InjectionPrep = (Vec<u32>, ndarray::Array1<f32>, Option<Vec<f32>>, usize);
 
@@ -132,8 +135,8 @@ impl ApolloEngine {
         if query_token_ids.is_empty() {
             return Ok(vec![]);
         }
-        let qset: std::collections::HashSet<u32> = query_token_ids.iter().copied().collect();
-        let wset: std::collections::HashSet<u16> = candidate_windows.iter().copied().collect();
+        let qset: HashSet<u32> = query_token_ids.iter().copied().collect();
+        let wset: HashSet<u16> = candidate_windows.iter().copied().collect();
         let in_candidate = |e: &VecInjectEntry| wset.is_empty() || wset.contains(&e.window_id);
         let entry_key =
             |e: &VecInjectEntry| (e.window_id, e.position_in_window, e.token_id, e.fact_id);
@@ -156,14 +159,14 @@ impl ApolloEngine {
             return Ok(scored.into_iter().map(|(e, _)| e).collect());
         }
 
-        let seed_facts: std::collections::HashSet<u16> = seeds.iter().map(|e| e.fact_id).collect();
-        let seed_positions: std::collections::HashSet<(u16, u16)> = seeds
+        let seed_facts: HashSet<u16> = seeds.iter().map(|e| e.fact_id).collect();
+        let seed_positions: HashSet<(u16, u16)> = seeds
             .iter()
             .map(|e| (e.window_id, e.position_in_window))
             .collect();
 
         let mut scored: Vec<(VecInjectEntry, f32)> = Vec::new();
-        let mut seen: std::collections::HashSet<(u16, u16, u32, u16)> =
+        let mut seen: HashSet<(u16, u16, u32, u16)> =
             HashSet::new();
 
         for e in &seeds {
@@ -246,7 +249,7 @@ impl ApolloEngine {
         // Injection delta: sum of answer-side entry embeddings.
         let hidden = weights.hidden_size;
         let mut delta = vec![0.0f32; hidden];
-        let qset: std::collections::HashSet<u32> = query_ids.iter().copied().collect();
+        let qset: HashSet<u32> = query_ids.iter().copied().collect();
         for e in &entries {
             if qset.contains(&e.token_id) {
                 continue;

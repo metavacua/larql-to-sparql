@@ -15,6 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub struct CircuitDiscoverArgs {
     /// Model path or HuggingFace model ID.
@@ -305,7 +308,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn core::error::Error>>
                 None => continue,
             };
 
-            let set_i: std::collections::HashSet<&str> =
+            let set_i: HashSet<&str> =
                 toks_i.iter().map(|s| s.as_str()).collect();
             let shared = toks_j.iter().filter(|t| set_i.contains(t.as_str())).count();
             let union = toks_i.len() + toks_j.len() - shared;
@@ -375,7 +378,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn core::error::Error>>
 
         // Aggregate features across all heads in this circuit
         let mut feature_coupling: HashMap<(usize, usize), f32> = HashMap::new();
-        let heads_set: std::collections::HashSet<(usize, usize)> = heads.iter().copied().collect();
+        let heads_set: HashSet<(usize, usize)> = heads.iter().copied().collect();
         for edge in &all_edges {
             if heads_set.contains(&(edge.layer, edge.head)) {
                 *feature_coupling

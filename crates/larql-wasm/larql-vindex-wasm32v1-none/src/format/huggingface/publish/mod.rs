@@ -19,6 +19,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 mod lfs;
 pub(super) mod protocol;
 mod remote;
@@ -123,7 +126,7 @@ pub fn publish_vindex_with_opts(
     // Pull remote LFS index so we can skip unchanged files. Non-fatal
     // if the tree API errors (brand-new repo returns 404 here) — we just
     // fall back to "upload everything".
-    let remote_lfs: std::collections::HashMap<String, String> = if opts.skip_unchanged {
+    let remote_lfs: HashMap<String, String> = if opts.skip_unchanged {
         fetch_remote_lfs_oids(repo_id, &token, repo_type).unwrap_or_default()
     } else {
         HashMap::new()

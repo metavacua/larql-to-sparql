@@ -16,6 +16,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[macro_use]
 extern crate alloc;
 #[cfg(any(
@@ -177,7 +180,7 @@ impl EngineKind {
     pub fn from_name(spec: &str) -> Option<Self> {
         // Split "name:key=val,key=val" into name + param pairs.
         let (name, params_str) = spec.split_once(':').unwrap_or((spec, ""));
-        let params: std::collections::HashMap<&str, &str> = params_str
+        let params: HashMap<&str, &str> = params_str
             .split(',')
             .filter(|s| !s.is_empty())
             .filter_map(|kv| kv.split_once('='))

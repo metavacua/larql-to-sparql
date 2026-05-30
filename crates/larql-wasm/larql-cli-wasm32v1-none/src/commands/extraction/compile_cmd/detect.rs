@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub fn detect_ffn_pattern(tensors: &HashMap<String, ArcArray2<f32>>, component: &str) -> String {
     let patterns: &[&str] = match component {
         "gate" => &[

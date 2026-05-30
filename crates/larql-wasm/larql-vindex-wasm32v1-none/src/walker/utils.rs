@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Decode a single token ID to a trimmed string.
 pub fn decode_token(tokenizer: &tokenizers::Tokenizer, id: u32) -> Option<String> {
     tokenizer
@@ -25,7 +28,7 @@ pub fn round4(v: f64) -> f64 {
 
 /// Extract top-N entities by count, with average confidence.
 pub fn top_entities(
-    counts: &std::collections::HashMap<String, (usize, f64)>,
+    counts: &HashMap<String, (usize, f64)>,
     n: usize,
 ) -> Vec<(String, usize, f64)> {
     let mut sorted: Vec<_> = counts

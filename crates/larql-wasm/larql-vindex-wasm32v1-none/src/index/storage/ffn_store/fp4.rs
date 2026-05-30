@@ -16,6 +16,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl VectorIndex {
     /// Load FP4/FP8 FFN storage from `dir` per `config.fp4`. No-op when
     /// the manifest is absent (vindexes extracted before exp 26 don't

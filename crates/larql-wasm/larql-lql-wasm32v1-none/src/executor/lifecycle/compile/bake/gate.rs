@@ -28,6 +28,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub(in crate::executor::lifecycle::compile) fn patch_gate_vectors(
     source_dir: &std::path::Path,
     dest_dir: &std::path::Path,

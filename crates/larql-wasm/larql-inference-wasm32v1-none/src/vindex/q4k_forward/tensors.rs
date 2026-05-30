@@ -10,6 +10,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Insert one Q4_K/Q6_K vindex layer's attention and dense FFN tensors into
 /// `weights.tensors` as dense f32 matrices.
 ///

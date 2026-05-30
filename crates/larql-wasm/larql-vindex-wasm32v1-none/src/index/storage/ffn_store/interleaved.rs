@@ -17,6 +17,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl VectorIndex {
     /// Load interleaved FFN data: [gate|up|down] per layer in one contiguous file.
     /// Eliminates TLB thrash from 3 separate mmap files.

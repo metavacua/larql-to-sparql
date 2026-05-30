@@ -1,10 +1,14 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{RwLock};
 
 use super::backend::RemoteMoeBackend;
 use super::config::{parse_unit_manifest, ShardConfig, UnitManifest};
 use super::router::MoeRouterWeights;
 use super::shard::{Shard, ShardTransport};
 use super::wire::{
+    decode_layer_batch_request_f16, decode_layer_batch_response_f16,
+    encode_layer_batch_request_f16, encode_layer_batch_response_f16, f16_bits_to_f32,
+    f32_to_f16_bits,
+};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -13,10 +17,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    decode_layer_batch_request_f16, decode_layer_batch_response_f16,
-    encode_layer_batch_request_f16, encode_layer_batch_response_f16, f16_bits_to_f32,
-    f32_to_f16_bits,
-};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// f32→f16→f32 round-trip should preserve normal-range residual values
 /// to within ~3 decimal digits.  Spot-check the boundary cases too.
@@ -164,7 +167,7 @@ fn shard_config_strips_trailing_slash() {
 //      ownership sets matching the inclusive ranges in the input.
 
 fn make_unit_shard(units: &[(usize, usize)]) -> Shard {
-    let set: std::collections::HashSet<(usize, usize)> = units.iter().copied().collect();
+    let set: HashSet<(usize, usize)> = units.iter().copied().collect();
     let config = ShardConfig::with_units("http://localhost:9000", set);
     let transport = ShardTransport::Http(reqwest::blocking::Client::new());
     Shard { config, transport }
@@ -301,7 +304,7 @@ fn shard_config_with_timeout_overrides_default() {
 #[test]
 fn shard_config_with_units_empty_set_yields_zero_range() {
     // Diagnostic min/max default to (0, 0) when the unit set is empty.
-    let empty: std::collections::HashSet<(usize, usize)> = HashSet::new();
+    let empty: HashSet<(usize, usize)> = HashSet::new();
     let s = ShardConfig::with_units("http://h:9000", empty);
     assert_eq!(s.start, 0);
     assert_eq!(s.end, 0);

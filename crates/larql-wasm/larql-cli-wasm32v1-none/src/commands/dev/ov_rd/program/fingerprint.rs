@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// FNV-1a 64-bit hash over arbitrary bytes.
 /// Deterministic across Rust versions — suitable for codebook drift detection.
 fn fnv64(data: &[u8]) -> u64 {

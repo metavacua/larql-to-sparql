@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 mod args;
 mod capture;
 mod context;
@@ -109,7 +112,7 @@ pub(super) fn run_induce_program(
     }
 
     // Step 4: dominant sink + merge candidates.
-    let mut sink_votes: std::collections::HashMap<usize, usize> = HashMap::new();
+    let mut sink_votes: HashMap<usize, usize> = HashMap::new();
     for &(_, t, _) in &strict_pairs {
         *sink_votes.entry(t).or_default() += 1;
     }

@@ -26,6 +26,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Default sizing — small enough to extract in microseconds, large enough
 /// that every walker code path runs at least once (>= 1 head, >= 1
 /// FFN feature, >= 1 vocab row).

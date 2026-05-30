@@ -13,6 +13,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 fn build_stats(model: &LoadedModel) -> serde_json::Value {
     let config = &model.config;
     let total_features: usize = config.layers.iter().map(|l| l.num_features).sum();

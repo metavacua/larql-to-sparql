@@ -15,6 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl Session {
     pub(crate) fn exec_infer_trace(
         &self,
@@ -250,7 +253,7 @@ fn build_attention_map(
     captures: &[larql_inference::LayerAttentionCapture],
     token_strs: &[Option<String>],
     with_attention: bool,
-) -> std::collections::HashMap<usize, Vec<(String, f32)>> {
+) -> HashMap<usize, Vec<(String, f32)>> {
     if !with_attention {
         return HashMap::new();
     }
@@ -294,7 +297,7 @@ fn build_lens_map(
     weights: &larql_inference::ModelWeights,
     tokenizer: &larql_inference::tokenizers::Tokenizer,
     with_attention: bool,
-) -> std::collections::HashMap<usize, (String, f64)> {
+) -> HashMap<usize, (String, f64)> {
     if !with_attention {
         return HashMap::new();
     }
@@ -334,8 +337,8 @@ fn render_trace_layer(
     relations_only: bool,
     per_layer: usize,
     with_attention: bool,
-    attention_map: &std::collections::HashMap<usize, Vec<(String, f32)>>,
-    lens_map: &std::collections::HashMap<usize, (String, f64)>,
+    attention_map: &HashMap<usize, Vec<(String, f32)>>,
+    lens_map: &HashMap<usize, (String, f64)>,
 ) {
     // When filtering to relations only, re-sort so positive gates rank
     // above negative gates of equal magnitude (positive gates correlate

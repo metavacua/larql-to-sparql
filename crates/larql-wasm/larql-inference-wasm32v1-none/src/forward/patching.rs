@@ -38,6 +38,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Donor-side state: the residual row at each requested `(layer, position)`
 /// coord, captured during the donor forward pass.
 pub struct DonorState {
@@ -86,7 +89,7 @@ pub fn capture_donor_state_with_ffn(
         };
     }
 
-    let layers: std::collections::HashSet<usize> = coords.iter().map(|(l, _)| *l).collect();
+    let layers: HashSet<usize> = coords.iter().map(|(l, _)| *l).collect();
     let max_layer = *layers.iter().max().unwrap();
     let layer_vec: Vec<usize> = layers.iter().copied().collect();
 

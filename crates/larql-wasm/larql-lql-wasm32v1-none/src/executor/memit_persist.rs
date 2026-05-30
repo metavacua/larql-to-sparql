@@ -26,6 +26,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Filename for the JSON snapshot, kept as a constant so callers
 /// don't sprinkle the literal across the codebase.
 pub(crate) const MEMIT_STORE_JSON: &str = "memit_store.json";

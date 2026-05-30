@@ -17,6 +17,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl VectorIndex {
     /// Load feature-major down vectors from down_features.bin.
     pub fn load_down_features(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {

@@ -30,6 +30,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Default sibling presets to probe / pull when the caller doesn't pass
 /// `--preset`. Matches the `publish` default set; the symmetry matters
 /// so `publish` and `pull` stay in lock-step.

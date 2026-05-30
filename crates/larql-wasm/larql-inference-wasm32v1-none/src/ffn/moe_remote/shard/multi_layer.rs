@@ -9,6 +9,10 @@
 use super::super::error::RemoteMoeError;
 use super::super::metrics;
 use super::super::multi_layer_wire::{
+    decode_multi_layer_response, encode_multi_layer_request, encode_multi_layer_request_q8k,
+    MultiLayerResult, MultiLayerTask, MultiLayerTaskQ8K, MULTI_LAYER_BATCH_CONTENT_TYPE,
+    MULTI_LAYER_BATCH_PATH, MULTI_LAYER_BATCH_Q8K_CONTENT_TYPE, MULTI_LAYER_BATCH_Q8K_PATH,
+};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,10 +21,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    decode_multi_layer_response, encode_multi_layer_request, encode_multi_layer_request_q8k,
-    MultiLayerResult, MultiLayerTask, MultiLayerTaskQ8K, MULTI_LAYER_BATCH_CONTENT_TYPE,
-    MULTI_LAYER_BATCH_PATH, MULTI_LAYER_BATCH_Q8K_CONTENT_TYPE, MULTI_LAYER_BATCH_Q8K_PATH,
-};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[cfg(unix)]
 use super::uds_call;
 use super::{Shard, ShardTransport};

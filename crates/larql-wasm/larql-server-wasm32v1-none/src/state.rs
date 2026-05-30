@@ -6,14 +6,6 @@ use crate::embed_store::EmbedStoreF16;
 
 use larql_models::ModelWeights;
 use larql_vindex::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     format::filenames::FEATURE_LABELS_JSON, ndarray::Array2, tokenizers, PatchedVindex,
     VindexConfig,
 };
@@ -22,6 +14,17 @@ use tokio::sync::RwLock;
 use crate::cache::DescribeCache;
 use crate::ffn_l2_cache::FfnL2Cache;
 use crate::session::SessionManager;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// A single loaded model.
 pub struct LoadedModel {
@@ -93,7 +96,7 @@ pub struct LoadedModel {
     /// rejects any (layer, expert_id) not in this set.  Designed for the
     /// architecture where each shard hosts a tight set of (layer, expert)
     /// units rather than a contiguous expert range.
-    pub unit_filter: Option<Arc<std::collections::HashSet<(usize, usize)>>>,
+    pub unit_filter: Option<Arc<HashSet<(usize, usize)>>>,
     /// Remote MoE expert backend wired via `--moe-shards` or `--moe-units-manifest`.
     /// When `Some`, the walk-ffn handler uses this for MoE layers instead of local dispatch.
     pub moe_remote: Option<Arc<larql_inference::ffn::RemoteMoeBackend>>,
@@ -110,7 +113,7 @@ pub struct LoadedModel {
     /// using a scratch entry.
     #[cfg(all(feature = "metal-experts", target_os = "macos"))]
     pub moe_scratches: std::sync::Mutex<
-        std::collections::HashMap<(usize, usize, usize), Arc<larql_compute::MoeScratch>>,
+        HashMap<(usize, usize, usize), Arc<larql_compute::MoeScratch>>,
     >,
     /// Per-layer pre-loaded Q4K weight buffers for Metal dense FFN dispatch.
     /// `[gate_buf, up_buf, down_buf]` for each layer. Lazily populated on first

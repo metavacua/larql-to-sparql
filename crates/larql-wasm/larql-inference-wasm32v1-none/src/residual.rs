@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Default norm epsilon. Most models use 1e-5 or 1e-6.
 /// Callers should prefer passing `arch.norm_eps()` explicitly.
 pub const DEFAULT_EPS: f64 = 1e-6;

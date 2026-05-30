@@ -20,6 +20,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Output of `capture_install_residuals`. Caller commits the pending
 /// decoys to `session.decoy_residual_cache` after the immutable borrow
 /// of `self` ends.
@@ -236,7 +239,7 @@ mod tests {
     use super::*;
     #[test]
     fn canonical_decoys_have_unique_3word_prefixes() {
-        let prefixes: std::collections::HashSet<String> = CANONICAL_DECOY_PROMPTS
+        let prefixes: HashSet<String> = CANONICAL_DECOY_PROMPTS
             .iter()
             .map(|p| p.split_whitespace().take(3).collect::<Vec<_>>().join(" "))
             .collect();

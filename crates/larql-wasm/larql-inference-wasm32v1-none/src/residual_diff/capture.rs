@@ -21,6 +21,12 @@ use larql_models::ModelWeights;
 use larql_vindex::{GateIndex, VectorIndex};
 
 use crate::forward::dump_config::{
+    cpu_layer_file, decode_layer_file, metal_layer_h_out_file, ENV_CPU_DUMP_LAYERS,
+    ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS,
+};
+use crate::layer_graph::generate::generate;
+use crate::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
+use crate::layer_graph::CachedLayerGraph;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -29,12 +35,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    cpu_layer_file, decode_layer_file, metal_layer_h_out_file, ENV_CPU_DUMP_LAYERS,
-    ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS,
-};
-use crate::layer_graph::generate::generate;
-use crate::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
-use crate::layer_graph::CachedLayerGraph;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Per-layer end-of-layer hidden state. `layers[l]` is the residual
 /// after layer l completes (post post_ffn norm + post-FFN residual +

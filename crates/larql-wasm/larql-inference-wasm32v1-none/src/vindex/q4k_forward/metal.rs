@@ -12,6 +12,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const MIN_KV_CACHE_SEQ: usize = 64;
 
 /// End-to-end predict on a Q4_K vindex driven by a Metal (or any Q4-capable)

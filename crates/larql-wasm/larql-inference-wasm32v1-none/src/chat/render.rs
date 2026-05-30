@@ -23,6 +23,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Render `template_str` (Jinja2) against a single-turn conversation.
 /// Returns the rendered string or a `minijinja::Error` with full diagnostic
 /// info (line/column, template frame).

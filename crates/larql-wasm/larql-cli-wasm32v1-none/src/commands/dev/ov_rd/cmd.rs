@@ -6,14 +6,6 @@ use super::eval_program::{run_eval_program, EvalProgramArgs};
 use super::induce_program::{run_induce_program, InduceProgramArgs};
 use super::normalize_program::{run_normalize_program, NormalizeProgramArgs};
 use super::oracle::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     run_oracle_lowrank, run_oracle_roundtrip, OracleLowrankArgs, OracleRoundtripArgs,
 };
 use super::oracle_pq::{run_oracle_pq, OraclePqArgs};
@@ -24,6 +16,17 @@ use super::sanity::{run_sanity_check, SanityCheckArgs};
 use super::static_replace::{run_static_replace, StaticReplaceArgs};
 use super::synthesize_program::{run_synthesize_program, SynthesizeProgramArgs};
 use super::zero_ablate::{run_zero_ablate, ZeroAblateArgs};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub struct OvRdArgs {
     #[command(subcommand)]

@@ -21,6 +21,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl VectorIndex {
     /// Load Q4 lm_head for GPU logits (replaces CPU f32 lm_head KNN).
     ///

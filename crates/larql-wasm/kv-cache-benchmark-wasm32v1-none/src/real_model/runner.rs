@@ -33,6 +33,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Result from running one strategy on a real model.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RealModelResult {

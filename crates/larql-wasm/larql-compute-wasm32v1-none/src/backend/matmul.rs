@@ -4,9 +4,6 @@
 //! matmul, batched matmul, and the specialised single-row gemvs the
 //! lm-head uses in autoregressive decode (where `M = 1` makes the
 //! 32×32 tiled sgemm waste 31/32 threads).
-
-#[cfg(not(target_arch = "wasm32"))]
-use ndarray::{Array2, ArrayView2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +15,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array2, ArrayView2};
 #[cfg(not(target_arch = "wasm32"))]
 /// A single matmul operation for batch dispatch.
 pub struct MatMulOp {

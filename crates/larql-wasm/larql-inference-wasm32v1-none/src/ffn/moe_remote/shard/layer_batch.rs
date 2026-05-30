@@ -10,6 +10,10 @@
 use super::super::error::RemoteMoeError;
 use super::super::metrics;
 use super::super::wire::{
+    decode_layer_batch_response, decode_layer_batch_response_f16, encode_layer_batch_request,
+    encode_layer_batch_request_f16, ExpertCallItem, LAYER_BATCH_CONTENT_TYPE,
+    LAYER_BATCH_F16_CONTENT_TYPE, LAYER_BATCH_F16_PATH, LAYER_BATCH_PATH,
+};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,10 +22,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    decode_layer_batch_response, decode_layer_batch_response_f16, encode_layer_batch_request,
-    encode_layer_batch_request_f16, ExpertCallItem, LAYER_BATCH_CONTENT_TYPE,
-    LAYER_BATCH_F16_CONTENT_TYPE, LAYER_BATCH_F16_PATH, LAYER_BATCH_PATH,
-};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[cfg(unix)]
 use super::uds_call;
 use super::{Shard, ShardTransport};

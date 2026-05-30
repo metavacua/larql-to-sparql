@@ -12,6 +12,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// A formatted edge ready to be rendered into the output buffer.
 /// Built from a `DescribeEdge` by `describe_format_and_split` after
 /// label resolution and the RELATIONS ONLY filter.

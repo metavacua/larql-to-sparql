@@ -16,6 +16,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl VectorIndex {
     /// Load Q4_0 interleaved FFN data.
     pub fn load_interleaved_q4(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {

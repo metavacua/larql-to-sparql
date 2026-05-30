@@ -18,6 +18,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub(in crate::executor::lifecycle::compile) fn apply_memit_deltas_to_down_weights(
     dest_dir: &std::path::Path,
     config: &larql_vindex::VindexConfig,

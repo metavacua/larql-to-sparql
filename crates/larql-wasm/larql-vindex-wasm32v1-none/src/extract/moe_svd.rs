@@ -26,6 +26,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Compute the top-K right singular vectors of `a` (shape `[m, n]`) via
 /// subspace iteration. Returns a `[K, n]` matrix whose rows are the
 /// approximate right singular vectors, sorted by descending singular value.

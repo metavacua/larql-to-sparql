@@ -28,6 +28,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Inverted index: token_id → list of (window_id, term_frequency) pairs.
 /// term_frequency = number of occurrences of that token in that window.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

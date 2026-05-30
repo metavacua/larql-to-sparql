@@ -10,6 +10,10 @@ use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 
 use larql_router_protocol::{
+    AckMsg, AnnounceMsg, Gap, GridService, LayerLatency, ModelCoverage, RouterMessage,
+    RouterPayload, ServerInfo, ServerMessage, ServerPayload, ShardInfo, StatusRequest,
+    StatusResponse,
+};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,10 +22,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    AckMsg, AnnounceMsg, Gap, GridService, LayerLatency, ModelCoverage, RouterMessage,
-    RouterPayload, ServerInfo, ServerMessage, ServerPayload, ShardInfo, StatusRequest,
-    StatusResponse,
-};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 // ── Per-server record ─────────────────────────────────────────────────────────
 

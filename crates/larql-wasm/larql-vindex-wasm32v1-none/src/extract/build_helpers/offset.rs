@@ -12,6 +12,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Compute the offset direction for a gate→down feature pair.
 /// Returns normalized(output_embed − input_embed) or None if invalid.
 pub(crate) fn compute_offset_direction(

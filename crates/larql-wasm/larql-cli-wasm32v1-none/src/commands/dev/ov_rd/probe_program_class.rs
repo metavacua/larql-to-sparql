@@ -1,16 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use clap::Args;
 use larql_inference::attention::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     run_attention_block_with_pre_o_and_all_attention_weights, SharedKV,
 };
 use larql_inference::forward::ple::precompute_per_layer_inputs;
@@ -36,6 +27,17 @@ use super::oracle_pq_mode_d::materialize_mode_d_tables;
 use super::program::{PositionContext, Program};
 use super::static_replace::fit_static_means;
 use super::types::{HeadId, PqConfig, PromptRecord};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub struct ProbeProgramClassArgs {
     #[arg(long)]

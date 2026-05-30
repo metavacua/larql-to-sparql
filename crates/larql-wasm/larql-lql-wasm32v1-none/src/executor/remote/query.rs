@@ -6,6 +6,9 @@ use crate::error::LqlError;
 use crate::executor::{Backend, Session};
 
 use super::{
+    ENDPOINT_DESCRIBE, ENDPOINT_EXPLAIN_INFER, ENDPOINT_INFER, ENDPOINT_RELATIONS, ENDPOINT_SELECT,
+    ENDPOINT_STATS, ENDPOINT_WALK,
+};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,9 +17,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    ENDPOINT_DESCRIBE, ENDPOINT_EXPLAIN_INFER, ENDPOINT_INFER, ENDPOINT_RELATIONS, ENDPOINT_SELECT,
-    ENDPOINT_STATS, ENDPOINT_WALK,
-};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Default `top` for `WALK` when the user doesn't specify one.
 const REMOTE_WALK_DEFAULT_TOP: u32 = 10;

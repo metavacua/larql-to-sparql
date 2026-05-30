@@ -22,6 +22,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// One successfully installed slot. Caller commits the raw residual to
 /// `session.raw_install_residuals` and the patch op to the session
 /// patch recording.
@@ -70,7 +73,7 @@ impl Session {
         // ones we just read are still valid suppression directions.
         // Decoys are small (~10 vectors × 2560 floats × 4 bytes ≈
         // 100 KB) so cloning is cheap.
-        let decoy_snapshot: std::collections::HashMap<
+        let decoy_snapshot: HashMap<
             usize,
             Vec<larql_vindex::ndarray::Array1<f32>>,
         > = plan
@@ -92,7 +95,7 @@ impl Session {
         // layer. This matches the Python reference's batch-refine
         // semantics (capture all → refine once → install) without
         // the online compound drift.
-        let mut raw_residuals_snapshot: std::collections::HashMap<
+        let mut raw_residuals_snapshot: HashMap<
             (usize, usize),
             larql_vindex::ndarray::Array1<f32>,
         > = self.raw_install_residuals.clone();
@@ -320,7 +323,7 @@ impl Session {
 fn refine_layer_from_raw(
     patched: &mut larql_vindex::PatchedVindex,
     layer: usize,
-    raw_residuals_snapshot: &std::collections::HashMap<
+    raw_residuals_snapshot: &HashMap<
         (usize, usize),
         larql_vindex::ndarray::Array1<f32>,
     >,

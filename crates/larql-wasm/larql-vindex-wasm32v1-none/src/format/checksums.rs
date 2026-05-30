@@ -15,6 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Compute SHA256 checksum of a file. Returns hex string.
 pub fn sha256_file(path: &Path) -> Result<String, VindexError> {
     let mut file = std::fs::File::open(path)?;

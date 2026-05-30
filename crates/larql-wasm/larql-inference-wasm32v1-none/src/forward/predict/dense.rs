@@ -17,6 +17,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Descending order on the probability field of `(index, prob)` pairs,
 /// with NaN probabilities treated as the smallest value so they never
 /// displace a real top-k hit. Used by every top-k selector in this file
@@ -133,7 +136,7 @@ pub fn predict_with_temperature(
     let num_layers = weights.num_layers;
     let mut h = embed_tokens(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
     for layer in 0..num_layers {
         let shared_kv = weights
             .arch

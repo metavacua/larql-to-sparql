@@ -13,6 +13,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Number of leading characters of a target token used for `starts_with`
 /// fuzzy matching against tokenizer outputs (e.g. "Pos" → matches " Pos",
 /// "Posei", "Poseidon"). Three characters is enough discrimination for

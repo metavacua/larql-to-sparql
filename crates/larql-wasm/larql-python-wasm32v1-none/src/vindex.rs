@@ -14,6 +14,12 @@ use pyo3::types::PyDict;
 
 use larql_vindex::patch::knn_store::KnnStore;
 use larql_vindex::{
+    format::filenames::KNN_STORE_BIN, load_vindex_config, load_vindex_embeddings,
+    load_vindex_tokenizer, tokenizers, FeatureMeta, SilentLoadCallbacks, VectorIndex, VindexConfig,
+    WalkHit,
+};
+
+use larql_lql::relations::RelationClassifier;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,12 +28,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    format::filenames::KNN_STORE_BIN, load_vindex_config, load_vindex_embeddings,
-    load_vindex_tokenizer, tokenizers, FeatureMeta, SilentLoadCallbacks, VectorIndex, VindexConfig,
-    WalkHit,
-};
-
-use larql_lql::relations::RelationClassifier;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── Content token filter (matches LQL executor logic) ──
 
 fn is_readable_token(tok: &str) -> bool {

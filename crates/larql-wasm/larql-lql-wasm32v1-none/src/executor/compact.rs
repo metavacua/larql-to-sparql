@@ -2,6 +2,12 @@
 
 use super::memit_persist::save_memit_store;
 use super::tuning::{
+    canonical_prompt, MEMIT_COMPACT_LAMBDA as DEFAULT_MEMIT_LAMBDA,
+    MEMIT_MIN_RECONSTRUCTION_COS as MIN_RECONSTRUCTION_COS,
+};
+use super::Session;
+use crate::ast::InsertMode;
+use crate::error::LqlError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -10,12 +16,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    canonical_prompt, MEMIT_COMPACT_LAMBDA as DEFAULT_MEMIT_LAMBDA,
-    MEMIT_MIN_RECONSTRUCTION_COS as MIN_RECONSTRUCTION_COS,
-};
-use super::Session;
-use crate::ast::InsertMode;
-use crate::error::LqlError;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl Session {
     /// `COMPACT MINOR` — promote L0 (KNN) entries to L1 (arch-A compose edges).
     pub(crate) fn exec_compact_minor(&mut self) -> Result<Vec<String>, LqlError> {

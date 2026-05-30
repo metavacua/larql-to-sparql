@@ -7,6 +7,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Strategy 1: Standard FP16 KV cache.
 ///
 /// Store raw f32 keys and values. Exact roundtrip — this is the baseline

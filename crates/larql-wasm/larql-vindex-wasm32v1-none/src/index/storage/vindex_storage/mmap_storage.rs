@@ -30,6 +30,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Parity wrapper over today's substore mmaps. Implements
 /// `VindexStorage` by cloning each substore's `Arc<Mmap>` (or
 /// `Arc<Vec<u8>>` for the synth lm_head) and converting once into a

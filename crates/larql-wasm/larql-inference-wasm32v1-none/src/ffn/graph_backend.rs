@@ -25,6 +25,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Precomputed gate index: for each (layer, token_id), which features activate.
 /// Built offline from the gate weight matrix and embedding matrix.
 /// Serializable to disk for reuse across predict calls.

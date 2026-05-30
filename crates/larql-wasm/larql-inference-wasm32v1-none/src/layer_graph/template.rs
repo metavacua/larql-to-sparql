@@ -11,6 +11,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── Template detection ──
 
 /// Known template patterns for routing.
@@ -62,7 +65,7 @@ pub fn detect_template(token_ids: &[u32], templates: &[TemplatePattern]) -> Opti
 pub struct TemplateUniverse {
     pub name: String,
     /// layer → sorted vec of feature indices that fire for this template.
-    pub features: std::collections::HashMap<usize, Vec<usize>>,
+    pub features: HashMap<usize, Vec<usize>>,
 }
 
 impl TemplateUniverse {
@@ -80,7 +83,7 @@ impl TemplateUniverse {
         activation_threshold: f32,
     ) -> Self {
         let all_layers: Vec<usize> = (0..weights.num_layers).collect();
-        let mut layer_features: std::collections::HashMap<usize, std::collections::HashSet<usize>> =
+        let mut layer_features: HashMap<usize, HashSet<usize>> =
             HashMap::new();
 
         for entity in entities {

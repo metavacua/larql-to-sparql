@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // SynthesisStep variants (Fail, NeedsOracle.suggested_program) are
 // constructed for a diagnostic trace dump; suppress until consumed.
 #![allow(dead_code)]

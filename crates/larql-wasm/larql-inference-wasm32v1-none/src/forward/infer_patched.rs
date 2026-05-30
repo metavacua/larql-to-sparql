@@ -34,6 +34,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Cosine threshold for the L0 KnnStore override. A stored key whose top-1
 /// cosine against the captured residual exceeds this value replaces the
 /// walk FFN's top-1 prediction.

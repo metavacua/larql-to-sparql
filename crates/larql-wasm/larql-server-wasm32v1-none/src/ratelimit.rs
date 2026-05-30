@@ -1,7 +1,7 @@
 //! Per-IP rate limiting middleware using a token bucket.
 
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex};
 use std::time::Instant;
 
 use axum::extract::ConnectInfo;
@@ -18,6 +18,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Token bucket for a single IP.
 struct Bucket {
     tokens: f64,

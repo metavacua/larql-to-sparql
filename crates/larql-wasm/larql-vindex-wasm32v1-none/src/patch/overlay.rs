@@ -23,6 +23,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ═══════════════════════════════════════════════════════════════
 // PatchedVindex — overlay on immutable base
 // ═══════════════════════════════════════════════════════════════
@@ -83,7 +86,7 @@ pub struct PatchedVindex {
     /// `gate_vectors.bin` stays clean — see layering doc above.
     pub(crate) overrides_gate: HashMap<(usize, usize), Vec<f32>>,
     /// Tombstones for deleted features.
-    pub(crate) deleted: std::collections::HashSet<(usize, usize)>,
+    pub(crate) deleted: HashSet<(usize, usize)>,
     /// Architecture B: per-layer retrieval-override KNN store.
     pub knn_store: super::knn_store::KnnStore,
 }
@@ -160,7 +163,7 @@ impl PatchedVindex {
     /// All in-memory up vector overrides on the underlying base vindex.
     /// Parallel to `down_overrides()`. Used by `COMPILE INTO VINDEX` to
     /// bake them into a fresh copy of `up_features.bin`.
-    pub fn up_overrides(&self) -> &std::collections::HashMap<(usize, usize), Vec<f32>> {
+    pub fn up_overrides(&self) -> &HashMap<(usize, usize), Vec<f32>> {
         self.base.up_overrides()
     }
 
@@ -176,7 +179,7 @@ impl PatchedVindex {
     /// `down_weights.bin`.
     ///
     /// For a single (layer, feature) lookup, use `down_override_at`.
-    pub fn down_overrides(&self) -> &std::collections::HashMap<(usize, usize), Vec<f32>> {
+    pub fn down_overrides(&self) -> &HashMap<(usize, usize), Vec<f32>> {
         self.base.down_overrides()
     }
 

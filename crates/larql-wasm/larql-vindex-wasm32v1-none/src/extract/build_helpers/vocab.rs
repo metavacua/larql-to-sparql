@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Build the whole-word vocabulary: tokens that decode as 3+ char
 /// alphabetic words. Returns (token_ids, reduced_embedding_matrix).
 pub(crate) fn build_whole_word_vocab(

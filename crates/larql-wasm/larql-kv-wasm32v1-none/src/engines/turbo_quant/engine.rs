@@ -21,6 +21,12 @@ use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
 use crate::{EngineInfo, KvEngine};
 use larql_inference::attention::SharedKV;
 use larql_inference::attention::{
+    run_attention_block_decode_step_backend, run_attention_with_kv_backend,
+};
+use larql_inference::ffn::BackendFfn;
+use larql_inference::forward::{embed_tokens_pub, run_ffn};
+use larql_inference::model::ModelWeights;
+use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -29,12 +35,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    run_attention_block_decode_step_backend, run_attention_with_kv_backend,
-};
-use larql_inference::ffn::BackendFfn;
-use larql_inference::forward::{embed_tokens_pub, run_ffn};
-use larql_inference::model::ModelWeights;
-use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 // ─── TurboQuant codec ────────────────────────────────────────────────────────
 

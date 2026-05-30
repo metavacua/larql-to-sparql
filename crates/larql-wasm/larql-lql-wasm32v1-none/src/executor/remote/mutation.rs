@@ -14,6 +14,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Default `confidence` for INSERT/UPDATE when the user doesn't
 /// pass one. 0.9 lands well above the retrieval floor without
 /// dominating template-matched siblings.

@@ -14,6 +14,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const SUPPRESSED_TOKEN_CANDIDATE_TOPK: usize = 256;
 const DEBUG_SUPPRESS_PROBE_IDS: &[u32] = &[5, 31, 4, 168, 184];
 const ENV_DEBUG_TOKEN_IDS: &str = "LARQL_DEBUG_TOKEN_IDS";

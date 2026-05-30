@@ -25,6 +25,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Expert-shard variant of [`super::load_model_weights_q4k`].
 ///
 /// Identical to the full loader except that when `expert_filter` is `Some((start,

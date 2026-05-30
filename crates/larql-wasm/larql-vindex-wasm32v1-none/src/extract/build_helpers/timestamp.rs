@@ -7,6 +7,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Simple ISO 8601 timestamp without chrono dependency.
 pub(crate) fn chrono_now() -> String {
     let d = std::time::SystemTime::now()

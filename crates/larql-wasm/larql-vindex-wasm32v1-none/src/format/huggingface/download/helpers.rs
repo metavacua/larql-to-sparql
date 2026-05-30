@@ -16,6 +16,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Normalise an HTTP ETag header to the raw content hash hf-hub uses
 /// as blob filenames. Handles:
 ///   * strong etag: `"abc123"` → `abc123`

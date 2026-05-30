@@ -25,6 +25,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Numeric guard: `temperature <= EPS` is treated as greedy (avoids
 /// dividing by zero in the temperature step).
 pub const TEMPERATURE_GREEDY_EPS: f32 = 1e-6;
@@ -237,8 +240,8 @@ impl Sampler {
 
 /// Build a `token_id → count` map. Tiny helper used by both penalty
 /// paths; allocations dominate here only for very long histories.
-fn token_counts(generated: &[u32]) -> std::collections::HashMap<u32, usize> {
-    let mut counts: std::collections::HashMap<u32, usize> = HashMap::new();
+fn token_counts(generated: &[u32]) -> HashMap<u32, usize> {
+    let mut counts: HashMap<u32, usize> = HashMap::new();
     for &id in generated {
         *counts.entry(id).or_insert(0) += 1;
     }
@@ -367,7 +370,7 @@ fn keep_top_p(probs: &mut [f32], p_thr: f32) {
             break;
         }
     }
-    let kept: std::collections::HashSet<usize> =
+    let kept: HashSet<usize> =
         order.iter().take(last_kept + 1).copied().collect();
     for (i, p) in probs.iter_mut().enumerate() {
         if !kept.contains(&i) {

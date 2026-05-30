@@ -18,6 +18,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Build a synthetic `ModelWeights` with all tensors populated.
 /// Uses `TinyModelArch` key conventions (e.g. `"0.attn.q_proj.weight"`).
 pub fn make_test_weights() -> ModelWeights {

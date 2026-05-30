@@ -20,6 +20,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub struct ExtendOutput {
     /// Hidden state at the last processed token, shape (1, hidden).
     pub last_hidden: Array2<f32>,

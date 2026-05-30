@@ -44,6 +44,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── Binary wire format constants ───────────────────────────────────────────────
 
 const BINARY_CT: &str = "application/x-larql-ffn";
@@ -314,7 +317,7 @@ async fn handle_walk_ffn_inner(
     })?;
 
     // Determine unique shards.
-    let unique_urls: std::collections::HashSet<&String> = layer_urls.values().collect();
+    let unique_urls: HashSet<&String> = layer_urls.values().collect();
 
     if unique_urls.len() == 1 || layers.len() == 1 {
         // All layers on the same shard — proxy raw bytes unchanged.

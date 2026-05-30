@@ -3,6 +3,8 @@ use std::time::Instant;
 
 use clap::Args;
 use larql_inference::{
+    forward_to_layer, predict, predict_from_hidden, trace_forward, InferenceModel,
+};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -11,8 +13,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    forward_to_layer, predict, predict_from_hidden, trace_forward, InferenceModel,
-};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 #[derive(Args)]
 pub struct ProjectionTestArgs {

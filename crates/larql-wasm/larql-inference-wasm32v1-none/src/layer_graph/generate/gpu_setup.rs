@@ -14,6 +14,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// True when the model has at least two layers and any per-layer
 /// attention parameter differs from layer 0. Catches Gemma 4 31B's
 /// sliding/global geometry alternation, the canonical heterogeneous

@@ -44,6 +44,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Where the decoder is in the `{"op":"<NAME>","args":{...}}` skeleton.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GrammarState {

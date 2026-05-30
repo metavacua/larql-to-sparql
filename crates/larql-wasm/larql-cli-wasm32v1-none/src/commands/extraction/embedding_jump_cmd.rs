@@ -11,6 +11,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// End-to-end proof: raw token embeddings → L13 → L14-33 dense → prediction.
 /// Zero layers for L0-13. Just an embedding lookup + a learned projection.
 #[derive(Args)]

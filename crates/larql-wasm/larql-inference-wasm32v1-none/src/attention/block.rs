@@ -4,6 +4,11 @@
 //! Supports KV sharing (reuse K/V from a source layer).
 
 use super::gqa::{
+    gqa_attention_with_all_weights, gqa_attention_with_weights, gqa_reduced_qk_all_weights,
+};
+use super::rope::apply_rope_partial;
+use super::{AttentionAllWeights, AttentionWeights, SharedKV};
+use ndarray::{s, Array2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -12,11 +17,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    gqa_attention_with_all_weights, gqa_attention_with_weights, gqa_reduced_qk_all_weights,
-};
-use super::rope::apply_rope_partial;
-use super::{AttentionAllWeights, AttentionWeights, SharedKV};
-use ndarray::{s, Array2};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Run the full attention block. Returns (h_post_attn, attn_projected, optional_weights).
 #[allow(clippy::too_many_arguments)]

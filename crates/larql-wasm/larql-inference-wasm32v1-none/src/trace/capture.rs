@@ -18,6 +18,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Which positions to capture.
 pub enum TracePositions {
     Last,
@@ -222,7 +225,7 @@ mod tests {
         let t = trace(w, &[0u32, 1, 2, 3], TracePositions::Positions(vec![0, 2]));
         // 2 positions × (n_layers + 1) nodes
         assert_eq!(t.nodes.len(), 2 * (w.num_layers + 1));
-        let positions: std::collections::HashSet<usize> =
+        let positions: HashSet<usize> =
             t.nodes.iter().map(|n| n.position).collect();
         assert_eq!(positions.len(), 2);
         assert!(positions.contains(&0) && positions.contains(&2));

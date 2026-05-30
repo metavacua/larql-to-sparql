@@ -4,6 +4,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::band_utils::{
+    HEALTH_STATUS_OK, INFER_MODE_COMPARE, INFER_MODE_DENSE, INFER_MODE_WALK, PROBE_RELATION_SOURCE,
+};
+use crate::state::AppState;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -12,9 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    HEALTH_STATUS_OK, INFER_MODE_COMPARE, INFER_MODE_DENSE, INFER_MODE_WALK, PROBE_RELATION_SOURCE,
-};
-use crate::state::AppState;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 pub mod proto {
     tonic::include_proto!("vindex");
@@ -558,7 +561,7 @@ fn grpc_relations(model: &crate::state::LoadedModel) -> Result<RelationsResponse
     let patched = model.patched.blocking_read();
     let all_layers = patched.loaded_layers();
 
-    let mut counts: std::collections::HashMap<String, (usize, String)> =
+    let mut counts: HashMap<String, (usize, String)> =
         HashMap::new();
     for &layer in &all_layers {
         if let Some(metas) = patched.down_meta_at(layer) {

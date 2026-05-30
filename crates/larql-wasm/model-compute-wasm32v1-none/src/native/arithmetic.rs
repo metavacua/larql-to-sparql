@@ -34,6 +34,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const MAX_RANGE_LEN: i64 = 100_000_000;
 const MAX_FACTORIAL: i64 = 20;
 

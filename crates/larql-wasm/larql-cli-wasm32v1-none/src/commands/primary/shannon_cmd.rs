@@ -24,6 +24,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const LN_2: f64 = std::f64::consts::LN_2;
 const DEFAULT_CONTEXT: usize = 512;
 const DEFAULT_STRIDE: usize = 256;
@@ -862,7 +865,7 @@ fn forward_hidden(
     let mut h = larql_inference::forward::embed_tokens_pub(weights, token_ids);
     let ple_inputs =
         larql_inference::forward::ple::precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
     for layer in 0..weights.num_layers {
         let shared_kv = weights
             .arch
@@ -900,7 +903,7 @@ fn forward_hidden_all_layers(
     let mut captures: Vec<Array2<f32>> = Vec::with_capacity(weights.num_layers + 1);
     captures.push(h0.clone());
     let mut h = h0;
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
     for layer in 0..weights.num_layers {
         let shared_kv = weights
             .arch

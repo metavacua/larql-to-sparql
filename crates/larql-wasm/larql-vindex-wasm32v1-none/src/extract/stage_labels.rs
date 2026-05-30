@@ -24,6 +24,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── Stage labels (`on_stage` / `on_stage_done`) ───────────────────────
 
 /// `loading` — opening + mmap'ing safetensors shards.
@@ -85,7 +88,7 @@ mod tests {
             COMP_ATTN_Q4K,
             COMP_FFN_Q4K,
         ];
-        let unique: std::collections::HashSet<_> = labels.iter().collect();
+        let unique: HashSet<_> = labels.iter().collect();
         assert_eq!(unique.len(), labels.len(), "duplicate stage label");
     }
 }

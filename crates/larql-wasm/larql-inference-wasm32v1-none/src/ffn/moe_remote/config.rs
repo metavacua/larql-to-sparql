@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── Shard configuration ───────────────────────────────────────────────────────
 
 /// One entry in the shard map: an expert-ID range + its URL.
@@ -41,7 +44,7 @@ pub struct ShardConfig {
     /// owned by this shard.  When `Some`, takes precedence over the
     /// `start..=end` range.  See `crate::ffn::moe_remote::UnitManifest`
     /// for the JSON shape that produces this set.
-    pub unit_set: Option<std::sync::Arc<std::collections::HashSet<(usize, usize)>>>,
+    pub unit_set: Option<std::sync::Arc<HashSet<(usize, usize)>>>,
 }
 
 impl ShardConfig {
@@ -61,7 +64,7 @@ impl ShardConfig {
     /// diagnostic compatibility; ownership checks use the set itself.
     pub fn with_units(
         url: impl Into<String>,
-        units: std::collections::HashSet<(usize, usize)>,
+        units: HashSet<(usize, usize)>,
     ) -> Self {
         let url = url.into().trim_end_matches('/').to_string();
         let (start, end) = if units.is_empty() {
@@ -136,7 +139,7 @@ impl UnitShard {
     /// Expand the per-layer ranges into a flat `(layer, expert_id)` set.
     pub fn into_unit_set(
         self,
-    ) -> Result<std::collections::HashSet<(usize, usize)>, RemoteMoeError> {
+    ) -> Result<HashSet<(usize, usize)>, RemoteMoeError> {
         let mut units = HashSet::new();
         for (layer_str, ranges) in self.layer_experts {
             let layer: usize = layer_str.parse().map_err(|_| {

@@ -42,6 +42,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Context window default. Real models report this in their config; the
 /// caller can override with [`ChatSession::with_max_context`].
 pub const DEFAULT_MAX_CONTEXT: usize = 8192;

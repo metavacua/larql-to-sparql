@@ -33,6 +33,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Checkpoint filename inside the output directory. Hidden so it
 /// doesn't clutter `ls` and so HF / vindex-loader code doesn't try to
 /// upload it.

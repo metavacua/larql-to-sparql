@@ -9,6 +9,9 @@ use std::path::Path;
 use crate::error::InferenceError;
 use crate::forward::trace_forward;
 use crate::model::{
+    load_model_dir_validated, load_model_dir_walk_only_validated, resolve_model_path, ModelWeights,
+};
+use crate::tokenizer::load_tokenizer;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,9 +20,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    load_model_dir_validated, load_model_dir_walk_only_validated, resolve_model_path, ModelWeights,
-};
-use crate::tokenizer::load_tokenizer;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Configuration for residual/activation capture.
 pub struct CaptureConfig {

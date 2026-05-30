@@ -12,6 +12,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Shared logits computation: final norm + vindex KNN + softmax.
 pub fn finalize_logits(
     weights: &ModelWeights,

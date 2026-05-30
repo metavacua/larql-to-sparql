@@ -23,6 +23,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const MAGIC: u32 = 0x444D4554; // "DMET"
 const LEGACY_LITERAL_MAGIC: u32 = 0x54454D44; // bytes written as b"DMET"
 const FORMAT_VERSION: u32 = 1;

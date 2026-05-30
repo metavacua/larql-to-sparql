@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Render a filesystem path for safe inclusion inside an LQL quoted string
 /// literal. The LQL lexer interprets `\` as an escape introducer, so a raw
 /// Windows path like `C:\Users\runner\...` ends up decoded as

@@ -15,6 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub(super) fn corruption_keep_values(groups: usize) -> Vec<usize> {
     [0usize, 4, 8, 12, 16, 24, 32, 40, groups]
         .into_iter()

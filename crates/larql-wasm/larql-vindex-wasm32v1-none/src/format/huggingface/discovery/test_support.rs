@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// RAII env-var override for `LARQL_HF_TEST_BASE`, plus a fake
 /// HF_TOKEN so the discovery functions don't try to read
 /// `~/.huggingface/token` during the test. Restored on drop.

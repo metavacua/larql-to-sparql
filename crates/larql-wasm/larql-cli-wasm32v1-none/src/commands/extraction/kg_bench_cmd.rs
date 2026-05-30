@@ -12,6 +12,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub struct KgBenchArgs {
     /// Model path or HuggingFace model ID (for tokenizer).
@@ -88,7 +91,7 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn core::error::Error>> {
         println!("\n{:?}", prompt);
 
         // Aggregate answer tokens across layers
-        let mut token_votes: std::collections::HashMap<String, f32> =
+        let mut token_votes: HashMap<String, f32> =
             HashMap::new();
 
         for &layer in &layers {

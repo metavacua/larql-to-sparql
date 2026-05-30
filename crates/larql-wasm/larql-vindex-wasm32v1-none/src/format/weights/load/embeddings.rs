@@ -23,6 +23,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Mmap + decode `embeddings.bin` into a `[vocab_size, hidden_size]`
 /// array of f32. Auto-detects f32 vs f16 storage from the byte count.
 ///

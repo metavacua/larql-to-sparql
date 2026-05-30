@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // Many helpers in this module are only invoked from the metal-gated
 // `#[cfg(all(feature = "metal", target_os = "macos"))]` branches. Without
 // the metal feature, those call sites disappear and the helpers become
@@ -809,7 +812,7 @@ struct ResidualRecord {
 
 /// Parse `LARQL_DUMP_RESIDUALS` binary (written by `moe_combine.rs / diag.rs`).
 /// Returns a map from layer_idx → record. Skips the 16-byte magic header.
-fn parse_residual_dump(bytes: &[u8]) -> std::collections::HashMap<usize, ResidualRecord> {
+fn parse_residual_dump(bytes: &[u8]) -> HashMap<usize, ResidualRecord> {
     let mut map = HashMap::new();
     if bytes.len() < 16 {
         return map;

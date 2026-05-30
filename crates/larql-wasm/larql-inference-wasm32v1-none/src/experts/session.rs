@@ -37,6 +37,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Minimal contract a session needs from its op-dispatch backend.
 ///
 /// Implemented for [`ExpertRegistry`] so production code uses real WASM
@@ -89,7 +92,7 @@ impl Dispatcher for Box<dyn Dispatcher> {
 /// as `UnknownOp`) rather than reaching the inner dispatcher.
 pub struct FilteredDispatcher<D: Dispatcher> {
     inner: D,
-    allowed: std::collections::HashSet<String>,
+    allowed: HashSet<String>,
 }
 
 impl<D: Dispatcher> FilteredDispatcher<D> {
@@ -425,7 +428,7 @@ mod mock_tests {
         ops: Vec<OpSpec>,
         /// op → response. `None` means the dispatcher will refuse the call
         /// (modelling an expert that declined).
-        responses: std::collections::HashMap<String, Option<ExpertResult>>,
+        responses: HashMap<String, Option<ExpertResult>>,
         calls: core::cell::RefCell<Vec<(String, Value)>>,
     }
 
@@ -689,7 +692,7 @@ mod mock_tests {
         let mock = MockDispatcher::new(&[("a", &[]), ("b", &[]), ("c", &[])]);
         let filtered = FilteredDispatcher::new(mock, ["a", "c"]);
         let specs = filtered.op_specs();
-        let names: std::collections::HashSet<String> =
+        let names: HashSet<String> =
             specs.iter().map(|s| s.name.clone()).collect();
         assert_eq!(names.len(), 2);
         assert!(names.contains("a") && names.contains("c"));

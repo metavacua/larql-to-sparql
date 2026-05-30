@@ -10,14 +10,6 @@ use crate::executor::helpers::{dir_size, format_bytes};
 use crate::executor::tuning::{MEMIT_DEFAULT_RIDGE, MEMIT_TARGET_ALPHA};
 use crate::executor::Session;
 use larql_vindex::format::filenames::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     ATTN_WEIGHTS_BIN, DOWN_FEATURES_BIN, DOWN_META_BIN, DOWN_WEIGHTS_BIN, EMBEDDINGS_BIN,
     FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, KNN_STORE_BIN, NORMS_BIN, RELATION_CLUSTERS_JSON,
     TOKENIZER_JSON, UP_FEATURES_BIN, UP_WEIGHTS_BIN, WEIGHT_MANIFEST_JSON,
@@ -28,6 +20,17 @@ use super::bake::{
     apply_memit_deltas_to_down_weights, patch_down_weights, patch_gate_vectors, patch_up_weights,
 };
 use super::collect_memit_facts_with_recording;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Walk the ordered patch history and return the (layer, feature) slots
 /// touched by more than one patch, along with the write count. Used by
@@ -37,7 +40,7 @@ pub(super) fn collect_compile_collisions(
 ) -> HashMap<(usize, usize), usize> {
     let mut counts: HashMap<(usize, usize), usize> = HashMap::new();
     for patch in patches {
-        let mut seen_in_this_patch: std::collections::HashSet<(usize, usize)> =
+        let mut seen_in_this_patch: HashSet<(usize, usize)> =
             HashSet::new();
         for op in &patch.operations {
             let key = match op.key() {
@@ -419,7 +422,7 @@ impl Session {
                 down_overrides
                     .keys()
                     .map(|(l, _)| *l)
-                    .collect::<std::collections::HashSet<_>>()
+                    .collect::<HashSet<_>>()
                     .len(),
             ));
         }

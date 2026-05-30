@@ -28,6 +28,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Per-layer comparison output. `cos` close to 1.0 means matching
 /// direction; `max_abs` close to 0.0 means matching pointwise. Both
 /// matter — see module docs.

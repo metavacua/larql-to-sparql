@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Pre-computed Lloyd-Max codebooks for Beta(d/2, d/2) distribution.
 ///
 /// After WHT of a unit-norm vector in d dimensions, each coordinate is

@@ -14,6 +14,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Everything `exec_insert` needs to know about a planned compose-mode
 /// install after reading the vindex config and embeddings. Small enough
 /// to pass by reference to each subsequent phase.

@@ -17,6 +17,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// End-to-end predict on a Q4_K vindex with the FFN served by an external
 /// [`crate::ffn::FfnBackend`].
 pub fn predict_q4k_with_ffn(

@@ -10,6 +10,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub struct FfnOverlapArgs {
     /// Model path or HuggingFace model ID.
@@ -76,18 +79,18 @@ pub fn run(args: FfnOverlapArgs) -> Result<(), Box<dyn core::error::Error>> {
             .map(|(i, v)| (i, v * larql_inference::ffn::sigmoid(v)))
             .collect();
         indexed.sort_unstable_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
-        let gate_top64: std::collections::HashSet<usize> =
+        let gate_top64: HashSet<usize> =
             indexed.iter().take(64).map(|x| x.0).collect();
-        let gate_top256: std::collections::HashSet<usize> =
+        let gate_top256: HashSet<usize> =
             indexed.iter().take(256).map(|x| x.0).collect();
 
         // Entity-routed features from gate index
         let entity_feats64 = gi.lookup_from_tokens(&entity_tokens, *layer, 64);
         let entity_feats256 = gi.lookup_from_tokens(&entity_tokens, *layer, 256);
 
-        let entity_set64: std::collections::HashSet<usize> =
+        let entity_set64: HashSet<usize> =
             entity_feats64.iter().copied().collect();
-        let entity_set256: std::collections::HashSet<usize> =
+        let entity_set256: HashSet<usize> =
             entity_feats256.iter().copied().collect();
 
         let overlap64 = entity_set64.intersection(&gate_top64).count();

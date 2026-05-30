@@ -10,6 +10,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 mod backend;
 mod compact;
 mod helpers;
@@ -43,7 +46,7 @@ pub struct Session {
     /// Architecture A: per-layer cached decoy residuals. Kept for backward compat.
     #[allow(dead_code)]
     pub(crate) decoy_residual_cache:
-        std::collections::HashMap<usize, Vec<larql_vindex::ndarray::Array1<f32>>>,
+        HashMap<usize, Vec<larql_vindex::ndarray::Array1<f32>>>,
     /// Raw captured residuals per installed slot, indexed by
     /// `(layer, feature)`. Each entry is the unscaled residual the
     /// model produced for the install prompt at that layer's FFN
@@ -57,7 +60,7 @@ pub struct Session {
     /// last-installed target before this cache existed).
     #[allow(dead_code)]
     pub(crate) raw_install_residuals:
-        std::collections::HashMap<(usize, usize), larql_vindex::ndarray::Array1<f32>>,
+        HashMap<(usize, usize), larql_vindex::ndarray::Array1<f32>>,
     /// Per-install fact metadata. Enables cross-fact balance: when a
     /// new INSERT's local balance converges, we replay every prior
     /// install's canonical prompt through INFER and scale the NEW

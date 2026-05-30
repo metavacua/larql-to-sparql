@@ -13,7 +13,7 @@
 
 use larql_vindex::format::filenames::*;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex};
 
 use memmap2::Mmap;
 #[allow(unused_imports)]
@@ -24,6 +24,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub struct EmbedStoreF16 {
     mmap: Arc<Mmap>,
     pub vocab_size: usize,

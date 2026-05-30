@@ -21,6 +21,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Per-layer K/V cache. Can grow unbounded or be clamped to a fixed
 /// sliding window (Markov-residual-bounded strategy — keep the last W
 /// positions' K/V, evict older). When bounded, attention becomes

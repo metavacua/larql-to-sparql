@@ -38,11 +38,6 @@
 //! address can be interpreted differently across formats or expected padded
 //! lengths, so the key includes pointer, length, format, and expected float
 //! count.
-
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::{OnceLock, RwLock};
-
-use crate::options;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -54,6 +49,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{OnceLock, RwLock};
+
+use crate::options;
 /// LRU cache entry: dequantised expert weights.
 pub(super) type ExpertF32 = Arc<Vec<f32>>;
 

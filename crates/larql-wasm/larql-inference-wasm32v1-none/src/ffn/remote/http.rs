@@ -11,14 +11,6 @@ use std::time::Duration;
 use ndarray::Array2;
 
 use super::codec::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     decode_binary_batch, decode_binary_batch_f16, decode_binary_batch_i8, decode_binary_single,
     decode_binary_single_f16, decode_binary_single_i8, encode_binary_request,
     extract_response_latency_ms, RemoteLatencyStats, WalkFfnSingleResponse, BINARY_CT, F16_CT,
@@ -27,6 +19,17 @@ use std::collections::{HashMap, HashSet};
 use super::q8k_wire::{decode_q8k_batch_response, encode_q8k_batch_request, Q8K_BATCH_CT};
 use crate::ffn::FfnBackend;
 use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 const STATS_PATH: &str = "/v1/stats";
 const WALK_FFN_PATH: &str = "/v1/walk-ffn";

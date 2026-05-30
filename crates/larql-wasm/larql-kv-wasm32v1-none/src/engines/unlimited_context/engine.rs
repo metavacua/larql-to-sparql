@@ -21,14 +21,6 @@ use serde::Serialize;
 
 use super::checkpoint_store::CheckpointStore;
 use super::extend::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     empty_prior, rs_extend_from_checkpoint_backend, rs_extend_from_checkpoint_q4k,
 };
 use super::token_archive::TokenArchive;
@@ -37,6 +29,17 @@ use crate::{EngineInfo, KvEngine};
 use larql_inference::attention::SharedKV;
 use larql_inference::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
 use larql_inference::model::ModelWeights;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 // ─── EngineStats ─────────────────────────────────────────────────────────────
 

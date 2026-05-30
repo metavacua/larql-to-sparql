@@ -32,6 +32,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Manifest key fragment that identifies an up_proj tensor entry.
 /// Used to filter `weight_manifest.json` while searching for the
 /// per-layer up tensors.

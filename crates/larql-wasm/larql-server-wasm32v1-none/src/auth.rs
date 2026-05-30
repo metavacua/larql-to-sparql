@@ -31,6 +31,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Constant-time equality on bearer tokens.
 ///
 /// Hashes both inputs with SHA-256 and compares the 32-byte digests with

@@ -26,6 +26,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Two-pass split pipeline: attention on CPU, FFN batched on Metal GPU.
 ///
 /// Pass 1: Run attention for all layers with attention-only residual stream (CPU).

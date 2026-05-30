@@ -45,6 +45,10 @@ use larql_vindex::VectorIndex;
 
 use super::compare::{LayerStat, ParityThreshold};
 use crate::forward::dump_config::{
+    cpu_stage_prefix, decode_layer_prefix, metal_layer_prefix, ENV_CPU_STAGE_DUMP,
+    ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS, ENV_STAGE_DUMP_LAYER,
+};
+use crate::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -53,10 +57,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    cpu_stage_prefix, decode_layer_prefix, metal_layer_prefix, ENV_CPU_STAGE_DUMP,
-    ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS, ENV_STAGE_DUMP_LAYER,
-};
-use crate::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// In-memory representation of one backend's per-stage dump for one
 /// layer. Stage names are exactly the suffixes the producer wrote

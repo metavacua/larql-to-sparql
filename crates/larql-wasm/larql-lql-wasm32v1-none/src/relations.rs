@@ -7,6 +7,8 @@ use larql_inference::ndarray::{Array1, Array2};
 use larql_inference::tokenizers::Tokenizer;
 use larql_vindex::clustering::ClusterResult;
 use larql_vindex::format::filenames::{
+    FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, RELATION_CLUSTERS_JSON,
+};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,8 +17,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, RELATION_CLUSTERS_JSON,
-};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Classifies edges into relation types using discovered clusters
 /// or embedding-space direction matching.
@@ -24,9 +27,9 @@ pub struct RelationClassifier {
     /// Discovered clusters from the vindex (if available).
     clusters: Option<ClusterResult>,
     /// Per-feature cluster assignments: (layer, feature) → cluster_id.
-    feature_assignments: std::collections::HashMap<(usize, usize), usize>,
+    feature_assignments: HashMap<(usize, usize), usize>,
     /// Probe-confirmed per-feature labels (highest priority).
-    probe_labels: std::collections::HashMap<(usize, usize), String>,
+    probe_labels: HashMap<(usize, usize), String>,
     /// Number of probe-confirmed labels.
     probe_count: usize,
 }
@@ -202,7 +205,7 @@ impl RelationClassifier {
     /// Returns the most common layer for features with this relation.
     pub fn typical_layer_for_relation(&self, relation: &str) -> Option<usize> {
         let norm = normalise_relation(relation);
-        let mut layer_counts: std::collections::HashMap<usize, usize> =
+        let mut layer_counts: HashMap<usize, usize> =
             HashMap::new();
 
         // Check probe labels

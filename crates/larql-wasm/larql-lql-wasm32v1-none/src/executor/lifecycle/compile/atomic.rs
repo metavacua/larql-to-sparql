@@ -30,6 +30,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Decide whether two paths refer to the same on-disk directory.
 ///
 /// Uses `canonicalize` when both paths exist (handles symlinks, `.`, `..`,

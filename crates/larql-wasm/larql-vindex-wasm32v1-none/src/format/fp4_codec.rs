@@ -13,6 +13,11 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use larql_models::quant::fp4_block::{
+    decode_fp4_feature, decode_fp8_feature, encode_fp4_feature, encode_fp8_feature,
+    fp4_feature_bytes, fp8_feature_bytes, BLOCK_ELEMENTS,
+};
+
+use crate::error::VindexError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,11 +26,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    decode_fp4_feature, decode_fp8_feature, encode_fp4_feature, encode_fp8_feature,
-    fp4_feature_bytes, fp8_feature_bytes, BLOCK_ELEMENTS,
-};
-
-use crate::error::VindexError;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Layout descriptor for one layer inside a per-projection file. Mirrors
 /// the information that `VindexConfig.layers[i]` already carries; exposed

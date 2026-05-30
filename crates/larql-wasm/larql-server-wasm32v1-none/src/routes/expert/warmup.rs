@@ -13,6 +13,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Eager warmup of the per-(layer, expert) HNSW unit cache for **walk** /
 /// interpretability KNN queries.  Iterates every `(layer, expert)` this
 /// shard owns and pre-builds an HNSW index over that expert's gate slice
@@ -59,7 +62,7 @@ pub fn warmup_hnsw_unit_cache(model: &LoadedModel) -> Result<(usize, usize, usiz
         units
             .iter()
             .map(|(_, e)| *e)
-            .collect::<std::collections::HashSet<_>>()
+            .collect::<HashSet<_>>()
             .len()
     } else {
         let (start, end_excl) = model.expert_filter.unwrap_or((0, num_experts));

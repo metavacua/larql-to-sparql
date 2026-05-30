@@ -11,6 +11,13 @@ use std::time::Instant;
 use clap::Args;
 
 use larql_inference::{
+    calibrate_scalar_gains, predict,
+    predict::LayerMode,
+    predict_with_ffn, predict_with_strategy,
+    vindex::{WalkFfn, WalkFfnConfig},
+    FfnBackend, InferenceModel, WeightFfn,
+};
+use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,13 +26,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    calibrate_scalar_gains, predict,
-    predict::LayerMode,
-    predict_with_ffn, predict_with_strategy,
-    vindex::{WalkFfn, WalkFfnConfig},
-    FfnBackend, InferenceModel, WeightFfn,
-};
-use larql_vindex::{SilentLoadCallbacks, VectorIndex};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub struct PredictArgs {
     /// Model path or HuggingFace model ID.

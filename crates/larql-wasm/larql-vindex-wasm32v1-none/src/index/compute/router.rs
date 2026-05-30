@@ -19,6 +19,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// MoE router weights for all layers.
 pub struct RouterIndex {
     /// Per-layer router weight matrices: `[num_experts, hidden_size]`
@@ -137,7 +140,7 @@ impl RouterIndex {
         layer_range: core::ops::RangeInclusive<usize>,
     ) -> Vec<(usize, usize, f32)> {
         // Count how often each expert is selected across layers, with avg probability
-        let mut expert_counts: std::collections::HashMap<usize, (usize, f32)> =
+        let mut expert_counts: HashMap<usize, (usize, f32)> =
             HashMap::new();
 
         for layer in layer_range {

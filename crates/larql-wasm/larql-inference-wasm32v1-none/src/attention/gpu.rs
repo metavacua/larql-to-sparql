@@ -15,6 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// GPU-accelerated attention block. Same as `run_attention_block` but routes
 /// Q/K/V/O projections through the ComputeBackend (Metal, CUDA, or CPU).
 pub fn run_attention_block_gpu(

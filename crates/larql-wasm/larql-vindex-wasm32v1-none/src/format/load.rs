@@ -8,6 +8,12 @@ use ndarray::Array2;
 use crate::config::VindexConfig;
 use crate::error::VindexError;
 use crate::format::filenames::{
+    DOWN_META_BIN, DOWN_META_JSONL, EMBEDDINGS_BIN, GATE_VECTORS_BIN, INDEX_JSON,
+    INTERLEAVED_Q4K_BIN, INTERLEAVED_Q4K_MANIFEST_JSON, LM_HEAD_BIN, LM_HEAD_Q4_BIN,
+    TOKENIZER_JSON,
+};
+use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER;
+use crate::index::{IndexLoadCallbacks, VectorIndex};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,12 +22,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    DOWN_META_BIN, DOWN_META_JSONL, EMBEDDINGS_BIN, GATE_VECTORS_BIN, INDEX_JSON,
-    INTERLEAVED_Q4K_BIN, INTERLEAVED_Q4K_MANIFEST_JSON, LM_HEAD_BIN, LM_HEAD_Q4_BIN,
-    TOKENIZER_JSON,
-};
-use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER;
-use crate::index::{IndexLoadCallbacks, VectorIndex};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 impl VectorIndex {
     /// Load a VectorIndex from a .vindex directory.

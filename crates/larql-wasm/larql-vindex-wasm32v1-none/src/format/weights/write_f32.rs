@@ -33,6 +33,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Manifest `kind` discriminators — wire-format strings written into
 /// `weights.json`. Constants exist so writers and the loader's match
 /// arm dispatch on the same source-of-truth. A typo on a constant

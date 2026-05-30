@@ -18,6 +18,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── Top-level config / sidecars ─────────────────────────────────────────
 pub const INDEX_JSON: &str = "index.json";
 pub const TOKENIZER_JSON: &str = "tokenizer.json";
@@ -185,7 +188,7 @@ mod tests {
             LM_HEAD_BIN,
             LM_HEAD_Q4_BIN,
         ];
-        let unique: std::collections::HashSet<_> = names.iter().collect();
+        let unique: HashSet<_> = names.iter().collect();
         assert_eq!(unique.len(), names.len(), "duplicate filename constant");
     }
 

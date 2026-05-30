@@ -67,6 +67,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Hyperparameters for target-delta optimisation. Defaults match the
 /// Python reference (`vindex_compile_rome_v11.py::optimise_target_delta`).
 #[derive(Debug, Clone, Copy)]

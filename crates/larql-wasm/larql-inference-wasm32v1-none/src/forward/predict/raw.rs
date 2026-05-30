@@ -18,6 +18,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Return type for [`forward_raw_logits`]. `h_pre_norm` is the residual
 /// at the last transformer block's output (pre-final-norm), `h_final`
 /// is after final-norm, and `logits` are the raw logits at the final
@@ -194,7 +197,7 @@ fn forward_layer_range(
     let ple_inputs = precompute_per_layer_inputs(weights, &h, &ple_token_ids);
     let ffn = WeightFfn { weights };
 
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
 
     for layer in layer_range {
         let shared_kv = weights

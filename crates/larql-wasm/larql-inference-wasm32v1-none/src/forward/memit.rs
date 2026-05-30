@@ -32,6 +32,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// A single fact to be compiled via MEMIT.
 #[derive(Debug, Clone)]
 pub struct MemitFact {
@@ -245,7 +248,7 @@ fn run_memit_inner(
     }
 
     // Group facts by layer.
-    let mut by_layer: std::collections::HashMap<usize, Vec<&MemitFact>> =
+    let mut by_layer: HashMap<usize, Vec<&MemitFact>> =
         HashMap::new();
     for fact in facts {
         by_layer.entry(fact.layer).or_default().push(fact);
@@ -266,7 +269,7 @@ fn run_memit_inner(
     // Build a fact-index map so RSource::OptimisedDeltas can look up
     // the delta corresponding to each fact passed into the per-layer
     // solver.
-    let fact_index_map: std::collections::HashMap<(usize, u32, Vec<u32>), usize> = facts
+    let fact_index_map: HashMap<(usize, u32, Vec<u32>), usize> = facts
         .iter()
         .enumerate()
         .map(|(i, f)| ((f.layer, f.target_token_id, f.prompt_tokens.clone()), i))

@@ -103,6 +103,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// RAII guard that decrements the requests_in_flight counter on drop (GT6 drain).
 struct RifGuard(std::sync::Arc<core::sync::atomic::AtomicU32>);
 impl Drop for RifGuard {
@@ -528,7 +531,7 @@ pub(crate) fn run_full_output_core(
 
             // Build router weights from model vectors.
             fn get_vec(
-                vectors: &std::collections::HashMap<String, Vec<f32>>,
+                vectors: &HashMap<String, Vec<f32>>,
                 k: Option<String>,
             ) -> &[f32] {
                 k.and_then(|k| vectors.get(&k))

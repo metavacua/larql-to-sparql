@@ -27,6 +27,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Small metadata files needed to describe a vindex (`larql show`,
 /// browse-tier UIs, schema introspection). All of these together stay
 /// well under a few MB on a typical vindex, so they're safe to fetch

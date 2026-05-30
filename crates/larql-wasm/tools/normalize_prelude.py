@@ -216,9 +216,44 @@ def strip_inline_qualifiers(text: str) -> str:
     return '\n'.join(out)
 
 
+def fix_inner_doc_order(text: str) -> str:
+    """Repair E0753: the early no_std insertion put `#[macro_use] extern crate
+    alloc;` (an item) above the module's `//!` inner-doc block. Inner doc
+    comments must precede all items, so move the extern-crate item below the
+    leading `#![…]` / `//!` header region."""
+    lines = text.split('\n')
+    # Locate a `#[macro_use]?` + `extern crate alloc;` run near the top.
+    ec_start = ec_end = None
+    for i, l in enumerate(lines[:15]):
+        if l.strip() == 'extern crate alloc;':
+            ec_end = i
+            ec_start = i
+            if i > 0 and lines[i - 1].strip() == '#[macro_use]':
+                ec_start = i - 1
+            break
+    if ec_start is None:
+        return text
+    # Is there a `//!` inner-doc line AFTER the extern crate? If not, fine.
+    if not any(l.lstrip().startswith('//!') for l in lines[ec_end + 1: ec_end + 40]):
+        return text
+    block = lines[ec_start:ec_end + 1]
+    rest = lines[:ec_start] + lines[ec_end + 1:]
+    # Find where the leading header (#![…] inner attrs + //! docs + blanks) ends.
+    insert_at = 0
+    for i, l in enumerate(rest):
+        s = l.strip()
+        if s.startswith('#![') or s.startswith('//!') or s == '' or s.startswith('//'):
+            insert_at = i + 1
+            continue
+        break
+    repaired = rest[:insert_at] + block + rest[insert_at:]
+    return '\n'.join(repaired)
+
+
 def normalize_file(path: Path) -> bool:
     text = path.read_text()
-    stripped = strip_old_imports(text)
+    stripped = fix_inner_doc_order(text)
+    stripped = strip_old_imports(stripped)
     stripped = strip_inline_qualifiers(stripped)
 
     needs = bool(TRIGGER.search(stripped))

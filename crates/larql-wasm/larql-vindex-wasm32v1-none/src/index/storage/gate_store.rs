@@ -31,6 +31,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── GateStore — composes all gate-matrix-and-cache state ────────────────
 
 /// Gate matrix storage + decode caches + HNSW index.
@@ -59,7 +62,7 @@ pub struct GateStore {
     /// where each shard hosts only its own (layer, expert) units and a
     /// query's KNN search space is bounded by one expert's slice.
     pub hnsw_unit_cache:
-        Mutex<std::collections::HashMap<(usize, usize), super::super::hnsw::HnswLayer>>,
+        Mutex<HashMap<(usize, usize), super::super::hnsw::HnswLayer>>,
     /// HNSW master toggle.
     pub hnsw_enabled: core::sync::atomic::AtomicBool,
     /// HNSW beam width.

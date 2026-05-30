@@ -17,6 +17,13 @@
 
 use clap::Args;
 use larql_vindex::format::filenames::{
+    ATTN_WEIGHTS_Q4K_BIN, ATTN_WEIGHTS_Q4K_MANIFEST_JSON, ATTN_WEIGHTS_Q4_BIN, ATTN_WEIGHTS_Q8_BIN,
+    EMBEDDINGS_BIN, GENERATION_CONFIG_JSON, INDEX_JSON, INTERLEAVED_Q4K_BIN,
+    INTERLEAVED_Q4K_MANIFEST_JSON, INTERLEAVED_Q4_BIN, LM_HEAD_BIN, LM_HEAD_Q4_BIN, NORMS_BIN,
+    TOKENIZER_CONFIG_JSON, TOKENIZER_JSON, WEIGHT_MANIFEST_JSON,
+};
+
+use crate::commands::primary::cache;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,13 +32,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    ATTN_WEIGHTS_Q4K_BIN, ATTN_WEIGHTS_Q4K_MANIFEST_JSON, ATTN_WEIGHTS_Q4_BIN, ATTN_WEIGHTS_Q8_BIN,
-    EMBEDDINGS_BIN, GENERATION_CONFIG_JSON, INDEX_JSON, INTERLEAVED_Q4K_BIN,
-    INTERLEAVED_Q4K_MANIFEST_JSON, INTERLEAVED_Q4_BIN, LM_HEAD_BIN, LM_HEAD_Q4_BIN, NORMS_BIN,
-    TOKENIZER_CONFIG_JSON, TOKENIZER_JSON, WEIGHT_MANIFEST_JSON,
-};
-
-use crate::commands::primary::cache;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 #[derive(Args)]
 pub struct DiagArgs {

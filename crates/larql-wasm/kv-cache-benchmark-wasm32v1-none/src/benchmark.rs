@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Benchmark runner: sweeps context lengths × strategies × models.
 /// Outputs JSON + formatted table.
 use crate::{model_config::ModelConfig, run_strategy_benchmark, KvStrategy, StrategyResult};

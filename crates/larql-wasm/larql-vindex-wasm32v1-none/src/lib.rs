@@ -1,8 +1,6 @@
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::doc_lazy_continuation)]
 #![cfg_attr(target_arch = "wasm32", no_std)]
-#[macro_use]
-extern crate alloc;
 
 //! Vindex — the queryable model format.
 //!
@@ -28,6 +26,8 @@ extern crate alloc;
 // BLAS provided by larql-compute dependency (no direct blas_src needed)
 
 // ── Module structure ──
+#[macro_use]
+extern crate alloc;
 pub mod clustering;
 pub mod config;
 pub mod describe;

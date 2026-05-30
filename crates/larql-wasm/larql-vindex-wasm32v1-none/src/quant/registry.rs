@@ -37,6 +37,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Function-pointer signatures that mirror `larql_models::quant::ggml`.
 type DequantizeFn = fn(&[u8], usize) -> Result<Vec<f32>, larql_models::ModelError>;
 type RowDotFn = fn(&[u8], &[f32]) -> Result<f32, larql_models::ModelError>;
@@ -153,7 +156,7 @@ mod tests {
 
     #[test]
     fn registry_tags_unique() {
-        let tags: std::collections::HashSet<_> = QUANT_FORMATS.iter().map(|f| f.tag).collect();
+        let tags: HashSet<_> = QUANT_FORMATS.iter().map(|f| f.tag).collect();
         assert_eq!(
             tags.len(),
             QUANT_FORMATS.len(),

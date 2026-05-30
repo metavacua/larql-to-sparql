@@ -1,14 +1,6 @@
 //! FFN (gate / up / down) per-layer extraction methods.
 
 use larql_models::{
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
     TopKEntry, VectorRecord, COMPONENT_FFN_DOWN, COMPONENT_FFN_GATE, COMPONENT_FFN_UP,
 };
 
@@ -17,6 +9,17 @@ use super::types::{ExtractCallbacks, ExtractConfig};
 use super::writer::VectorWriter;
 use crate::error::VindexError;
 use crate::walker::utils::{decode_token, partial_top_k_column};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 impl VectorExtractor {
     /// Extract FFN down vectors for a single layer.

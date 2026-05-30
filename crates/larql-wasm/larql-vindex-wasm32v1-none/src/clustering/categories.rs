@@ -14,6 +14,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Load category words from the Wikidata categories file, or fall back to built-in.
 pub fn category_words() -> Vec<String> {
     // Try loading from file (relative to cwd or workspace root)

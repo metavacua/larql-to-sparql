@@ -15,6 +15,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub struct OvGateArgs {
     /// Model path or HuggingFace model ID.
@@ -190,7 +193,7 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn core::error::Error>> {
 
     // Label unique features
     let label_start = Instant::now();
-    let feature_labels: std::collections::HashMap<(usize, usize), String> =
+    let feature_labels: HashMap<(usize, usize), String> =
         if let Some(ref labels_path) = args.labels {
             eprintln!("  Loading labels from {}...", labels_path.display());
             let labels = load_feature_labels(labels_path)?;
@@ -202,7 +205,7 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn core::error::Error>> {
             labels
         } else {
             eprintln!("  Labeling features (slow — use --labels for instant labels)...");
-            let mut labels: std::collections::HashMap<(usize, usize), String> =
+            let mut labels: HashMap<(usize, usize), String> =
                 HashMap::new();
             for hd in &all_heads {
                 for &(f, _) in &hd.couplings {

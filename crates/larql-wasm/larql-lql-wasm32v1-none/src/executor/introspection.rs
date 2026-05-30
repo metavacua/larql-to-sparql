@@ -13,12 +13,15 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl Session {
     pub(crate) fn exec_show_compact_status(&self) -> Result<Vec<String>, LqlError> {
         let (_path, _config, patched) = self.require_vindex()?;
         let l0_entries = patched.knn_store.len();
         let l1_edges = patched.num_overrides();
-        let l1_layers: std::collections::HashSet<usize> = patched
+        let l1_layers: HashSet<usize> = patched
             .overrides_gate_iter()
             .map(|(layer, _, _)| layer)
             .collect();
@@ -383,7 +386,7 @@ impl Session {
         };
 
         // Collect distinct top_tokens across all scanned features.
-        let mut entity_counts: std::collections::HashMap<String, (usize, f32)> =
+        let mut entity_counts: HashMap<String, (usize, f32)> =
             HashMap::new();
 
         for layer in &scan_layers {

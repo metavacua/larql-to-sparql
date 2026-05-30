@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{RwLock};
 
 use rayon::prelude::*;
 
@@ -19,6 +19,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Per-shard call list element: (position, expert_id, residual).
 type ShardCallItem = (usize, usize, Vec<f32>);
 /// Output of `forward_layer_moe`: (output rows, optional per-expert (logit, weight)).

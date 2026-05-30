@@ -5,6 +5,9 @@ use crate::ast::LayerBand;
 use crate::error::LqlError;
 use crate::executor::helpers::{is_content_token, is_readable_token};
 use crate::executor::tuning::{
+    DESCRIBE_ALSO_CONTENT_TAKE, DESCRIBE_ALSO_READABLE_TAKE, DESCRIBE_COHERENCE_FLOOR,
+    DESCRIBE_GATE_THRESHOLD,
+};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -13,9 +16,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    DESCRIBE_ALSO_CONTENT_TAKE, DESCRIBE_ALSO_READABLE_TAKE, DESCRIBE_COHERENCE_FLOOR,
-    DESCRIBE_GATE_THRESHOLD,
-};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 /// Tokenise `entity` and build a query vector by averaging its token
 /// embeddings. Returns `Ok(None)` when the entity tokenises to nothing

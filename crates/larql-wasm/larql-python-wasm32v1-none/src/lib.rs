@@ -7,6 +7,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[macro_use]
 extern crate alloc;
 
@@ -181,7 +184,7 @@ impl PyEdge {
             let json_mod = d.py().import("json")?;
             let meta_str: String = json_mod.call_method1("dumps", (meta_obj,))?.extract()?;
             if let Ok(meta_map) = serde_json::from_str::<
-                std::collections::HashMap<String, serde_json::Value>,
+                HashMap<String, serde_json::Value>,
             >(&meta_str)
             {
                 edge.metadata = Some(meta_map);

@@ -27,6 +27,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Top-k `(token_id, probability)` pairs at the given residual, projected
 /// through the model's final norm + lm_head. Probabilities sum to 1.0
 /// across the full vocab (top-k truncation happens after softmax, not
