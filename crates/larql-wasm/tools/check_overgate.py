@@ -92,12 +92,10 @@ def gated_context(lines: list[str], idx: int) -> str:
             j += 1
             continue
         break
-    # now capture the item itself
+    # capture the item itself. The attr-skip loop above already appended the
+    # item's first line (it `break`s after appending without advancing j), so
+    # `out` ends at line j; continue the brace/`;` scan from there.
     if j < len(lines):
-        first = lines[j] if not out or out[-1] != lines[j] else ''
-        if first:
-            out.append(first)
-        # read a brace block or up to ~8 lines / `;`
         depth = ' '.join(out).count('{') - ' '.join(out).count('}')
         k = j
         while k + 1 < len(lines) and (depth > 0 or

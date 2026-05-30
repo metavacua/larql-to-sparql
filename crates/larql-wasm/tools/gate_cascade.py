@@ -33,7 +33,6 @@ ITEM_START = re.compile(
     r'^(\s*)(?:pub(?:\s*\([^)]*\))?\s+)?'
     r'(?:default\s+)?(?:const\s+)?(?:async\s+)?(?:unsafe\s+)?(?:extern\s+"[^"]*"\s+)?'
     r'(fn|struct|enum|trait|impl|const|static|type|mod|use)\b'
-    r'|^(\s*)(?:pub\s+)?use\b'
 )
 
 
@@ -47,9 +46,22 @@ def check(crate: str) -> tuple[bool, str]:
 
 
 # Error lines that indicate "this code path needs a native item that's gated".
+# Error lines whose code path needs a native-only item that has been gated.
+# Matches both `error[E####]:` and bare `error:` (macro-not-found has no code),
+# across the phrasings the compiler uses for "this references something absent
+# on wasm32v1-none": missing imports/items, missing trait items, no method /
+# associated item, and unstable types (e.g. the built-in `f16`, available on
+# native via the gated `half` crate).
 ERR = re.compile(
-    r'^([^:\s]+\.rs):(\d+):\d+:\s+error\[E\d+\]:\s+'
-    r'(unresolved import|cannot find (?:function|value|type|macro|module|trait))'
+    r'^([^:\s]+\.rs):(\d+):\d+:\s+error(?:\[E\d+\])?:\s+'
+    r'('
+    r'unresolved import'
+    r'|cannot find (?:function|value|type|macro|module|trait)'
+    r'|no method named'
+    r'|no function or associated item named'
+    r'|not all trait items implemented'
+    r'|the type `[^`]+` is unstable'
+    r')'
 )
 
 
@@ -85,10 +97,13 @@ def already_gated(lines: list[str], insert_at: int) -> bool:
     return insert_at - 1 >= 0 and lines[insert_at - 1].strip() == GATE
 
 
-def one_pass(crate: str) -> int:
+def one_pass(crate: str) -> tuple[int, bool, str]:
+    """Run one gating pass. Returns (items_gated, already_ok, check_output).
+    The check output is returned so the caller can report/decide without a
+    second `cargo check` (each check is a full wasm compile)."""
     ok, out = check(crate)
     if ok:
-        return 0
+        return 0, True, out
     # Map file -> set of error line numbers (1-based).
     by_file: dict[str, set[int]] = {}
     for line in out.splitlines():
@@ -118,18 +133,19 @@ def one_pass(crate: str) -> int:
             gated += 1
         if insert_points:
             path.write_text('\n'.join(lines))
-    return gated
+    return gated, False, out
 
 
 def main(crate: str, max_iter: int) -> None:
     for it in range(1, max_iter + 1):
-        n = one_pass(crate)
-        ok, out = check(crate)
-        nerr = out.count('error[')
-        print(f"  pass {it}: gated {n} items, {nerr} errors remain")
+        # `out` here is the check run at the START of this pass (pre-gating).
+        n, ok, out = one_pass(crate)
         if ok:
+            print(f"  pass {it}: gated {n} items, 0 errors remain")
             print(f"✅ {crate} passes wasm32v1-none")
             return
+        nerr = out.count('error[')
+        print(f"  pass {it}: gated {n} items, {nerr} errors remain (pre-gating)")
         if n == 0:
             print(f"⚠️  fixpoint: {nerr} errors remain that gating cannot fix "
                   f"(need real portability work). Showing first few:")

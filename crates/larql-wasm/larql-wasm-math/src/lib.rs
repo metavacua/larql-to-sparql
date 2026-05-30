@@ -118,3 +118,40 @@ impl FloatExt for f64 {
     #[inline] fn hypot(self, other: Self) -> Self { libm::hypot(self, other) }
     #[inline] fn mul_add(self, a: Self, b: Self) -> Self { libm::fma(self, a, b) }
 }
+
+/// A tiny no_std FNV-1a hasher for `wasm32v1-none`, where `std`'s
+/// `DefaultHasher` (SipHash, std-only) is unavailable. Used as a drop-in for
+/// cache-key hashing — values are internal, so the exact algorithm is
+/// irrelevant as long as it is deterministic within a run.
+pub struct FnvHasher(u64);
+
+impl FnvHasher {
+    #[inline]
+    pub fn new() -> Self {
+        // FNV-1a 64-bit offset basis.
+        FnvHasher(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Default for FnvHasher {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl core::hash::Hasher for FnvHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        let mut h = self.0;
+        for &b in bytes {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3); // FNV prime
+        }
+        self.0 = h;
+    }
+}

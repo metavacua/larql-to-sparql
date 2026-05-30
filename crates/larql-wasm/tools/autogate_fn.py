@@ -79,16 +79,30 @@ def find_item_span(lines: list[str], start: int) -> int:
 
 
 def attr_block_start(lines: list[str], fn_line: int) -> int:
-    """Walk upward over the fn's doc comments and attributes to find where to
-    insert the gate (above the whole attribute/doc block)."""
+    """Walk upward over the fn's doc comments and attributes (including
+    multi-line `#[cfg_attr(...)]`) to find where the gate must go — ABOVE the
+    whole attribute/doc block, never inside a multi-line attribute."""
     i = fn_line - 1
+    depth = 0  # net unclosed brackets while inside a multi-line attribute
     while i >= 0:
-        s = lines[i].strip()
-        if s.startswith('///') or s.startswith('//!') or s.startswith('#[') or \
-           s.endswith(']') or s.startswith('//'):
+        line = lines[i]
+        s = line.strip()
+        opens = line.count('[') + line.count('(')
+        closes = line.count(']') + line.count(')')
+        if depth > 0:
+            # inside a multi-line attribute — keep consuming until balanced
+            depth += closes - opens
             i -= 1
             continue
-        # multi-line attribute close: keep walking if previous lines are attr
+        if s.startswith('///') or s.startswith('//!') or s.startswith('//') \
+                or s.startswith('#['):
+            i -= 1
+            continue
+        if (s.endswith(']') or s.endswith(')')) and closes > opens:
+            # closing line of a multi-line attribute: enter it
+            depth = closes - opens
+            i -= 1
+            continue
         break
     return i + 1
 
