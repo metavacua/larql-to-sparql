@@ -17,6 +17,8 @@ build/
 *.whl
 # Don't ignore Rust source modules named `build/`
 !crates/*/src/**/build/
+# …including the nested larql-wasm workspace (crates/larql-wasm/<crate>/src/…/build/)
+!crates/larql-wasm/*/src/**/build/
 
 # IDE
 .idea/

@@ -1,0 +1,82 @@
+//! ETag generation for CDN edge caching.
+
+use core::hash::{Hash, Hasher};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::hash_map::DefaultHasher;
+#[cfg(target_arch = "wasm32")]
+use larql_wasm_math::FnvHasher as DefaultHasher;
+/// Compute a short ETag from a JSON response body.
+pub fn compute_etag(body: &serde_json::Value) -> String {
+    let mut hasher = DefaultHasher::new();
+    body.to_string().hash(&mut hasher);
+    format!("\"{:x}\"", hasher.finish())
+}
+
+/// Check if the request's If-None-Match header matches the ETag.
+pub fn matches_etag(if_none_match: Option<&str>, etag: &str) -> bool {
+    match if_none_match {
+        Some(val) => val.trim() == etag || val.trim() == "*",
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn etag_is_quoted() {
+        let etag = compute_etag(&serde_json::json!({"hello": "world"}));
+        assert!(etag.starts_with('"'));
+        assert!(etag.ends_with('"'));
+    }
+
+    #[test]
+    fn same_body_same_etag() {
+        let body = serde_json::json!({"entity": "France", "edges": []});
+        let e1 = compute_etag(&body);
+        let e2 = compute_etag(&body);
+        assert_eq!(e1, e2);
+    }
+
+    #[test]
+    fn different_body_different_etag() {
+        let e1 = compute_etag(&serde_json::json!({"entity": "France"}));
+        let e2 = compute_etag(&serde_json::json!({"entity": "Germany"}));
+        assert_ne!(e1, e2);
+    }
+
+    #[test]
+    fn matches_exact() {
+        let etag = compute_etag(&serde_json::json!({"x": 1}));
+        assert!(matches_etag(Some(&etag), &etag));
+    }
+
+    #[test]
+    fn matches_wildcard() {
+        let etag = compute_etag(&serde_json::json!({"x": 1}));
+        assert!(matches_etag(Some("*"), &etag));
+    }
+
+    #[test]
+    fn no_match_on_none() {
+        let etag = compute_etag(&serde_json::json!({"x": 1}));
+        assert!(!matches_etag(None, &etag));
+    }
+
+    #[test]
+    fn no_match_on_different() {
+        let etag = compute_etag(&serde_json::json!({"x": 1}));
+        assert!(!matches_etag(Some("\"wrong\""), &etag));
+    }
+}

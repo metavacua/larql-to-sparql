@@ -1,0 +1,31 @@
+[package]
+name = "larql-router-protocol-wasm32v1-none"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "gRPC protocol types for the larql-router self-assembling grid"
+
+[dependencies]
+
+[build-dependencies]
+tonic-build = "0.13"
+
+# `protobuf-src` builds a fresh `protoc` via cmake. That works on Linux
+# and macOS but fails on the GitHub windows-latest runner — cmake links
+# against the debug UCRT and absl drops a pile of unresolved
+# `__imp_ceilf` / `__imp_modf` symbols. On Windows we expect `protoc`
+# to be on `PATH` (CI installs it via `arduino/setup-protoc`); the
+# build script falls back to that.
+[target.'cfg(not(windows))'.build-dependencies]
+protobuf-src = "2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tonic = "0.13"
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+larql-wasm-math = { workspace = true }
+libm = { workspace = true }

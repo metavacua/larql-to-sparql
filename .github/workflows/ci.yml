@@ -1,0 +1,413 @@
+# Consolidated CI matrix
+#
+# Replaces 13 per-crate workflow files with a single workflow that discovers
+# all crates dynamically (including the nested crates/larql-experts workspace)
+# and tests them across three platform/target combinations (native) and four
+# wasm runtime probes (wasm32v1-none, wasmi, node, firefox). WASM failures
+# are not suppressed — CI exposes the wasm32v1-none boundary empirically.
+#
+# Workflows NOT covered here (kept in separate files):
+#   quality.yml         cargo-audit / cargo-deny / cargo-msrv / buf lint
+#   validate.yml        REUSE / semver-checks / CHANGELOG
+#   bench-regress.yml   Criterion regression baseline
+#   kv-cache-benchmark.yml
+#   larql-python.yml    maturin/uv Python bindings
+
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - 'ci/**'
+      - 'wasm/**'
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ci.yml'
+      - '.github/scripts/discover-crates.py'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+      - 'ci/**'
+      - 'wasm/**'
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ci.yml'
+      - '.github/scripts/discover-crates.py'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+# ── Discover ──────────────────────────────────────────────────────────────────
+
+jobs:
+  discover:
+    name: discover crates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    outputs:
+      native_matrix:   ${{ steps.matrices.outputs.native }}
+      wasm_matrix:     ${{ steps.matrices.outputs.wasm }}
+      coverage_matrix: ${{ steps.matrices.outputs.coverage }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Emit matrices
+        id: matrices
+        run: |
+          echo "native=$(python3 .github/scripts/discover-crates.py native)"     >> "$GITHUB_OUTPUT"
+          echo "wasm=$(python3 .github/scripts/discover-crates.py wasm)"         >> "$GITHUB_OUTPUT"
+          echo "coverage=$(python3 .github/scripts/discover-crates.py coverage)" >> "$GITHUB_OUTPUT"
+
+# ── Native test ───────────────────────────────────────────────────────────────
+
+  native-test:
+    name: native · ${{ matrix.crate }} · ${{ matrix.platform }}
+    needs: [discover, wasm-check]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
+
+    permissions:
+      contents: read
+      checks: write
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.native_matrix) }}
+
+    env:
+      # macOS runners ship Python 3.14; PyO3 0.24.2 caps at 3.13.
+      # ABI3 forward-compatibility builds against the stable ABI so the
+      # extension works on Python ≥ 3.x without per-version wheels.
+      # Remove once PyO3 is updated to support Python 3.14 natively.
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # ── Platform setup ──────────────────────────────────────────────────
+
+      - name: Install OpenBLAS (Ubuntu)
+        if: matrix.needs_openblas == true && matrix.platform == 'ubuntu'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: matrix.needs_openblas == true && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      - name: Install protoc (Windows)
+        if: matrix.needs_protoc_windows == true && matrix.platform == 'windows'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Cache ─────────────────────────────────────────────────────────────
+      # Swatinem/rust-cache@v2 uses zstd -T0 (all-CPU compression) in its
+      # post-job step, which can exceed the GitHub cache API upload window on
+      # Windows for crates with larger build graphs (observed: larql-models
+      # Windows, run 26594114167 — all 328 tests passed, cache save failed).
+      # actions/cache@v5 gives per-OS path control and more reliable uploads.
+
+      - name: Cache cargo registry and build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-${{ matrix.crate }}-
+            ${{ runner.os }}-${{ matrix.target }}-
+
+      # ── Checks (fmt once per crate on ubuntu) ─────────────────────────────
+
+      - name: Format check
+        if: matrix.platform == 'ubuntu'
+        run: cargo fmt ${{ matrix.fmt_flags }} -- --check
+
+      - name: Check
+        run: cargo check ${{ matrix.cargo_package }} --target ${{ matrix.target }} --all-targets
+
+      - name: Clippy
+        run: >
+          cargo clippy ${{ matrix.cargo_package }}
+          --target ${{ matrix.target }} --all-targets
+          -- -D warnings
+
+      # ── Tests ─────────────────────────────────────────────────────────────
+
+      - name: Test
+        run: cargo test ${{ matrix.cargo_package }} --target ${{ matrix.target }}
+
+      - name: Bench (compile + smoke)
+        run: cargo test ${{ matrix.cargo_package }} --target ${{ matrix.target }} --benches
+
+      # ── Optional: Metal feature check on macOS ─────────────────────────────
+
+      - name: Metal feature check
+        if: matrix.has_metal_feature == true && matrix.platform == 'macos'
+        run: >
+          cargo check -p ${{ matrix.crate }}
+          --target ${{ matrix.target }}
+          --features metal
+
+# ── WASM check ────────────────────────────────────────────────────────────────
+#
+# Probes four runtime/target combinations for every crate. No shims or
+# continue-on-error: failures are intentionally exposed so the wasm32v1-none
+# boundary is mapped empirically.
+
+  wasm-check:
+    name: wasm · ${{ matrix.crate }} · ${{ matrix.runtime }}
+    needs: discover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
+
+    permissions:
+      contents: read
+      checks: write
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.wasm_matrix) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/bin
+            target
+          key: wasm-${{ matrix.crate }}-${{ matrix.runtime }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            wasm-${{ matrix.crate }}-${{ matrix.runtime }}-
+            wasm-${{ matrix.crate }}-
+
+      # ── wasm32v1-none: compile check at strictest WASM baseline ───────────
+      # wasm32v1-none is WASM MVP 1.0 (no atomics, no SIMD, no multi-memory).
+      # Not the same as wasm32-unknown-unknown.
+
+      - name: Add wasm32v1-none target
+        if: matrix.runtime == 'wasm32v1-none'
+        run: rustup target add wasm32v1-none
+
+      - name: Check (wasm32v1-none)
+        if: matrix.runtime == 'wasm32v1-none'
+        run: cargo check ${{ matrix.cargo_package }} --target wasm32v1-none --lib
+
+      # ── wasmi: compile to wasm32v1-none, execute in wasmi interpreter ────────
+      # Correct design: the wasmi column builds the crate as a wasm32v1-none
+      # binary and runs it inside the wasmi interpreter. Expected to fail for
+      # all crates until they are made no_std (category A in wasm-inventory.md).
+      # The previous design ran `--features wasm` in native Rust, which only
+      # tested model-compute's wasmi host — not WASM code running in wasmi.
+
+      - name: Install wasmi CLI (wasmi)
+        if: matrix.runtime == 'wasmi'
+        # wasmi_cli is not published to crates.io; install from the tagged
+        # release in the wasmi-labs/wasmi repo. The package name uses an
+        # underscore (wasmi_cli), matching the Cargo.toml package field.
+        # Pin to the same minor series as the wasmi library in Cargo.lock (1.x).
+        run: >
+          cargo install
+          --git https://github.com/wasmi-labs/wasmi.git
+          --tag v1.0.9
+          wasmi_cli
+
+      - name: Add wasm32v1-none target (wasmi)
+        if: matrix.runtime == 'wasmi'
+        run: rustup target add wasm32v1-none
+
+      - name: Test in wasmi (wasmi)
+        if: matrix.runtime == 'wasmi'
+        # Compiles each crate to wasm32v1-none and runs the test binary through
+        # wasmi. The runner value is `wasmi run` — the WASM module path is the
+        # first positional argument to `run`, so no `--` separator is needed.
+        # Failures here = crate needs no_std (category A in wasm-inventory.md).
+        env:
+          CARGO_TARGET_WASM32V1_NONE_RUNNER: wasmi run
+        run: cargo test ${{ matrix.cargo_package }} --target wasm32v1-none
+
+      # ── node: wasm-bindgen-test-runner on wasm32-unknown-unknown, Node.js ──
+      # wasm32-unknown-unknown is used (not wasm32v1-none) because
+      # wasm-bindgen-test-runner requires the JS/unknown target for its glue.
+      # Crates without #[wasm_bindgen_test] tests compile; runner reports 0
+      # tests and exits 0. Crates that fail getrandom's "js" feature check
+      # (category E in wasm-inventory.md) fail at compile time — expected signal.
+      # Node.js 22 is pre-installed on ubuntu-24.04 runners.
+
+      - name: Install wasm-bindgen-cli (node)
+        if: matrix.runtime == 'node'
+        run: cargo install wasm-bindgen-cli --locked
+
+      - name: Add wasm32-unknown-unknown target (node)
+        if: matrix.runtime == 'node'
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Test in Node.js (node)
+        if: matrix.runtime == 'node'
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: cargo test ${{ matrix.cargo_package }} --target wasm32-unknown-unknown
+
+      # ── firefox: wasm-bindgen-test-runner + headless Firefox ──────────────
+      # Same wasm32-unknown-unknown target as node; runner is told to use the
+      # browser backend. geckodriver is pre-installed on ubuntu-24.04 runners.
+
+      - name: Install wasm-bindgen-cli (firefox)
+        if: matrix.runtime == 'firefox'
+        run: cargo install wasm-bindgen-cli --locked
+
+      - name: Install Firefox (firefox)
+        if: matrix.runtime == 'firefox'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y firefox
+
+      - name: Add wasm32-unknown-unknown target (firefox)
+        if: matrix.runtime == 'firefox'
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Test in Firefox headless (firefox)
+        if: matrix.runtime == 'firefox'
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: >
+          cargo test ${{ matrix.cargo_package }} --target wasm32-unknown-unknown
+          -- --browser --headless --firefox
+
+      # ── pyodide: compile to wasm32-unknown-emscripten (larql-python only) ─
+
+      - name: Install Emscripten SDK (pyodide)
+        if: matrix.runtime == 'pyodide'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y emscripten
+
+      - name: Add wasm32-unknown-emscripten target (pyodide)
+        if: matrix.runtime == 'pyodide'
+        run: rustup target add wasm32-unknown-emscripten
+
+      - name: Build wasm32-unknown-emscripten (pyodide)
+        if: matrix.runtime == 'pyodide'
+        run: >
+          cargo build ${{ matrix.cargo_package }}
+          --target wasm32-unknown-emscripten
+          --release
+
+# ── Gate jobs ─────────────────────────────────────────────────────────────────
+#
+# Branch protection should require ONLY "native ✓".
+# "wasm boundary ✓" is a stable informational check — it always passes so it
+# provides a consistent entry in the PR status list without blocking merges.
+# See .github/wasm-inventory.md for the per-cell roadmap.
+
+  native-gate:
+    name: native ✓
+    needs: [native-test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Assert all native jobs succeeded
+        shell: bash
+        run: |
+          result="${{ needs.native-test.result }}"
+          if [[ "$result" != "success" ]]; then
+            echo "native-test result: $result  (expected: success)"
+            echo "See individual native-test job logs for failure details."
+            exit 1
+          fi
+
+  wasm-boundary:
+    name: wasm boundary ✓
+    needs: [wasm-check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Boundary scan complete (informational)
+        run: |
+          echo "WASM boundary scan complete."
+          echo "Consult .github/wasm-inventory.md for per-cell status and remediation roadmap."
+          echo "No wasm-check job gates merges; see 'native ✓' for the required gate."
+
+# ── Coverage (informational, ubuntu only) ─────────────────────────────────────
+
+  coverage:
+    name: coverage · ${{ matrix.crate }}
+    needs: [discover, native-test]
+    if: success()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.coverage_matrix) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install OpenBLAS
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Coverage summary
+        run: cargo llvm-cov ${{ matrix.cargo_package }} --summary-only

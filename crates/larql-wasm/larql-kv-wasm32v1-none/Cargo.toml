@@ -1,0 +1,52 @@
+[package]
+name = "larql-kv-wasm32v1-none"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pluggable KV-cache engines for larql-inference (markov-rs, unlimited-context, turbo-quant, apollo)"
+
+[dependencies]
+larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
+larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["accelerate"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Android: Minimal blas-src without external dependencies.
+blas-src = { version = "0.10", default-features = false }
+
+[features]
+default = []
+metal = ["larql-compute/metal", "larql-inference/metal"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+ndarray = "0.16"
+zip = { version = "2", default-features = false }
+rand = "0.8"
+rand_distr = "0.4"
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }

@@ -1,0 +1,9 @@
+[package]
+name = "larql-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Bridge ABI trait definitions for wasm32v1-none kernel and native/browser adapters"
+
+[dependencies]

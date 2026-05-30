@@ -1,0 +1,75 @@
+[package]
+name = "larql-vindex-wasm32v1-none"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Vindex — the queryable model format. Storage, KNN index, build, load, mutate."
+keywords = ["transformer", "vindex", "knn", "interpretability"]
+categories = ["science"]
+
+[dependencies]
+larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none", default-features = false }
+larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
+larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
+
+# Matrix types (all compute via larql-compute)
+
+# Parallelism for the direct-Q4K matmul kernel (feature walk).
+
+# RNG for randomized SVD (per-expert MoE summary tier in extract/moe_svd.rs).
+
+# Tokenizer (for embeddings loading + token resolution)
+
+# Portable 64-bit atomics — provides AtomicU64 on targets that lack
+# native 64-bit atomic ops (e.g. arm-linux-androideabi / ARMv7).
+
+# Checksums
+
+# base64 encoding for the HF preupload file-sample field.
+
+# Model weights (for safetensors loading during extract)
+
+# Refcounted, slice-cheap byte handle returned by the `VindexStorage`
+# trait. `Bytes::from_owner(Arc<Mmap>)` is zero-copy from the existing
+# mmap path and Redis / S3 backends can return owned bytes without
+# lifetime contortions. Already transitive via reqwest / hf-hub.
+
+# HuggingFace Hub integration
+
+# OS-level mmap hints (madvise)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = []
+metal = ["larql-compute/metal"]
+
+# HTTP mocking for the publish trio (lfs / remote / upload).
+# `serial_test` because the tests set the LARQL_HF_TEST_BASE env var to
+# point at a per-test mockito server; env vars are process-global, so
+# parallel runs would race.
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+ndarray = "0.16"
+rayon = "1.10"
+rand = "0.8"
+tokenizers = "0.21"
+portable-atomic = "1"
+sha2 = "0.10"
+base64 = "0.22"
+safetensors = "0.7"
+memmap2 = "0.9"
+bytes = "1"
+hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }

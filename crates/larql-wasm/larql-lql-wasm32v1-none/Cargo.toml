@@ -1,0 +1,41 @@
+[package]
+name = "larql-lql-wasm32v1-none"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LQL parser, executor, and REPL for LARQL"
+
+[dependencies]
+larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
+larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none" }
+larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
+larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
+
+[features]
+default = []
+# Enable Metal-accelerated paths in `larql-compute` / `larql-inference`.
+# Mirrors the features in those crates so workspace tests can be built
+# with `--features metal` from this package.
+metal = ["larql-compute/metal", "larql-inference/metal", "larql-vindex/metal"]
+
+# Mocked HTTP server for testing the Remote backend's forwarders
+# without spinning up a real `larql-server`. Each test wires a
+# `mockito::Server`, points the session at it via `USE "<url>"`, and
+# asserts on the canned response.
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+ndarray = "0.16"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rustyline = "15"
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }
