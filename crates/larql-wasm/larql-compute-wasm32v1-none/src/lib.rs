@@ -65,6 +65,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[macro_use]
 extern crate alloc;
 #[cfg(any(
@@ -95,6 +98,7 @@ pub use pipeline::{
 
 // ── Re-exports: backend ──
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use backend::{
     dot_proj_gpu, matmul_gpu, Capability, ComputeBackend, DecodeBackend, MatMul, MatMulOp,
     QuantMatVec,
@@ -107,12 +111,15 @@ pub use backend::{
 /// which Rust resolves through the sub-trait that defines the method.
 /// `use larql_compute::prelude::*;` saves listing them one by one.
 pub mod prelude {
+    #[cfg(not(target_arch = "wasm32"))]
     pub use crate::backend::{
         Capability, ComputeBackend, DecodeBackend, MatMul, MatMulOp, QuantMatVec,
     };
 }
+#[cfg(not(target_arch = "wasm32"))]
 pub use cpu::ops::linalg::{cholesky, cholesky_inverse, cholesky_solve, ridge_decomposition_solve};
 pub use cpu::ops::moe::{quantize_x_to_q8k, Q8KActivation};
+#[cfg(not(target_arch = "wasm32"))]
 pub use cpu::ops::vector::{cosine, dot, norm};
 pub use cpu::CpuBackend;
 
@@ -144,6 +151,7 @@ pub use metal::{BackendOptions, DecodeFlags, MetalBackend, MoeScratch};
 #[cfg(all(feature = "metal", target_os = "macos"))]
 pub use ::metal::Buffer as MetalBuffer;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Create the best available backend with env-derived defaults.
 ///
 /// With `--features metal`: tries Metal GPU first
@@ -192,12 +200,14 @@ pub fn default_backend_with_options(options: BackendOptions) -> Box<dyn ComputeB
     Box::new(cpu::CpuBackend)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// CPU-only fallback for the explicit-options API on non-macOS hosts.
 #[cfg(not(all(feature = "metal", target_os = "macos")))]
 pub fn default_backend_with_options<T>(_options: T) -> Box<dyn ComputeBackend> {
     Box::new(cpu::CpuBackend)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Force CPU-only backend. No GPU, no calibration overhead.
 ///
 /// Use when you want deterministic CPU execution or to benchmark

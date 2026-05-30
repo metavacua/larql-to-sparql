@@ -44,6 +44,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Enable timing around the full CPU MoE forward pass.
 pub const ENV_MOE_FWD_TIMING: &str = "LARQL_MOE_FWD_TIMING";
 /// Enable timing around one CPU MoE expert.
@@ -131,28 +134,34 @@ pub const ENV_DECODE_STAGE_TIMING: &str = "LARQL_DECODE_STAGE_TIMING";
 /// Debug-only outer norm bypass in Metal MoE combine.
 pub const ENV_SKIP_OUTER_NORM: &str = "SKIP_OUTER_NORM";
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn env_flag(name: &str) -> bool {
     std::env::var_os(name).is_some()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn env_flag_any(names: &[&str]) -> bool {
     names.iter().any(|name| env_flag(name))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn env_usize(name: &str) -> Option<usize> {
     std::env::var(name).ok()?.parse().ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 pub(crate) fn env_value(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 pub(crate) fn env_nonempty_value(name: &str) -> Option<String> {
     env_value(name).filter(|value| !value.is_empty())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 pub(crate) fn env_opt_in(name: &str) -> bool {
     matches!(
@@ -161,6 +170,7 @@ pub(crate) fn env_opt_in(name: &str) -> bool {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 pub(crate) fn env_opt_out(name: &str) -> bool {
     matches!(
@@ -169,6 +179,7 @@ pub(crate) fn env_opt_out(name: &str) -> bool {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 pub(crate) fn env_not_zero_or_default(name: &str, default: bool) -> bool {
     std::env::var(name)
@@ -176,14 +187,17 @@ pub(crate) fn env_not_zero_or_default(name: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn moe_debug_enabled() -> bool {
     env_flag_any(&[ENV_MOE_DEBUG, ENV_MOE_DEBUG_LEGACY])
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn skip_moe_enabled() -> bool {
     env_flag_any(&[ENV_SKIP_MOE, ENV_SKIP_MOE_LEGACY])
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 pub(crate) fn split_profile_requested() -> bool {
     env_flag_any(&[ENV_PROFILE_SPLIT, ENV_DECODE_STAGE_TIMING])
@@ -195,6 +209,7 @@ mod tests {
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn with_env_vars<T>(vars: &[(&str, Option<&str>)], f: impl FnOnce() -> T) -> T {
         let _guard = ENV_LOCK.lock().expect("env test mutex poisoned");
         let previous: Vec<_> = vars

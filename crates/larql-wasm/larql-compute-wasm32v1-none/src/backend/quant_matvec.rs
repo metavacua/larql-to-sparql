@@ -25,6 +25,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Reverse the `quantize_to_q8` block layout: each 32-element block
 /// has one f32 scale, multiplied through to recover f32 values.
 fn dequantise_q8(q8_x: &[i8], q8_scales: &[f32]) -> Vec<f32> {

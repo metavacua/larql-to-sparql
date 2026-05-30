@@ -151,14 +151,24 @@ def find_insert_point(lines: list[str]) -> int:
     item-level doc comment (`///`) or outer attribute (`#[`), which belong to
     the following item and must not be separated from it."""
     last_header = 0
-    for i, line in enumerate(lines):
-        s = line.strip()
+    i = 0
+    n = len(lines)
+    while i < n:
+        s = lines[i].strip()
         if s == '':
+            i += 1
             continue  # blanks don't extend the header; insert lands before them
-        if (s.startswith('//!') or s.startswith('#![') or
-                s.startswith('use ') or s.startswith('pub use ') or
-                s.startswith('extern crate')):
+        if s.startswith('//!') or s.startswith('#!['):
             last_header = i + 1
+            i += 1
+            continue
+        if (s.startswith('use ') or s.startswith('pub use ') or
+                s.startswith('extern crate')):
+            # consume a possibly multi-line use/extern statement (until `;`)
+            while i < n and ';' not in lines[i]:
+                i += 1
+            last_header = i + 1
+            i += 1
             continue
         # `///` (outer doc), `#[` (outer attr), or any item → stop.
         break
@@ -182,7 +192,23 @@ def strip_inline_qualifiers(text: str) -> str:
     out = []
     for line in text.split('\n'):
         s = line.lstrip()
-        # Preserve `use std::collections::...` (prelude native half).
+        # `use {std,alloc}::sync::{Arc?, Rc?, ...native...}`: the prelude already
+        # provides Arc/Rc, so drop them from the list to avoid an E0252 clash
+        # (keeping any native sync types like Mutex/RwLock/OnceLock, which a
+        # gate will cover). Drop the whole line if Arc/Rc were the only items.
+        m = re.match(r'(\s*)((?:pub\s+)?use\s+(?:std|alloc)::sync)::\{([^}]*)\};\s*$', line)
+        if m:
+            indent, head, items = m.group(1), m.group(2), m.group(3)
+            kept = [x.strip() for x in items.split(',')
+                    if x.strip() and x.strip() not in ('Arc', 'Rc')]
+            if not kept:
+                continue  # only Arc/Rc — prelude covers them; drop line
+            out.append(f'{indent}{head}::{{{", ".join(kept)}}};')
+            continue
+        # `use {std,alloc}::sync::Arc;` / `::Rc;` alone → drop (prelude covers).
+        if re.match(r'\s*(?:pub\s+)?use\s+(?:std|alloc)::sync::(Arc|Rc);\s*$', line):
+            continue
+        # Preserve other `use ...` lines.
         if s.startswith('use ') or s.startswith('pub use '):
             out.append(line)
             continue

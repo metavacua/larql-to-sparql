@@ -22,9 +22,11 @@ use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borro
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// `(q_dim, kv_dim, num_q_heads, num_kv_heads, head_dim, rope_base)` for
 /// layer 0 — passed to the inner dispatchers as legacy scalars. Only
 /// `q_dim` is read on a non-empty-layers path (as the empty-layers

@@ -3,20 +3,24 @@
 //! All vector-vector operations route through here. Uses BLAS sdot
 //! via ndarray internally. No direct ndarray .dot() calls elsewhere.
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::ArrayView1;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Vector dot product: a · b → scalar.
 #[inline]
 pub fn dot(a: &ArrayView1<f32>, b: &ArrayView1<f32>) -> f32 {
     a.dot(b)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Vector L2 norm: sqrt(a · a).
 #[inline]
 pub fn norm(a: &ArrayView1<f32>) -> f32 {
     a.dot(a).sqrt()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Cosine similarity: (a · b) / (|a| × |b|).
 #[inline]
 pub fn cosine(a: &ArrayView1<f32>, b: &ArrayView1<f32>) -> f32 {
@@ -32,7 +36,9 @@ pub fn cosine(a: &ArrayView1<f32>, b: &ArrayView1<f32>) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array1;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn dot_basic() {
         let a = Array1::from_vec(vec![1.0, 2.0, 3.0]);
@@ -40,6 +46,7 @@ mod tests {
         assert!((dot(&a.view(), &b.view()) - 32.0).abs() < 1e-5);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn dot_orthogonal() {
         let a = Array1::from_vec(vec![1.0, 0.0]);
@@ -47,18 +54,21 @@ mod tests {
         assert!((dot(&a.view(), &b.view()) - 0.0).abs() < 1e-5);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn norm_unit() {
         let a = Array1::from_vec(vec![3.0, 4.0]);
         assert!((norm(&a.view()) - 5.0).abs() < 1e-5);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cosine_identical() {
         let a = Array1::from_vec(vec![1.0, 2.0, 3.0]);
         assert!((cosine(&a.view(), &a.view()) - 1.0).abs() < 1e-5);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cosine_orthogonal() {
         let a = Array1::from_vec(vec![1.0, 0.0]);
@@ -66,6 +76,7 @@ mod tests {
         assert!((cosine(&a.view(), &b.view()) - 0.0).abs() < 1e-5);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cosine_opposite() {
         let a = Array1::from_vec(vec![1.0, 0.0]);

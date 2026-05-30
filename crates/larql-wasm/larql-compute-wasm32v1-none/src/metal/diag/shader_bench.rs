@@ -6,6 +6,16 @@
 //! production-shaped batched timings.
 
 use core::fmt::Write as _;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -17,14 +27,6 @@ use crate::metal::buffers::read_buffer_f32;
 use crate::metal::kernel::KernelHandle;
 use crate::metal::ops::q4_common::quantize_to_q8;
 use crate::metal::MetalBackend;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
 const GEMMA3_4B_KV_ROWS: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

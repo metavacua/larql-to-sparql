@@ -26,9 +26,11 @@ use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borro
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Apply the outer post-FFN norm (when the arch declares one) followed by
 /// the whole-layer `layer_scalar` multiplication. Operates in place on
 /// `new_h`. Requires that `new_h` currently holds

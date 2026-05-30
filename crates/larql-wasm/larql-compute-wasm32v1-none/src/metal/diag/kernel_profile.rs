@@ -20,16 +20,18 @@
 //! (0.5625 B/elem) — the GPU spends more cycles on nibble dequant than waiting
 //! for memory. Closing the gap vs Ollama's ~414 GB/s effective rate requires
 //! reducing the per-element compute overhead (vectorized accumulation).
-
-use std::time::Instant;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
+
+use std::time::Instant;
 const GEMMA3_4B_KV_DIM: usize = 4096;
 
 /// Result for a single kernel profiling run.

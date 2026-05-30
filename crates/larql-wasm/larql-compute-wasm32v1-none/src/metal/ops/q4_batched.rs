@@ -7,19 +7,21 @@
 //! - `multi_layer_ffn`: 21 layers × (gate+up+GEGLU+down+Q8) in one submission
 
 use metal::*;
-use std::ffi::c_void;
-
-use super::q4_common::{quantize_to_q8, Q4Pipelines};
-use crate::metal::buffers::BufferCache;
-use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
+use std::ffi::c_void;
+
+use super::q4_common::{quantize_to_q8, Q4Pipelines};
+use crate::metal::buffers::BufferCache;
+use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
 /// Batched gate+up for ALL seq positions in ONE GPU submission.
 /// Encodes 2×seq_len Q4 matvec dispatches in a single command buffer.
 #[allow(clippy::too_many_arguments)]

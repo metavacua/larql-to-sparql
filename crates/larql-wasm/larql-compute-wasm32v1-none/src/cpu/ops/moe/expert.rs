@@ -5,10 +5,15 @@
 //! shard. The BF16 expert weights are dequantized on demand so only the
 //! selected experts pay the conversion cost.
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::cache::{try_cached_dequant, ExpertF32};
+#[cfg(not(target_arch = "wasm32"))]
 use super::math::{gelu_tanh, matmul_vec, matmul_vec_into, rms_norm, silu};
 use crate::cpu::ops::q4_common::q4k_matvec_into;
 use crate::cpu::ops::q4k_q8k_dot::{
+    q4k_q8k_matvec_into, quantize_x_to_q8k, quantize_x_to_q8k_into, Q8KActivation,
+};
+use crate::options;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,9 +22,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    q4k_q8k_matvec_into, quantize_x_to_q8k, quantize_x_to_q8k_into, Q8KActivation,
-};
-use crate::options;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // `q4k_q8k_gate_up_into` exists for future kernel exploration but is not
 // wired into the hot path — see comment in `run_single_expert_q4k_q8k_into`.
 
@@ -62,6 +67,7 @@ impl ExpertScratch {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply pre_experts_norm once per frame and return the normed residual.
 /// Hoisting this out of `run_single_expert*` saves K-1 redundant rms_norm
 /// passes per layer (the input residual is identical for every expert in
@@ -78,6 +84,7 @@ pub fn pre_experts_norm(
     rms_norm(h, pre_experts_norm, eps, norm_offset)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a single expert's gated FFN given a pre-normed input vector.
 ///
 /// `gate_up_bytes` and `down_bytes` carry exactly one expert's weights — the
@@ -196,6 +203,7 @@ pub fn run_single_expert(
     matmul_vec(&hidden_state, &down_w, hidden, inter_padded)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Allocation-free variant of `run_single_expert`: writes into the caller's
 /// `ExpertScratch` instead of allocating gate / up / activation / output
 /// buffers per call.  Used by the streaming expert server's hot path where
@@ -414,6 +422,7 @@ pub fn quantize_h_norm_for_q4k(h_norm: &[f32]) -> Option<Q8KActivation> {
     Some(quantize_x_to_q8k(h_norm))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Direct Q4_K-from-mmap expert kernel.  No f32 dequant cache; reads the
 /// 144-byte Q4_K super-blocks straight from the per-layer mmap and accumulates
 /// an integer dot product against the pre-quantised Q8_K activation.
@@ -540,6 +549,7 @@ pub fn run_single_expert_q4k_q8k_into<'s>(
     &scratch.out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply pre-experts norm then run a single expert. Used by the remote
 /// expert server endpoint where the raw residual arrives from the client.
 #[allow(clippy::too_many_arguments)]

@@ -4,9 +4,11 @@ use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borro
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 impl MetalBackend {
     /// Full pipeline: attention + FFN for all layers in ONE command buffer.
     /// No CPU-GPU round-trips between layers.

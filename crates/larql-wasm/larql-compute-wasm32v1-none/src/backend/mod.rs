@@ -25,6 +25,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub mod capability;
 pub mod decode;
 pub mod helpers;
@@ -33,7 +36,9 @@ pub mod quant_matvec;
 
 pub use capability::Capability;
 pub use decode::DecodeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 pub use helpers::{dot_proj_gpu, matmul_gpu};
+#[cfg(not(target_arch = "wasm32"))]
 pub use matmul::{MatMul, MatMulOp};
 pub use quant_matvec::QuantMatVec;
 /// Hardware compute backend — the umbrella trait every caller binds.
@@ -42,6 +47,10 @@ pub use quant_matvec::QuantMatVec;
 /// metadata (`name`, `device_info`) and an explicit
 /// [`Capability::supports`](Self::supports) probe. Most callers
 /// shouldn't care which sub-trait a method comes from.
+// Requires the native `MatMul` supertrait (ndarray/BLAS), so the umbrella
+// backend trait is native-only. The portable sub-traits QuantMatVec /
+// DecodeBackend remain available on wasm32.
+#[cfg(not(target_arch = "wasm32"))]
 pub trait ComputeBackend: MatMul + QuantMatVec + DecodeBackend + Send + Sync {
     /// Human-readable backend name.
     fn name(&self) -> &str;

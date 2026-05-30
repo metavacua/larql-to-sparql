@@ -15,9 +15,11 @@ use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borro
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub const SHADER: &str = r#"
 constant uint F32GEMV_SG_PER_TG = 8;   // simdgroups per threadgroup
 constant uint F32GEMV_ROWS_PER_TG = F32GEMV_SG_PER_TG; // one row per simdgroup

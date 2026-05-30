@@ -10,6 +10,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Dequantize a BF16 byte slice to f32.
 #[inline]
 pub(super) fn bf16_to_f32(bytes: &[u8]) -> Vec<f32> {
@@ -66,6 +69,7 @@ pub(super) fn gelu_tanh(x: f32) -> f32 {
     0.5 * x * (1.0 + (c * (x + 0.044715 * x * x * x)).tanh())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute y = W · x  (W is [out_rows, in_cols] row-major, x is [in_cols]).
 ///
 /// Uses BLAS sgemv via the workspace-level `ndarray` BLAS feature (Accelerate
@@ -88,6 +92,7 @@ pub(super) fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) 
     w_view.dot(&x_view).to_vec()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Same as `matmul_vec` but writes into a caller-provided output buffer
 /// instead of allocating.  Reuse a per-call scratch (`gate_scratch`,
 /// `up_scratch`, `out_scratch` in `run_single_expert`) to avoid 360+ heap

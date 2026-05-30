@@ -41,6 +41,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Q4_K super-block layout: 144 bytes per 256 values.
 const BLOCK_BYTES: usize = Q4_K_BLOCK_BYTES;
 /// Number of f32 / i8 elements per Q4_K (and Q8_K) super-block.

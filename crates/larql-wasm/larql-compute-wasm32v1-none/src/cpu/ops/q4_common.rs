@@ -12,6 +12,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 extern "C" {
     /// C kernel: Q4_0 × Q8_0 matrix-vector multiply with ARM vdotq_s32.
     pub fn q4_0_matvec_c(

@@ -3,10 +3,13 @@
 //! callers fall back to a CPU `ndarray` dot when no backend is
 //! available).
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::ComputeBackend;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// `dot_proj` through a backend: `a @ b^T`.
 /// If `backend` is `None`, falls back to ndarray BLAS (CPU).
 pub fn dot_proj_gpu(
@@ -20,6 +23,7 @@ pub fn dot_proj_gpu(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// `matmul` through a backend: `a @ b` (no transpose).
 pub fn matmul_gpu(
     a: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>,
@@ -36,8 +40,10 @@ pub fn matmul_gpu(
 mod tests {
     use super::*;
     use crate::CpuBackend;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn synth(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
         let mut s = seed;
         Array2::from_shape_fn((rows, cols), |_| {
@@ -46,6 +52,7 @@ mod tests {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn max_diff(a: &Array2<f32>, b: &Array2<f32>) -> f32 {
         a.iter()
             .zip(b.iter())

@@ -16,9 +16,11 @@ use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borro
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Read `n` f32s out of a Metal `Buffer` and write them as raw
 /// little-endian bytes to `<dir>/<name>`.
 fn write_f32_buffer(dir: &str, name: &str, buf: &Buffer, n: usize) {

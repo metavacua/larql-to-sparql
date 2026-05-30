@@ -147,11 +147,22 @@ def cmd_prove(crate: str) -> None:
         print(f"❌ {crate} does not currently pass wasm32v1-none — fix it before proving.")
         return
 
+    def in_test_module(lines: list[str], idx: int) -> bool:
+        """True if line idx sits below a `#[cfg(test)]` (mod tests) marker.
+        prove only checks `--lib`, which excludes test code, so gates inside
+        test modules look 'unnecessary' there but are required for the wasmi
+        `cargo test --target wasm32v1-none` build. Don't flag them."""
+        for j in range(idx, -1, -1):
+            if 'cfg(test)' in lines[j]:
+                return True
+        return False
+
     unnecessary = []
     for rs in sorted(src.rglob('*.rs')):
         original = rs.read_text()
         lines = original.split('\n')
-        sites = [i for i, l in enumerate(lines) if l.strip() == GATE]
+        sites = [i for i, l in enumerate(lines)
+                 if l.strip() == GATE and not in_test_module(lines, i)]
         if not sites:
             continue
         # Remove gates one at a time (re-read fresh each time).

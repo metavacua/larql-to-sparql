@@ -14,6 +14,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Q4 matvec: scores = Q4_matrix @ x.
 /// Pre-quantizes x to Q8 internally.
 pub fn dispatch(q4_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> Vec<f32> {

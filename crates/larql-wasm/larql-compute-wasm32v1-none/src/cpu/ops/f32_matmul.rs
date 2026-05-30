@@ -4,13 +4,16 @@
 //! On Linux: OpenBLAS or equivalent.
 //! Single-core at 117 GB/s on M3 Max.
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::{Array2, ArrayView2};
 
+#[cfg(not(target_arch = "wasm32"))]
 /// C = A × B via BLAS sgemm.
 pub fn matmul(a: ArrayView2<f32>, b: ArrayView2<f32>) -> Array2<f32> {
     a.dot(&b)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// C = A × B^T via BLAS sgemm.
 pub fn matmul_transb(a: ArrayView2<f32>, b: ArrayView2<f32>) -> Array2<f32> {
     a.dot(&b.t())
@@ -19,8 +22,10 @@ pub fn matmul_transb(a: ArrayView2<f32>, b: ArrayView2<f32>) -> Array2<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn synth(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
         let mut s = seed;
         Array2::from_shape_fn((rows, cols), |_| {
@@ -45,6 +50,7 @@ mod tests {
         assert_eq!(c.shape(), &[6, 128]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn matmul_identity() {
         let a = synth(4, 4, 42);

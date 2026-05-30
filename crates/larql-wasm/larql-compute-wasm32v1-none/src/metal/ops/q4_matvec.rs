@@ -9,18 +9,20 @@
 //! 75 %-row-drop ship-log entry.)
 
 use metal::*;
-use std::ffi::c_void;
-
-use crate::metal::buffers::BufferCache;
-use crate::metal::kernel::KernelHandle;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
+use std::ffi::c_void;
+
+use crate::metal::buffers::BufferCache;
+use crate::metal::kernel::KernelHandle;
 /// Dispatch a single Q4 matvec on GPU.
 ///
 /// - `kernel`: the q4 matvec [`KernelHandle`] (carries pipeline +

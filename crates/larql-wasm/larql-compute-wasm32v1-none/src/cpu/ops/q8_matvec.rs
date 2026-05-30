@@ -14,6 +14,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Quantize a weight matrix to Q8 format: int8 values + per-block f32 scales.
 /// Returns (int8_data[N*K], scales[N * K/LEGACY_BLOCK_ELEMS]).
 pub fn quantize_weights_q8(weights: &[f32], num_rows: usize, hidden: usize) -> (Vec<i8>, Vec<f32>) {

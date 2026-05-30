@@ -25,6 +25,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub mod ops;
 
 // Re-export for backward compatibility (used by benchmarks/examples)
@@ -34,12 +37,15 @@ pub mod q4 {
     pub use super::ops::q4_vecmat::dispatch as q4_vecmat;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::backend::{Capability, ComputeBackend, DecodeBackend, MatMul, QuantMatVec};
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::{Array2, ArrayView2};
 
 /// CPU backend using BLAS (f32) and C kernel (Q4).
 pub struct CpuBackend;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl MatMul for CpuBackend {
     fn matmul(&self, a: ArrayView2<f32>, b: ArrayView2<f32>) -> Array2<f32> {
         ops::f32_matmul::matmul(a, b)
@@ -50,6 +56,7 @@ impl MatMul for CpuBackend {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl QuantMatVec for CpuBackend {
     fn q4_matvec(
         &self,
@@ -104,11 +111,13 @@ impl QuantMatVec for CpuBackend {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 // CPU doesn't run the full decode pipeline through ComputeBackend —
 // `larql-inference` drives that path. The default `None` impls are
 // the right answer here.
 impl DecodeBackend for CpuBackend {}
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ComputeBackend for CpuBackend {
     fn name(&self) -> &str {
         "cpu (BLAS + C Q4 kernel)"

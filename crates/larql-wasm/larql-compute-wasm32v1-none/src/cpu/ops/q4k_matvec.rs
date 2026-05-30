@@ -14,6 +14,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Offset to the start of the 128-byte nibble-packed quants region inside
 /// a Q4_K block: 2 bytes `d` + 2 bytes `dmin` + 12 packed `(scale, min)`
 /// bytes = 16. Pinning this so `[Q4K_HEADER_BYTES..Q4K_BLOCK_SIZE]`

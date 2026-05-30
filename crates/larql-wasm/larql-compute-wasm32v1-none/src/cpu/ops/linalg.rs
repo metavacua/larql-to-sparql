@@ -3,6 +3,7 @@
 //! All operations use f64 for numerical stability (the MEMIT covariance
 //! inverse is ill-conditioned at f32 for ffn_dim > 2048).
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
@@ -12,6 +13,10 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// Cholesky decomposition of a symmetric positive-definite matrix.
 /// Returns the lower-triangular factor L such that A = L L^T.
 ///
@@ -53,6 +58,7 @@ pub fn cholesky(a: &Array2<f64>, ridge: f64) -> Result<Array2<f64>, String> {
     Ok(l)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Solve L L^T X = B for X, given the lower-triangular Cholesky factor L.
 /// B is (n, m) — solves m right-hand sides simultaneously.
 pub fn cholesky_solve(l: &Array2<f64>, b: &Array2<f64>) -> Array2<f64> {
@@ -85,6 +91,7 @@ pub fn cholesky_solve(l: &Array2<f64>, b: &Array2<f64>) -> Array2<f64> {
     x
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute A⁻¹ via Cholesky: solves L L^T X = I.
 pub fn cholesky_inverse(l: &Array2<f64>) -> Array2<f64> {
     let n = l.shape()[0];
@@ -92,6 +99,7 @@ pub fn cholesky_inverse(l: &Array2<f64>) -> Array2<f64> {
     cholesky_solve(l, &identity)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Closed-form ridge-regression decomposition.
 ///
 /// Solves   ΔW = T^T (K K^T + λI)^{-1} K
@@ -138,6 +146,7 @@ pub fn ridge_decomposition_solve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::array;
     #[test]
     fn test_cholesky_2x2() {
@@ -150,6 +159,7 @@ mod tests {
         assert_eq!(l[[0, 1]], 0.0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_cholesky_solve_identity() {
         let a = Array2::<f64>::eye(3);
@@ -182,6 +192,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_cholesky_with_ridge() {
         // Negative diagonal fails; ridge rescues it.
@@ -198,6 +209,7 @@ mod tests {
         assert!(cholesky(&a, 0.0).is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_ridge_decomposition_round_trip() {
         // With orthonormal keys and small λ, ΔW @ k_i should reproduce t_i.
@@ -226,6 +238,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_ridge_decomposition_shape_mismatch() {
         let keys = Array2::<f32>::zeros((3, 4));
@@ -233,6 +246,7 @@ mod tests {
         assert!(ridge_decomposition_solve(&keys, &targets, 1e-3).is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_ridge_decomposition_singular_keys_need_ridge() {
         // Two identical keys → K K^T is rank-1, singular. λ=0 should fail,
@@ -245,6 +259,7 @@ mod tests {
         assert!(ridge_decomposition_solve(&keys, &targets, 1e-2).is_ok());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_ridge_decomposition_zero_keys() {
         // All-zero keys → KK^T = 0; ridge alone makes it solvable but
@@ -264,6 +279,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_ridge_decomposition_realistic_shape() {
         // Gemma-ish: N=8 facts, d=128 (proxy for hidden_dim). Verify the

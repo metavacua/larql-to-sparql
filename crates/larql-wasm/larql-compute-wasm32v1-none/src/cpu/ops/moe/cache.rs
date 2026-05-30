@@ -39,7 +39,8 @@
 //! lengths, so the key includes pointer, length, format, and expected float
 //! count.
 
-use std::sync::{Arc, OnceLock, RwLock};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{OnceLock, RwLock};
 
 use crate::options;
 #[allow(unused_imports)]
@@ -50,6 +51,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// LRU cache entry: dequantised expert weights.
 pub(super) type ExpertF32 = Arc<Vec<f32>>;
 
@@ -108,7 +112,7 @@ fn cache_key(bytes: &[u8], format: crate::QuantFormat, expected_floats: usize) -
 }
 
 struct Inner {
-    map: std::collections::HashMap<Key, ExpertF32>,
+    map: HashMap<Key, ExpertF32>,
     /// Insertion order — used for FIFO eviction when `map.len() > cap`.
     /// Hits do NOT touch this (eviction is now FIFO, not LRU): preserving
     /// recency would force every read to take a write lock, which destroys
@@ -155,7 +159,9 @@ impl Inner {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn cell() -> &'static RwLock<Inner> {
+    #[cfg(not(target_arch = "wasm32"))]
     static CELL: OnceLock<RwLock<Inner>> = OnceLock::new();
     CELL.get_or_init(|| {
         // Default 256: covers one token's working set on Gemma 4 26B-A4B
@@ -166,6 +172,7 @@ fn cell() -> &'static RwLock<Inner> {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Return a cached Arc<Vec<f32>> for `bytes`, dequantising under `format` on
 /// miss. `expected_floats` is required for block formats (Q4_K) where the
 /// output length is not derivable from the input length without padding info;
@@ -346,6 +353,7 @@ mod cache_format_tests {
         assert_eq!(inner.order.len(), 1);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Parallel cache hits don't deadlock or corrupt — exercises the
     /// `RwLock` read-side under contention.  Many threads request the same
     /// few keys; the cache must stably return the same `Arc` content for

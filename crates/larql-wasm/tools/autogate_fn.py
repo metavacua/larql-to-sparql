@@ -94,13 +94,21 @@ def attr_block_start(lines: list[str], fn_line: int) -> int:
 
 
 def already_gated(lines: list[str], insert_at: int) -> bool:
-    # Look a few lines above the insertion point for an existing wasm gate.
-    for j in range(max(0, insert_at - 1), insert_at):
-        if 'cfg(not(target_arch = "wasm32"))' in lines[j]:
-            return True
-    # also if the line right above is the gate
-    if insert_at - 1 >= 0 and lines[insert_at - 1].strip() == GATE:
+    # The item's attribute/doc block sits between insert_at and the fn line;
+    # an existing gate may be anywhere in that block. Scan from insert_at down
+    # over doc/attr lines, and also just above insert_at, for the gate.
+    if insert_at - 1 >= 0 and 'cfg(not(target_arch = "wasm32"))' in lines[insert_at - 1]:
         return True
+    j = insert_at
+    while j < len(lines):
+        s = lines[j].strip()
+        if 'cfg(not(target_arch = "wasm32"))' in s:
+            return True
+        if s.startswith('///') or s.startswith('//!') or s.startswith('#[') \
+                or s.startswith('//') or s == '' or s.endswith(']'):
+            j += 1
+            continue
+        break  # reached the item itself
     return False
 
 
@@ -109,6 +117,17 @@ USE_NATIVE_STD = re.compile(
     r'^\s*(?:pub\s+)?use\s+std::(io|fs|net|thread|process|env|path|os|ffi)\b'
     r'|^\s*(?:pub\s+)?use\s+std::sync::(Mutex|RwLock|OnceLock|Condvar|Barrier|mpsc)\b'
     r'|^\s*(?:pub\s+)?use\s+std::time::(Instant|SystemTime)\b'
+)
+
+# A `use <native-crate>::...` statement for a crate absent on wasm32.
+USE_NATIVE_DEP = re.compile(
+    r'^\s*(?:pub\s+)?use\s+'
+    r'(ndarray|memmap2|safetensors|tokenizers|reqwest|rayon|libc|tokio|tonic'
+    r'|axum|axum_server|prost|wasmi|wasmtime|wasmtime_wasi|hf_hub|blas_src'
+    r'|openblas_src|pyo3|numpy|rustyline|indicatif|minijinja|minijinja_contrib'
+    r'|tower|tower_http|tracing|hyper|h2|rustls|ring|async_stream|tokio_stream'
+    r'|prost_types|cblas_sys|utoipa|utoipa_swagger_ui)\b'
+    r'|^\s*(?:pub\s+)?use\s+crate::expert_proto\b'
 )
 
 
@@ -120,8 +139,8 @@ def process_file(path: Path, dry: bool) -> int:
     i = 0
     n = len(lines)
     while i < n:
-        # Gate standalone `use std::<native>` import lines.
-        if USE_NATIVE_STD.match(lines[i]):
+        # Gate standalone native `use` import lines (std::<native> or native crate).
+        if USE_NATIVE_STD.match(lines[i]) or USE_NATIVE_DEP.match(lines[i]):
             if not (i > 0 and lines[i - 1].strip() == GATE):
                 inserts.append(i)
             i += 1

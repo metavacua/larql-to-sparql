@@ -5,6 +5,7 @@
 //! lm-head uses in autoregressive decode (where `M = 1` makes the
 //! 32×32 tiled sgemm waste 31/32 threads).
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::{Array2, ArrayView2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
@@ -14,6 +15,10 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// A single matmul operation for batch dispatch.
 pub struct MatMulOp {
     pub a: Array2<f32>,
@@ -23,12 +28,15 @@ pub struct MatMulOp {
 
 /// Dense linear-algebra primitives that don't depend on quantisation.
 pub trait MatMul {
+    #[cfg(not(target_arch = "wasm32"))]
     /// C = A × B where A is [m, k] and B is [k, n].
     fn matmul(&self, a: ArrayView2<f32>, b: ArrayView2<f32>) -> Array2<f32>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// C = A × B^T where A is [m, k] and B is [n, k].
     fn matmul_transb(&self, a: ArrayView2<f32>, b: ArrayView2<f32>) -> Array2<f32>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Multiple matmuls in one submission. Default: serial dispatch.
     /// GPU backends can override with parallel command buffer encoding.
     fn matmul_batch(&self, ops: &[MatMulOp]) -> Vec<Array2<f32>> {
@@ -43,6 +51,7 @@ pub trait MatMul {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Dedicated row-per-simdgroup gemv for single-row × large-N × large-K.
     /// Computes `out[N] = W[N, K] · x[K]`. Backends that lack a specialised
     /// kernel should return `None`; callers fall back to `matmul_transb`.
@@ -53,6 +62,7 @@ pub trait MatMul {
         None
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// GPU gemv + GPU argmax without materialising the full output Vec.
     /// Returns `(token_id, score)` for the top-1 element.
     /// Saves ~0.33ms on Metal by reading back only 8 KB partial results
@@ -89,6 +99,7 @@ pub trait MatMul {
         None
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Like [`Self::f32_gemv`] but skips the internal CPU-vs-GPU flop
     /// threshold. Use when the caller has already decided the work is
     /// worth a GPU dispatch — e.g. the per-layer gate matmul that fires

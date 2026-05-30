@@ -6,10 +6,18 @@
 
 use crate::MoeLayerWeights;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::cache::try_cached_dequant;
+#[cfg(not(target_arch = "wasm32"))]
 use super::expert::{run_single_expert_q4k_q8k_into, ExpertScratch};
+#[cfg(not(target_arch = "wasm32"))]
 use super::math::{gelu_tanh, matmul_vec, silu, softmax};
+#[cfg(not(target_arch = "wasm32"))]
 use super::{
+    moe_expert_input, moe_post_expert_output, moe_route_from_router_input, moe_router_input,
+};
+use crate::cpu::ops::q4k_q8k_dot::quantize_x_to_q8k;
+use crate::options;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,11 +26,11 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-    moe_expert_input, moe_post_expert_output, moe_route_from_router_input, moe_router_input,
-};
-use crate::cpu::ops::q4k_q8k_dot::quantize_x_to_q8k;
-use crate::options;
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run the MoE expert block for one token.
 ///
 /// `h` — residual stream at this layer (hidden_size f32 values).

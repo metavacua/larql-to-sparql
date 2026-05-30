@@ -12,6 +12,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Bytes per Q4_KF pre-baked super-block. Q4_KF keeps the 256-element
 /// Q4_K block shape but expands packed scale/min metadata for faster decode.
 pub const Q4_KF_BLOCK_BYTES: usize = 160;

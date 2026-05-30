@@ -18,16 +18,21 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 mod cache;
 mod expert;
 mod forward;
 mod math;
 
 pub use crate::cpu::ops::q4k_q8k_dot::{quantize_x_to_q8k, Q8KActivation};
+#[cfg(not(target_arch = "wasm32"))]
 pub use expert::{
     pre_experts_norm, quantize_h_norm_for_q4k, run_single_expert, run_single_expert_into,
     run_single_expert_q4k_q8k_into, run_single_expert_with_norm, ExpertScratch,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use forward::cpu_moe_forward;
 
 use crate::{
@@ -35,6 +40,7 @@ use crate::{
     MoeRouterNormPolicy, MoeTopKWeightPolicy,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Process-wide cached snapshot of `LARQL_DISABLE_Q4K_DIRECT`.
 ///
 /// `cpu_moe_forward` (per layer) and `run_single_expert` (per expert
@@ -113,6 +119,7 @@ pub(crate) fn moe_router_input(
     router_in
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn moe_route_from_router_input(
     router_in: &[f32],
     moe: &MoeLayerWeights<'_>,
@@ -161,6 +168,7 @@ pub(crate) fn moe_post_expert_output(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// CPU router: returns `(top_k_indices, selected_weights)` for the given
 /// hidden state. Used by GPU dispatch paths that route on CPU but run expert
 /// FFNs on GPU. Mirrors the policy-driven routing logic in
