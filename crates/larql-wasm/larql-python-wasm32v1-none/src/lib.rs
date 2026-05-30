@@ -17,6 +17,19 @@ use larql_wasm_math::FnvHasher as DefaultHasher;
 #[macro_use]
 extern crate alloc;
 
+// This is the only cdylib kernel crate, so it is the final wasm32v1-none
+// artifact and must supply the no_std runtime items (global allocator + panic
+// handler) that rlib kernels leave to their eventual consumer.
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOC: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
+
+#[cfg(target_arch = "wasm32")]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 use pyo3::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]

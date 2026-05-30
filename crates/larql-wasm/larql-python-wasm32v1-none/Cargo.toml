@@ -30,3 +30,8 @@ serde = { version = "1", default-features = false, features = ["derive", "alloc"
 larql-wasm-math = { workspace = true }
 hashbrown = { workspace = true }
 libm = { workspace = true }
+# This is the only cdylib kernel crate, so it is the final wasm artifact and
+# must supply the no_std runtime items (global allocator + panic handler) that
+# rlib kernels inherit from their consumer. dlmalloc is a pure-Rust, no-OS
+# allocator that works on wasm32v1-none.
+dlmalloc = { version = "0.2", features = ["global"] }
