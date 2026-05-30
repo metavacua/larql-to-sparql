@@ -32,7 +32,7 @@ pub struct FfnOverlapArgs {
     layers: String,
 }
 
-pub fn run(args: FfnOverlapArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: FfnOverlapArgs) -> Result<(), Box<dyn std::error::Error>> {
     let model = InferenceModel::load(&args.model)?;
     let weights = model.weights();
 

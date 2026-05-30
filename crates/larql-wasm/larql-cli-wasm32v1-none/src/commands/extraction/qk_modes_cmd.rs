@@ -42,7 +42,7 @@ pub struct QkModesArgs {
     layers: Option<String>,
 }
 
-pub fn run(args: QkModesArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -273,7 +273,7 @@ fn compute_svd(ata: &Array2<f32>, dim: usize, threshold: f32) -> (Vec<f32>, Vec<
     (singular_values, singular_vectors)
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

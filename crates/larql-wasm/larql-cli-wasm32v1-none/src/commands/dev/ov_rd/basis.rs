@@ -142,7 +142,7 @@ pub(super) fn build_roundtrip_bases(
     index: &VectorIndex,
     heads: &[HeadId],
     sigma_rel_cutoff: f64,
-) -> Result<HashMap<HeadId, WoRoundtripBasis>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<HeadId, WoRoundtripBasis>, Box<dyn std::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -237,7 +237,7 @@ pub(super) fn fit_z_pca_bases(
     heads: &[HeadId],
     bases: &HashMap<HeadId, WoRoundtripBasis>,
     means: &HashMap<HeadId, StaticHeadMeans>,
-) -> Result<HashMap<HeadId, ZPcaBasis>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<HeadId, ZPcaBasis>, Box<dyn std::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -315,7 +315,7 @@ pub(super) fn fit_z_pca_bases(
 fn build_wo_roundtrip_basis(
     w_o_head: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>,
     sigma_rel_cutoff: f64,
-) -> Result<WoRoundtripBasis, Box<dyn core::error::Error>> {
+) -> Result<WoRoundtripBasis, Box<dyn std::error::Error>> {
     let hidden = w_o_head.nrows();
     let head_dim = w_o_head.ncols();
     let mut gram = vec![vec![0.0f64; head_dim]; head_dim];

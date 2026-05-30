@@ -59,7 +59,7 @@ pub struct EmbeddingJumpArgs {
     source_layers: usize,
 }
 
-pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;

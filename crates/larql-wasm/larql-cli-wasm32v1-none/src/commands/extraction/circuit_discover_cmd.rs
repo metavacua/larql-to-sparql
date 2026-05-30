@@ -67,7 +67,7 @@ struct Circuit {
     top_tokens: Vec<String>,
 }
 
-pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -346,7 +346,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn core::error::Error>>
         while let Some(current) = queue.pop() {
             if let Some(neighbors) = adjacency.get(&current) {
                 for &(neighbor, _sim) in neighbors {
-                    if let hashbrown::hash_map::Entry::Vacant(e) = cluster_id.entry(neighbor)
+                    if let std::collections::hash_map::Entry::Vacant(e) = cluster_id.entry(neighbor)
                     {
                         e.insert(cid);
                         queue.push(neighbor);
@@ -529,7 +529,7 @@ fn project_top_token(
         .to_string()
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

@@ -28,7 +28,7 @@ pub struct MergeArgs {
     strategy: String,
 }
 
-pub fn run(args: MergeArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: MergeArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!(
         "Merging {} files (strategy={})",
         args.inputs.len(),

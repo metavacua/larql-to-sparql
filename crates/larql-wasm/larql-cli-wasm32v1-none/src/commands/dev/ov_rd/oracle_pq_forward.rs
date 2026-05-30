@@ -36,7 +36,7 @@ pub(super) fn forward_q4k_oracle_pq_head(
     means: &StaticHeadMeans,
     codebook: &PqCodebook,
     stratum: &str,
-) -> Result<(Array2<f32>, RoundtripPatchMetrics, Vec<Vec<usize>>), Box<dyn core::error::Error>> {
+) -> Result<(Array2<f32>, RoundtripPatchMetrics, Vec<Vec<usize>>), Box<dyn std::error::Error>> {
     let mut metrics = None;
     let mut oracle_codes = Vec::new();
 
@@ -114,7 +114,7 @@ pub(super) fn forward_q4k_oracle_pq_mode_d_head(
     codebook: &PqCodebook,
     mode_d_table: &ModeDTable,
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     let hidden_size = weights.hidden_size;
     larql_inference::vindex::predict_q4k_hidden_with_mapped_head_residual_delta(
         weights,
@@ -157,7 +157,7 @@ pub(super) fn forward_q4k_predicted_address_mode_d_head(
     mode_d_table: &ModeDTable,
     predicted_codes_by_position: &[Vec<usize>],
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     let mut replacement_delta = Vec::with_capacity(token_ids.len() * weights.hidden_size);
     for pos in 0..token_ids.len() {
         let codes = predicted_codes_by_position
@@ -184,7 +184,7 @@ pub(super) fn capture_layer_input_hidden(
     token_ids: &[u32],
     index: &VectorIndex,
     target_layer: usize,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
     let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
@@ -229,7 +229,7 @@ pub(super) fn capture_prev_ffn_feature_keys(
     index: &VectorIndex,
     target_layer: usize,
     feature_top_k: usize,
-) -> Result<Vec<Vec<usize>>, Box<dyn core::error::Error>> {
+) -> Result<Vec<Vec<usize>>, Box<dyn std::error::Error>> {
     let mut prev_features_by_pos = vec![Vec::<usize>::new(); token_ids.len()];
     if target_layer == 0 || feature_top_k == 0 {
         return Ok(prev_features_by_pos);
@@ -286,7 +286,7 @@ pub(super) fn capture_ffn_first_feature_keys(
     index: &VectorIndex,
     target_layer: usize,
     feature_top_k: usize,
-) -> Result<Vec<Vec<usize>>, Box<dyn core::error::Error>> {
+) -> Result<Vec<Vec<usize>>, Box<dyn std::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
     let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
@@ -344,7 +344,7 @@ pub(super) fn capture_attention_relation_rows(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Vec<Vec<f32>>, Box<dyn core::error::Error>> {
+) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
     let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
@@ -409,7 +409,7 @@ pub(super) fn capture_reduced_qk_attention_rows(
     index: &VectorIndex,
     head: HeadId,
     qk_rank: usize,
-) -> Result<Vec<Vec<f32>>, Box<dyn core::error::Error>> {
+) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
     let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();

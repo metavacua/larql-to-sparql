@@ -210,7 +210,7 @@ fn compute_percentiles(values: &[f64]) -> (f64, f64, f64) {
     (mean, p50, p99)
 }
 
-pub fn run(args: BenchArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     let vindex_path = cache::resolve_model(&args.model)?;
     if !vindex_path.is_dir() {
         return Err(format!(
@@ -484,7 +484,7 @@ fn run_larql(
     vindex_path: &std::path::Path,
     args: &BenchArgs,
     metal: bool,
-) -> Result<BenchRow, Box<dyn core::error::Error>> {
+) -> Result<BenchRow, Box<dyn std::error::Error>> {
     use larql_inference::layer_graph::generate::generate;
     use larql_inference::layer_graph::CachedLayerGraph;
 
@@ -659,7 +659,7 @@ fn run_engine(
     kind: EngineKind,
     backend: Box<dyn larql_inference::ComputeBackend>,
     args: &BenchArgs,
-) -> Result<BenchRow, Box<dyn core::error::Error>> {
+) -> Result<BenchRow, Box<dyn std::error::Error>> {
     use larql_inference::forward::hidden_to_raw_logits;
 
     let mut engine = kind.build_with_profiling(backend, args.profile);
@@ -773,7 +773,7 @@ fn run_engine_q4k(
     kind: EngineKind,
     backend: Box<dyn larql_inference::ComputeBackend>,
     args: &BenchArgs,
-) -> Result<BenchRow, Box<dyn core::error::Error>> {
+) -> Result<BenchRow, Box<dyn std::error::Error>> {
     // We need two backend instances: one owned by the engine, one for Q4K calls.
     let want_metal_q4k = args.backends.contains("metal");
     let backend_for_q4k: Box<dyn larql_inference::ComputeBackend> = if want_metal_q4k {
@@ -889,7 +889,7 @@ fn run_remote_ffn_bench(
     args: &BenchArgs,
     ffn_url: &str,
     wire_pref: larql_inference::WirePreference,
-) -> Result<BenchRow, Box<dyn core::error::Error>> {
+) -> Result<BenchRow, Box<dyn std::error::Error>> {
     use larql_inference::{
         generate_with_remote_ffn, generate_with_remote_ffn_batch, LayerShardedBackend,
     };
@@ -1068,7 +1068,7 @@ fn run_remote_moe_bench(
     vindex_path: &std::path::Path,
     args: &BenchArgs,
     shards_str: &str,
-) -> Result<BenchRow, Box<dyn core::error::Error>> {
+) -> Result<BenchRow, Box<dyn std::error::Error>> {
     use larql_inference::ffn::moe_remote::{RemoteMoeBackend, ShardConfig};
     use larql_inference::{generate_with_remote_moe, generate_with_remote_moe_batch};
     // Parse "START-END=URL,..." shard map.

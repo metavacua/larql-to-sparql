@@ -45,7 +45,7 @@ impl GammaProjectedAddressModel {
     pub(super) fn project_layer_input(
         &self,
         layer_input: &Array2<f32>,
-    ) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+    ) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
         match &self.source {
             GammaProjectionSource::Raw => Ok(layer_input.clone()),
             GammaProjectionSource::DiagonalAffine(map) => {
@@ -221,7 +221,7 @@ pub(super) fn fit_gamma_projected_address_models(
     epochs: usize,
     lr: f32,
     l2: f32,
-) -> Result<HashMap<(HeadId, PqConfig), Vec<GammaProjectedAddressModel>>, Box<dyn core::error::Error>>
+) -> Result<HashMap<(HeadId, PqConfig), Vec<GammaProjectedAddressModel>>, Box<dyn std::error::Error>>
 {
     let samples = collect_gamma_code_samples(
         weights,
@@ -700,7 +700,7 @@ fn collect_gamma_code_samples(
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     projection_layers: &[usize],
     label_prefix: &str,
-) -> Result<Vec<GammaCodeSample>, Box<dyn core::error::Error>> {
+) -> Result<Vec<GammaCodeSample>, Box<dyn std::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);

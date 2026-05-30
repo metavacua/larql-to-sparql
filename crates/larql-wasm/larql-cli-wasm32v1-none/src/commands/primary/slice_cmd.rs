@@ -28,6 +28,11 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 
 use crate::commands::primary::cache;
+// ─── Parts catalogue ─────────────────────────────────────────────────────
+//
+// Each `Part` maps to one or more filename patterns. The `index.json` +
+// tokenizer come along implicitly so the output is always a loadable
+// vindex; everything else is opt-in.
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -39,11 +44,6 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
-// ─── Parts catalogue ─────────────────────────────────────────────────────
-//
-// Each `Part` maps to one or more filename patterns. The `index.json` +
-// tokenizer come along implicitly so the output is always a loadable
-// vindex; everything else is opt-in.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Part {
@@ -248,7 +248,7 @@ pub fn slice_vindex(
     parts: BTreeSet<Part>,
     force: bool,
     dry_run: bool,
-) -> Result<SliceOutcome, Box<dyn core::error::Error>> {
+) -> Result<SliceOutcome, Box<dyn std::error::Error>> {
     if !src.is_dir() {
         return Err(format!("source vindex not a directory: {}", src.display()).into());
     }
@@ -378,7 +378,7 @@ pub fn slice_vindex(
     Ok(outcome)
 }
 
-pub fn run(args: SliceArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Resolve source through the cache shorthand.
     let src = cache::resolve_model(&args.source)?;
 

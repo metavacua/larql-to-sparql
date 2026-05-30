@@ -61,7 +61,7 @@ fn parse_range(spec: &str) -> Vec<usize> {
     out
 }
 
-pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model (tokenizer only)...");
     let model = InferenceModel::load(&args.model)?;
 

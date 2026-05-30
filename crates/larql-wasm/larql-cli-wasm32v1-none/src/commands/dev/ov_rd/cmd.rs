@@ -81,7 +81,7 @@ enum OvRdCommand {
     SynthesizeProgram(SynthesizeProgramArgs),
 }
 
-pub fn run(args: OvRdArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: OvRdArgs) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         OvRdCommand::Capture(capture) => run_capture(capture),
         OvRdCommand::ZeroAblate(zero) => run_zero_ablate(zero),

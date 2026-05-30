@@ -32,7 +32,7 @@ use larql_wasm_math::FloatExt as _;
 pub fn render_user_prompt(
     base_dir: &Path,
     user_prompt: &str,
-) -> Result<String, Box<dyn core::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error>> {
     let cfg_path = base_dir.join(TOKENIZER_CONFIG_JSON);
     if !cfg_path.exists() {
         return Err(format!(

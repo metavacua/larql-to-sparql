@@ -73,13 +73,13 @@ impl CaptureCallbacks for ProgressCallbacks {
     }
 }
 
-pub fn run(args: ResidualsArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: ResidualsArgs) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         ResidualsCommand::Capture(capture) => run_capture(capture),
     }
 }
 
-fn run_capture(args: CaptureArgs) -> Result<(), Box<dyn core::error::Error>> {
+fn run_capture(args: CaptureArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let capturer = InferenceModel::load(&args.model)?;
     eprintln!(

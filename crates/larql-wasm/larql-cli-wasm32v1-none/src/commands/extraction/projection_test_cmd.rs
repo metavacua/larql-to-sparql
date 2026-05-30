@@ -57,7 +57,7 @@ struct VectorMeta {
     layers: Vec<usize>,
 }
 
-pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     // ── Load model ──
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();

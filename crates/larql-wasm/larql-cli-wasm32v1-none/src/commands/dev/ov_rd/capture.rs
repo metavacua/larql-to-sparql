@@ -65,7 +65,7 @@ pub(super) struct CaptureArgs {
     wo_visible: bool,
 }
 
-pub(super) fn run_capture(args: CaptureArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub(super) fn run_capture(args: CaptureArgs) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());

@@ -22,7 +22,7 @@ pub struct DescribeArgs {
     entity: String,
 }
 
-pub fn run(args: DescribeArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: DescribeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let graph = larql_core::load(&args.graph)?;
     let result = graph.describe(&args.entity);
 

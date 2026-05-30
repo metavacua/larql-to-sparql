@@ -65,7 +65,7 @@ pub(super) fn measure_code_stability(
     pca_bases: &HashMap<HeadId, ZPcaBasis>,
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     selected_groups: &[usize],
-) -> Result<HashMap<(HeadId, PqConfig), Vec<CodeStabilityReport>>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), Vec<CodeStabilityReport>>, Box<dyn std::error::Error>> {
     let train = collect_code_distribution_counts(
         weights,
         index,
@@ -184,7 +184,7 @@ fn collect_code_distribution_counts(
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     selected_groups: &[usize],
     label_prefix: &str,
-) -> Result<HashMap<(HeadId, PqConfig), CodeDistributionCounts>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), CodeDistributionCounts>, Box<dyn std::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);

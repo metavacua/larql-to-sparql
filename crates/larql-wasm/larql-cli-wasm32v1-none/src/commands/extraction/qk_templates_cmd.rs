@@ -62,7 +62,7 @@ fn default_templates() -> Vec<(String, String)> {
     ]
 }
 
-pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -392,7 +392,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (norm_a * norm_b)
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

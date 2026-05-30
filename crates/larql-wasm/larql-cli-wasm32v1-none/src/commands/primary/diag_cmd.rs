@@ -57,7 +57,7 @@ struct PathDecision {
     note: String,
 }
 
-pub fn run(args: DiagArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: DiagArgs) -> Result<(), Box<dyn std::error::Error>> {
     let path = cache::resolve_model(&args.model)?;
     println!("Engine diagnostic — {}", path.display());
     println!("{}", "=".repeat(70));
@@ -167,7 +167,7 @@ pub fn run(args: DiagArgs) -> Result<(), Box<dyn core::error::Error>> {
 /// Walk every Q4_K manifest in the vindex, compare each entry's recorded
 /// `length` to `format.expected_bytes(&shape)`. Returns a single line
 /// summary; on mismatch, the kernel reads off-stride and produces NaN.
-fn validate_strides(dir: &std::path::Path) -> Result<String, Box<dyn core::error::Error>> {
+fn validate_strides(dir: &std::path::Path) -> Result<String, Box<dyn std::error::Error>> {
     let manifests = [
         ATTN_WEIGHTS_Q4K_MANIFEST_JSON,
         INTERLEAVED_Q4K_MANIFEST_JSON,
@@ -327,7 +327,7 @@ fn probe_run(
     vindex_path: &std::path::Path,
     _index: &larql_vindex::VectorIndex,
     tokens: usize,
-) -> Result<String, Box<dyn core::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error>> {
     use larql_inference::{default_backend, generate, CachedLayerGraph};
 
     let mut cb = larql_vindex::SilentLoadCallbacks;

@@ -25,7 +25,7 @@ pub struct QueryArgs {
     relation: Option<String>,
 }
 
-pub fn run(args: QueryArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: QueryArgs) -> Result<(), Box<dyn std::error::Error>> {
     let graph = larql_core::load(&args.graph)?;
     let edges = graph.select(&args.subject, args.relation.as_deref());
 

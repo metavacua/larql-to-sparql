@@ -116,7 +116,7 @@ pub struct CompileArgs {
     pub slot: usize,
 }
 
-pub fn run(args: CompileArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     if args.prompt.is_some() && args.answer.is_some() {
         return single::run(args);
     }

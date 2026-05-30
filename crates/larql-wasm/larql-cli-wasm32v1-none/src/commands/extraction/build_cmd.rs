@@ -31,7 +31,7 @@ pub struct BuildArgs {
     compile: Option<String>,
 }
 
-pub fn run(args: BuildArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: BuildArgs) -> Result<(), Box<dyn std::error::Error>> {
     let vindexfile_path = args.dir.join("Vindexfile");
     if !vindexfile_path.exists() {
         return Err(format!("Vindexfile not found: {}", vindexfile_path.display()).into());

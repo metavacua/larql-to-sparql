@@ -202,7 +202,7 @@ impl IndexBuildCallbacks for CliBuildCallbacks {
     }
 }
 
-pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut callbacks = CliBuildCallbacks::new();
     let build_start = Instant::now();
 

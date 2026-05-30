@@ -172,7 +172,7 @@ impl StaticModeAccumulator {
 
 pub(super) fn run_static_replace(
     args: StaticReplaceArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -324,7 +324,7 @@ pub(super) fn fit_static_means(
     tokenizer: &tokenizers::Tokenizer,
     prompts: &[PromptRecord],
     heads: &[HeadId],
-) -> Result<HashMap<HeadId, StaticHeadMeans>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<HeadId, StaticHeadMeans>, Box<dyn std::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -395,7 +395,7 @@ fn build_static_replacement(
     seq_len: usize,
     means: &StaticHeadMeans,
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     let mut values = Vec::with_capacity(seq_len * means.head_dim);
     for pos in 0..seq_len {
         let owned_row;
@@ -437,7 +437,7 @@ fn forward_q4k_replace_pre_o_head(
     index: &VectorIndex,
     head: HeadId,
     replacement: &Array2<f32>,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_replaced_pre_o_head(
         weights,
         token_ids,

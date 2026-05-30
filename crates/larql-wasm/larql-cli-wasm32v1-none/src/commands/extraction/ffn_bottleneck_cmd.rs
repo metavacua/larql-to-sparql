@@ -32,7 +32,7 @@ pub struct FfnBottleneckArgs {
     layer: usize,
 }
 
-pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let model = InferenceModel::load(&args.model)?;
     let weights = model.weights();

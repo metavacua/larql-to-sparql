@@ -1,14 +1,3 @@
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
 // Many helpers in this module are only invoked from the metal-gated
 // `#[cfg(all(feature = "metal", target_os = "macos"))]` branches. Without
 // the metal feature, those call sites disappear and the helpers become
@@ -33,6 +22,17 @@ use larql_wasm_math::FloatExt as _;
 //! See `crates/larql-cli/ROADMAP.md` P0 → "`larql parity`" for the full design.
 
 use clap::Args;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 #[cfg(all(feature = "metal", target_os = "macos"))]
 use crate::commands::primary::cache;
@@ -110,7 +110,7 @@ pub struct ParityArgs {
 }
 
 #[cfg(not(all(feature = "metal", target_os = "macos")))]
-pub fn run(_args: ParityArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(_args: ParityArgs) -> Result<(), Box<dyn std::error::Error>> {
     Err(
         "`larql parity` requires the `metal` feature on macOS — Metal is the reference \
          backend this command compares CPU output against."
@@ -119,7 +119,7 @@ pub fn run(_args: ParityArgs) -> Result<(), Box<dyn core::error::Error>> {
 }
 
 #[cfg(all(feature = "metal", target_os = "macos"))]
-pub fn run(args: ParityArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: ParityArgs) -> Result<(), Box<dyn std::error::Error>> {
     if !COMPONENTS.contains(&args.component.as_str()) {
         return Err(format!(
             "unknown --component '{}'. Available: {}",
@@ -205,7 +205,7 @@ fn run_lm_head(
     weights: &larql_models::ModelWeights,
     args: &ParityArgs,
     backends: &[&str],
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     use larql_compute::CpuBackend;
     use larql_vindex::SilentLoadCallbacks;
 
@@ -303,7 +303,7 @@ fn run_moe_expert(
     weights: &larql_models::ModelWeights,
     args: &ParityArgs,
     backends: &[&str],
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let arch = &*weights.arch;
     let hidden = config.hidden_size;
     let inter = arch.moe_intermediate_size();
@@ -381,7 +381,7 @@ fn run_moe_block(
     weights: &larql_models::ModelWeights,
     args: &ParityArgs,
     backends: &[&str],
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let arch = &*weights.arch;
     let hidden = config.hidden_size;
     let inter = arch.moe_intermediate_size();
@@ -566,7 +566,7 @@ fn run_layer_diff(
     path: &std::path::Path,
     config: &larql_vindex::VindexConfig,
     args: &ParityArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     use larql_inference::layer_graph::{generate::generate, CachedLayerGraph};
     use larql_inference::vindex::predict_q4k_hidden;
     let num_layers = config.num_layers;
@@ -1155,7 +1155,7 @@ fn expert_bytes(
     weights: &larql_models::ModelWeights,
     layer: usize,
     expert: usize,
-) -> Result<(&[u8], &[u8]), Box<dyn core::error::Error>> {
+) -> Result<(&[u8], &[u8]), Box<dyn std::error::Error>> {
     let gu_key = per_layer_ffn_key(layer, expert, PER_LAYER_FFN_GATE_UP);
     let dn_key = per_layer_ffn_key(layer, expert, PER_LAYER_FFN_DOWN);
     let gu = weights
@@ -1189,7 +1189,7 @@ fn router_proj_for(
     weights: &larql_models::ModelWeights,
     arch: &dyn larql_models::ModelArchitecture,
     layer: usize,
-) -> Result<Vec<f32>, Box<dyn core::error::Error>> {
+) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
     let key = arch
         .moe_router_key(layer)
         .ok_or("arch has no router_proj key for this layer")?;

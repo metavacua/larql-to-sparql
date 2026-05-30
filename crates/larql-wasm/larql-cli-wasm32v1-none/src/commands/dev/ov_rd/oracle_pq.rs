@@ -509,7 +509,7 @@ pub(super) struct OraclePqArgs {
     eval_offset: usize,
 }
 
-pub(super) fn run_oracle_pq(args: OraclePqArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub(super) fn run_oracle_pq(args: OraclePqArgs) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -2176,7 +2176,7 @@ pub(super) fn run_oracle_pq(args: OraclePqArgs) -> Result<(), Box<dyn core::erro
                     let mut emit_position_variant =
                         |variant_name: String,
                          mut changed_positions: Vec<usize>|
-                         -> Result<(), Box<dyn core::error::Error>> {
+                         -> Result<(), Box<dyn std::error::Error>> {
                             changed_positions.sort_unstable();
                             changed_positions.dedup();
                             if changed_positions.is_empty() {
@@ -3897,7 +3897,7 @@ struct CodeClassCollapseMapping {
 
 fn parse_code_class_collapse_specs(
     spec: &str,
-) -> Result<Vec<CodeClassCollapseSpec>, Box<dyn core::error::Error>> {
+) -> Result<Vec<CodeClassCollapseSpec>, Box<dyn std::error::Error>> {
     let mut out = Vec::new();
     for (idx, raw_spec) in spec
         .split(';')
@@ -3940,7 +3940,7 @@ fn parse_code_class_collapse_specs(
 
 fn parse_conditional_quotient_guards(
     spec: &str,
-) -> Result<Vec<ConditionalQuotientGuard>, Box<dyn core::error::Error>> {
+) -> Result<Vec<ConditionalQuotientGuard>, Box<dyn std::error::Error>> {
     let mut out = Vec::new();
     for raw in spec
         .split(',')
@@ -3961,7 +3961,7 @@ fn parse_conditional_quotient_guards(
 
 fn parse_code_class_collapse_mappings(
     spec: &str,
-) -> Result<Vec<CodeClassCollapseMapping>, Box<dyn core::error::Error>> {
+) -> Result<Vec<CodeClassCollapseMapping>, Box<dyn std::error::Error>> {
     let mut mappings = Vec::new();
     let mut seen_sources = Vec::new();
     for raw_mapping in spec
@@ -4031,7 +4031,7 @@ enum CodeSubstitutionToSpec {
 
 fn parse_code_substitution_to_specs(
     spec: &str,
-) -> Result<Vec<CodeSubstitutionToSpec>, Box<dyn core::error::Error>> {
+) -> Result<Vec<CodeSubstitutionToSpec>, Box<dyn std::error::Error>> {
     let mut out = Vec::new();
     for part in spec
         .split(',')

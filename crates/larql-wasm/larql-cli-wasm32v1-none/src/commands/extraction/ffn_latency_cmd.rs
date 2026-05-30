@@ -42,7 +42,7 @@ pub struct FfnLatencyArgs {
     pub timeout: u64,
 }
 
-pub fn run(args: FfnLatencyArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: FfnLatencyArgs) -> Result<(), Box<dyn std::error::Error>> {
     let layers: Vec<usize> = args
         .layers
         .split(',')

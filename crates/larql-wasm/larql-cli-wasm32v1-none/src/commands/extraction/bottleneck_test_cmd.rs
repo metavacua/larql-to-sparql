@@ -113,7 +113,7 @@ fn rule_score(prompt: &str) -> f32 {
     1500.0
 }
 
-pub fn run(args: BottleneckTestArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: BottleneckTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Load model
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();

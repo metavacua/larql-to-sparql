@@ -2,6 +2,9 @@
 #[macro_use]
 extern crate alloc;
 
+// Command execution (clap parsing + vindex/inference/IO) is native.
+// formatting (empty) and utils (pure base64/string helpers) stay portable.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod commands;
 pub mod formatting;
 pub mod utils;

@@ -78,7 +78,7 @@ pub fn write_safetensors(
     tensors: &HashMap<String, ArcArray2<f32>>,
     vectors: &HashMap<String, Vec<f32>>,
     path: &Path,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     use larql_models::quant::half::encode_bf16;
     use safetensors::tensor::{serialize, TensorView};
     let mut byte_bufs: HashMap<String, Vec<u8>> = HashMap::new();

@@ -84,7 +84,7 @@ impl WalkCallbacks for ProgressCallbacks {
     }
 }
 
-pub fn run(args: AttentionWalkArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: AttentionWalkArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let walker = AttentionWalker::load(&args.model)?;
     eprintln!("  {} layers", walker.num_layers());

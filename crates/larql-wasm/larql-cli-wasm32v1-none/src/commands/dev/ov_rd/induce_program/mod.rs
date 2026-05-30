@@ -35,7 +35,7 @@ use proposal::{identity_program, set_merge_program, single_merge_program};
 
 pub(super) fn run_induce_program(
     args: InduceProgramArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     let heads = parse_head_spec(&args.head)?;
@@ -327,7 +327,7 @@ fn save_and_report(
     program: &Program,
     metrics: &BehaviorMetrics,
     out: &std::path::Path,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut p = program.clone();
     p.metrics = Some(metrics.clone());
     p.normalize();

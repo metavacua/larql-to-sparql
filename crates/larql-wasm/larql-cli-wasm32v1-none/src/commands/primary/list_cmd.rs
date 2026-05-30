@@ -22,7 +22,7 @@ use larql_wasm_math::FloatExt as _;
 #[derive(Args)]
 pub struct ListArgs {}
 
-pub fn run(_args: ListArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(_args: ListArgs) -> Result<(), Box<dyn std::error::Error>> {
     let entries = cache::scan_cached_vindexes()?;
 
     if entries.is_empty() {

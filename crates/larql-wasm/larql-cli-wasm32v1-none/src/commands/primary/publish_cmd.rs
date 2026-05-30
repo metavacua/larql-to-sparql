@@ -132,7 +132,7 @@ pub struct PublishArgs {
     pub repo_type: String,
 }
 
-pub fn run(args: PublishArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: PublishArgs) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Resolve source.
     let src = cache::resolve_model(&args.source)?;
     if !src.is_dir() {
@@ -260,7 +260,7 @@ pub fn run(args: PublishArgs) -> Result<(), Box<dyn core::error::Error>> {
     Ok(())
 }
 
-fn resolve_collection_list(raw: &[String]) -> Result<Vec<String>, Box<dyn core::error::Error>> {
+fn resolve_collection_list(raw: &[String]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     if raw.len() == 1 && raw[0].eq_ignore_ascii_case("none") {
         return Ok(Vec::new());
     }
@@ -282,7 +282,7 @@ fn resolve_collection_list(raw: &[String]) -> Result<Vec<String>, Box<dyn core::
 
 /// Parse `OWNER/NAME` → `OWNER`. Returns an error for bare names so we
 /// don't accidentally treat a missing namespace as valid.
-fn namespace_of(repo: &str) -> Result<&str, Box<dyn core::error::Error>> {
+fn namespace_of(repo: &str) -> Result<&str, Box<dyn std::error::Error>> {
     repo.split_once('/')
         .map(|(ns, _)| ns)
         .ok_or_else(|| format!("--repo must be `OWNER/NAME`, got '{repo}'").into())
@@ -401,7 +401,7 @@ fn build_collections(
     args: &PublishArgs,
     uploaded: &[StepOutcome],
     levels: &[String],
-) -> Result<Vec<(String, String)>, Box<dyn core::error::Error>> {
+) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     let namespace = namespace_of(&args.repo)?;
     let cfg = larql_vindex::load_vindex_config(src)?;
 
@@ -476,7 +476,7 @@ fn build_collections(
     Ok(urls)
 }
 
-fn resolve_slice_list(raw: &[String]) -> Result<Vec<String>, Box<dyn core::error::Error>> {
+fn resolve_slice_list(raw: &[String]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     // Default set when --slices is not passed.
     if raw.is_empty() {
         return Ok(DEFAULT_SLICES.iter().map(|s| s.to_string()).collect());
@@ -520,7 +520,7 @@ fn execute_step(
     step: &UploadStep,
     force_upload: bool,
     repo_type: &str,
-) -> Result<String, Box<dyn core::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error>> {
     match (&step.preset, &step.staging) {
         // Full vindex — upload the source directory directly, no slicing.
         (None, _) => {
@@ -556,7 +556,7 @@ fn upload_dir(
     repo: &str,
     force_upload: bool,
     repo_type: &str,
-) -> Result<String, Box<dyn core::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error>> {
     let mut callbacks = CliPublishCallbacks::new();
     let opts = larql_vindex::PublishOptions {
         skip_unchanged: !force_upload,

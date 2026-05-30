@@ -50,7 +50,7 @@ pub struct LinkArgs {
     pub force: bool,
 }
 
-pub fn run(args: LinkArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: LinkArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Resolve target to an absolute path — symlinks without absolute
     // targets break the moment you cd elsewhere.
     let target = std::fs::canonicalize(&args.path)
@@ -110,7 +110,7 @@ pub fn run(args: LinkArgs) -> Result<(), Box<dyn core::error::Error>> {
 
 /// Reject names that would collide with HF `owner/name` syntax or break
 /// filesystem assumptions.
-fn validate_name(name: &str) -> Result<(), Box<dyn core::error::Error>> {
+fn validate_name(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     if name.is_empty() {
         return Err("name cannot be empty".into());
     }

@@ -18,7 +18,7 @@ pub struct StatsArgs {
     graph: PathBuf,
 }
 
-pub fn run(args: StatsArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: StatsArgs) -> Result<(), Box<dyn std::error::Error>> {
     let graph = larql_core::load(&args.graph)?;
     let stats = graph.stats();
 

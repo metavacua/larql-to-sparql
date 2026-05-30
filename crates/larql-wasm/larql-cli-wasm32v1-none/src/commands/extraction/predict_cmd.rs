@@ -67,7 +67,7 @@ pub struct PredictArgs {
     mode: Option<String>,
 }
 
-pub fn run(args: PredictArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: PredictArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -103,7 +103,7 @@ fn run_single(
     token_ids: &[u32],
     top_k: usize,
     args: &PredictArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let weights = model.weights();
 
     match args.ffn.as_str() {
@@ -159,7 +159,7 @@ fn run_ffn(
     print_predictions(label, &result.predictions);
 }
 
-fn parse_k(k: &str, num_layers: usize) -> Result<WalkFfnConfig, Box<dyn core::error::Error>> {
+fn parse_k(k: &str, num_layers: usize) -> Result<WalkFfnConfig, Box<dyn std::error::Error>> {
     if k == "full" || k == "unlimited" {
         Ok(WalkFfnConfig::dense(num_layers))
     } else {
@@ -178,7 +178,7 @@ fn run_with_mode(
     top_k: usize,
     spec: &str,
     args: &PredictArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let weights = model.weights();
     let num_layers = weights.num_layers;
 
@@ -300,7 +300,7 @@ fn run_comparison(
     token_ids: &[u32],
     top_k: usize,
     args: &PredictArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let weights = model.weights();
 
     println!();

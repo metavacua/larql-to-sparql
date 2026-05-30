@@ -91,7 +91,7 @@ impl BfsCallbacks for ProgressCallbacks {
 #[allow(clippy::type_complexity)]
 fn load_mock_knowledge(
     path: &PathBuf,
-) -> Result<Vec<(String, String, f64)>, Box<dyn core::error::Error>> {
+) -> Result<Vec<(String, String, f64)>, Box<dyn std::error::Error>> {
     let contents = std::fs::read_to_string(path)?;
     let value: serde_json::Value = serde_json::from_str(&contents)?;
     let mut entries = Vec::new();
@@ -106,7 +106,7 @@ fn load_mock_knowledge(
     Ok(entries)
 }
 
-pub fn run(args: BfsArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: BfsArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Load templates from file
     let tmpl_contents = std::fs::read_to_string(&args.templates).map_err(|e| {
         format!(

@@ -34,7 +34,7 @@ pub(super) fn fit_pq_codebooks(
     configs: &[PqConfig],
     iterations: usize,
     stratum_conditioned_groups: &[usize],
-) -> Result<HashMap<(HeadId, PqConfig), PqCodebook>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), PqCodebook>, Box<dyn std::error::Error>> {
     let max_k = configs.iter().map(|c| c.k).max().unwrap_or(0);
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {

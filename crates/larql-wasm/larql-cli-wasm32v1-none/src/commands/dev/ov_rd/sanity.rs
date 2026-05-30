@@ -101,7 +101,7 @@ impl SanityHeadAccumulator {
     }
 }
 
-pub(super) fn run_sanity_check(args: SanityCheckArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub(super) fn run_sanity_check(args: SanityCheckArgs) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -223,7 +223,7 @@ fn forward_q4k_noop_replace_pre_o_head(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_mapped_pre_o_head(
         weights,
         token_ids,
@@ -240,7 +240,7 @@ fn forward_q4k_subtract_pre_o_head(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_subtracted_pre_o_heads(
         weights,
         token_ids,
@@ -256,7 +256,7 @@ fn forward_q4k_noop_replace_head_residual_delta(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_original_head_residual_delta(
         weights, token_ids, index, head.layer, head.head,
     )

@@ -58,7 +58,7 @@ pub fn ensure_cloned(
     modified: &mut HashMap<String, ArcArray2<f32>>,
     originals: &HashMap<String, ArcArray2<f32>>,
     key: &str,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     if !modified.contains_key(key) {
         let original = originals
             .get(key)
@@ -68,7 +68,7 @@ pub fn ensure_cloned(
     Ok(())
 }
 
-pub fn decode_f32_b64(b64: &str) -> Result<Vec<f32>, Box<dyn core::error::Error>> {
+pub fn decode_f32_b64(b64: &str) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64)?;
     Ok(bytes

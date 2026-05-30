@@ -90,7 +90,7 @@ impl WalkCallbacks for ProgressCallbacks {
     }
 }
 
-pub fn run(args: WeightWalkArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: WeightWalkArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let walker = WeightWalker::load(&args.model)?;
     eprintln!("  {} layers", walker.num_layers());

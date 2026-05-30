@@ -211,7 +211,7 @@ impl OracleRoundtripAccumulator {
 
 pub(super) fn run_oracle_roundtrip(
     args: OracleRoundtripArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -332,7 +332,7 @@ pub(super) fn run_oracle_roundtrip(
 
 pub(super) fn run_oracle_lowrank(
     args: OracleLowrankArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -554,7 +554,7 @@ fn forward_q4k_oracle_roundtrip_head(
     index: &VectorIndex,
     head: HeadId,
     basis: &WoRoundtripBasis,
-) -> Result<(Array2<f32>, RoundtripPatchMetrics), Box<dyn core::error::Error>> {
+) -> Result<(Array2<f32>, RoundtripPatchMetrics), Box<dyn std::error::Error>> {
     let mut metrics = None;
 
     let h = larql_inference::vindex::predict_q4k_hidden_with_mapped_pre_o_head(
@@ -611,7 +611,7 @@ fn forward_q4k_oracle_lowrank_head(
     pca_basis: &ZPcaBasis,
     means: &StaticHeadMeans,
     k: usize,
-) -> Result<(Array2<f32>, RoundtripPatchMetrics), Box<dyn core::error::Error>> {
+) -> Result<(Array2<f32>, RoundtripPatchMetrics), Box<dyn std::error::Error>> {
     let mut metrics = None;
 
     let h = larql_inference::vindex::predict_q4k_hidden_with_mapped_pre_o_head(

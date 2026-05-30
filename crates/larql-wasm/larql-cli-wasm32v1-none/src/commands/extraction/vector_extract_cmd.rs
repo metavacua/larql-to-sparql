@@ -92,7 +92,7 @@ impl ExtractCallbacks for ProgressCallbacks {
     }
 }
 
-pub fn run(args: VectorExtractArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: VectorExtractArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Validate components
     let components: Vec<String> = match args.components {
         Some(ref cs) => {

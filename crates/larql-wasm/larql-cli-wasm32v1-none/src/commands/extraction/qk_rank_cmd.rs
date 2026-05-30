@@ -32,7 +32,7 @@ pub struct QkRankArgs {
     all: bool,
 }
 
-pub fn run(args: QkRankArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -275,7 +275,7 @@ fn compute_singular_values(ata: &ndarray::Array2<f32>, dim: usize) -> Vec<f32> {
     eigenvalues
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

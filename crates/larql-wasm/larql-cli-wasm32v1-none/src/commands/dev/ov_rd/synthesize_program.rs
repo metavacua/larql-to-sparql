@@ -1,3 +1,12 @@
+// SynthesisStep variants (Fail, NeedsOracle.suggested_program) are
+// constructed for a diagnostic trace dump; suppress until consumed.
+#![allow(dead_code)]
+
+use std::path::PathBuf;
+
+use clap::Args;
+
+use super::program_cache::ProgramCache;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -9,15 +18,6 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
-// SynthesisStep variants (Fail, NeedsOracle.suggested_program) are
-// constructed for a diagnostic trace dump; suppress until consumed.
-#![allow(dead_code)]
-
-use std::path::PathBuf;
-
-use clap::Args;
-
-use super::program_cache::ProgramCache;
 #[derive(Args)]
 pub(super) struct SynthesizeProgramArgs {
     /// Program cache JSON built by build-program-cache.
@@ -31,7 +31,7 @@ pub(super) struct SynthesizeProgramArgs {
 
 pub(super) fn run_synthesize_program(
     args: SynthesizeProgramArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     let cache: ProgramCache = serde_json::from_str(&std::fs::read_to_string(&args.cache)?)?;
@@ -265,7 +265,7 @@ fn emit_artifacts(
     result: &SynthesisResult,
     cache: &ProgramCache,
     out: &PathBuf,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let report = serde_json::json!({
         "head": {"layer": cache.head_layer, "head": cache.head_idx},
         "group": cache.group,

@@ -80,7 +80,7 @@ pub struct PullArgs {
     pub output: Option<std::path::PathBuf>,
 }
 
-pub fn run(args: PullArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: PullArgs) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref slug_or_url) = args.collection {
         return pull_collection(slug_or_url);
     }
@@ -123,7 +123,7 @@ fn render_sibling_repo(
     model: &str,
     preset: &str,
     template: &str,
-) -> Result<String, Box<dyn core::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error>> {
     let bare = model.trim_start_matches("hf://");
     if !looks_like_hf_repo(bare) {
         return Err(
@@ -176,7 +176,7 @@ fn download_with_indicatif(hf_path: &str) -> Result<PathBuf, larql_vindex::Vinde
 fn copy_dir_all(
     src: &std::path::Path,
     dst: &std::path::Path,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
@@ -196,7 +196,7 @@ fn pull_one(
     model: &str,
     print_siblings: bool,
     output: Option<&std::path::Path>,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     // If --output is set and already populated, skip the download.
     if let Some(out) = output {
         if out.join("index.json").exists() {
@@ -245,7 +245,7 @@ fn pull_one(
 /// Pull every dataset item in an HF collection. A single-item failure
 /// logs a warning but doesn't abort — one unavailable sibling shouldn't
 /// fail the whole collection pull.
-fn pull_collection(slug_or_url: &str) -> Result<(), Box<dyn core::error::Error>> {
+fn pull_collection(slug_or_url: &str) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Fetching collection: {slug_or_url}");
     let items = larql_vindex::fetch_collection_items(slug_or_url)?;
     let datasets: Vec<String> = items
@@ -289,7 +289,7 @@ fn pull_collection(slug_or_url: &str) -> Result<(), Box<dyn core::error::Error>>
 
 /// Pull the full repo + every default sibling preset. Missing siblings
 /// log a warning; only the full repo is hard-required.
-fn pull_all_slices(model: &str, template: &str) -> Result<(), Box<dyn core::error::Error>> {
+fn pull_all_slices(model: &str, template: &str) -> Result<(), Box<dyn std::error::Error>> {
     pull_one(model, /*print_siblings=*/ false, None)?;
     for preset in DEFAULT_SIBLING_PRESETS {
         let sibling = match render_sibling_repo(model, preset, template) {
@@ -357,7 +357,7 @@ fn split_sibling_suffix(bare: &str) -> (&str, Option<&'static str>) {
     (bare, None)
 }
 
-fn normalise_hf_path(model: &str) -> Result<String, Box<dyn core::error::Error>> {
+fn normalise_hf_path(model: &str) -> Result<String, Box<dyn std::error::Error>> {
     if model.starts_with("hf://") {
         return Ok(model.to_string());
     }

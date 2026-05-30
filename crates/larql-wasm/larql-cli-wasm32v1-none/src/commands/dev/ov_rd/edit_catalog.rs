@@ -103,7 +103,7 @@ enum EditCatalogSpace {
 }
 
 impl EditCatalogSpace {
-    fn parse(name: &str) -> Result<Self, Box<dyn core::error::Error>> {
+    fn parse(name: &str) -> Result<Self, Box<dyn std::error::Error>> {
         match name.trim() {
             "hidden" => Ok(Self::Hidden),
             "pca" => Ok(Self::Pca),
@@ -137,7 +137,7 @@ struct EditCatalog {
 
 pub(super) fn run_oracle_edit_catalog(
     args: OracleEditCatalogArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -460,7 +460,7 @@ fn fit_edit_catalogs(
     edit_counts: &[usize],
     pca_rank: usize,
     iterations: usize,
-) -> Result<HashMap<EditCatalogKey, EditCatalog>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<EditCatalogKey, EditCatalog>, Box<dyn std::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -618,7 +618,7 @@ fn forward_q4k_oracle_edit_catalog_head(
     w_o_head: &[Vec<f32>],
     catalog: &EditCatalog,
     pca_rank: usize,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     let hidden_size = weights.hidden_size;
     larql_inference::vindex::predict_q4k_hidden_with_mapped_head_residual_delta(
         weights,
@@ -678,7 +678,7 @@ fn build_static_hidden_tables(
     index: &VectorIndex,
     heads: &[HeadId],
     means: &HashMap<HeadId, StaticHeadMeans>,
-) -> Result<HashMap<HeadId, StaticHiddenTable>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<HeadId, StaticHiddenTable>, Box<dyn std::error::Error>> {
     let w_o_heads = copy_w_o_heads(weights, index, heads)?;
     let mut tables = HashMap::new();
     for head in heads {
@@ -709,7 +709,7 @@ fn copy_w_o_heads(
     weights: &mut larql_inference::ModelWeights,
     index: &VectorIndex,
     heads: &[HeadId],
-) -> Result<HashMap<HeadId, Vec<Vec<f32>>>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<HeadId, Vec<Vec<f32>>>, Box<dyn std::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);

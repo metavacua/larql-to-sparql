@@ -78,7 +78,7 @@ pub struct CachedVindex {
 
 /// Return the HF hub cache root (`~/.cache/huggingface/hub/` by default,
 /// honoring `HF_HOME`).
-pub fn hf_hub_dir() -> Result<PathBuf, Box<dyn core::error::Error>> {
+pub fn hf_hub_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Ok(h) = std::env::var("HF_HOME") {
         return Ok(PathBuf::from(h).join("hub"));
     }
@@ -91,7 +91,7 @@ pub fn hf_hub_dir() -> Result<PathBuf, Box<dyn core::error::Error>> {
 /// Return the LARQL local cache root (`~/.cache/larql/local/` by default,
 /// honoring `LARQL_HOME` which should point at a dir that will hold the
 /// `local/` subdir).
-pub fn larql_local_dir() -> Result<PathBuf, Box<dyn core::error::Error>> {
+pub fn larql_local_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Ok(h) = std::env::var("LARQL_HOME") {
         return Ok(PathBuf::from(h).join("local"));
     }
@@ -104,7 +104,7 @@ pub fn larql_local_dir() -> Result<PathBuf, Box<dyn core::error::Error>> {
 /// Scan both caches for every cached vindex. Sorted by `(source, repo)`
 /// — local entries come first, then HF entries alphabetically within
 /// each group.
-pub fn scan_cached_vindexes() -> Result<Vec<CachedVindex>, Box<dyn core::error::Error>> {
+pub fn scan_cached_vindexes() -> Result<Vec<CachedVindex>, Box<dyn std::error::Error>> {
     let hub = hf_hub_dir()?;
     let local = larql_local_dir()?;
     scan_cached_vindexes_at_both(&hub, &local)
@@ -115,7 +115,7 @@ pub fn scan_cached_vindexes() -> Result<Vec<CachedVindex>, Box<dyn core::error::
 pub fn scan_cached_vindexes_at_both(
     hub: &Path,
     local: &Path,
-) -> Result<Vec<CachedVindex>, Box<dyn core::error::Error>> {
+) -> Result<Vec<CachedVindex>, Box<dyn std::error::Error>> {
     let mut out = scan_hf_hub_at(hub)?;
     out.extend(scan_local_at(local)?);
     out.sort_by(|a, b| (a.source as u8, a.repo.as_str()).cmp(&(b.source as u8, b.repo.as_str())));
@@ -123,7 +123,7 @@ pub fn scan_cached_vindexes_at_both(
 }
 
 /// Scan the HuggingFace hub cache only.
-pub fn scan_hf_hub_at(hub: &Path) -> Result<Vec<CachedVindex>, Box<dyn core::error::Error>> {
+pub fn scan_hf_hub_at(hub: &Path) -> Result<Vec<CachedVindex>, Box<dyn std::error::Error>> {
     if !hub.exists() {
         return Ok(Vec::new());
     }
@@ -167,7 +167,7 @@ pub fn scan_hf_hub_at(hub: &Path) -> Result<Vec<CachedVindex>, Box<dyn core::err
 /// Scan the LARQL local cache only. Each entry is a directory (or
 /// symlink to one) under `local/` whose name ends in `.vindex` and which
 /// contains an `index.json`.
-pub fn scan_local_at(local: &Path) -> Result<Vec<CachedVindex>, Box<dyn core::error::Error>> {
+pub fn scan_local_at(local: &Path) -> Result<Vec<CachedVindex>, Box<dyn std::error::Error>> {
     if !local.exists() {
         return Ok(Vec::new());
     }
@@ -221,7 +221,7 @@ fn shorthand_key(repo: &str) -> &str {
 pub fn resolve_shorthand_from(
     name: &str,
     cache: &[CachedVindex],
-) -> Result<PathBuf, Box<dyn core::error::Error>> {
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let matches: Vec<_> = cache
         .iter()
         .filter(|c| shorthand_key(&c.repo) == name)
@@ -255,7 +255,7 @@ pub fn resolve_shorthand_from(
 /// See the module docstring for the precedence order. Plain-name lookups
 /// that match multiple cached repos return an error listing the matches so
 /// the user can pick one.
-pub fn resolve_model(model: &str) -> Result<PathBuf, Box<dyn core::error::Error>> {
+pub fn resolve_model(model: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // 1. hf:// URI — defer to the vindex crate. Downloads if not cached.
     if model.starts_with("hf://") {
         return Ok(larql_vindex::resolve_hf_vindex(model)?);
@@ -287,7 +287,7 @@ pub fn resolve_model(model: &str) -> Result<PathBuf, Box<dyn core::error::Error>
 /// Match a plain name against the cache. The match is on the `name` half
 /// of `owner/name`, e.g. `gemma-3-4b-it-vindex` matches
 /// `chrishayuk/gemma-3-4b-it-vindex`.
-pub fn resolve_shorthand(name: &str) -> Result<PathBuf, Box<dyn core::error::Error>> {
+pub fn resolve_shorthand(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let cache = scan_cached_vindexes()?;
     resolve_shorthand_from(name, &cache)
 }
@@ -295,7 +295,7 @@ pub fn resolve_shorthand(name: &str) -> Result<PathBuf, Box<dyn core::error::Err
 /// Resolve a user-supplied string to a single `CachedVindex` entry —
 /// never touches the network. Used by `rm` where we explicitly don't want
 /// to download something in order to delete it.
-pub fn resolve_cached(model: &str) -> Result<CachedVindex, Box<dyn core::error::Error>> {
+pub fn resolve_cached(model: &str) -> Result<CachedVindex, Box<dyn std::error::Error>> {
     let cache = scan_cached_vindexes()?;
     resolve_cached_from(model, &cache)
 }
@@ -304,7 +304,7 @@ pub fn resolve_cached(model: &str) -> Result<CachedVindex, Box<dyn core::error::
 pub fn resolve_cached_from(
     model: &str,
     cache: &[CachedVindex],
-) -> Result<CachedVindex, Box<dyn core::error::Error>> {
+) -> Result<CachedVindex, Box<dyn std::error::Error>> {
     let key = model.strip_prefix("hf://").unwrap_or(model);
 
     // Full owner/name match (HF entries only have this form).

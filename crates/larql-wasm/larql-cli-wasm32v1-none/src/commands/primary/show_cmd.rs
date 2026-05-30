@@ -24,7 +24,7 @@ pub struct ShowArgs {
     pub model: String,
 }
 
-pub fn run(args: ShowArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: ShowArgs) -> Result<(), Box<dyn std::error::Error>> {
     let path = cache::resolve_model(&args.model)?;
     let cfg = larql_vindex::load_vindex_config(&path)?;
 

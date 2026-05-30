@@ -27,7 +27,7 @@ pub(super) struct NormalizeProgramArgs {
 
 pub(super) fn run_normalize_program(
     args: NormalizeProgramArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(&args.program)?;
     let mut program: Program = serde_json::from_str(&text)?;
     program.validate()?;

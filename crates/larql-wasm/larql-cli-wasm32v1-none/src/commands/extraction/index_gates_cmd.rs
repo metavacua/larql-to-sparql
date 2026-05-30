@@ -50,7 +50,7 @@ impl IndexBuildCallbacks for ProgressCallbacks {
     }
 }
 
-pub fn run(args: IndexGatesArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: IndexGatesArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;

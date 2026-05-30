@@ -146,7 +146,7 @@ enum TailSelector {
 }
 
 impl TailSelector {
-    fn parse(value: &str) -> Result<Self, Box<dyn core::error::Error>> {
+    fn parse(value: &str) -> Result<Self, Box<dyn std::error::Error>> {
         match value {
             "residual-error" => Ok(Self::ResidualError),
             "prompt-kl" => Ok(Self::PromptKl),
@@ -180,7 +180,7 @@ enum ExceptionFit {
 }
 
 impl ExceptionFit {
-    fn parse(value: &str) -> Result<Self, Box<dyn core::error::Error>> {
+    fn parse(value: &str) -> Result<Self, Box<dyn std::error::Error>> {
         match value {
             "kmeans" => Ok(Self::Kmeans),
             "exemplar" => Ok(Self::Exemplar),
@@ -200,7 +200,7 @@ impl ExceptionFit {
 
 pub(super) fn run_oracle_pq_exception(
     args: OraclePqExceptionArgs,
-) -> Result<(), Box<dyn core::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -597,7 +597,7 @@ fn fit_exception_catalogs(
     prompt_scores: &HashMap<(HeadId, usize), f64>,
     position_scores: &HashMap<(HeadId, usize, usize), f64>,
     iterations: usize,
-) -> Result<HashMap<ExceptionKey, ExceptionCatalog>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<ExceptionKey, ExceptionCatalog>, Box<dyn std::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -769,7 +769,7 @@ fn measure_fit_prompt_base_pq_kl(
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     tables: &HashMap<(HeadId, PqConfig), ModeDTable>,
     base_config: PqConfig,
-) -> Result<HashMap<(HeadId, usize), f64>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<(HeadId, usize), f64>, Box<dyn std::error::Error>> {
     let mut scores = HashMap::new();
     for (prompt_idx, record) in prompts.iter().enumerate() {
         let label = prompt_label(record);
@@ -831,7 +831,7 @@ fn measure_fit_position_restore_gains(
     base_config: PqConfig,
     tail_selector: TailSelector,
     candidates_per_prompt: usize,
-) -> Result<HashMap<(HeadId, usize, usize), f64>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<(HeadId, usize, usize), f64>, Box<dyn std::error::Error>> {
     let mut scores = HashMap::new();
     if candidates_per_prompt == 0 {
         return Ok(scores);
@@ -931,14 +931,14 @@ fn capture_head_position_sq_errors(
     table: &ModeDTable,
     w_o_head: &[Vec<f32>],
     stratum: &str,
-) -> Result<Vec<(usize, f64)>, Box<dyn core::error::Error>> {
+) -> Result<Vec<(usize, f64)>, Box<dyn std::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
 
     for layer in 0..weights.num_layers {
         let inserted = insert_q4k_layer_tensors(weights, index, layer)?;
         if layer == head.layer {
-            let result = (|| -> Result<Vec<(usize, f64)>, Box<dyn core::error::Error>> {
+            let result = (|| -> Result<Vec<(usize, f64)>, Box<dyn std::error::Error>> {
                 let (_, pre_o) = run_attention_block_with_pre_o(weights, &h, layer)
                     .ok_or_else(|| format!("pre-W_O capture failed at layer {layer}"))?;
                 let head_dim = weights.arch.head_dim_for_layer(layer);
@@ -996,7 +996,7 @@ fn forward_q4k_oracle_pq_exception_head(
     w_o_head: &[Vec<f32>],
     catalog: &ExceptionCatalog,
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     let hidden_size = weights.hidden_size;
     larql_inference::vindex::predict_q4k_hidden_with_mapped_head_residual_delta(
         weights,
@@ -1046,7 +1046,7 @@ fn forward_q4k_oracle_pq_position_restore_head(
     w_o_head: &[Vec<f32>],
     restore_position: usize,
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     let hidden_size = weights.hidden_size;
     larql_inference::vindex::predict_q4k_hidden_with_mapped_head_residual_delta(
         weights,
@@ -1104,7 +1104,7 @@ fn copy_w_o_heads(
     weights: &mut larql_inference::ModelWeights,
     index: &VectorIndex,
     heads: &[HeadId],
-) -> Result<HashMap<HeadId, Vec<Vec<f32>>>, Box<dyn core::error::Error>> {
+) -> Result<HashMap<HeadId, Vec<Vec<f32>>>, Box<dyn std::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -1229,7 +1229,7 @@ impl PqExceptionAccumulator {
     }
 }
 
-fn parse_f64_list(spec: &str) -> Result<Vec<f64>, Box<dyn core::error::Error>> {
+fn parse_f64_list(spec: &str) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
     let mut values = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

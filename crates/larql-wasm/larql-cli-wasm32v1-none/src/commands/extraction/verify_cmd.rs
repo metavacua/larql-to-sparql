@@ -18,7 +18,7 @@ pub struct VerifyArgs {
     vindex: PathBuf,
 }
 
-pub fn run(args: VerifyArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
     if !args.vindex.is_dir() {
         return Err(format!("not a directory: {}", args.vindex.display()).into());
     }

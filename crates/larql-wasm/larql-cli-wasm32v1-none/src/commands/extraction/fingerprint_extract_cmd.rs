@@ -103,7 +103,7 @@ struct HeadContribution {
     top_token: String,
 }
 
-pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -447,7 +447,7 @@ fn top_token(
         .to_string()
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

@@ -18,7 +18,7 @@ pub struct ValidateArgs {
     graph: PathBuf,
 }
 
-pub fn run(args: ValidateArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: ValidateArgs) -> Result<(), Box<dyn std::error::Error>> {
     let graph = larql_core::load(&args.graph)?;
     let stats = graph.stats();
 

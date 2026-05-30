@@ -48,13 +48,13 @@ pub struct ModelPullArgs {
     pub revision: Option<String>,
 }
 
-pub fn run(args: ModelArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: ModelArgs) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         ModelCommand::Pull(p) => run_pull(p),
     }
 }
 
-fn run_pull(args: ModelPullArgs) -> Result<(), Box<dyn core::error::Error>> {
+fn run_pull(args: ModelPullArgs) -> Result<(), Box<dyn std::error::Error>> {
     let bare = args.repo.trim_start_matches("hf://");
     if !bare.contains('/') || bare.split('/').count() != 2 {
         return Err(format!(

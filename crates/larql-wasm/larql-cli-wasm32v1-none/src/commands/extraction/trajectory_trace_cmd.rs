@@ -317,7 +317,7 @@ fn make_pca_info(singular_values: Vec<f32>) -> PcaInfo {
 
 // ── Main ──
 
-pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -835,7 +835,7 @@ fn current_date() -> String {
 fn parse_layer_spec(
     spec: &str,
     num_layers: usize,
-) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
+) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

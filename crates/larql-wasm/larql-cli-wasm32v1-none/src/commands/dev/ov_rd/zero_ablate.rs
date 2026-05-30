@@ -151,7 +151,7 @@ impl ZeroHeadAccumulator {
     }
 }
 
-pub(super) fn run_zero_ablate(args: ZeroAblateArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub(super) fn run_zero_ablate(args: ZeroAblateArgs) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -254,7 +254,7 @@ pub(super) fn run_zero_ablate(args: ZeroAblateArgs) -> Result<(), Box<dyn core::
 
 fn select_zero_ablation_heads(
     args: &ZeroAblateArgs,
-) -> Result<Vec<HeadId>, Box<dyn core::error::Error>> {
+) -> Result<Vec<HeadId>, Box<dyn std::error::Error>> {
     let mut heads = if let Some(spec) = &args.heads {
         parse_head_spec(spec)?
     } else {
@@ -301,7 +301,7 @@ pub(super) fn forward_q4k_zero_pre_o_head(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_zeroed_pre_o_heads(
         weights,
         token_ids,

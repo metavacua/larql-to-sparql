@@ -34,7 +34,7 @@ pub struct RmArgs {
     pub yes: bool,
 }
 
-pub fn run(args: RmArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: RmArgs) -> Result<(), Box<dyn std::error::Error>> {
     let entry = cache::resolve_cached(&args.model)?;
 
     let (target_desc, target_path, is_symlink) = match entry.source {

@@ -53,7 +53,7 @@ pub struct OvGateArgs {
     labels: Option<PathBuf>,
 }
 
-pub fn run(args: OvGateArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
     let ndjson = args.output == "ndjson";
 
     eprintln!("Loading model: {}", args.model);
@@ -389,7 +389,7 @@ fn project_top_n(
         .collect()
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

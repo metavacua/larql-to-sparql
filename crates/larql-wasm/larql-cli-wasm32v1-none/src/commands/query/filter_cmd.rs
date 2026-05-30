@@ -80,7 +80,7 @@ fn parse_source(s: &str) -> Option<SourceType> {
     serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
 }
 
-pub fn run(args: FilterArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub fn run(args: FilterArgs) -> Result<(), Box<dyn std::error::Error>> {
     let graph = larql_core::load(&args.graph)?;
 
     let mut metadata = Vec::new();

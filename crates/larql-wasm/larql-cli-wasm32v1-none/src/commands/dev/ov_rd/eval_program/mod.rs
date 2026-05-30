@@ -86,7 +86,7 @@ impl Diagnostics {
 // Entry point
 // ────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn run_eval_program(args: EvalProgramArgs) -> Result<(), Box<dyn core::error::Error>> {
+pub(super) fn run_eval_program(args: EvalProgramArgs) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     let program_text = std::fs::read_to_string(&args.program)?;

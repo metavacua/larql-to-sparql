@@ -32,7 +32,7 @@ pub fn build_fit_context(
     tokenizer: &tokenizers::Tokenizer,
     head: HeadId,
     config: PqConfig,
-) -> Result<FitContext, Box<dyn core::error::Error>> {
+) -> Result<FitContext, Box<dyn std::error::Error>> {
     let mut all_records = load_prompts(&args.prompts, None)?;
     if args.max_per_stratum > 0 {
         all_records = limit_prompts_per_stratum(all_records, args.max_per_stratum);
