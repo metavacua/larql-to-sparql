@@ -1,19 +1,4 @@
 //! Grid state and gRPC service implementation for the self-assembling FFN grid.
-
-use std::pin::Pin;
-use core::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
-
-use tokio::sync::{mpsc, RwLock};
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::StreamExt;
-use tonic::{Request, Response, Status, Streaming};
-
-use larql_router_protocol::{
-    AckMsg, AnnounceMsg, Gap, GridService, LayerLatency, ModelCoverage, RouterMessage,
-    RouterPayload, ServerInfo, ServerMessage, ServerPayload, ShardInfo, StatusRequest,
-    StatusResponse,
-};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,8 +11,31 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::pin::Pin;
+use core::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::sync::{mpsc, RwLock};
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_stream::wrappers::ReceiverStream;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_stream::StreamExt;
+#[cfg(not(target_arch = "wasm32"))]
+use tonic::{Request, Response, Status, Streaming};
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_router_protocol::{
+    AckMsg, AnnounceMsg, Gap, GridService, LayerLatency, ModelCoverage, RouterMessage,
+    RouterPayload, ServerInfo, ServerMessage, ServerPayload, ShardInfo, StatusRequest,
+    StatusResponse,
+};
+
 // ── Per-server record ─────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug)]
 pub struct ServerEntry {
     pub server_id: String,
@@ -46,6 +54,7 @@ pub struct ServerEntry {
 
 // ── Mode B: available server entry ───────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A server in Mode B idle state — it has capacity but no shard loaded yet.
 pub struct AvailableEntry {
     pub server_id: String,
@@ -59,6 +68,7 @@ pub struct AvailableEntry {
 
 // ── Grid state ────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 pub struct GridState {
     servers: HashMap<String, ServerEntry>,
@@ -75,7 +85,9 @@ pub struct GridState {
     serving_senders: HashMap<String, mpsc::Sender<Result<RouterMessage, tonic::Status>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GridState {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn register(&mut self, entry: ServerEntry) {
         tracing::info!(
             server_id = %entry.server_id,
@@ -89,6 +101,7 @@ impl GridState {
         self.log_coverage();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Register a server and store its sender for rebalancer-initiated UnassignMsg.
     pub fn register_with_sender(
         &mut self,
@@ -99,6 +112,7 @@ impl GridState {
         self.register(entry);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn deregister(&mut self, server_id: &str) {
         self.serving_senders.remove(server_id);
         if let Some(entry) = self.servers.remove(server_id) {
@@ -113,6 +127,7 @@ impl GridState {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn update_heartbeat(
         &mut self,
         server_id: &str,
@@ -203,6 +218,7 @@ impl GridState {
         self.any_model_table = any;
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn log_coverage(&self) {
         // Group by model_id
         let mut by_model: HashMap<&str, Vec<&ServerEntry>> = HashMap::new();
@@ -233,6 +249,7 @@ impl GridState {
         !self.available_servers.is_empty()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the sender channel for a serving server by ID (for UnassignMsg delivery).
     pub fn serving_sender(
         &self,
@@ -241,6 +258,7 @@ impl GridState {
         self.serving_senders.get(server_id).cloned()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Register a Mode B available server. Returns the server_id.
     pub fn register_available(
         &mut self,
@@ -273,6 +291,7 @@ impl GridState {
         self.available_servers.remove(server_id);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Find the first available server that has at least `min_ram_bytes` of
     /// RAM, send it an `AssignMsg`, and move it out of the available pool.
     ///
@@ -367,6 +386,7 @@ impl GridState {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn status_response(&self) -> StatusResponse {
         // Build per-model coverage
         let mut by_model: HashMap<String, Vec<&ServerEntry>> = HashMap::new();
@@ -451,6 +471,7 @@ impl GridState {
 
 // ── gRPC service impl ─────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct GridServiceImpl {
     pub state: Arc<RwLock<GridState>>,
     next_id: AtomicU64,
@@ -458,7 +479,9 @@ pub struct GridServiceImpl {
     grid_key: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GridServiceImpl {
+    #[cfg(not(target_arch = "wasm32"))]
     #[allow(dead_code)]
     pub fn new(state: Arc<RwLock<GridState>>) -> Self {
         Self {
@@ -468,6 +491,7 @@ impl GridServiceImpl {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_with_key(state: Arc<RwLock<GridState>>, key: Option<String>) -> Self {
         Self {
             state,
@@ -476,6 +500,7 @@ impl GridServiceImpl {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn alloc_server_id(&self) -> String {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -486,12 +511,16 @@ impl GridServiceImpl {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 type JoinStream = Pin<Box<dyn futures_core::Stream<Item = Result<RouterMessage, Status>> + Send>>;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[tonic::async_trait]
 impl GridService for GridServiceImpl {
+    #[cfg(not(target_arch = "wasm32"))]
     type JoinStream = JoinStream;
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn join(
         &self,
         request: Request<Streaming<ServerMessage>>,
@@ -676,6 +705,7 @@ impl GridService for GridServiceImpl {
         Ok(Response::new(Box::pin(stream)))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn status(
         &self,
         _request: Request<StatusRequest>,
@@ -856,6 +886,7 @@ mod tests {
         assert!((server.layer_stats[0].avg_ms - 2.1).abs() < 0.001);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn register_available_and_deregister() {
         let mut state = GridState::default();

@@ -19,23 +19,6 @@
 
 use larql_router::grid;
 use larql_router::rebalancer;
-
-use std::net::SocketAddr;
-
-use axum::body::Bytes;
-use axum::extract::State;
-use axum::http::{header, StatusCode};
-use axum::response::Response;
-use axum::routing::post;
-use axum::{Json, Router};
-use clap::Parser;
-use serde_json::Value;
-use tokio::sync::RwLock;
-use tonic::transport::Server as GrpcServer;
-use tracing::{info, warn};
-
-use grid::{GridServiceImpl, GridState};
-use larql_router_protocol::GridServiceServer;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -47,6 +30,33 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::net::SocketAddr;
+
+#[cfg(not(target_arch = "wasm32"))]
+use axum::body::Bytes;
+#[cfg(not(target_arch = "wasm32"))]
+use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
+use axum::http::{header, StatusCode};
+#[cfg(not(target_arch = "wasm32"))]
+use axum::response::Response;
+#[cfg(not(target_arch = "wasm32"))]
+use axum::routing::post;
+#[cfg(not(target_arch = "wasm32"))]
+use axum::{Json, Router};
+use clap::Parser;
+use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::sync::RwLock;
+#[cfg(not(target_arch = "wasm32"))]
+use tonic::transport::Server as GrpcServer;
+#[cfg(not(target_arch = "wasm32"))]
+use tracing::{info, warn};
+
+use grid::{GridServiceImpl, GridState};
+use larql_router_protocol::GridServiceServer;
 // ── Binary wire format constants ───────────────────────────────────────────────
 
 const BINARY_CT: &str = "application/x-larql-ffn";
@@ -241,6 +251,7 @@ impl AppState {
 
 // ── Route handler ──────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_walk_ffn(
     State(state): State<Arc<AppState>>,
     request: axum::extract::Request,
@@ -259,6 +270,7 @@ async fn handle_walk_ffn(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_walk_ffn_inner(
     state: Arc<AppState>,
     request: axum::extract::Request,
@@ -410,6 +422,7 @@ async fn handle_walk_ffn_inner(
         .unwrap())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Forward raw bytes to a shard, passing the Content-Type header through.
 /// The shard's response status and Content-Type are preserved unchanged.
 async fn proxy_raw(
@@ -450,6 +463,7 @@ async fn handle_health() -> Json<Value> {
     Json(serde_json::json!({"status": "ok"}))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Proxy /v1/stats to the first reachable shard so that clients connecting
 /// via RemoteWalkBackend (which reads hidden_size from /v1/stats) work
 /// transparently through the router.
@@ -491,6 +505,7 @@ async fn handle_stats(State(state): State<Arc<AppState>>) -> Response {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     // Accept both `larql-router <args>` and `larql-router route <args>`.

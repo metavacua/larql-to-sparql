@@ -8,15 +8,6 @@
 //!
 //! The server receives `UnassignMsg`, drains in-flight requests (up to 30s),
 //! sends `DroppingMsg(reason="reassigned")`, and re-enters the available pool.
-
-use std::time::Duration;
-
-use tokio::sync::RwLock;
-use tracing::{debug, info};
-
-use larql_router_protocol::{RouterMessage, RouterPayload, UnassignMsg};
-
-use crate::grid::GridState;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -28,8 +19,23 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::sync::RwLock;
+#[cfg(not(target_arch = "wasm32"))]
+use tracing::{debug, info};
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_router_protocol::{RouterMessage, RouterPayload, UnassignMsg};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::grid::GridState;
 // ── Config ────────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct RebalancerConfig {
     /// How often to run the imbalance check.
@@ -41,7 +47,9 @@ pub struct RebalancerConfig {
     pub sustained_window: Duration,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for RebalancerConfig {
+    #[cfg(not(target_arch = "wasm32"))]
     fn default() -> Self {
         Self {
             check_interval: Duration::from_secs(30),
@@ -51,7 +59,9 @@ impl Default for RebalancerConfig {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RebalancerConfig {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_cli(interval_secs: u64, threshold: f32) -> Self {
         Self {
             check_interval: Duration::from_secs(interval_secs),
@@ -63,6 +73,7 @@ impl RebalancerConfig {
 
 // ── Per-layer imbalance tracker ───────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Tracks how long a given layer has been in imbalanced state.
 #[derive(Default)]
 struct ImbalanceTracker {
@@ -70,7 +81,9 @@ struct ImbalanceTracker {
     first_seen: HashMap<(String, u32), std::time::Instant>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ImbalanceTracker {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Record that this layer is currently imbalanced. Returns true if the
     /// imbalance has been sustained long enough to trigger action.
     fn record(&mut self, key: (String, u32), sustained: Duration) -> bool {
@@ -89,12 +102,14 @@ impl ImbalanceTracker {
 
 // ── Rebalancer task ───────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Spawn the rebalancer background task.
 /// Returns immediately; the task runs for the process lifetime.
 pub fn spawn(state: Arc<RwLock<GridState>>, cfg: RebalancerConfig) {
     tokio::spawn(rebalancer_task(state, cfg));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn rebalancer_task(state: Arc<RwLock<GridState>>, cfg: RebalancerConfig) {
     let mut interval = tokio::time::interval(cfg.check_interval);
     let mut tracker = ImbalanceTracker::default();
@@ -105,6 +120,7 @@ async fn rebalancer_task(state: Arc<RwLock<GridState>>, cfg: RebalancerConfig) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn check_imbalance(
     state: &Arc<RwLock<GridState>>,
     cfg: &RebalancerConfig,
@@ -183,6 +199,7 @@ async fn check_imbalance(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Send `UnassignMsg` to the serving server identified by `server_id`.
 /// The sender channel is stored in `GridState::serving_senders`.
 async fn send_unassign(
