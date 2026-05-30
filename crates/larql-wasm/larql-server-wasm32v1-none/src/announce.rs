@@ -8,13 +8,13 @@ use core::hash::{Hash, Hasher};
 use std::time::Duration;
 
 use larql_router_protocol::{
+    AnnounceMsg, DroppingMsg, GridServiceClient, HeartbeatMsg, RouterPayload, ServerMessage,
+    ServerPayload,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::hash_map::DefaultHasher;
 #[cfg(target_arch = "wasm32")]
 use larql_wasm_math::FnvHasher as DefaultHasher;
-    AnnounceMsg, DroppingMsg, GridServiceClient, HeartbeatMsg, RouterPayload, ServerMessage,
-    ServerPayload,
-};
 
 use crate::metrics::LayerLatencyTracker;
 #[cfg(not(target_arch = "wasm32"))]
