@@ -69,16 +69,18 @@ def _inner(pred: str, kw: str) -> str:
     return pred[len(kw) + 1: pred.rindex(")")]
 
 
-def eval_cfg(pred: str, feats: set[str]) -> bool:
-    """Evaluate a cfg predicate string for wasm32v1-none. Unknown keys/barewords
-    are treated as false (conservative: the code is assumed NOT compiled)."""
+def eval_cfg(pred: str, feats: set[str], test: bool = False) -> bool:
+    """Evaluate a cfg predicate string for wasm32v1-none. `test` is the truth of
+    the `test` cfg — pass test=False for the `--lib` boundary (the default), or
+    test=True to ask whether code would compile in the test build. Unknown
+    keys/barewords are treated as false (the code is assumed NOT compiled)."""
     pred = pred.strip()
     if pred.startswith("all(") and pred.endswith(")"):
-        return all(eval_cfg(p, feats) for p in _split_top(_inner(pred, "all")))
+        return all(eval_cfg(p, feats, test) for p in _split_top(_inner(pred, "all")))
     if pred.startswith("any(") and pred.endswith(")"):
-        return any(eval_cfg(p, feats) for p in _split_top(_inner(pred, "any")))
+        return any(eval_cfg(p, feats, test) for p in _split_top(_inner(pred, "any")))
     if pred.startswith("not(") and pred.endswith(")"):
-        return not eval_cfg(_inner(pred, "not"), feats)
+        return not eval_cfg(_inner(pred, "not"), feats, test)
     m = re.match(r'(\w+)\s*=\s*"([^"]*)"\s*$', pred)
     if m:
         k, v = m.group(1), m.group(2)
@@ -89,7 +91,9 @@ def eval_cfg(pred: str, feats: set[str]) -> bool:
         return (k, v) in _KV_TRUE  # unknown key → not present → false
     if pred == "debug_assertions":
         return True
-    return False  # unix / windows / test / doc / any other bareword → false
+    if pred == "test":
+        return test
+    return False  # unix / windows / doc / any other bareword → false
 
 
 def default_features(crate_dir: Path) -> set[str]:
@@ -234,7 +238,14 @@ def _scan_file(f: Path, lines: list[str], feats: set[str], local_core: bool, t: 
                 i += 1; buf += " " + lines[i].strip()
             tree = re.sub(r'^\s*(pub\s+)?use\s+', '', buf).split(";")[0].strip()
             govern = cfgs + [c for _, cs in stack for c in cs]
-            is_active = all(eval_cfg(c, feats) for c in govern)
+            is_active = all(eval_cfg(c, feats, test=False) for c in govern)
+            # `cargo check --lib` excludes cfg(test) code entirely (native and
+            # wasm alike). A predicate "requires test" if flipping test False->True
+            # turns it on; any such governing conjunct ⇒ this use is test-only.
+            test_only = any(eval_cfg(c, feats, True) and not eval_cfg(c, feats, False)
+                            for c in govern)
+            if test_only:
+                i += 1; attr_buf = []; continue
             for p in _flatten_use(tree):
                 sysroot = p.lstrip(":")
                 root = sysroot.split("::")[0]
