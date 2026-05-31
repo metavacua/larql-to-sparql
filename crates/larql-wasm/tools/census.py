@@ -40,16 +40,13 @@ from wasm_gate_common import WASM_DIR, ROOT, MANIFEST, kernel_crates
 
 # ── cfg evaluation for the wasm32v1-none target ──────────────────────────────
 # Key/value facts true for `wasm32v1-none` (MVP: no atomics/simd128 features).
+# Any (key, value) not listed is false — including every key=val for an unknown
+# key — so this set alone decides target_* predicates.
 _KV_TRUE = {
     ("target_arch", "wasm32"), ("target_family", "wasm"),
     ("target_pointer_width", "32"), ("target_endian", "little"),
     ("target_os", "none"), ("target_env", ""), ("target_vendor", "unknown"),
 }
-_KV_KEYS = {"target_arch", "target_family", "target_pointer_width",
-            "target_endian", "target_os", "target_env", "target_vendor",
-            "target_feature", "feature"}
-# Barewords that are false on wasm32v1-none (a lib, non-test, no-OS build).
-_BARE_FALSE = {"unix", "windows", "test", "doc", "doctest", "miri"}
 
 
 def _split_top(s: str) -> list[str]:
@@ -89,12 +86,10 @@ def eval_cfg(pred: str, feats: set[str]) -> bool:
             return v in feats
         if k == "target_feature":
             return False  # MVP: nothing enabled
-        if k in _KV_KEYS:
-            return (k, v) in _KV_TRUE
-        return False
+        return (k, v) in _KV_TRUE  # unknown key → not present → false
     if pred == "debug_assertions":
         return True
-    return pred not in _BARE_FALSE and False  # bareword → false
+    return False  # unix / windows / test / doc / any other bareword → false
 
 
 def default_features(crate_dir: Path) -> set[str]:
@@ -168,17 +163,20 @@ def _module_dir(f: Path) -> Path:
     return f.parent if f.name in ("lib.rs", "main.rs", "mod.rs") else f.parent / f.stem
 
 
-def reachable_files(src: Path, feats: set[str]) -> set[Path]:
-    """Files compiled for wasm32v1-none: BFS the `mod` tree from lib.rs, skipping
-    any module whose cfg is false on this target."""
+def reachable_files(src: Path, feats: set[str]) -> dict[Path, list[str]]:
+    """Files compiled for wasm32v1-none, mapped to their (already-read) lines:
+    BFS the `mod` tree from lib.rs, skipping any module whose cfg is false on
+    this target. The lines are cached so the scan pass need not re-read them."""
     start = src / "lib.rs"
     if not start.exists():
-        return set()
-    seen, q = {start}, deque([start])
+        return {}
+    seen: dict[Path, list[str]] = {}
+    enqueued, q = {start}, deque([start])
     while q:
         f = q.popleft()
         d = _module_dir(f)
         lines = f.read_text().split("\n")
+        seen[f] = lines
         i, n = 0, len(lines)
         while i < n:
             attrs = []
@@ -189,16 +187,15 @@ def reachable_files(src: Path, feats: set[str]) -> set[Path]:
             m = re.match(r'\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;', lines[i])
             if m and all(eval_cfg(c, feats) for c in _attr_cfgs(attrs)):
                 for cand in (d / f"{m.group(1)}.rs", d / m.group(1) / "mod.rs"):
-                    if cand.exists() and cand not in seen:
-                        seen.add(cand); q.append(cand)
+                    if cand.exists() and cand not in enqueued:
+                        enqueued.add(cand); q.append(cand)
             i += 1
     return seen
 
 
-def _scan_file(f: Path, feats: set[str], local_core: bool,
+def _scan_file(f: Path, lines: list[str], feats: set[str], local_core: bool,
                gated: Counter, active: Counter,
                gated_paths: set, active_paths: set, anomalies: list):
-    lines = f.read_text().split("\n")
     n, i, depth = len(lines), 0, 0
     stack: list[tuple[int, list[str]]] = []  # (depth outside block, cfgs) of enclosers
     pending: list[str] | None = None          # cfgs of a block whose `{` not seen yet
@@ -271,29 +268,36 @@ def scan_stdlib(crates: list[str]):
         feats = default_features(crate_dir)
         # `core` collides with a local module in crates that define `mod core`.
         local_core = (src / "core.rs").exists() or (src / "core").is_dir()
-        for f in reachable_files(src, feats):
-            _scan_file(f, feats, local_core, gated, active,
+        for f, lines in reachable_files(src, feats).items():
+            _scan_file(f, lines, feats, local_core, gated, active,
                        gated_paths, active_paths, anomalies)
     return gated, active, gated_paths, active_paths, anomalies
 
 
 # ── external crates via cargo tree ───────────────────────────────────────────
 def crate_deps(crates: list[str], wasm: bool) -> set[str]:
-    acc: set[str] = set()
+    # One `cargo tree` for the whole crate set (the union is all we keep), not
+    # one per crate — each invocation pays full cargo resolution startup.
+    cmd = ["cargo", "tree", "--manifest-path", str(MANIFEST),
+           "-e", "normal", "--prefix", "none"]
     for base in crates:
-        cmd = ["cargo", "tree", "--manifest-path", str(MANIFEST),
-               "-p", f"{base}-wasm32v1-none", "-e", "normal", "--prefix", "none"]
-        if wasm:
-            cmd += ["--target", "wasm32v1-none"]
-        r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
-        for line in r.stdout.splitlines():
-            name = re.sub(r' v[0-9].*', '', line).strip()
-            if not name or name.startswith("(") or name.endswith("-wasm32v1-none"):
-                continue
-            if name in ("larql-wasm-math", "larql-bridge"):
-                continue
-            acc.add(name)
+        cmd += ["-p", f"{base}-wasm32v1-none"]
+    if wasm:
+        cmd += ["--target", "wasm32v1-none"]
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+    acc: set[str] = set()
+    for line in r.stdout.splitlines():
+        name = re.sub(r' v[0-9].*', '', line).strip()
+        if not name or name.startswith("(") or name.endswith("-wasm32v1-none"):
+            continue
+        if name in ("larql-wasm-math", "larql-bridge"):
+            continue
+        acc.add(name)
     return acc
+
+
+def kernel_crates_bases() -> list[str]:
+    return [c[:-len("-wasm32v1-none")] for c in kernel_crates()]
 
 
 def main():
@@ -334,10 +338,6 @@ def main():
             print("\n-- distinct active core::/alloc:: paths --")
             for p in sorted(ap):
                 print("  B ", p)
-
-
-def kernel_crates_bases() -> list[str]:
-    return [c[:-len("-wasm32v1-none")] for c in kernel_crates()]
 
 
 if __name__ == "__main__":
