@@ -193,9 +193,19 @@ def reachable_files(src: Path, feats: set[str]) -> dict[Path, list[str]]:
     return seen
 
 
-def _scan_file(f: Path, lines: list[str], feats: set[str], local_core: bool,
-               gated: Counter, active: Counter,
-               gated_paths: set, active_paths: set, anomalies: list):
+class Tally:
+    """Accumulated stdlib-surface census results across scanned files."""
+    def __init__(self):
+        self.gated = Counter()      # 2-seg stdlib key -> gated use-site count
+        self.active = Counter()     # 2-seg stdlib key -> active use-site count
+        self.gated_paths = set()    # distinct full gated paths
+        self.active_paths = set()   # distinct full active paths
+        self.anomalies = []         # active `use std::` in reachable code (should be none)
+        self.gated_sites = []       # (full_path, relpath, lineno) per gated use-site
+
+
+def _scan_file(f: Path, lines: list[str], feats: set[str], local_core: bool, t: "Tally"):
+    rel = str(f.relative_to(WASM_DIR))
     n, i, depth = len(lines), 0, 0
     stack: list[tuple[int, list[str]]] = []  # (depth outside block, cfgs) of enclosers
     pending: list[str] | None = None          # cfgs of a block whose `{` not seen yet
@@ -234,11 +244,12 @@ def _scan_file(f: Path, lines: list[str], feats: set[str], local_core: bool,
                     continue
                 key = "::".join(sysroot.split("::")[:2])
                 if is_active:
-                    active[key] += 1; active_paths.add(sysroot)
+                    t.active[key] += 1; t.active_paths.add(sysroot)
                     if root == "std":
-                        anomalies.append(f"{f.relative_to(WASM_DIR)}:{i+1}  {sysroot}")
+                        t.anomalies.append(f"{rel}:{i+1}  {sysroot}")
                 else:
-                    gated[key] += 1; gated_paths.add(sysroot)
+                    t.gated[key] += 1; t.gated_paths.add(sysroot)
+                    t.gated_sites.append((sysroot, rel, i + 1))
             attr_buf = []; i += 1
             continue
         # non-use item / code line: maintain the enclosing-cfg stack
@@ -257,9 +268,8 @@ def _scan_file(f: Path, lines: list[str], feats: set[str], local_core: bool,
         attr_buf = []; i += 1
 
 
-def scan_stdlib(crates: list[str]):
-    gated, active, anomalies = Counter(), Counter(), []
-    gated_paths, active_paths = set(), set()
+def scan_stdlib(crates: list[str]) -> "Tally":
+    t = Tally()
     for base in crates:
         crate_dir = WASM_DIR / f"{base}-wasm32v1-none"
         src = crate_dir / "src"
@@ -269,9 +279,8 @@ def scan_stdlib(crates: list[str]):
         # `core` collides with a local module in crates that define `mod core`.
         local_core = (src / "core.rs").exists() or (src / "core").is_dir()
         for f, lines in reachable_files(src, feats).items():
-            _scan_file(f, lines, feats, local_core, gated, active,
-                       gated_paths, active_paths, anomalies)
-    return gated, active, gated_paths, active_paths, anomalies
+            _scan_file(f, lines, feats, local_core, t)
+    return t
 
 
 # ── external crates via cargo tree ───────────────────────────────────────────
@@ -317,27 +326,38 @@ def main():
     print("  " + " ".join(gated_crates))
 
     if "--crates-only" not in flags:
-        gated, active, gp, ap, anomalies = scan_stdlib(crates)
-        print(f"\n== SET A: gated stdlib roots ({sum(gated.values())} sites) ==")
-        for k, c in gated.most_common():
+        t = scan_stdlib(crates)
+        print(f"\n== SET A: gated stdlib roots ({sum(t.gated.values())} sites) ==")
+        for k, c in t.gated.most_common():
             print(f"  {c:4d}  {k}")
-        print(f"\n== SET B: active stdlib roots ({sum(active.values())} sites) ==")
-        for k, c in active.most_common():
+        print(f"\n== SET B: active stdlib roots ({sum(t.active.values())} sites) ==")
+        for k, c in t.active.most_common():
             print(f"  {c:4d}  {k}")
-        if anomalies:
-            print(f"\n!! INVARIANT VIOLATION: {len(anomalies)} active `use std::` on wasm "
+        if t.anomalies:
+            print(f"\n!! INVARIANT VIOLATION: {len(t.anomalies)} active `use std::` on wasm "
                   f"(should be 0) — a real native leak or a cfg the evaluator missed:")
-            for a in anomalies[:40]:
+            for a in t.anomalies[:40]:
                 print("  ", a)
         else:
             print("\n✅ invariant holds: no active `use std::` in wasm-reachable code")
         if show_paths:
             print("\n-- distinct gated stdlib paths --")
-            for p in sorted(gp):
+            for p in sorted(t.gated_paths):
                 print("  A ", p)
             print("\n-- distinct active core::/alloc:: paths --")
-            for p in sorted(ap):
+            for p in sorted(t.active_paths):
                 print("  B ", p)
+        if "--sites" in flags:
+            # Conversion worklist: every gated stdlib use grouped by full path.
+            by_path: dict[str, list[str]] = {}
+            for full, rel, ln in t.gated_sites:
+                by_path.setdefault(full, []).append(f"{rel}:{ln}")
+            print(f"\n-- gated stdlib use-sites ({len(t.gated_sites)} across "
+                  f"{len(by_path)} symbols) --")
+            for full in sorted(by_path):
+                print(f"\n  {full}  ({len(by_path[full])})")
+                for loc in sorted(by_path[full]):
+                    print(f"      {loc}")
 
 
 if __name__ == "__main__":
