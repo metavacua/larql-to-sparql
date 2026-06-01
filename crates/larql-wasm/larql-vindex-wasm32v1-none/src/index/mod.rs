@@ -14,6 +14,8 @@ pub mod compute;
 pub mod core;
 #[cfg(test)]
 mod ffn_dispatch_tests;
+/// Minimal-Viable Vindex — the portable, total reference query kernel (L0).
+pub mod mvv;
 pub mod mutate;
 pub mod storage;
 pub mod types;

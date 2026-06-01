@@ -69,6 +69,9 @@ serde_json = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+# serde_json is portable (alloc, no_std); the MVV reader parses index.json on
+# wasm32. The native side already pulls it via the workspace above.
+serde_json = { workspace = true }
 larql-wasm-math = { workspace = true }
 thiserror = { version = "2", default-features = false }
 hashbrown = { workspace = true }
