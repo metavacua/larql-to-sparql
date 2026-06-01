@@ -294,9 +294,12 @@ def wasm_matrix(crates: list[dict]) -> dict:
         except Exception:
             pass
 
-    # -wasm32v1-none crates: all four runtimes (kernel portability + test execution)
+    # -wasm32v1-none crates: portability (wasm32v1-none) + a NATIVE --lib compile
+    # (these crates are excluded from native_matrix, so without this their host
+    # build is never checked — a native-only break can hide behind a green
+    # wasm32v1-none cell) + test execution under the wasm runtimes.
     # -interface crates: only node + firefox (native std; wasm32v1-none/wasmi don't apply)
-    KERNEL_RUNTIMES = ["wasm32v1-none", "wasmi", "node", "firefox"]
+    KERNEL_RUNTIMES = ["wasm32v1-none", "native", "wasmi", "node", "firefox"]
     INTERFACE_RUNTIMES = ["node", "firefox"]
 
     includes = []

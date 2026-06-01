@@ -234,6 +234,17 @@ jobs:
         if: matrix.runtime == 'wasm32v1-none'
         run: cargo check ${{ matrix.cargo_package }} --target wasm32v1-none --lib
 
+      # ── native: the -wasm32v1-none crate must ALSO compile on the host. ──────
+      # These crates are excluded from native_matrix, so without this their
+      # native --lib build is never exercised — which let a native-only break
+      # (a `use` jammed into a brace group in larql-server) ship behind a green
+      # wasm32v1-none cell. Granular per-crate "both targets compile" feedback;
+      # building the roots (server/cli/python) transitively checks their subtree.
+
+      - name: Check (native --lib)
+        if: matrix.runtime == 'native'
+        run: cargo check ${{ matrix.cargo_package }} --lib
+
       # ── wasmi: compile to wasm32v1-none, execute in wasmi interpreter ────────
       # Correct design: the wasmi column builds the crate as a wasm32v1-none
       # binary and runs it inside the wasmi interpreter. Expected to fail for
