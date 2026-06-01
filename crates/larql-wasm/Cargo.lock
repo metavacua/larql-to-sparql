@@ -2609,6 +2609,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "larql-vindex-mvv-cdylib"
+version = "0.1.0"
+dependencies = [
+ "dlmalloc",
+ "larql-vindex-wasm32v1-none",
+]
+
+[[package]]
 name = "larql-vindex-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
@@ -2634,6 +2642,13 @@ dependencies = [
  "sha2",
  "thiserror 2.0.18",
  "tokenizers",
+]
+
+[[package]]
+name = "larql-wasm-certify"
+version = "0.1.0"
+dependencies = [
+ "wasmparser 0.248.0",
 ]
 
 [[package]]

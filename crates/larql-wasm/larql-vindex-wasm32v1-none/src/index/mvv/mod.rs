@@ -12,6 +12,7 @@ mod query;
 // integration test against the public API), so they compile in isolation from
 // the crate's other (native-only) inline test modules.
 
+pub use crate::config::dtype::StorageDtype;
 pub use descriptor::{MvvDescriptor, MvvLayer, MVV_DESCRIPTOR_VERSION};
 pub use error::MvvError;
 pub use query::MvvIndex;

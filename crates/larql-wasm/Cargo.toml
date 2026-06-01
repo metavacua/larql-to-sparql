@@ -35,6 +35,9 @@ members = [
     "model-compute-interface",
     "kv-cache-benchmark-wasm32v1-none",
     "kv-cache-benchmark-interface",
+    # Verification harness (NOT pure-kernel): MVV certification scaffolding.
+    "larql-vindex-mvv-cdylib",
+    "larql-wasm-certify",
 ]
 
 [workspace.package]
