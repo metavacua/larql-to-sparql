@@ -390,6 +390,61 @@ jobs:
           echo "Consult .github/wasm-inventory.md for per-cell status and remediation roadmap."
           echo "No wasm-check job gates merges; see 'native ✓' for the required gate."
 
+# ── Portable-surface correctness gates ────────────────────────────────────────
+#
+# Unlike the informational wasm-check matrix, these FAIL on violation — they are
+# correctness signal for the coding agent over checks it can't run in its own
+# environment.
+
+  census:
+    name: wasm census ✓ (no native leak)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Census invariant — no active `use std::` in wasm-reachable code
+        # A surviving active `use std::` means native-only code leaked into the
+        # portable surface. The census also reports SET A/SET B for the boundary.
+        run: |
+          out="$(python3 crates/larql-wasm/tools/census.py 2>&1)" || true
+          echo "$out" | tail -50
+          if ! echo "$out" | grep -q 'invariant holds'; then
+            echo "::error::census invariant violated — native (std) leaked into the wasm32v1-none surface"
+            exit 1
+          fi
+
+  mvv-certify:
+    name: MVV wasm-safe ✓ (import-free + call_indirect-free)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Add wasm32v1-none target
+        run: rustup target add wasm32v1-none
+      - name: Build the MVV cdylib (wasm32v1-none)
+        run: >
+          cargo build --manifest-path crates/larql-wasm/Cargo.toml
+          -p larql-vindex-mvv-cdylib --target wasm32v1-none --release
+      - name: Certify the compiled module is wasm-safe
+        # larql-wasm-certify exits non-zero unless the module is import-free and
+        # call_indirect-free (capability-contained + no arbitrary code execution).
+        run: >
+          cargo run --manifest-path crates/larql-wasm/Cargo.toml
+          -p larql-wasm-certify --quiet --
+          crates/larql-wasm/target/wasm32v1-none/release/larql_vindex_mvv_cdylib.wasm
+
 # ── Coverage (informational, ubuntu only) ─────────────────────────────────────
 
   coverage:
