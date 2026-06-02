@@ -57,16 +57,32 @@ def build_vocabulary(corpus: list[dict], min_df: int = 2, max_features: int = 51
 
     # Always include strong LQL trigger words even if rare
     trigger_words = [
+        # LQL statement keywords
         "describe", "walk", "infer", "select", "explain", "trace",
         "insert", "delete", "update", "merge", "rebalance",
         "extract", "compile", "diff", "use", "show", "stats",
         "compact", "begin", "save", "apply", "remove",
+        # LQL concepts
         "features", "layers", "relations", "edges", "entities", "models",
         "patch", "patches", "vindex", "model", "inference",
         "knowledge", "residual", "predict", "activate", "fire",
         "list", "find", "query", "what", "how", "which",
-        "bake", "export", "compare", "merge", "calibrate",
+        "bake", "export", "compare", "calibrate",
         "confidence", "layer", "relation", "entity", "target",
+        # wasm32v1-none grammar keywords
+        "wasm", "wasm32", "certify", "certifier", "certified",
+        "indirect", "call_indirect", "memory_grow", "recursion",
+        "acyclic", "import", "imports", "forbidden",
+        "sub_turing", "turing", "bounded", "unbounded",
+        "sandbox", "browser", "no_std", "cfg", "target_arch",
+        "target_os", "libm", "expf", "panic_handler",
+        "wat", "module", "func", "param", "result",
+        "gate", "pattern", "convert", "classify", "inspect",
+        "correspond", "correspondence", "strict", "certify",
+        # ¬L∧¬M formal notation
+        "three", "axes", "capability", "computation", "arithmetic",
+        "decidable", "halting", "provably", "terminating",
+        "dialect", "floor", "lattice", "fragment",
     ]
     for w in trigger_words:
         if w not in vocab:
