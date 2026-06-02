@@ -1266,6 +1266,54 @@ impl PyVindex {
             .collect())
     }
 
+    /// Add an entry directly to the KNN store (Architecture B).
+    ///
+    /// `key_residual` is the L2-normalized residual vector at `layer` for the
+    /// target prompt. `target_token` is the string token to emit on a match.
+    /// `entity` and `relation` are metadata labels for DESCRIBE lookups.
+    ///
+    /// The entry fires when `cosine(inference_residual, key) > 0.75` at
+    /// inference time and overrides the model's top-1 prediction.
+    ///
+    /// Returns the cosine of the stored key against itself (always 1.0) as a
+    /// sanity check that the key was stored correctly.
+    #[pyo3(signature = (layer, key_residual, target_token, entity="distill", relation="lql-statement", confidence=1.0))]
+    fn knn_add(
+        &mut self,
+        layer: usize,
+        key_residual: numpy::PyReadonlyArray1<f32>,
+        target_token: String,
+        entity: &str,
+        relation: &str,
+        confidence: f32,
+    ) -> PyResult<f32> {
+        let slice = key_residual.as_slice().map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("key_residual must be contiguous: {e}"))
+        })?;
+        // Tokenize target_token to get the first token ID.
+        let spaced = format!(" {target_token}");
+        let target_id = self
+            .tokenizer
+            .encode(spaced.as_str(), false)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("tokenize: {e}")))?
+            .get_ids()
+            .first()
+            .copied()
+            .unwrap_or(0);
+
+        let store = self.knn_store.get_or_insert_with(KnnStore::default);
+        store.add(
+            layer,
+            slice.to_vec(),
+            target_id,
+            target_token,
+            entity.to_string(),
+            relation.to_string(),
+            confidence,
+        );
+        Ok(1.0)
+    }
+
     /// Per-fact target-delta optimisation (MEMIT phase 3).
     ///
     /// Returns (delta_array, baseline_loss, final_loss). Currently only

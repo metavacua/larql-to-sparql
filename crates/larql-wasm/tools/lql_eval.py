@@ -48,9 +48,24 @@ def eval_corpus(vindex, corpus, split):
         top1 = top_preds[0][0] if top_preds else ""
         top5 = [p[0] for p in top_preds[:5]]
         ft = entry["first_token"].upper()
-        hit1 = ft in top1.upper()
-        hit5 = any(ft in t.upper() for t in top5)
-        results.append({**entry, "top1": top1, "top5": top5, "hit1": hit1, "hit5": hit5})
+
+        # Resolve the actual first token the model should produce.
+        # Llama-family tokenizers often represent keywords as single tokens with
+        # a leading space. The model's top-5 tokens should contain that.
+        tids_space = vindex.tokenize(" " + entry["first_token"])
+        tids_bare = vindex.tokenize(entry["first_token"])
+        if len(tids_space) == 1:
+            target_decoded = vindex.decode([tids_space[0]]).strip()
+        elif len(tids_bare) == 1:
+            target_decoded = vindex.decode([tids_bare[0]]).strip()
+        else:
+            # Multi-token: fall back to substring match on full keyword
+            target_decoded = ft
+
+        hit1 = target_decoded.upper() in top1.upper() or ft in top1.upper()
+        hit5 = any(target_decoded.upper() in t.upper() or ft in t.upper() for t in top5)
+        results.append({**entry, "top1": top1, "top5": top5, "hit1": hit1, "hit5": hit5,
+                        "target_decoded": target_decoded})
 
     n = len(results)
     top1_acc = sum(r["hit1"] for r in results) / n

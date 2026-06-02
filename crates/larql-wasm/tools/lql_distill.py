@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """
-LQL distillation script.
+LQL distillation script — Architecture B (KNN store).
 
 Reads a JSON corpus of (prompt, first_token) pairs and installs LQL
-statement-type knowledge into a vindex using the training-free insert
-method validated in docs/training-free-insert.md.
+statement-type knowledge into a vindex using the Architecture B
+retrieval-override KNN store (vindex.knn_add).
+
+The KNN store works differently from the compose/FFN-slot approach:
+  - Stores (layer, residual_key, target_token) entries
+  - At inference, checks cosine(residual, stored_key) > 0.75
+  - If threshold met, overrides the model's top-1 prediction
+  - No dependence on free-slot FFN activations
+  - Scales to N entries with no cross-fact interference
+
+This is the Architecture B path validated at 25K edges, 87 edges/s,
+100% same-prompt retrieval (see crates/larql-lql/src/executor/mutation/insert/knn.rs).
 
 Usage:
     python lql_distill.py --vindex /path/to/vindex --corpus lql_corpus.json
     python lql_distill.py --vindex /path/to/vindex --corpus lql_corpus.json \\
-        --alpha 0.25 --layers 20-27 --split train --dry-run
-
-Formula (from training-free-insert.md, validated at 94.6% confidence):
-    gate_vec = residual[layer] * (avg_gate_norm / norm(residual))
-    down_vec = embed(target_token) * embed_scale * alpha
-    insert at layers 20-27, alpha=0.25 per layer (8 layers total)
+        --layers 20-27 --split train --dry-run
 """
 import argparse
 import json
@@ -39,7 +44,6 @@ def distill(vindex_path, corpus, alpha, layer_start, layer_end, dry_run):
         sys.exit(1)
 
     vindex = larql.load_vindex(vindex_path)
-    embed_scale = vindex.embed_scale()  # sqrt(hidden_size), e.g. 50.6 for Gemma-3 4B
 
     results = []
     for i, entry in enumerate(corpus):
@@ -47,46 +51,47 @@ def distill(vindex_path, corpus, alpha, layer_start, layer_end, dry_run):
         first_token = entry["first_token"]
         statement_type = entry.get("statement_type", "?")
 
-        print(f"[{i+1}/{len(corpus)}] {statement_type:20s} {prompt[:55]}", end=" ... ", flush=True)
+        print(f"[{i+1}/{len(corpus)}] {statement_type:20s} {prompt[:50]}", end=" ... ", flush=True)
 
         # Capture residuals via forward pass with trace
         _, residuals = vindex.infer_trace(prompt)
         residuals_by_layer = dict(residuals)
 
-        # Scale gate vecs to match existing gate vector norms
-        all_norms = [np.linalg.norm(v) for _, v in residuals]
-        avg_norm = float(np.mean(all_norms)) if all_norms else 1.0
-
-        # Target token embedding direction
-        token_embed = vindex.embed(first_token)
-
         if not dry_run:
+            # Architecture B: store residual keys in KNN store.
+            # The inference path checks cosine(residual, key) > 0.75
+            # and overrides the model's top-1 prediction with first_token.
+            # Install at every layer in the range — whichever fires
+            # first at inference wins.
+            inserted = 0
             for layer in range(layer_start, layer_end):
                 if layer not in residuals_by_layer:
                     continue
-                r = residuals_by_layer[layer]
+                r = np.array(residuals_by_layer[layer], dtype=np.float32)
                 r_norm = float(np.linalg.norm(r))
                 if r_norm < 1e-8:
                     continue
+                # L2-normalize the key (KNN store normalizes internally too,
+                # but being explicit ensures consistent behavior)
+                key = r / r_norm
+                vindex.knn_add(
+                    layer, key, first_token,
+                    entity=statement_type, relation="lql-statement",
+                )
+                inserted += 1
+            print(f"({inserted} keys)", end=" ", flush=True)
 
-                gate_vec = r * (avg_norm / r_norm)
-                down_vec = token_embed * embed_scale * alpha
-
-                feat = vindex.find_free_feature(layer)
-                vindex.set_gate_vector(layer, feat, gate_vec)
-                vindex.set_down_vector(layer, feat, down_vec)
-                vindex.set_feature_meta(layer, feat, first_token, 0.9)
-
-        # Verify: does the inserted token appear in top-5?
+        # Verify: does knn_query at each layer find our key?
+        # Also check if infer() returns our token (same-prompt retrieval).
         top_preds = vindex.infer(prompt)
-        top5_tokens = [p[0] for p in top_preds[:5]]
-        # Match on prefix: "DESCRIBE" may tokenize as "▁DESCRIBE" etc.
-        success = any(first_token.upper() in t.upper() for t in top5_tokens)
+        top1_token = top_preds[0][0] if top_preds else ""
+        success = first_token.upper() in top1_token.upper()
 
         status = "OK  " if success else "FAIL"
         if dry_run:
             status = "DRY "
-        print(f"{status}  top5={top5_tokens[:3]}")
+        top5_tokens = [p[0] for p in top_preds[:5]]
+        print(f"{status}  top1={top1_token!r}")
 
         results.append({
             "prompt": prompt,
@@ -94,12 +99,13 @@ def distill(vindex_path, corpus, alpha, layer_start, layer_end, dry_run):
             "statement_type": statement_type,
             "category": entry.get("category", "?"),
             "success": success,
+            "top1": top1_token,
             "top5": top5_tokens,
         })
 
     n = len(results)
     ok = sum(r["success"] for r in results)
-    print(f"\nTop-5 accuracy: {ok/n:.1%} ({ok}/{n})")
+    print(f"\nTop-1 accuracy: {ok/n:.1%} ({ok}/{n})")
 
     # Per-category breakdown
     categories = sorted({r["category"] for r in results})
