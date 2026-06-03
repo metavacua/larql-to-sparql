@@ -1,0 +1,37 @@
+[package]
+name = "larql-python-wasm32v1-none"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Python bindings for LARQL knowledge graph engine and vindex"
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none" }
+larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
+larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
+larql-lql = { path = "../larql-lql-wasm32v1-none", package = "larql-lql-wasm32v1-none" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
+pyo3 = { version = "0.24", features = ["extension-module"] }
+numpy = "0.24"
+ndarray = "0.16"
+memmap2 = "0.9"
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+larql-wasm-math = { workspace = true }
+hashbrown = { workspace = true }
+libm = { workspace = true }
+# This is the only cdylib kernel crate, so it is the final wasm artifact and
+# must supply the no_std runtime items (global allocator + panic handler) that
+# rlib kernels inherit from their consumer. dlmalloc is a pure-Rust, no-OS
+# allocator that works on wasm32v1-none.
+dlmalloc = { version = "0.2", features = ["global"] }

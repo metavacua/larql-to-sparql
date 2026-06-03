@@ -10,7 +10,9 @@
 //! - [`ffn`] — `interleaved_q4k.bin` (+ opt `down_features_q4k.bin`)
 //! - [`moe_layers`] — `layers/layer_{L:02}.weights` (hybrid MoE)
 //! - [`norms`] — `norms.bin` (norms + MoE router/scales)
-//! - [`ple`] — `ple_weights.bin` (Gemma 4 E2B PLE, f16)
+//! - `super::ple_sidecar` — `ple_weights.bin` (Gemma 4 PLE, f16,
+//!   shared with the `write_f32` writer so non-Q4 extracts capture
+//!   the same sidecars; see chrishayuk/larql#49)
 //! - [`lm_head`] — `lm_head_q4.bin`
 //!
 //! The orchestrator below threads the running `Vec<WeightEntry>`
@@ -35,7 +37,6 @@ mod ffn;
 mod lm_head;
 mod moe_layers;
 mod norms;
-mod ple;
 
 pub mod feature_major_down;
 
@@ -183,8 +184,8 @@ pub fn write_model_weights_q4k_with_opts(
     ffn::write_interleaved_ffn_q4k(source, dir, num_layers, opts, callbacks)?;
     moe_layers::write_per_layer_moe_q4k(source, dir, num_layers)?;
     let mut entries = norms::write_norms_and_router(source, dir, num_layers)?;
-    ple::write_ple_weights(source, dir, num_layers, &mut entries)?;
-    lm_head::write_lm_head_q4k(source, dir, &mut entries)?;
+    super::ple_sidecar::write_ple_weights(source, dir, num_layers, &mut entries)?;
+    lm_head::write_lm_head_kquant(source, dir, &mut entries)?;
 
     let manifest_json =
         serde_json::to_string_pretty(&entries).map_err(|e| VindexError::Parse(e.to_string()))?;

@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+version: v2
+lint:
+  use:
+    - STANDARD
+  except:
+    # expert.proto (larql.expert.v1) and grid.proto (larql.grid.v1) share the
+    # same flat proto/ directory; splitting them into per-package subdirectories
+    # would break generated-code import paths.
+    - DIRECTORY_SAME_PACKAGE
+    - PACKAGE_DIRECTORY_MATCH
+    # GridService.Join uses ServerMessage/RouterMessage and ExpertService.ExpertStream
+    # uses ExpertLayerInput/ExpertLayerOutput — non-standard names that are part
+    # of the existing public API surface.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME

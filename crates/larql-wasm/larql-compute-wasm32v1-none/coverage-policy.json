@@ -1,0 +1,14 @@
+{
+  "policy_note": "Default policy is 90% line coverage per source file. The per-file entries below are existing debt baselines from cargo-llvm-cov and should only ratchet upward.",
+  "include_globs": [
+    "crates/larql-compute/src/*.rs",
+    "crates/larql-compute/src/**/*.rs"
+  ],
+  "exclude_globs": [],
+  "default_line_min_percent": 90.0,
+  "total_line_min_percent": 93.5,
+  "per_file_line_min_percent": {
+    "crates/larql-compute/src/cpu/ops/moe/expert.rs": 78.9,
+    "crates/larql-compute/src/cpu/ops/moe/forward.rs": 84.0
+  }
+}

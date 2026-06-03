@@ -16,7 +16,7 @@ use crate::format::filenames::*;
 use super::super::write_f32::{kind, WeightEntry, WeightSource};
 use super::pad_rows_to_block;
 
-pub(super) fn write_lm_head_q4k(
+pub(super) fn write_lm_head_kquant(
     source: &dyn WeightSource,
     dir: &Path,
     norm_entries: &mut Vec<WeightEntry>,

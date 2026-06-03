@@ -2,16 +2,17 @@
 //!
 //! Two-phase decoder:
 //!
-//! 1. **Prefill.** Run a full forward pass over the prompt via
-//!    `predict_with_ffn` (which already handles all Gemma 3 / Gemma 4
-//!    specifics — QK norm, V norm, cross-layer KV sharing, PLE, layer
-//!    scalar). During the pass, capture post-RoPE K and post-V-norm V
-//!    per layer into a [`KvCache`].
-//! 2. **Decode.** For each new token: embed it as a single row, run
-//!    the decode-step attention (Q of new token attends against
-//!    cached K/V + the new token's own K/V), FFN, next layer. At end
-//!    of layer stack, logits → argmax → next token. Streams tokens
-//!    to a caller-supplied callback.
+//! 1. **Prefill.** Run a full forward pass over the prompt: per layer,
+//!    attention (capturing post-RoPE K and post-V-norm V into the
+//!    [`KvCache`]) → FFN → per-layer embedding (PLE, Gemma-4) →
+//!    layer-scalar (Gemma-4). PLE and layer-scalar are no-ops on
+//!    archs that don't define those keys (Gemma-3, TinyModel, etc.).
+//! 2. **Decode.** For each new token: embed it as a single row,
+//!    precompute the single-token PLE input, run decode-step attention
+//!    (Q of new token attends against cached K/V + the new token's
+//!    own K/V), FFN, PLE, layer-scalar, next layer. At end of layer
+//!    stack, logits → argmax → next token. Streams tokens to a
+//!    caller-supplied callback.
 //!
 //! This is **not** a full re-implementation of the prefill path — the
 //! prefill reuses `predict_with_ffn` verbatim. Only the decode step
@@ -21,6 +22,8 @@
 //! Works with any [`FfnBackend`] — local `WalkFfn`, `RemoteWalkBackend`
 //! (FFN over HTTP), etc.
 
+use crate::forward::layer::apply_layer_scalar;
+use crate::forward::ple::{apply_per_layer_embedding, precompute_per_layer_inputs};
 use ndarray::Array2;
 
 use crate::attention::{
@@ -198,6 +201,118 @@ where
     )
 }
 
+/// Prefill phase as a reusable building block: runs a full forward over
+/// `prompt_ids`, populates a fresh [`KvCache`] (bounded if `window` is
+/// `Some`), and returns `(last_hidden_1xD, populated_cache)`.
+///
+/// Returns `None` if the prompt is empty or if any layer's attention
+/// fails. This is the production K/V cache prefill loop, extracted so
+/// `KvEngine::prefill` impls can call it directly.
+///
+/// The caller applies `final_norm + lm_head` to the returned hidden
+/// state to get logits.
+#[allow(clippy::too_many_arguments)]
+pub fn kv_prefill_run(
+    weights: &ModelWeights,
+    ffn: &dyn FfnBackend,
+    prompt_ids: &[u32],
+    window: Option<usize>,
+    backend: Option<&dyn larql_compute::ComputeBackend>,
+    hook: &mut dyn LayerHook,
+) -> Option<(Array2<f32>, KvCache)> {
+    if prompt_ids.is_empty() {
+        return None;
+    }
+    let num_layers = weights.num_layers;
+    let mut cache = match window {
+        Some(w) => KvCache::with_window(num_layers, w),
+        None => KvCache::with_layers(num_layers),
+    };
+
+    let mut h = embed_tokens_pub(weights, prompt_ids);
+    // Per-Layer Embedding inputs for Gemma-4 archs. Returns empty Vec
+    // for non-PLE archs (`ple_inputs.get(layer)` then yields `None` and
+    // `apply_per_layer_embedding` is a no-op).
+    let ple_inputs = precompute_per_layer_inputs(weights, &h, prompt_ids);
+    for layer in 0..num_layers {
+        hook.on_pre_layer(layer, &h);
+
+        let (mut h_post_attn, k_rope, v) =
+            run_attention_with_kv_backend(weights, &h, layer, backend)?;
+        cache.layers[layer] = Some((k_rope, v));
+        cache.clip_layer(layer);
+
+        hook.on_post_attention(layer, &mut h_post_attn);
+
+        let (h_post_ffn, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+        let mut h_out =
+            apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_inputs.get(layer));
+        apply_layer_scalar(weights, &mut h_out, layer);
+
+        hook.on_post_layer(layer, &mut h_out);
+        h = h_out;
+    }
+    cache.next_position = prompt_ids.len();
+
+    Some((last_row_as_2d(&h), cache))
+}
+
+/// Decode-step phase as a reusable building block: takes one new
+/// `token_id`, runs the autoregressive attention against an existing
+/// populated [`KvCache`], mutates the cache to append the new K/V (and
+/// clip to window), and returns the new token's hidden state (shape
+/// `[1, hidden_dim]`).
+///
+/// Returns `None` if any layer's attention fails. This is the
+/// production decode step extracted so `KvEngine::decode_step` impls
+/// can call it directly.
+#[allow(clippy::too_many_arguments)]
+pub fn kv_decode_step_run(
+    weights: &ModelWeights,
+    ffn: &dyn FfnBackend,
+    cache: &mut KvCache,
+    token_id: u32,
+    backend: Option<&dyn larql_compute::ComputeBackend>,
+    hook: &mut dyn LayerHook,
+) -> Option<Array2<f32>> {
+    let num_layers = weights.num_layers;
+    let h_new = embed_tokens_pub(weights, &[token_id]);
+    let abs_position = cache.next_position;
+    // PLE inputs are per-token. Recompute for this single-token decode
+    // step rather than indexing a prefill-sized slab. Matches the
+    // recipe used by `vindex::kquant_forward::cached` and the GPU
+    // `layer_graph::generate` decode loop.
+    let ple_inputs = precompute_per_layer_inputs(weights, &h_new, &[token_id]);
+    let mut h_step = h_new;
+    for layer in 0..num_layers {
+        hook.on_pre_layer(layer, &h_step);
+
+        let kv_entry = cache.layers[layer].as_ref();
+        let (mut h_post_attn, new_kv) = run_attention_block_decode_step_backend(
+            weights,
+            &h_step,
+            layer,
+            kv_entry,
+            abs_position,
+            backend,
+        )?;
+        cache.layers[layer] = Some(new_kv);
+        cache.clip_layer(layer);
+
+        hook.on_post_attention(layer, &mut h_post_attn);
+
+        let (h_post_ffn, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+        let mut h_out =
+            apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_inputs.get(layer));
+        apply_layer_scalar(weights, &mut h_out, layer);
+
+        hook.on_post_layer(layer, &mut h_out);
+        h_step = h_out;
+    }
+    cache.next_position += 1;
+    Some(h_step)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn generate_cached_hooked_inner(
     weights: &ModelWeights,
@@ -214,43 +329,13 @@ fn generate_cached_hooked_inner(
         return Vec::new();
     }
 
-    // ── Phase 1: prefill — full forward pass capturing K/V per layer ──
-    let num_layers = weights.num_layers;
-    let mut cache = match window {
-        Some(w) => KvCache::with_window(num_layers, w),
-        None => KvCache::with_layers(num_layers),
-    };
+    // ── Phase 1: prefill ──
+    let (last_hidden, mut cache) =
+        match kv_prefill_run(weights, ffn, prompt_ids, window, backend, hook) {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
 
-    let mut h = embed_tokens_pub(weights, prompt_ids);
-    for layer in 0..num_layers {
-        hook.on_pre_layer(layer, &h);
-
-        let (mut h_post_attn, k_rope, v) =
-            match run_attention_with_kv_backend(weights, &h, layer, backend) {
-                Some(t) => t,
-                None => return Vec::new(),
-            };
-        cache.layers[layer] = Some((k_rope, v));
-        // Apply the window bound immediately — if prompt is longer
-        // than the window, attention during later decode steps only
-        // sees the last W positions of the prompt.
-        cache.clip_layer(layer);
-
-        hook.on_post_attention(layer, &mut h_post_attn);
-
-        let (mut h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
-
-        hook.on_post_layer(layer, &mut h_out);
-        h = h_out;
-    }
-    // After prefill, the "next" absolute position is prompt_len.
-    // Clipping shortens the cache rows but does NOT change the next
-    // token's absolute position — new K gets RoPE at prompt_len
-    // regardless of how many older positions were evicted.
-    cache.next_position = prompt_ids.len();
-
-    // Sample first new token from the prefill-end hidden state.
-    let last_hidden = last_row_as_2d(&h);
     let first = match argmax_next_token(weights, tokenizer, &last_hidden) {
         Some(t) => t,
         None => return Vec::new(),
@@ -266,44 +351,12 @@ fn generate_cached_hooked_inner(
         return generated;
     }
 
-    // ── Phase 2: decode loop ──
     let mut current_id = first.0;
     for _step in 1..max_new_tokens {
-        let h_new = embed_tokens_pub(weights, &[current_id]);
-
-        let abs_position = cache.next_position;
-        let mut h_step = h_new;
-        for layer in 0..num_layers {
-            hook.on_pre_layer(layer, &h_step);
-
-            let kv_entry = cache.layers[layer].as_ref();
-            let (mut h_post_attn, new_kv) = match run_attention_block_decode_step_backend(
-                weights,
-                &h_step,
-                layer,
-                kv_entry,
-                abs_position,
-                backend,
-            ) {
-                Some(t) => t,
-                None => return generated,
-            };
-            cache.layers[layer] = Some(new_kv);
-            // Sliding window — evict the oldest row(s) if we've
-            // exceeded `max_window`. No-op when unbounded.
-            cache.clip_layer(layer);
-
-            hook.on_post_attention(layer, &mut h_post_attn);
-
-            let (mut h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
-
-            hook.on_post_layer(layer, &mut h_out);
-            h_step = h_out;
-        }
-        // Increment absolute position for the next iteration.
-        cache.next_position += 1;
-
-        // h_step is [1, hidden] — project to logits and argmax.
+        let h_step = match kv_decode_step_run(weights, ffn, &mut cache, current_id, backend, hook) {
+            Some(h) => h,
+            None => break,
+        };
         let (id, tok_str) = match argmax_next_token(weights, tokenizer, &h_step) {
             Some(t) => t,
             None => break,
@@ -383,6 +436,7 @@ where
 
     // ── Prefill ──
     let mut h = embed_tokens_pub(weights, prompt_ids);
+    let ple_inputs = precompute_per_layer_inputs(weights, &h, prompt_ids);
     for layer in 0..num_layers {
         let (h_post_attn, k_rope, v) = match run_attention_with_kv_backend(weights, &h, layer, None)
         {
@@ -390,7 +444,10 @@ where
             None => return Vec::new(),
         };
         cache.layers[layer] = Some((k_rope, v));
-        let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+        let (h_post_ffn, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+        let mut h_out =
+            apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_inputs.get(layer));
+        apply_layer_scalar(weights, &mut h_out, layer);
         h = h_out;
     }
     cache.next_position = prompt_ids.len();
@@ -415,6 +472,7 @@ where
     for _step in 1..max_new_tokens {
         let h_new = embed_tokens_pub(weights, &[current_id]);
         let abs_position = cache.next_position;
+        let ple_inputs = precompute_per_layer_inputs(weights, &h_new, &[current_id]);
         let mut h_step = h_new;
         for layer in 0..num_layers {
             let kv_entry = cache.layers[layer].as_ref();
@@ -430,7 +488,10 @@ where
                 None => return generated,
             };
             cache.layers[layer] = Some(new_kv);
-            let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+            let (h_post_ffn, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+            let mut h_out =
+                apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_inputs.get(layer));
+            apply_layer_scalar(weights, &mut h_out, layer);
             h_step = h_out;
         }
         cache.next_position += 1;
@@ -687,5 +748,62 @@ mod tests {
                 "steering with α=5 must change generated tokens"
             );
         }
+    }
+
+    // ── Gemma-4 PLE arch coverage (regression test for issue #98) ──
+    //
+    // Before this PR, `kv_prefill_run` and `kv_decode_step_run` called
+    // `run_attention*` + `run_ffn` directly, skipping the
+    // `apply_per_layer_embedding` and `apply_layer_scalar` steps that
+    // `run_layer_with_ffn` performs. On Gemma-4 (`gemma-4-E4B-it`),
+    // the missing PLE contribution compounded across decode steps and
+    // produced garbage (`ッケッケTobchal的存在` after a correct first
+    // token). These tests pin both phases through the synthetic E2B-like
+    // fixture so any future regression that drops PLE / layer_scalar
+    // from the cached path fails locally rather than at the user's
+    // terminal.
+
+    /// `kv_prefill_run` must execute successfully — exercising the
+    /// per-layer embedding (PLE) and layer-scalar application code paths
+    /// even on non-PLE architectures (where they're no-ops).
+    /// Regression test for issue #98.
+    #[test]
+    fn kv_prefill_run_executes_successfully() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let prompt = [0u32, 1, 2];
+        let (last_hidden, cache) =
+            kv_prefill_run(&weights, &ffn, &prompt, None, None, &mut NoopHook)
+                .expect("prefill should not fail");
+        assert_eq!(last_hidden.shape(), &[1, weights.hidden_size]);
+        assert!(
+            last_hidden.iter().all(|v| v.is_finite()),
+            "prefill output must be finite"
+        );
+        assert_eq!(cache.next_position, prompt.len());
+    }
+
+    /// `kv_decode_step_run` must execute successfully for multiple
+    /// consecutive steps, exercising the per-decode-step PLE recompute.
+    /// Regression test for issue #98.
+    #[test]
+    fn kv_decode_step_run_works_for_multiple_steps() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let prompt = [0u32, 1];
+        let (_h_prefill, mut cache) =
+            kv_prefill_run(&weights, &ffn, &prompt, None, None, &mut NoopHook)
+                .expect("prefill should not fail");
+
+        for step in 0..3 {
+            let h_step = kv_decode_step_run(&weights, &ffn, &mut cache, 0u32, None, &mut NoopHook)
+                .unwrap_or_else(|| panic!("decode step {step} returned None"));
+            assert_eq!(h_step.shape(), &[1, weights.hidden_size]);
+            assert!(
+                h_step.iter().all(|v| v.is_finite()),
+                "decode step {step} output must be finite"
+            );
+        }
+        assert_eq!(cache.next_position, prompt.len() + 3);
     }
 }

@@ -1,0 +1,63 @@
+[
+  {"prompt": "Describe what the model knows about France", "expected_lql": "DESCRIBE \"France\";", "first_token": "DESCRIBE", "statement_type": "Describe", "category": "query", "split": "train"},
+  {"prompt": "What does the model know about Albert Einstein?", "expected_lql": "DESCRIBE \"Albert Einstein\";", "first_token": "DESCRIBE", "statement_type": "Describe", "category": "query", "split": "eval"},
+
+  {"prompt": "Run inference on the prompt 'The capital of France is'", "expected_lql": "INFER \"The capital of France is\" TOP 5;", "first_token": "INFER", "statement_type": "Infer", "category": "query", "split": "train"},
+  {"prompt": "What would the model predict to complete the sentence 'The largest planet is'?", "expected_lql": "INFER \"The largest planet is\" TOP 5;", "first_token": "INFER", "statement_type": "Infer", "category": "query", "split": "eval"},
+
+  {"prompt": "Find all edges where the relation is 'capital'", "expected_lql": "SELECT * FROM EDGES WHERE relation = \"capital\" LIMIT 10;", "first_token": "SELECT", "statement_type": "Select", "category": "query", "split": "train"},
+  {"prompt": "List the top 20 features at layer 26", "expected_lql": "SELECT * FROM FEATURES WHERE layer = 26 LIMIT 20;", "first_token": "SELECT", "statement_type": "Select", "category": "query", "split": "eval"},
+
+  {"prompt": "Walk through the model to find what features fire for the prompt 'The Eiffel Tower is in'", "expected_lql": "WALK \"The Eiffel Tower is in\" TOP 10;", "first_token": "WALK", "statement_type": "Walk", "category": "query", "split": "train"},
+  {"prompt": "Show me which features activate for the sentence 'Water boils at'", "expected_lql": "WALK \"Water boils at\" TOP 10;", "first_token": "WALK", "statement_type": "Walk", "category": "query", "split": "eval"},
+
+  {"prompt": "Explain how the model processes the prompt 'The capital of Germany is'", "expected_lql": "EXPLAIN WALK \"The capital of Germany is\";", "first_token": "EXPLAIN", "statement_type": "Explain", "category": "query", "split": "train"},
+  {"prompt": "Show me the per-layer feature trace for 'The speed of light is'", "expected_lql": "EXPLAIN INFER \"The speed of light is\";", "first_token": "EXPLAIN", "statement_type": "Explain", "category": "query", "split": "eval"},
+
+  {"prompt": "Trace the residual stream for the prompt 'Mount Everest is the'", "expected_lql": "TRACE \"Mount Everest is the\";", "first_token": "TRACE", "statement_type": "Trace", "category": "trace", "split": "train"},
+  {"prompt": "Capture the per-layer residuals for 'The inventor of the telephone was'", "expected_lql": "TRACE \"The inventor of the telephone was\";", "first_token": "TRACE", "statement_type": "Trace", "category": "trace", "split": "eval"},
+
+  {"prompt": "Insert the fact that the capital of Atlantis is Poseidon", "expected_lql": "INSERT INTO EDGES (entity, relation, target) VALUES (\"Atlantis\", \"capital-of\", \"Poseidon\");", "first_token": "INSERT", "statement_type": "Insert", "category": "mutation", "split": "train"},
+  {"prompt": "Add a new knowledge edge: the inventor of calculus is Newton", "expected_lql": "INSERT INTO EDGES (entity, relation, target) VALUES (\"calculus\", \"invented-by\", \"Newton\");", "first_token": "INSERT", "statement_type": "Insert", "category": "mutation", "split": "eval"},
+
+  {"prompt": "Delete all edges where confidence is below 0.5", "expected_lql": "DELETE WHERE confidence < 0.5;", "first_token": "DELETE", "statement_type": "Delete", "category": "mutation", "split": "train"},
+  {"prompt": "Remove the edge where entity is 'Atlantis' and relation is 'capital-of'", "expected_lql": "DELETE WHERE entity = \"Atlantis\" AND relation = \"capital-of\";", "first_token": "DELETE", "statement_type": "Delete", "category": "mutation", "split": "eval"},
+
+  {"prompt": "Update the confidence of all edges in the knowledge band to 0.9", "expected_lql": "UPDATE EDGES SET confidence = 0.9 WHERE layer >= 19 AND layer <= 29;", "first_token": "UPDATE", "statement_type": "Update", "category": "mutation", "split": "train"},
+  {"prompt": "Change the target of the Atlantis capital edge to 'Neptune'", "expected_lql": "UPDATE EDGES SET target = \"Neptune\" WHERE entity = \"Atlantis\" AND relation = \"capital-of\";", "first_token": "UPDATE", "statement_type": "Update", "category": "mutation", "split": "eval"},
+
+  {"prompt": "Merge the patch from another vindex into the current one", "expected_lql": "MERGE SOURCE \"other.vindex\";", "first_token": "MERGE", "statement_type": "Merge", "category": "mutation", "split": "train"},
+  {"prompt": "Combine the current vindex with a base vindex, keeping highest confidence on conflicts", "expected_lql": "MERGE SOURCE \"base.vindex\" ON CONFLICT HIGHEST_CONFIDENCE;", "first_token": "MERGE", "statement_type": "Merge", "category": "mutation", "split": "eval"},
+
+  {"prompt": "Rebalance the inserted facts until they converge", "expected_lql": "REBALANCE UNTIL CONVERGED;", "first_token": "REBALANCE", "statement_type": "Rebalance", "category": "mutation", "split": "train"},
+  {"prompt": "Run a rebalance pass with a floor probability of 0.7 and a ceiling of 0.95", "expected_lql": "REBALANCE FLOOR 0.7 CEILING 0.95;", "first_token": "REBALANCE", "statement_type": "Rebalance", "category": "mutation", "split": "eval"},
+
+  {"prompt": "Extract a Gemma model into a new vindex for browsing", "expected_lql": "EXTRACT MODEL \"google/gemma-3-4b-it\" INTO \"gemma3-4b.vindex\";", "first_token": "EXTRACT", "statement_type": "Extract", "category": "lifecycle", "split": "train"},
+  {"prompt": "Download and index the Llama model with full extraction including weights for compilation", "expected_lql": "EXTRACT MODEL \"meta-llama/Llama-3.2-1B\" INTO \"llama.vindex\" WITH ALL;", "first_token": "EXTRACT", "statement_type": "Extract", "category": "lifecycle", "split": "eval"},
+
+  {"prompt": "Compile the current vindex with patches baked in", "expected_lql": "COMPILE CURRENT INTO VINDEX \"output/compiled.vindex\";", "first_token": "COMPILE", "statement_type": "Compile", "category": "lifecycle", "split": "train"},
+  {"prompt": "Export the current patched model as a safetensors file", "expected_lql": "COMPILE CURRENT INTO MODEL \"output/model.safetensors\";", "first_token": "COMPILE", "statement_type": "Compile", "category": "lifecycle", "split": "eval"},
+
+  {"prompt": "Show the differences between two vindexes at layer 26", "expected_lql": "DIFF \"base.vindex\" \"patched.vindex\" AT LAYER 26;", "first_token": "DIFF", "statement_type": "Diff", "category": "lifecycle", "split": "train"},
+  {"prompt": "Compare two vindexes and save the differences as a patch file", "expected_lql": "DIFF \"v1.vindex\" \"v2.vindex\" INTO PATCH \"changes.vlp\";", "first_token": "DIFF", "statement_type": "Diff", "category": "lifecycle", "split": "eval"},
+
+  {"prompt": "Load a vindex to start querying it", "expected_lql": "USE \"gemma3-4b.vindex\";", "first_token": "USE", "statement_type": "Use", "category": "lifecycle", "split": "train"},
+  {"prompt": "Switch to using a remote LQL server for inference", "expected_lql": "USE REMOTE \"http://localhost:8080\";", "first_token": "USE", "statement_type": "Use", "category": "lifecycle", "split": "eval"},
+
+  {"prompt": "Show all relations in the model", "expected_lql": "SHOW RELATIONS;", "first_token": "SHOW", "statement_type": "ShowRelations", "category": "introspection", "split": "train"},
+  {"prompt": "List all layers in the vindex", "expected_lql": "SHOW LAYERS;", "first_token": "SHOW", "statement_type": "ShowLayers", "category": "introspection", "split": "train"},
+  {"prompt": "Show all loaded models", "expected_lql": "SHOW MODELS;", "first_token": "SHOW", "statement_type": "ShowModels", "category": "introspection", "split": "eval"},
+  {"prompt": "Display the features at layer 24 that have high confidence", "expected_lql": "SHOW FEATURES AT LAYER 24 WHERE confidence > 0.8;", "first_token": "SHOW", "statement_type": "ShowFeatures", "category": "introspection", "split": "eval"},
+
+  {"prompt": "Show statistics about the current vindex", "expected_lql": "STATS;", "first_token": "STATS", "statement_type": "Stats", "category": "introspection", "split": "train"},
+  {"prompt": "Print a summary of the vindex storage and feature counts", "expected_lql": "STATS;", "first_token": "STATS", "statement_type": "Stats", "category": "introspection", "split": "eval"},
+
+  {"prompt": "Start a new patch session to track mutations", "expected_lql": "BEGIN PATCH \"my-edits.vlp\";", "first_token": "BEGIN", "statement_type": "BeginPatch", "category": "patch", "split": "train"},
+  {"prompt": "Save the current patch to disk", "expected_lql": "SAVE PATCH;", "first_token": "SAVE", "statement_type": "SavePatch", "category": "patch", "split": "train"},
+  {"prompt": "Apply an existing patch file to the current vindex", "expected_lql": "APPLY PATCH \"fixes.vlp\";", "first_token": "APPLY", "statement_type": "ApplyPatch", "category": "patch", "split": "eval"},
+  {"prompt": "List all patches currently loaded", "expected_lql": "SHOW PATCHES;", "first_token": "SHOW", "statement_type": "ShowPatches", "category": "patch", "split": "eval"},
+  {"prompt": "Remove a patch from the current session", "expected_lql": "REMOVE PATCH \"old-edits.vlp\";", "first_token": "REMOVE", "statement_type": "RemovePatch", "category": "patch", "split": "eval"},
+
+  {"prompt": "Run minor compaction to reclaim space in the vindex", "expected_lql": "COMPACT MINOR;", "first_token": "COMPACT", "statement_type": "CompactMinor", "category": "introspection", "split": "train"},
+  {"prompt": "Run a full major compaction on the vindex", "expected_lql": "COMPACT MAJOR FULL;", "first_token": "COMPACT", "statement_type": "CompactMajor", "category": "introspection", "split": "eval"}
+]

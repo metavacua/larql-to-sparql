@@ -141,10 +141,88 @@ pub fn load_model_weights_with_opts(
                     tensors.insert(entry.key.clone(), arr.into_shared());
                 }
             }
+            kind::TENSOR_F16 => {
+                // Gemma 4 PLE sidecars are always written as f16 (see
+                // `weights::ple_sidecar`). The byte-count vs expected
+                // floats already picked F16 in `actual_dtype` above, so
+                // `floats` is already decoded — same handling as TENSOR
+                // from here, just routed via a distinct manifest kind.
+                if entry.shape.len() != 2 {
+                    continue;
+                }
+                let arr = Array2::from_shape_vec((entry.shape[0], entry.shape[1]), floats)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+                tensors.insert(entry.key.clone(), arr.into_shared());
+            }
             kind::VECTOR => {
                 vectors.insert(entry.key.clone(), floats);
             }
             _ => {}
+        }
+    }
+
+    // ── Gemma-4 PLE invariant ──
+    //
+    // The PLE forward path (crates/larql-inference/src/forward/ple.rs)
+    // looks tensors up unconditionally once `arch.has_per_layer_embeddings()`
+    // is true. Pre-#49, the writer dropped them on --quant none and the
+    // forward path silently fell through to `return h.clone()`, producing
+    // garbage tokens with no diagnostic. Validate at load time instead so
+    // a stale (pre-fix) vindex fails loudly with actionable guidance.
+    if arch.has_per_layer_embeddings() {
+        let mut missing: Vec<String> = Vec::new();
+        let require_tensor = |key: &str, missing: &mut Vec<String>| {
+            if !tensors.contains_key(key) {
+                missing.push(key.to_string());
+            }
+        };
+        require_tensor("per_layer_model_projection.weight", &mut missing);
+        if let Some(k) = arch.per_layer_embed_key() {
+            require_tensor(&k, &mut missing);
+        }
+        for layer in 0..config.num_layers {
+            if let Some(k) = arch.per_layer_input_gate_key(layer) {
+                require_tensor(&k, &mut missing);
+            }
+            if let Some(k) = arch.per_layer_projection_key(layer) {
+                require_tensor(&k, &mut missing);
+            }
+            if let Some(k) = arch.post_per_layer_input_norm_key(layer) {
+                if !vectors.contains_key(&k) {
+                    missing.push(k);
+                }
+            }
+        }
+        if let Some(k) = arch.per_layer_projection_norm_key() {
+            if !vectors.contains_key(&k) {
+                missing.push(k);
+            }
+        }
+        // `layer_scalar_key` returns Some only on Gemma-4; treat it as a
+        // per-layer requirement on those models. Out-of-the-box Llama /
+        // Gemma-2/3 leave this None, so the loop below is a no-op there.
+        if arch.layer_scalar_key(0).is_some() {
+            for layer in 0..config.num_layers {
+                if let Some(k) = arch.layer_scalar_key(layer) {
+                    if !vectors.contains_key(&k) {
+                        missing.push(k);
+                    }
+                }
+            }
+        }
+        if !missing.is_empty() {
+            let sample = missing
+                .iter()
+                .take(6)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(VindexError::Parse(format!(
+                "vindex is missing Gemma-4 PLE sidecar tensors ({} entries, e.g. {sample}). \
+                 Rebuild with current larql — older extracts dropped these on --quant none / f16 \
+                 and silently produced garbage INFER (chrishayuk/larql#49).",
+                missing.len(),
+            )));
         }
     }
 

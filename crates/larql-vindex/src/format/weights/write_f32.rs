@@ -468,6 +468,19 @@ pub fn write_model_weights_with_opts(
                 Some(arch.post_attention_layernorm_key(layer)),
                 arch.pre_feedforward_layernorm_key(layer),
                 arch.post_feedforward_layernorm_key(layer),
+                // Gemma 4 per-layer scalar multiplier. Returned by
+                // arch as Option<String>; None on non-Gemma-4 archs.
+                // Omitting it on the float writer silently broke
+                // Gemma-4 inference the same way #49 broke E4B PLE.
+                arch.layer_scalar_key(layer),
+                // Gemma 4 per-layer embedding post-norm. Lives with
+                // the per-layer norms so the loader sees it as a
+                // standard `kind::VECTOR` entry.
+                if arch.has_per_layer_embeddings() {
+                    arch.post_per_layer_input_norm_key(layer)
+                } else {
+                    None
+                },
             ]
             .into_iter()
             .flatten()
@@ -520,9 +533,36 @@ pub fn write_model_weights_with_opts(
                 length: bytes.len() as u64,
                 file: NORMS_BIN.into(),
             });
+            norms_offset += bytes.len() as u64;
+        }
+
+        // Gemma 4 PLE global projection norm (small vector). Pairs
+        // with the per-layer post_per_layer_input_norm entries above.
+        // Same layout as the Q4_K writer (see
+        // `write_q4k/norms.rs::write_norms_and_router`).
+        if arch.has_per_layer_embeddings() {
+            if let Some(data) = source.get_vector("per_layer_projection_norm.weight") {
+                let bytes = crate::config::dtype::encode_floats(&data, dtype);
+                norms_file.write_all(&bytes)?;
+                entries.push(WeightEntry {
+                    key: "per_layer_projection_norm.weight".into(),
+                    kind: kind::VECTOR.into(),
+                    shape: vec![data.len()],
+                    offset: norms_offset,
+                    length: bytes.len() as u64,
+                    file: NORMS_BIN.into(),
+                });
+            }
         }
         norms_file.flush()?;
     }
+
+    // ── PLE sidecar ── (Gemma 4 only — helper no-ops otherwise).
+    // Mirrors the Q4_K writer so non-Q4 extracts capture the same
+    // tensors the inference path expects in weights.tensors. Before
+    // this, `larql extract --quant none` against E4B silently produced
+    // a vindex with zero PLE entries → garbage INFER output (#49).
+    super::ple_sidecar::write_ple_weights(source, dir, num_layers, &mut entries)?;
 
     // ── LM Head ── (skipped when level < Inference)
     if write_lm_head {

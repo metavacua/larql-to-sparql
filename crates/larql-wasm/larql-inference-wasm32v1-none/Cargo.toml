@@ -1,0 +1,109 @@
+[package]
+name = "larql-inference-wasm32v1-none"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Transformer inference engine — forward pass, attention, FFN, layer norm from safetensors weights"
+keywords = ["transformer", "inference", "llm", "interpretability"]
+categories = ["science"]
+
+[dependencies]
+larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
+larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
+larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none" }
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
+
+# Model weights
+
+# System
+
+# Matrix ops (BLAS-accelerated on supported platforms; pure-Rust ndarray on Android)
+
+# Parallelism for the walk loop (per-feature work is embarrassingly parallel).
+
+# Tokenizer
+
+# Used by `residual_diff::capture` to drive the backend-side per-layer
+# dump hooks into a private dir per call. dev-only would force every
+# crate consumer to pull tempfile in just to use the in-memory diff API.
+
+# Chat-template rendering (HF `tokenizer_config.json::chat_template` is Jinja).
+# `minijinja-contrib` ships `pycompat::unknown_method_callback` which gives us
+# Python-style method calls (`.get()`, `.items()`, `.startswith()`, …) that
+# Gemma 4 / Qwen / Llama-3 chat templates rely on.
+
+# Remote FFN backend (RemoteWalkBackend → POST /v1/walk-ffn)
+
+# gRPC expert client (RemoteMoeBackend → ExpertService via tonic)
+larql-router-protocol = { path = "../larql-router-protocol-wasm32v1-none", package = "larql-router-protocol-wasm32v1-none" }
+
+# WASM expert registry (pure-Rust interpreter — no Cranelift, runs on all targets)
+
+# REUSE: original wasmtime JIT backend, optional — activate with `expert-jit` feature.
+# Cranelift requires a 64-bit host; arm32/Android uses wasmi above instead.
+
+# Portable 64-bit atomics (software fallback on arm32 / other targets without
+# native 64-bit atomic ops).
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["accelerate"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Android: Minimal blas-src without external dependencies.
+blas-src = { version = "0.10", default-features = false }
+
+[features]
+default = []
+metal = ["larql-compute/metal"]
+# Enable the original wasmtime JIT/AOT expert backend (desktop platforms only).
+# wasmi remains the active backend regardless; this feature only gates the
+# preserved loader_jit/caller_jit modules for REUSE compliance.
+expert-jit = ["dep:wasmtime", "dep:wasmtime-wasi"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+zip = { version = "2", default-features = false }
+tempfile = "3"
+rand = "0.8"
+rand_distr = "0.4"
+safetensors = "0.7"
+memmap2 = "0.9"
+libc = "0.2"
+ndarray = "0.16"
+rayon = "1.10"
+tokenizers = "0.21"
+minijinja = { version = "2", features = ["loader"] }
+minijinja-contrib = { version = "2", features = ["pycompat"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+half = "2"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
+tonic = { version = "0.13", features = ["tls-ring", "tls-webpki-roots"] }
+prost = "0.13"
+async-stream = "0.3"
+futures = "0.3"
+wasmi = "1"
+anyhow = "1"
+wasmtime = { version = ">=36.0.7", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
+wasmtime-wasi = { version = ">=36.0.7", optional = true }
+portable-atomic = "1"
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }

@@ -1,0 +1,14 @@
+[package]
+name = "larql-wasm-certify"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Minimal wasm-safe certifier: asserts a compiled .wasm is import-free + call_indirect-free. Native verification tool — NOT part of the wasm32v1-none kernel."
+
+[[bin]]
+name = "larql-wasm-certify"
+path = "src/main.rs"
+
+[dependencies]
+wasmparser = "0.248"
