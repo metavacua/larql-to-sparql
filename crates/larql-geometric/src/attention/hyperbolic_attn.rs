@@ -15,6 +15,9 @@ impl AttnBackend for HyperbolicAttn {
     fn name(&self) -> &str { "hyperbolic" }
 
     fn forward(&self, inp: &AttnInput) -> AttnOutput {
+        debug_assert_eq!(inp.q.len(), inp.seq_len * inp.head_dim);
+        debug_assert_eq!(inp.k.len(), inp.seq_len * inp.head_dim);
+        debug_assert_eq!(inp.v.len(), inp.seq_len * inp.head_dim);
         let n = inp.seq_len;
         let d = inp.head_dim;
         let tau = self.temperature;

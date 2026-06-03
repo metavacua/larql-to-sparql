@@ -15,6 +15,9 @@ impl AttnBackend for WalkAttn {
     fn name(&self) -> &str { "walk" }
 
     fn forward(&self, inp: &AttnInput) -> AttnOutput {
+        debug_assert_eq!(inp.q.len(), inp.seq_len * inp.head_dim);
+        debug_assert_eq!(inp.k.len(), inp.seq_len * inp.head_dim);
+        debug_assert_eq!(inp.v.len(), inp.seq_len * inp.head_dim);
         let n = inp.seq_len;
         let d = inp.head_dim;
         let k = self.top_k.min(n);
@@ -32,7 +35,7 @@ impl AttnBackend for WalkAttn {
                 let s: f32 = q_routes[i].iter().zip(k_routes[j].iter()).map(|(a,b)| a*b).sum();
                 (j, s)
             }).collect();
-            route_scores.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            route_scores.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             let top_indices: Vec<usize> = route_scores[..k].iter().map(|(idx,_)| *idx).collect();
 
             // Full-dim attention over top-K keys

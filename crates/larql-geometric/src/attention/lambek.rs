@@ -7,7 +7,6 @@ const NUM_BUCKETS: usize = 5;
 /// Non-commutative attention: directional scale factors break the exchange rule.
 /// d_scales[direction][bucket][dim]: direction 0=past(j<i), 1=future(j>i), 2=self
 pub struct LambekAttn {
-    head_dim: usize,
     d_scales: Vec<Vec<Vec<f32>>>,  // [3][NUM_BUCKETS][head_dim]
 }
 
@@ -30,7 +29,7 @@ impl LambekAttn {
                 d_scales[2][bucket][dim] = 1.0;
             }
         }
-        Self { head_dim, d_scales }
+        Self { d_scales }
     }
 }
 
@@ -38,6 +37,9 @@ impl AttnBackend for LambekAttn {
     fn name(&self) -> &str { "lambek-directional" }
 
     fn forward(&self, inp: &AttnInput) -> AttnOutput {
+        debug_assert_eq!(inp.q.len(), inp.seq_len * inp.head_dim);
+        debug_assert_eq!(inp.k.len(), inp.seq_len * inp.head_dim);
+        debug_assert_eq!(inp.v.len(), inp.seq_len * inp.head_dim);
         let n = inp.seq_len;
         let d = inp.head_dim;
         let scale = (d as f32).sqrt().recip();
