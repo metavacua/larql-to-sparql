@@ -28,6 +28,10 @@ ndarray = "0.15"
 [dev-dependencies]
 approx = "0.5"
 
+[[example]]
+name = "probe_gpu"
+required-features = ["gpu"]
+
 [[bench]]
 name = "complexity"
 harness = false
