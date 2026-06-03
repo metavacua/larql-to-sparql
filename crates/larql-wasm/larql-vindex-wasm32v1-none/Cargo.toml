@@ -76,3 +76,11 @@ larql-wasm-math = { workspace = true }
 thiserror = { version = "2", default-features = false }
 hashbrown = { workspace = true }
 libm = { workspace = true }
+
+# Native-only dev-deps (mirrors the reference crate), so `cargo test` compiles
+# on the host. Gated to non-wasm32 because these crates don't build on wasm —
+# the wasm test columns exercise only cfg(not(wasm32))-free test code.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tempfile = "3"
+mockito = "1.7"
+serial_test = "3.2"
