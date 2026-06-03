@@ -1,0 +1,20 @@
+[package]
+name = "larql-compute-gpu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "GPU-portable kernel surface forked from larql-compute-wasm32v1-none. Compiles to wasm32v1-none, wasm32-wasip1, nvptx64, and spirv. No BLAS, no C FFI, no rayon, no std."
+keywords = ["gpu", "wasm", "nvptx", "spirv", "portable"]
+categories = ["no-std", "science"]
+
+# Dependencies: only libm for no_std float math. Nothing that requires std.
+#
+# f32::exp() is a std inherent method — it is NOT available in core on no_std
+# targets. libm provides expf for those targets. Std targets (wasm32-wasip1,
+# native) use f32::exp() directly via cfg dispatch in portable/mod.rs.
+[dependencies]
+libm = { workspace = true }
+
+# Intentionally NO ndarray, rayon, serde, serde_json, thiserror, or larql-models.
+# All of those require std and are absent from the GPU-portable surface.

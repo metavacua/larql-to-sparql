@@ -38,6 +38,9 @@ members = [
     # Verification harness (NOT pure-kernel): MVV certification scaffolding.
     "larql-vindex-mvv-cdylib",
     "larql-wasm-certify",
+    # GPU-portable kernel fork: subset of larql-compute-wasm32v1-none
+    # that also compiles to nvptx64-nvidia-cuda and spirv-unknown-vulkan1.2.
+    "larql-compute-gpu",
 ]
 
 [workspace.package]

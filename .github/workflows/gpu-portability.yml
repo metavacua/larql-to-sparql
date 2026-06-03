@@ -1,0 +1,322 @@
+# GPU portability boundary probe
+#
+# Maps which larql-compute kernels compile and run across GPU and WASM-with-OS
+# targets. The purpose is to make the portability boundary observable, not to
+# gate merges. See ci.yml "native ✓" for the required gate.
+#
+# Targets probed:
+#   wasm32-wasip1              WASI Preview 1 (OS-capable WASM, rustup standard)
+#                              → COMPILE + RUN tests via wasmtime (emulated GPU)
+#   wgpu (native, Vulkan)      wgpu over Lavapipe software Vulkan driver
+#                              → continue-on-error until Phase 2 adds wgpu feature
+#   spirv-unknown-vulkan1.2    SPIR-V (rust-gpu, non-standard toolchain)
+#                              → continue-on-error; toolchain requires special setup
+#   nvptx64-nvidia-cuda        CUDA PTX (compile-only; no hardware required)
+#                              → continue-on-error; compile verifies ¬L∧¬M gating
+#
+# Gating implemented (larql-compute/build.rs + Cargo.toml + cfg gates):
+#   no_c_kernel cfg: emitted for wasm/nvptx/spirv → gates q4_0_matvec_c extern "C"
+#   ndarray/rayon/larql-models: excluded from nvptx64/spirv targets in Cargo.toml
+#   cpu module, backend traits, pipeline: excluded from nvptx64/spirv via cfg
+#   criterion dev-dep: excluded from wasm targets (rayon incompatible)
+#   src/portable/: always compiled; pure core; the ¬L∧¬M kernel surface
+#
+# Software emulation strategy (standard GitHub-hosted runners, no physical GPU):
+#   WASI     → wasmtime runtime (full execution of portable:: tests)
+#   Vulkan   → Lavapipe (Mesa llvmpipe software renderer; `mesa-vulkan-drivers`)
+#   CUDA     → compile-only via nvptx64 target (no runtime)
+#   SPIR-V   → rust-gpu compile check (no runtime)
+
+name: gpu-portability
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# ── WASI Preview 1 — compile + test (emulated GPU via WASI runtime) ───────────
+#
+# wasm32-wasip1 is the closest standard target to wasm32v1-none that includes
+# OS-level capabilities (file I/O, clocks, env). larql-compute's C kernel gate
+# (build.rs) skips q4_dot.c on wasm targets so this now compiles and RUNS tests
+# via wasmtime. The portable::* tests execute the ¬L∧¬M kernel surface on an
+# emulated "GPU-like" environment (WASI = sandboxed execution model).
+
+jobs:
+  wasi-test:
+    name: wasm32-wasip1 compile + test (wasmtime emulation)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add wasm32-wasip1 target
+        run: rustup target add wasm32-wasip1
+
+      - name: Install wasmtime (WASI runtime)
+        # wasmtime is the reference WASI runtime; executes wasm32-wasip1 binaries.
+        run: cargo install wasmtime-cli --locked
+
+      - name: Cache cargo artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/bin
+            target
+          key: gpu-wasi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: gpu-wasi-
+
+      - name: Check larql-compute (wasm32-wasip1)
+        run: |
+          cargo check -p larql-compute --target wasm32-wasip1 --lib \
+            2>&1 | tee wasi-check.log
+          echo "check exit: $?" >> wasi-check.log
+
+      - name: Test larql-compute portable::* on WASI (wasmtime)
+        # Run only the portable:: module tests — these are the ¬L∧¬M kernels.
+        # The C-kernel and BLAS tests are excluded (they're gated on wasm targets).
+        env:
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime
+        run: |
+          cargo test -p larql-compute --target wasm32-wasip1 \
+            portable 2>&1 | tee -a wasi-check.log
+          echo "test exit: $?" >> wasi-check.log
+
+      - name: Check model-compute (wasm32-wasip1)
+        run: |
+          cargo check -p model-compute --target wasm32-wasip1 --lib \
+            2>&1 | tee -a wasi-check.log
+          echo "exit: $?" >> wasi-check.log
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasi-test-log
+          path: wasi-check.log
+
+# ── Vulkan / wgpu via Lavapipe (software renderer) ────────────────────────────
+#
+# Lavapipe is Mesa's llvmpipe-based software Vulkan driver. It executes Vulkan
+# compute shaders on the CPU — no physical GPU required. wgpu automatically
+# selects the Vulkan backend when WGPU_BACKEND=vulkan is set.
+#
+# Phase 2 adds `--features wgpu` to larql-compute; until then this job probes
+# the baseline compile (no feature) and verifies the Lavapipe driver is working.
+
+  vulkan-lavapipe:
+    name: wgpu · Vulkan · Lavapipe software renderer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+
+    env:
+      WGPU_BACKEND: vulkan
+      # Force Lavapipe (Mesa llvmpipe) even if other Vulkan ICDs are installed.
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Mesa Lavapipe (software Vulkan driver)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            mesa-vulkan-drivers \
+            libvulkan1 \
+            libvulkan-dev \
+            vulkan-tools
+
+      - name: Verify Lavapipe is available
+        run: |
+          vulkaninfo --summary 2>&1 | tee lavapipe-info.log
+          # Confirm llvmpipe is the active driver (software renderer)
+          vulkaninfo --summary 2>&1 | grep -i "llvmpipe\|lavapipe" | head -5
+
+      - name: Cache cargo artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: gpu-vulkan-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: gpu-vulkan-
+
+      - name: Check larql-compute (baseline, no wgpu feature yet)
+        run: |
+          cargo check -p larql-compute --lib 2>&1 | tee wgpu-check.log
+          echo "exit: $?" >> wgpu-check.log
+
+      - name: Check larql-compute --features wgpu (Phase 2 target)
+        # Expected to fail until Phase 2 adds the wgpu feature to Cargo.toml.
+        # continue-on-error on the job handles this gracefully.
+        run: |
+          cargo check -p larql-compute --lib --features wgpu \
+            2>&1 | tee -a wgpu-check.log
+          echo "exit: $?" >> wgpu-check.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-lavapipe-log
+          path: |
+            lavapipe-info.log
+            wgpu-check.log
+
+# ── SPIR-V via rust-gpu (non-standard toolchain) ──────────────────────────────
+#
+# rust-gpu compiles Rust to SPIR-V for Vulkan compute shaders. It requires a
+# pinned nightly toolchain managed by rust-gpu itself (not standard rustup).
+# SPIR-V bans recursion entirely — it is a natural ¬L enforcer on the GPU branch.
+#
+# This job will fail until:
+#   (a) rust-gpu toolchain is pinned in rust-toolchain.toml, AND
+#   (b) Phase 2 adds the spirv/ stub and `spirv = []` feature to larql-compute.
+# The log shows the exact error so Phase 2 work can be scoped correctly.
+
+  spirv-check:
+    name: SPIR-V · rust-gpu compile probe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust (baseline)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Attempt rust-gpu toolchain installation
+        # rust-gpu publishes pinned nightly toolchains via rustup components.
+        # The exact channel changes with each rust-gpu release; pin this once
+        # a rust-toolchain.toml entry is added in Phase 2.
+        run: |
+          rustup toolchain install nightly 2>&1 | tee spirv-check.log || true
+          rustup component add rust-src --toolchain nightly 2>&1 | tee -a spirv-check.log || true
+          rustup target add spirv-unknown-vulkan1.2 --toolchain nightly \
+            2>&1 | tee -a spirv-check.log || true
+
+      - name: Check larql-compute --target spirv-unknown-vulkan1.2
+        # Expected to fail: spirv-unknown-vulkan1.2 requires rust-gpu's codegen
+        # backend, which is not part of the standard nightly distribution.
+        run: |
+          cargo +nightly check -p larql-compute --lib \
+            --target spirv-unknown-vulkan1.2 \
+            2>&1 | tee -a spirv-check.log || true
+          echo "exit: $?" >> spirv-check.log
+
+      - name: Check model-compute --target spirv-unknown-vulkan1.2
+        # model-compute has no larql-* deps — the most portable crate in the tree.
+        run: |
+          cargo +nightly check -p model-compute --lib \
+            --target spirv-unknown-vulkan1.2 \
+            2>&1 | tee -a spirv-check.log || true
+          echo "exit: $?" >> spirv-check.log
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spirv-check-log
+          path: spirv-check.log
+
+# ── CUDA / nvptx64 (compile-only; no physical GPU required) ───────────────────
+#
+# nvptx64-nvidia-cuda is a tier-3 Rust target. `cargo check` does not link,
+# so no CUDA runtime or physical GPU is needed — it only tests that the Rust
+# source compiles to PTX IR. Code using `std` will fail (nvptx is no_std only);
+# model-compute (no larql-* deps) is the best current candidate.
+#
+# Expected failures until model-compute is annotated #![no_std] or a dedicated
+# nvptx kernel crate is added.
+
+  nvptx-check:
+    name: nvptx64-nvidia-cuda compile probe (no hardware)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+
+      - name: Add nvptx64-nvidia-cuda target
+        # This is a standard tier-3 Rust target; rustup can add it without
+        # special toolchains. Compilation requires llvm with PTX support
+        # (available in the standard Rust distribution).
+        run: rustup target add nvptx64-nvidia-cuda 2>&1 | tee nvptx-check.log
+
+      - name: Cache cargo artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: gpu-nvptx-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: gpu-nvptx-
+
+      - name: Check model-compute --target nvptx64-nvidia-cuda
+        # model-compute is the most portable crate; no larql-* deps.
+        # Likely fails because model-compute uses std — log shows the exact gap.
+        run: |
+          cargo check -p model-compute --lib --target nvptx64-nvidia-cuda \
+            2>&1 | tee -a nvptx-check.log
+          echo "exit: $?" >> nvptx-check.log
+
+      - name: Check larql-compute --target nvptx64-nvidia-cuda
+        run: |
+          cargo check -p larql-compute --lib --target nvptx64-nvidia-cuda \
+            2>&1 | tee -a nvptx-check.log
+          echo "exit: $?" >> nvptx-check.log
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvptx-check-log
+          path: nvptx-check.log
+
+# ── Summary gate (informational, always passes) ────────────────────────────────
+
+  gpu-boundary:
+    name: gpu boundary ✓ (informational)
+    needs: [wasi-test, vulkan-lavapipe, spirv-check, nvptx-check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: GPU portability boundary scan complete
+        run: |
+          echo "GPU portability boundary scan complete."
+          echo "wasi-test = COMPILE + RUN via wasmtime (emulated WASI execution)."
+          echo "vulkan/spirv/nvptx = continue-on-error; failures expected until Phase 2."
+          echo ""
+          echo "Consult crates/larql-compute/docs/compute-inventory.md for kernel-level"
+          echo "portability classification and the Phase 3 attention seam."
+          echo ""
+          echo "wasi-test:        ${{ needs.wasi-test.result }}"
+          echo "vulkan-lavapipe:  ${{ needs.vulkan-lavapipe.result }}"
+          echo "spirv-check:      ${{ needs.spirv-check.result }}"
+          echo "nvptx-check:      ${{ needs.nvptx-check.result }}"
