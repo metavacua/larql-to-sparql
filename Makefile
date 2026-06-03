@@ -562,6 +562,28 @@ platform-test-macos:
 clean:
 	cargo clean
 
+# Remove only incremental compilation metadata (safe after branch switches;
+# these directories are always stale across branches and account for 1-3 GB).
+.PHONY: clean-incremental
+clean-incremental:
+	rm -rf target/debug/incremental target/release/incremental
+	rm -rf crates/larql-wasm/target/debug/incremental crates/larql-wasm/target/release/incremental
+	rm -rf crates/larql-experts/target/debug/incremental crates/larql-experts/target/release/incremental
+
+# Full cargo clean across all three workspaces (root, larql-wasm, larql-experts).
+.PHONY: clean-all
+clean-all:
+	cargo clean
+	cargo clean --manifest-path crates/larql-wasm/Cargo.toml
+	cargo clean --manifest-path crates/larql-experts/Cargo.toml
+
+# Show current disk usage of each workspace's target directory.
+.PHONY: disk-report
+disk-report:
+	@du -sh target 2>/dev/null || true
+	@du -sh crates/larql-wasm/target 2>/dev/null || true
+	@du -sh crates/larql-experts/target 2>/dev/null || true
+
 # Benchmarks
 #
 # `bench` runs the core graph example. `bench-compute` runs the primary
