@@ -58,6 +58,9 @@ env:
   # version-pinned. They must keep pace with the evolving formats of
   # their backing advisory database.
   CARGO_TERM_COLOR: always
+  # Suppresses incremental compilation metadata — never useful in CI since
+  # runners start fresh, but significantly shrinks target/ and its cache.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   # ---------------------------------------------------------------------

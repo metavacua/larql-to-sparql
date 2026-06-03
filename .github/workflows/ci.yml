@@ -41,6 +41,9 @@ on:
       - '.github/scripts/discover-crates.py'
   workflow_dispatch: {}
 
+env:
+  CARGO_INCREMENTAL: "0"
+
 permissions:
   contents: read
 

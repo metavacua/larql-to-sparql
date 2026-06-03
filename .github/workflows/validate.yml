@@ -46,6 +46,7 @@ env:
   REUSE_TOOL_VERSION: "6.2.0"
   COCOGITTO_VERSION: "7.0.0"
   GIT_CLIFF_VERSION: "2.13.1"
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   # ---------------------------------------------------------------------

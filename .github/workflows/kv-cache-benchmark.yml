@@ -32,6 +32,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
+env:
+  CARGO_INCREMENTAL: "0"
+
 jobs:
   test:
     if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
