@@ -104,6 +104,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Free disk space (Linux)
+        if: runner.os == 'Linux'
+        uses: jlumbroso/free-disk-space@v1.3.0
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -207,6 +219,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.0
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -466,6 +489,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.0
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
