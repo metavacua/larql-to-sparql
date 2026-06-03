@@ -29,8 +29,22 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'knowledge/**'
+      - 'audit/**'
+      - 'memory/**'
+      - 'LICENSES/**'
   push:
     branches: [main, ci/workflows-complete]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'knowledge/**'
+      - 'audit/**'
+      - 'memory/**'
+      - 'LICENSES/**'
   workflow_dispatch:
   schedule:
     # Weekly RustSec advisory refresh against the committed lockfile, so
@@ -205,6 +219,17 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.0
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
       - name: Install Rust toolchain
         run: |
