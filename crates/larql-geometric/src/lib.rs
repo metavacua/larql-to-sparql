@@ -3,6 +3,7 @@
 pub mod attention;
 pub mod complex;
 pub mod hyperbolic;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod vindex_loader;
 
 #[cfg(feature = "gpu")]

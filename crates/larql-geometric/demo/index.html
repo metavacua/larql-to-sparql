@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+<!-- Copyright (C) 2026 Ian Douglas Lawrence Norman McLean -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Geometric LM — Attention PoC</title>
+<style>
+body { font-family: monospace; max-width: 860px; margin: 2em auto; padding: 0 1em; }
+canvas { border: 1px solid #999; display: block; margin: 0.8em 0; }
+label { margin-right: 0.5em; }
+#log { background: #111; color: #0f0; padding: 0.8em; height: 110px; overflow-y: auto;
+       font-size: 0.85em; white-space: pre-wrap; }
+button { margin-left: 0.5em; cursor: pointer; }
+</style>
+</head>
+<body>
+<h2>Geometric Language Model — Attention PoC</h2>
+<p>
+  <label>Backend:
+    <select id="backend">
+      <option value="complex-linear">Complex Linear  O(n)</option>
+      <option value="hyperbolic">Hyperbolic (Poincaré ball)</option>
+      <option value="walk-k4">Walk sparse K=4</option>
+      <option value="lambek">Lambek non-commutative</option>
+    </select>
+  </label>
+  <label>n=<input id="seqlen" type="number" value="16" min="2" max="256" style="width:4em"></label>
+  <label>d=<input id="headdim" type="number" value="32" min="4" max="128" style="width:4em"></label>
+  <button onclick="runBench()">Run / Benchmark</button>
+</p>
+<canvas id="heatmap" width="512" height="256"></canvas>
+<div id="log">(click Run to start)</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

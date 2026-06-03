@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 gpu = ["dep:wgpu", "dep:pollster"]
-browser = ["dep:wasm-bindgen", "dep:js-sys", "dep:console_error_panic_hook", "gpu"]
+browser = ["dep:wasm-bindgen", "dep:js-sys", "dep:console_error_panic_hook"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
