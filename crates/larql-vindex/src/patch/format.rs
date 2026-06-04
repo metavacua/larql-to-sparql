@@ -198,21 +198,17 @@ impl VindexPatch {
     /// independent.  When `dependencies` is populated, any explicit ordering
     /// constraint between `i` and `j` makes them non-commutative.
     pub fn commute(&self, i: usize, j: usize) -> bool {
-        let no_explicit_deps = match &self.dependencies {
-            None | Some(_) if self.dependencies.as_ref().map_or(true, |d| d.is_empty()) => true,
-            _ => false,
-        };
-        if no_explicit_deps {
-            // Infer from key: different addresses → independent
-            let ki = self.operations.get(i).and_then(|op| op.key());
-            let kj = self.operations.get(j).and_then(|op| op.key());
-            match (ki, kj) {
-                (Some(a), Some(b)) => a != b,
-                _ => false, // KNN ops conservatively non-commutative
+        if let Some(deps) = &self.dependencies {
+            if !deps.is_empty() {
+                return !deps.contains(&(i, j)) && !deps.contains(&(j, i));
             }
-        } else {
-            let deps = self.dependencies.as_ref().unwrap();
-            !deps.contains(&(i, j)) && !deps.contains(&(j, i))
+        }
+        // Infer from key: different addresses → independent
+        let ki = self.operations.get(i).and_then(|op| op.key());
+        let kj = self.operations.get(j).and_then(|op| op.key());
+        match (ki, kj) {
+            (Some(a), Some(b)) => a != b,
+            _ => false, // KNN ops conservatively non-commutative
         }
     }
 

@@ -373,16 +373,19 @@ impl Session {
             ));
         }
 
-        let model_name = match &self.backend {
-            Backend::Vindex { config, .. } => config.model.clone(),
-            Backend::Weight { model_id, .. } => model_id.clone(),
-            _ => "unknown".into(),
+        let (model_name, base_checksum) = match &self.backend {
+            Backend::Vindex { config, path, .. } => (
+                config.model.clone(),
+                larql_vindex::checksums::compute_base_checksum(path).ok(),
+            ),
+            Backend::Weight { model_id, .. } => (model_id.clone(), None),
+            _ => ("unknown".into(), None),
         };
 
         let patch = larql_vindex::VindexPatch {
-            version: 1,
+            version: 2,
             base_model: model_name,
-            base_checksum: None,
+            base_checksum,
             created_at: String::new(),
             description: None,
             author: None,
