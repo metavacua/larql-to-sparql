@@ -1,0 +1,154 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# GPU compute CI for larql-geometric.
+#
+# Three execution layers:
+#   fmt         - format gate (no GPU needed)
+#   compile     - cargo check + clippy --features gpu on Ubuntu + Windows
+#   gpu-test    - actual test execution on three software/hardware backends:
+#                   lavapipe  (Mesa CPU Vulkan, ubuntu-24.04)
+#                   warp      (Microsoft WARP software DX12, windows-latest)
+#                   metal     (Apple hardware GPU, macos-15)
+#
+# Prerequisite: wgpu in crates/larql-geometric/Cargo.toml declares
+#   features = ["wgsl","webgpu","wgc","metal","dx12"]
+# The 'wgc' feature enables native HAL backends (Vulkan on Linux,
+# Metal on macOS, DX12 on Windows). Without it, GpuContext::new_blocking()
+# always returns None and test_complex_linear_cpu_gpu_parity silently skips.
+#
+# Note on SwiftShader: google/swiftshader publishes no pre-built release
+# binaries on GitHub. WARP (Windows Advanced Rasterization Platform) is
+# used as the Windows software GPU path instead — it is built into every
+# Windows installation and requires no downloads.
+
+name: gpu-check
+
+on:
+  push:
+    branches: [main, 'ci/**', 'lm-synthesis/**']
+    paths:
+      - 'crates/larql-geometric/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/gpu-check.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-geometric/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/gpu-check.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+env:
+  CARGO_INCREMENTAL: "0"
+
+permissions:
+  contents: read
+
+# ── Format gate ───────────────────────────────────────────────────────────────
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: cargo fmt check
+        run: cargo fmt -p larql-geometric -- --check
+
+# ── Compile + lint (no GPU driver needed) ─────────────────────────────────────
+
+  compile:
+    name: compile · ${{ matrix.platform }}
+    needs: [fmt]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu
+            runner: ubuntu-24.04
+          - platform: windows
+            runner: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: cargo check --features gpu
+        run: cargo check -p larql-geometric --features gpu --all-targets
+
+      - name: cargo clippy --features gpu
+        run: cargo clippy -p larql-geometric --features gpu --all-targets -- -D warnings
+
+# ── GPU execution (software emulation + hardware Metal) ───────────────────────
+
+  gpu-test:
+    name: gpu-test · ${{ matrix.driver }}
+    needs: [fmt]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - driver: lavapipe
+            runner: ubuntu-24.04
+          - driver: warp
+            runner: windows-latest
+          - driver: metal
+            runner: macos-15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # ── Driver setup ────────────────────────────────────────────────────────
+
+      - name: Install Lavapipe (lavapipe)
+        if: matrix.driver == 'lavapipe'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y mesa-vulkan-drivers
+          echo "WGPU_BACKEND=vulkan" >> "$GITHUB_ENV"
+
+      # WARP (Windows Advanced Rasterization Platform) is the Windows built-in
+      # software DX12 rasterizer. No installation needed — it is present on
+      # every Windows install. WGPU_ADAPTER_NAME=warp selects it explicitly so
+      # the test always targets the software path (not any attached hardware GPU).
+      - name: Set WARP adapter (warp)
+        if: matrix.driver == 'warp'
+        shell: bash
+        run: |
+          echo "WGPU_BACKEND=dx12" >> "$GITHUB_ENV"
+          echo "WGPU_ADAPTER_NAME=warp" >> "$GITHUB_ENV"
+
+      # Metal (macos-15): no driver setup needed — Metal is available natively
+      # on GitHub's Apple Silicon (M-series) runners.
+
+      # ── Tests ───────────────────────────────────────────────────────────────
+
+      - name: cargo test --features gpu
+        run: cargo test -p larql-geometric --features gpu
+
+      - name: probe GPU adapters (smoke)
+        run: cargo run -p larql-geometric --example probe_gpu --features gpu
