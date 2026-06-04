@@ -25,6 +25,8 @@ pub enum VindexError {
         needed: ExtractLevel,
         have: ExtractLevel,
     },
+    #[error("base checksum mismatch: patch expects {expected} but vindex has {actual}")]
+    ChecksumMismatch { expected: String, actual: String },
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("model error: {0}")]

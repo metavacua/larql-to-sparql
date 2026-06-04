@@ -387,6 +387,7 @@ impl Session {
             description: None,
             author: None,
             tags: vec![],
+            dependencies: None,
             operations: recording.operations,
         };
 

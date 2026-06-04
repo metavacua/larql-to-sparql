@@ -273,6 +273,7 @@ fn main() {
         description: Some("medical-facts".into()),
         author: Some("demo".into()),
         tags: vec!["medical".into()],
+        dependencies: None,
         operations: vec![PatchOp::Update {
             layer: 1,
             feature: 0,
@@ -284,6 +285,7 @@ fn main() {
                 top_token_id: 500,
                 c_score: 0.99,
             }),
+            quality: None,
         }],
     };
 

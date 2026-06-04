@@ -58,6 +58,7 @@ impl Session {
             description: Some(format!("DELETE L{layer} F{feature}")),
             author: None,
             tags: vec![],
+            dependencies: None,
             operations: ops,
         };
 
@@ -103,6 +104,7 @@ impl Session {
                 c_score: confidence.unwrap_or(REMOTE_DEFAULT_CONFIDENCE),
             });
 
+        let quality = down_meta.as_ref().map(|m| larql_vindex::patch::format::FeatureQuality::from_c_score(m.c_score));
         let op = larql_vindex::PatchOp::Update {
             layer,
             feature,
@@ -110,6 +112,7 @@ impl Session {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta,
+            quality,
         };
 
         let patch = larql_vindex::VindexPatch {
@@ -120,6 +123,7 @@ impl Session {
             description: Some(format!("UPDATE L{layer} F{feature}")),
             author: None,
             tags: vec![],
+            dependencies: None,
             operations: vec![op],
         };
 

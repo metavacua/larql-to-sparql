@@ -51,6 +51,18 @@ pub fn compute_checksums(dir: &Path) -> Result<HashMap<String, String>, VindexEr
     Ok(checksums)
 }
 
+/// Compute a lightweight fingerprint for a base vindex directory.
+///
+/// Hashes `index.json`, which encodes model identity (architecture, layer
+/// count, hidden size, etc.) plus any per-file checksums already stored
+/// there.  O(index.json size) — effectively O(1) relative to model size.
+///
+/// Used to populate `VindexPatch::base_checksum` and to verify that a patch
+/// is being applied to the correct base.
+pub fn compute_base_checksum(dir: &Path) -> Result<String, VindexError> {
+    sha256_file(&dir.join(crate::format::filenames::INDEX_JSON))
+}
+
 /// Verify checksums of a vindex directory against stored checksums.
 /// Returns a list of (filename, status) pairs.
 pub fn verify_checksums(

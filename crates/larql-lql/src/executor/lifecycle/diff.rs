@@ -137,6 +137,11 @@ impl Session {
                                     top_token_id: b.top_token_id,
                                     c_score: b.c_score,
                                 }),
+                                quality: Some(
+                                    larql_vindex::patch::format::FeatureQuality::from_c_score(
+                                        b.c_score,
+                                    ),
+                                ),
                             });
                         }
                         (Some(_), None) => {
@@ -162,6 +167,11 @@ impl Session {
                                     top_token_id: b.top_token_id,
                                     c_score: b.c_score,
                                 }),
+                                quality: Some(
+                                    larql_vindex::patch::format::FeatureQuality::from_c_score(
+                                        b.c_score,
+                                    ),
+                                ),
                             });
                         }
                         _ => {}
@@ -175,10 +185,13 @@ impl Session {
                 _ => "unknown".into(),
             };
 
+            let base_checksum =
+                larql_vindex::checksums::compute_base_checksum(&path_a).ok();
+
             let patch = larql_vindex::VindexPatch {
-                version: 1,
+                version: 2,
                 base_model: model_name,
-                base_checksum: None,
+                base_checksum,
                 created_at: String::new(),
                 description: Some(format!(
                     "Diff: {} vs {}",
@@ -187,6 +200,7 @@ impl Session {
                 )),
                 author: None,
                 tags: vec![],
+                dependencies: None,
                 operations,
             };
 

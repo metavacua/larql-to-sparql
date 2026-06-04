@@ -270,6 +270,7 @@ fn main() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Delete {
             layer: 0,
             feature: 0,
@@ -318,6 +319,7 @@ fn main() {
             description: None,
             author: None,
             tags: vec![],
+            dependencies: None,
             operations: vec![
                 larql_vindex::PatchOp::Delete {
                     layer: 0,
