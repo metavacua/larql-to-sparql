@@ -716,12 +716,24 @@ mod tests {
 
     #[test]
     fn feature_quality_from_c_score() {
-        assert_eq!(FeatureQuality::from_c_score(0.9), FeatureQuality::Monosemantic);
-        assert_eq!(FeatureQuality::from_c_score(0.71), FeatureQuality::Monosemantic);
+        assert_eq!(
+            FeatureQuality::from_c_score(0.9),
+            FeatureQuality::Monosemantic
+        );
+        assert_eq!(
+            FeatureQuality::from_c_score(0.71),
+            FeatureQuality::Monosemantic
+        );
         assert_eq!(FeatureQuality::from_c_score(0.5), FeatureQuality::Ambiguous);
         assert_eq!(FeatureQuality::from_c_score(0.3), FeatureQuality::Ambiguous);
-        assert_eq!(FeatureQuality::from_c_score(0.29), FeatureQuality::Polysemantic);
-        assert_eq!(FeatureQuality::from_c_score(0.0), FeatureQuality::Polysemantic);
+        assert_eq!(
+            FeatureQuality::from_c_score(0.29),
+            FeatureQuality::Polysemantic
+        );
+        assert_eq!(
+            FeatureQuality::from_c_score(0.0),
+            FeatureQuality::Polysemantic
+        );
     }
 
     #[test]
@@ -777,39 +789,70 @@ mod tests {
     fn commute_different_keys_inferred() {
         let ops = vec![
             PatchOp::Insert {
-                layer: 0, feature: 0, relation: None,
-                entity: "A".into(), target: "B".into(), confidence: None,
-                gate_vector_b64: None, up_vector_b64: None, down_vector_b64: None,
-                down_meta: None, quality: None,
+                layer: 0,
+                feature: 0,
+                relation: None,
+                entity: "A".into(),
+                target: "B".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
             },
             PatchOp::Insert {
-                layer: 0, feature: 1, relation: None,
-                entity: "C".into(), target: "D".into(), confidence: None,
-                gate_vector_b64: None, up_vector_b64: None, down_vector_b64: None,
-                down_meta: None, quality: None,
+                layer: 0,
+                feature: 1,
+                relation: None,
+                entity: "C".into(),
+                target: "D".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
             },
         ];
         let patch = make_patch(ops);
-        assert!(patch.commute(0, 1), "different (layer,feature) should commute");
+        assert!(
+            patch.commute(0, 1),
+            "different (layer,feature) should commute"
+        );
     }
 
     #[test]
     fn commute_same_key_does_not_commute() {
         let ops = vec![
             PatchOp::Insert {
-                layer: 1, feature: 5, relation: None,
-                entity: "A".into(), target: "B".into(), confidence: None,
-                gate_vector_b64: None, up_vector_b64: None, down_vector_b64: None,
-                down_meta: None, quality: None,
+                layer: 1,
+                feature: 5,
+                relation: None,
+                entity: "A".into(),
+                target: "B".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
             },
             PatchOp::Update {
-                layer: 1, feature: 5,
-                gate_vector_b64: None, up_vector_b64: None, down_vector_b64: None,
-                down_meta: None, quality: None,
+                layer: 1,
+                feature: 5,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
             },
         ];
         let patch = make_patch(ops);
-        assert!(!patch.commute(0, 1), "same (layer,feature) must not commute");
+        assert!(
+            !patch.commute(0, 1),
+            "same (layer,feature) must not commute"
+        );
     }
 
     #[test]
@@ -817,39 +860,67 @@ mod tests {
         let kv = encode_gate_vector(&[1.0f32]);
         let ops = vec![
             PatchOp::InsertKnn {
-                layer: 0, entity: "e".into(), relation: "r".into(),
-                target: "t".into(), target_id: 1, confidence: None,
+                layer: 0,
+                entity: "e".into(),
+                relation: "r".into(),
+                target: "t".into(),
+                target_id: 1,
+                confidence: None,
                 key_vector_b64: kv.clone(),
             },
             PatchOp::InsertKnn {
-                layer: 0, entity: "f".into(), relation: "r".into(),
-                target: "t2".into(), target_id: 2, confidence: None,
+                layer: 0,
+                entity: "f".into(),
+                relation: "r".into(),
+                target: "t2".into(),
+                target_id: 2,
+                confidence: None,
                 key_vector_b64: kv,
             },
         ];
         let patch = make_patch(ops);
-        assert!(!patch.commute(0, 1), "KNN ops conservatively non-commutative");
+        assert!(
+            !patch.commute(0, 1),
+            "KNN ops conservatively non-commutative"
+        );
     }
 
     #[test]
     fn commute_respects_explicit_dependencies() {
         let ops = vec![
             PatchOp::Insert {
-                layer: 0, feature: 0, relation: None,
-                entity: "A".into(), target: "B".into(), confidence: None,
-                gate_vector_b64: None, up_vector_b64: None, down_vector_b64: None,
-                down_meta: None, quality: None,
+                layer: 0,
+                feature: 0,
+                relation: None,
+                entity: "A".into(),
+                target: "B".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
             },
             PatchOp::Insert {
-                layer: 0, feature: 1, relation: None,
-                entity: "C".into(), target: "D".into(), confidence: None,
-                gate_vector_b64: None, up_vector_b64: None, down_vector_b64: None,
-                down_meta: None, quality: None,
+                layer: 0,
+                feature: 1,
+                relation: None,
+                entity: "C".into(),
+                target: "D".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
             },
         ];
         // Different keys → would normally commute, but explicit dep says otherwise
         let patch = make_patch(ops).with_dependencies(vec![(0, 1)]);
-        assert!(!patch.commute(0, 1), "explicit dependency overrides key inference");
+        assert!(
+            !patch.commute(0, 1),
+            "explicit dependency overrides key inference"
+        );
     }
 
     // ── VindexPatch::with_base_checksum / with_dependencies ──────────────
@@ -876,6 +947,9 @@ mod tests {
     fn dependencies_not_serialized_when_none() {
         let patch = make_patch(vec![]);
         let json = serde_json::to_string(&patch).unwrap();
-        assert!(!json.contains("dependencies"), "should be omitted when None");
+        assert!(
+            !json.contains("dependencies"),
+            "should be omitted when None"
+        );
     }
 }

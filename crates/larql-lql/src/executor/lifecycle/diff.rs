@@ -185,8 +185,7 @@ impl Session {
                 _ => "unknown".into(),
             };
 
-            let base_checksum =
-                larql_vindex::checksums::compute_base_checksum(&path_a).ok();
+            let base_checksum = larql_vindex::checksums::compute_base_checksum(&path_a).ok();
 
             let patch = larql_vindex::VindexPatch {
                 version: 2,

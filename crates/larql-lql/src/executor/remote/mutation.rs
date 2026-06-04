@@ -104,7 +104,9 @@ impl Session {
                 c_score: confidence.unwrap_or(REMOTE_DEFAULT_CONFIDENCE),
             });
 
-        let quality = down_meta.as_ref().map(|m| larql_vindex::patch::format::FeatureQuality::from_c_score(m.c_score));
+        let quality = down_meta
+            .as_ref()
+            .map(|m| larql_vindex::patch::format::FeatureQuality::from_c_score(m.c_score));
         let op = larql_vindex::PatchOp::Update {
             layer,
             feature,

@@ -82,7 +82,9 @@ impl Session {
                         top_token_id: meta.top_token_id,
                         c_score: meta.c_score,
                     }),
-                    quality: Some(larql_vindex::patch::format::FeatureQuality::from_c_score(meta.c_score)),
+                    quality: Some(larql_vindex::patch::format::FeatureQuality::from_c_score(
+                        meta.c_score,
+                    )),
                 });
             }
         }
