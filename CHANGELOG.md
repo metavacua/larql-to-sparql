@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Address second-wave windows-fix CI failures
 - Align license enforcement with audited multi-license tree
 - Allow pulling vindexes from HF model repos
+- Also gate 131_072 behind 64-bit in format_comparative_table
 - Apply rustfmt and fix clippy::unnecessary_sort_by
 - Bump pinned versions and drop fmt CI duplication
 - Bump toolchain to 1.88 and unpin scanner-tool versions
