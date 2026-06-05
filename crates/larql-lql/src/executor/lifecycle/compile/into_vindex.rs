@@ -445,6 +445,7 @@ mod tests {
             description: None,
             author: None,
             tags: Vec::new(),
+            dependencies: None,
             operations: ops,
         }
     }
@@ -461,6 +462,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }
     }
 

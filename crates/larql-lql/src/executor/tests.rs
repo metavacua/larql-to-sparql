@@ -1802,6 +1802,7 @@ fn refresh_recorded_patch_ops_for_slots_persists_latest_overlay_vectors() {
                 9.0, 9.0, 9.0, 9.0,
             ])),
             down_meta: None,
+            quality: None,
         }],
     });
 
@@ -1970,6 +1971,7 @@ fn compile_on_conflict_fail_detects_collision() {
             description: None,
             author: None,
             tags: Vec::new(),
+            dependencies: None,
             operations: vec![PatchOp::Insert {
                 layer: 0,
                 feature: 0,
@@ -1981,6 +1983,7 @@ fn compile_on_conflict_fail_detects_collision() {
                 up_vector_b64: None,
                 down_vector_b64: None,
                 down_meta: None,
+                quality: None,
             }],
         };
         patched.patches.push(mkp("A"));
@@ -2020,6 +2023,7 @@ fn compile_on_conflict_last_wins_succeeds() {
             description: None,
             author: None,
             tags: Vec::new(),
+            dependencies: None,
             operations: vec![PatchOp::Insert {
                 layer: 0,
                 feature: 0,
@@ -2031,6 +2035,7 @@ fn compile_on_conflict_last_wins_succeeds() {
                 up_vector_b64: None,
                 down_vector_b64: None,
                 down_meta: None,
+                quality: None,
             }],
         };
         patched.patches.push(mkp("A"));
@@ -2067,6 +2072,7 @@ fn memit_facts_count_inserts_only() {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         },
         PatchOp::Delete {
             layer: 10,
@@ -2080,6 +2086,7 @@ fn memit_facts_count_inserts_only() {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         },
     ];
     let insert_count = ops
@@ -2101,6 +2108,7 @@ fn memit_facts_deduplicate_across_patches() {
         description: None,
         author: None,
         tags: Vec::new(),
+        dependencies: None,
         operations: vec![PatchOp::Insert {
             layer: 10,
             feature: 5,
@@ -2112,6 +2120,7 @@ fn memit_facts_deduplicate_across_patches() {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }],
     };
     let patches = vec![mkp(0.9), mkp(0.95)];
@@ -3041,6 +3050,7 @@ fn compile_skips_memit_fact_with_no_relation() {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }],
     });
 
@@ -4683,6 +4693,7 @@ fn compile_into_vindex_on_conflict_highest_confidence_runs() {
             description: None,
             author: None,
             tags: Vec::new(),
+            dependencies: None,
             operations: vec![PatchOp::Insert {
                 layer: 0,
                 feature: 0,
@@ -4694,6 +4705,7 @@ fn compile_into_vindex_on_conflict_highest_confidence_runs() {
                 up_vector_b64: None,
                 down_vector_b64: None,
                 down_meta: None,
+                quality: None,
             }],
         };
         patched.patches.push(mkp(0.5, "low"));
@@ -4793,6 +4805,7 @@ fn mk_insert_patch(
         description: None,
         author: None,
         tags: Vec::new(),
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Insert {
             layer,
             feature,
@@ -4804,6 +4817,7 @@ fn mk_insert_patch(
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }],
     }
 }
