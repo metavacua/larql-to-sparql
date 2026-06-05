@@ -19,6 +19,17 @@ fn io_err(msg: impl Into<String>) -> VindexError {
     VindexError::Io(std::io::Error::other(msg.into()))
 }
 
+// ── API base URL (overridable for tests) ────────────────────────────────
+
+/// Env-var used by tests to redirect all GitHub API calls to a local
+/// mockito server instead of `https://api.github.com`.
+pub(crate) const GH_TEST_BASE_ENV: &str = "LARQL_GH_TEST_BASE";
+
+fn gh_api_base() -> String {
+    std::env::var(GH_TEST_BASE_ENV)
+        .unwrap_or_else(|_| "https://api.github.com".to_string())
+}
+
 // ── URL parsing ─────────────────────────────────────────────────────────
 
 /// Parsed `gh://owner/repo@ref/path` URL.
@@ -91,8 +102,12 @@ pub fn download_gh_file(gh: &GhUrl) -> Result<PathBuf, VindexError> {
     let token = std::env::var("GITHUB_TOKEN").ok();
 
     let url = format!(
-        "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
-        gh.owner, gh.repo, gh.path, gh.git_ref
+        "{}/repos/{}/{}/contents/{}?ref={}",
+        gh_api_base(),
+        gh.owner,
+        gh.repo,
+        gh.path,
+        gh.git_ref
     );
 
     let mut req = reqwest::blocking::Client::new()
@@ -231,7 +246,7 @@ mutation($input: CreateCommitOnBranchInput!) {
     });
 
     let resp = reqwest::blocking::Client::new()
-        .post("https://api.github.com/graphql")
+        .post(format!("{}/graphql", gh_api_base()))
         .bearer_auth(&token)
         .header("User-Agent", "larql-vindex/0.1")
         .json(&body)
@@ -272,7 +287,7 @@ fn get_branch_head_oid(
     branch: &str,
     token: &str,
 ) -> Result<String, VindexError> {
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/git/refs/heads/{branch}");
+    let url = format!("{}/repos/{owner}/{repo}/git/refs/heads/{branch}", gh_api_base());
 
     let resp = reqwest::blocking::Client::new()
         .get(&url)
@@ -306,7 +321,7 @@ fn get_default_branch_head_oid(
     repo: &str,
     token: &str,
 ) -> Result<String, VindexError> {
-    let url = format!("https://api.github.com/repos/{owner}/{repo}");
+    let url = format!("{}/repos/{owner}/{repo}", gh_api_base());
     let resp = reqwest::blocking::Client::new()
         .get(&url)
         .bearer_auth(token)
@@ -341,6 +356,10 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, VindexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
+    use serial_test::serial;
+
+    // ── Pure parsing tests (no network, no serial needed) ───────────────
 
     #[test]
     fn parse_gh_url_with_ref() {
@@ -360,8 +379,14 @@ mod tests {
 
     #[test]
     fn parse_gh_url_nested_path() {
-        let u = GhUrl::parse("gh://metavacua/larql-to-sparql@knowledge/patches/foo.vlp").unwrap();
+        let u =
+            GhUrl::parse("gh://metavacua/larql-to-sparql@knowledge/patches/foo.vlp").unwrap();
         assert_eq!(u.path, "patches/foo.vlp");
+    }
+
+    #[test]
+    fn parse_gh_url_missing_prefix_errors() {
+        assert!(GhUrl::parse("https://github.com/owner/repo").is_err());
     }
 
     #[test]
@@ -370,8 +395,431 @@ mod tests {
     }
 
     #[test]
+    fn parse_gh_url_missing_repo_errors() {
+        assert!(GhUrl::parse("gh://owner").is_err());
+    }
+
+    #[test]
+    fn parse_gh_url_empty_repo_name_errors() {
+        assert!(GhUrl::parse("gh://owner/@main/file").is_err());
+    }
+
+    #[test]
     fn parse_gh_url_missing_slash_after_repo_gives_empty_path() {
         let u = GhUrl::parse("gh://owner/repo@main").unwrap();
         assert_eq!(u.path, "");
+    }
+
+    #[test]
+    fn base64_decode_valid() {
+        // "hello" in standard base64
+        let decoded = base64_decode("aGVsbG8=").unwrap();
+        assert_eq!(decoded, b"hello");
+    }
+
+    #[test]
+    fn base64_decode_invalid_returns_error() {
+        assert!(base64_decode("!!!not-base64!!!").is_err());
+    }
+
+    // ── RAII env-var guard ───────────────────────────────────────────────
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.prev.take() {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    // ── HTTP-mocked tests ────────────────────────────────────────────────
+    //
+    // Each test spins up its own mockito::Server on an ephemeral port and
+    // overrides LARQL_GH_TEST_BASE to point at it. Tests are serialized
+    // via `#[serial]` because env vars are process-global.
+
+    #[test]
+    #[serial]
+    fn download_gh_file_base64_content_success() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+        // Remove GITHUB_TOKEN so auth header is absent (exercises the no-token branch)
+        let _tok = {
+            let prev = std::env::var("GITHUB_TOKEN").ok();
+            std::env::remove_var("GITHUB_TOKEN");
+            prev
+        };
+
+        let mock = server
+            .mock("GET", "/repos/owner/repo/contents/path/file.txt?ref=main")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({
+                    "encoding": "base64",
+                    "content": base64::engine::general_purpose::STANDARD
+                        .encode(b"hello world") + "\n",
+                    "download_url": null
+                })
+                .to_string(),
+            )
+            .create();
+
+        let gh = GhUrl {
+            owner: "owner".into(),
+            repo: "repo".into(),
+            git_ref: "main".into(),
+            path: "path/file.txt".into(),
+        };
+        let tmp = download_gh_file(&gh).unwrap();
+        mock.assert();
+        assert_eq!(std::fs::read(&tmp).unwrap(), b"hello world");
+    }
+
+    #[test]
+    #[serial]
+    fn download_gh_file_with_token_sets_auth_header() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+        let _tok = EnvGuard::set("GITHUB_TOKEN", "mytoken");
+
+        let mock = server
+            .mock("GET", "/repos/o/r/contents/f?ref=HEAD")
+            .match_header("authorization", "Bearer mytoken")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({
+                    "encoding": "base64",
+                    "content": base64::engine::general_purpose::STANDARD.encode(b"data"),
+                    "download_url": null
+                })
+                .to_string(),
+            )
+            .create();
+
+        let gh = GhUrl {
+            owner: "o".into(),
+            repo: "r".into(),
+            git_ref: "HEAD".into(),
+            path: "f".into(),
+        };
+        download_gh_file(&gh).unwrap();
+        mock.assert();
+    }
+
+    #[test]
+    #[serial]
+    fn download_gh_file_http_error_propagates() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+
+        let mock = server
+            .mock("GET", "/repos/o/r/contents/f?ref=HEAD")
+            .with_status(404)
+            .with_body("not found")
+            .create();
+
+        let gh = GhUrl {
+            owner: "o".into(),
+            repo: "r".into(),
+            git_ref: "HEAD".into(),
+            path: "f".into(),
+        };
+        assert!(download_gh_file(&gh).is_err());
+        mock.assert();
+    }
+
+    #[test]
+    #[serial]
+    fn download_gh_file_download_url_fallback() {
+        // Simulates a >1 MB file: Contents API returns no inline content,
+        // just a download_url; function must follow it.
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+
+        let dl_path = "/raw/owner/repo/main/big.bin";
+        let contents_mock = server
+            .mock("GET", "/repos/owner/repo/contents/big.bin?ref=main")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({
+                    "encoding": null,
+                    "content": null,
+                    "download_url": format!("{}{}", server.url(), dl_path)
+                })
+                .to_string(),
+            )
+            .create();
+
+        let raw_mock = server
+            .mock("GET", dl_path)
+            .with_status(200)
+            .with_body(b"bigdata".as_ref())
+            .create();
+
+        let gh = GhUrl {
+            owner: "owner".into(),
+            repo: "repo".into(),
+            git_ref: "main".into(),
+            path: "big.bin".into(),
+        };
+        let tmp = download_gh_file(&gh).unwrap();
+        contents_mock.assert();
+        raw_mock.assert();
+        assert_eq!(std::fs::read(&tmp).unwrap(), b"bigdata");
+    }
+
+    #[test]
+    #[serial]
+    fn download_gh_file_no_content_no_download_url_errors() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+
+        let _mock = server
+            .mock("GET", "/repos/o/r/contents/f?ref=HEAD")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({"encoding": null, "content": null, "download_url": null})
+                    .to_string(),
+            )
+            .create();
+
+        let gh = GhUrl {
+            owner: "o".into(),
+            repo: "r".into(),
+            git_ref: "HEAD".into(),
+            path: "f".into(),
+        };
+        assert!(download_gh_file(&gh).is_err());
+    }
+
+    #[test]
+    fn graphql_commit_missing_token_errors() {
+        // No network needed — token check fails before any HTTP call.
+        std::env::remove_var("GITHUB_TOKEN");
+        let result = graphql_commit("o", "r", "b", "msg", &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn graphql_commit_success() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+        let _tok = EnvGuard::set("GITHUB_TOKEN", "tok");
+
+        // Step 1: GET branch ref → returns sha
+        let ref_mock = server
+            .mock("GET", "/repos/owner/repo/git/refs/heads/main")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({
+                    "ref": "refs/heads/main",
+                    "object": {"sha": "abc123def456", "type": "commit"}
+                })
+                .to_string(),
+            )
+            .create();
+
+        // Step 2: POST GraphQL mutation → returns commit OID
+        let gql_mock = server
+            .mock("POST", "/graphql")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({
+                    "data": {
+                        "createCommitOnBranch": {
+                            "commit": {"oid": "newoid123"}
+                        }
+                    }
+                })
+                .to_string(),
+            )
+            .create();
+
+        let oid = graphql_commit(
+            "owner",
+            "repo",
+            "main",
+            "test commit",
+            &[FileAddition {
+                path: "Vindexfile".into(),
+                contents_base64: "Y29udGVudA==".into(),
+            }],
+        )
+        .unwrap();
+
+        ref_mock.assert();
+        gql_mock.assert();
+        assert_eq!(oid, "newoid123");
+    }
+
+    #[test]
+    #[serial]
+    fn graphql_commit_branch_404_falls_back_to_default() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+        let _tok = EnvGuard::set("GITHUB_TOKEN", "tok");
+
+        // Branch lookup 404s
+        let ref_404 = server
+            .mock("GET", "/repos/o/r/git/refs/heads/newbranch")
+            .with_status(404)
+            .create();
+
+        // Fallback: GET repo info → default_branch = "main"
+        let repo_mock = server
+            .mock("GET", "/repos/o/r")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::json!({"default_branch": "main"}).to_string())
+            .create();
+
+        // Retry branch lookup with "main"
+        let ref_main = server
+            .mock("GET", "/repos/o/r/git/refs/heads/main")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({"object": {"sha": "headsha"}}).to_string(),
+            )
+            .create();
+
+        // GraphQL commit
+        let gql_mock = server
+            .mock("POST", "/graphql")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({
+                    "data": {
+                        "createCommitOnBranch": {"commit": {"oid": "oid42"}}
+                    }
+                })
+                .to_string(),
+            )
+            .create();
+
+        let oid = graphql_commit("o", "r", "newbranch", "msg", &[]).unwrap();
+        ref_404.assert();
+        repo_mock.assert();
+        ref_main.assert();
+        gql_mock.assert();
+        assert_eq!(oid, "oid42");
+    }
+
+    #[test]
+    #[serial]
+    fn graphql_commit_graphql_errors_propagates() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+        let _tok = EnvGuard::set("GITHUB_TOKEN", "tok");
+
+        let _ref_mock = server
+            .mock("GET", "/repos/o/r/git/refs/heads/b")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::json!({"object": {"sha": "s"}}).to_string())
+            .create();
+
+        let _gql_mock = server
+            .mock("POST", "/graphql")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({"errors": [{"message": "branch not found"}]}).to_string(),
+            )
+            .create();
+
+        assert!(graphql_commit("o", "r", "b", "msg", &[]).is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn graphql_commit_http_error_propagates() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+        let _tok = EnvGuard::set("GITHUB_TOKEN", "tok");
+
+        let _ref_mock = server
+            .mock("GET", "/repos/o/r/git/refs/heads/b")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::json!({"object": {"sha": "s"}}).to_string())
+            .create();
+
+        let _gql_mock = server
+            .mock("POST", "/graphql")
+            .with_status(401)
+            .with_body("Unauthorized")
+            .create();
+
+        assert!(graphql_commit("o", "r", "b", "msg", &[]).is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn graphql_commit_missing_oid_errors() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+        let _tok = EnvGuard::set("GITHUB_TOKEN", "tok");
+
+        let _ref_mock = server
+            .mock("GET", "/repos/o/r/git/refs/heads/b")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::json!({"object": {"sha": "s"}}).to_string())
+            .create();
+
+        // Response has no OID in the expected path
+        let _gql_mock = server
+            .mock("POST", "/graphql")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::json!({"data": {}}).to_string())
+            .create();
+
+        assert!(graphql_commit("o", "r", "b", "msg", &[]).is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn get_branch_head_oid_missing_sha_errors() {
+        let mut server = mockito::Server::new();
+        let _base = EnvGuard::set(GH_TEST_BASE_ENV, &server.url());
+        let _tok = EnvGuard::set("GITHUB_TOKEN", "tok");
+
+        let _ref_mock = server
+            .mock("GET", "/repos/o/r/git/refs/heads/b")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::json!({"object": {}}).to_string()) // no sha
+            .create();
+
+        let _gql_mock = server
+            .mock("POST", "/graphql")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::json!({"data": {}}).to_string())
+            .create();
+
+        assert!(graphql_commit("o", "r", "b", "msg", &[]).is_err());
     }
 }
