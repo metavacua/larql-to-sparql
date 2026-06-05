@@ -5046,7 +5046,9 @@ fn create_vindex_empty_produces_initial_object() {
     ))
     .unwrap();
 
-    let result = session.execute(&stmt).expect("create_vindex_empty should succeed");
+    let result = session
+        .execute(&stmt)
+        .expect("create_vindex_empty should succeed");
     assert!(!result.is_empty(), "expected non-empty output");
     assert!(result[0].contains("Created empty vindex"));
 
@@ -5127,16 +5129,15 @@ fn create_vindex_empty_then_apply_patch_yields_rank1_object() {
     let patch_json = serde_json::to_string_pretty(&patch).unwrap();
     std::fs::write(&patch_path, &patch_json).unwrap();
 
-    let apply_stmt = parser::parse(&format!(
-        r#"APPLY PATCH "{}";"#,
-        lql_path(&patch_path)
-    ))
-    .unwrap();
+    let apply_stmt =
+        parser::parse(&format!(r#"APPLY PATCH "{}";"#, lql_path(&patch_path))).unwrap();
 
     // USE the vindex first so the session has a backend.
     let use_stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&out_dir))).unwrap();
     session.execute(&use_stmt).expect("USE empty vindex");
-    session.execute(&apply_stmt).expect("APPLY PATCH to empty vindex");
+    session
+        .execute(&apply_stmt)
+        .expect("APPLY PATCH to empty vindex");
 
     let _ = std::fs::remove_dir_all(&model_dir);
     let _ = std::fs::remove_dir_all(&out_dir);

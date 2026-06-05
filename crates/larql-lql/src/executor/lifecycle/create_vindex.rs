@@ -106,8 +106,11 @@ impl Session {
 
         let config_json = serde_json::to_string_pretty(&config)
             .map_err(|e| LqlError::exec("failed to serialise vindex config", e))?;
-        std::fs::write(output_dir.join(larql_vindex::format::filenames::INDEX_JSON), config_json)
-            .map_err(|e| LqlError::exec("failed to write index.json", e))?;
+        std::fs::write(
+            output_dir.join(larql_vindex::format::filenames::INDEX_JSON),
+            config_json,
+        )
+        .map_err(|e| LqlError::exec("failed to write index.json", e))?;
 
         Ok(vec![format!(
             "Created empty vindex: {} ({} layers, hidden={}, intermediate={}, model: {})",

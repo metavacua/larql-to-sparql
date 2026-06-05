@@ -2024,8 +2024,7 @@ fn parse_create_vindex_empty() {
 
 #[test]
 fn parse_create_vindex_empty_no_semicolon() {
-    let stmt =
-        parse(r#"CREATE VINDEX "/out" ARCHITECTURE "google/gemma-3-4b-it" EMPTY"#).unwrap();
+    let stmt = parse(r#"CREATE VINDEX "/out" ARCHITECTURE "google/gemma-3-4b-it" EMPTY"#).unwrap();
     assert!(matches!(
         stmt,
         Statement::CreateVindex {
