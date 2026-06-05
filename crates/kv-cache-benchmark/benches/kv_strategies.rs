@@ -59,6 +59,10 @@ fn bench_memory_sweep(c: &mut Criterion) {
     let tq4 = TurboQuant::new(4);
     let markov = MarkovResidual::new(512);
     let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov];
+    // kv_bytes_per_token ≈ 69_632; safe limit on 32-bit is ~61_718 tokens.
+    #[cfg(not(target_pointer_width = "64"))]
+    let lengths: &[usize] = &[512, 1024, 2048, 4096, 8192, 16384, 32768];
+    #[cfg(target_pointer_width = "64")]
     let lengths = benchmark::CONTEXT_LENGTHS;
     c.bench_function("memory_sweep", |b| {
         b.iter(|| benchmark::memory_sweep(&config, &strategies, lengths))
@@ -152,7 +156,12 @@ fn bench_engine_memory_accounting(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("engine_memory");
 
-    for &seq_len in &[512usize, 4096, 32768, 131072, 370_000] {
+    // seq_len * layers * 2 * kv_dim * 2 overflows usize on 32-bit for seq_len > ~61k.
+    #[cfg(not(target_pointer_width = "64"))]
+    let engine_lens: &[usize] = &[512, 4096, 32768];
+    #[cfg(target_pointer_width = "64")]
+    let engine_lens: &[usize] = &[512, 4096, 32768, 131_072, 370_000];
+    for &seq_len in engine_lens {
         let window = seq_len.min(512);
 
         group.bench_with_input(
