@@ -98,6 +98,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Skip default features check for Android in larql-compute
 - Skip default features check for Android in larql-core
 - Supply github_token to buf-setup-action to avoid rate limiting
+- Tighten bench_engine_memory_accounting 32-bit cap to 4096
 - Unblock CI tests broken by e67b4f3
 - Update runtime to use Engine with Config
 - Use >= 0.3 boundary for Ambiguous quality tier
