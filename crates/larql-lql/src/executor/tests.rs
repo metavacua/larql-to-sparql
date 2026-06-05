@@ -4990,3 +4990,154 @@ fn compact_major_skips_inserts_with_no_relation() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ══════════════════════════════════════════════════════════════
+// CREATE VINDEX … EMPTY
+// ══════════════════════════════════════════════════════════════
+
+/// Write a minimal `config.json` that `detect_architecture` accepts.
+fn make_model_config_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "larql_lql_model_config_{tag}_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let config_json = serde_json::json!({
+        "model_type": "tinymodel",
+        "hidden_size": 16,
+        "num_hidden_layers": 2,
+        "intermediate_size": 32,
+        "head_dim": 8,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 2,
+        "vocab_size": 64,
+    });
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string_pretty(&config_json).unwrap(),
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn create_vindex_empty_produces_initial_object() {
+    let model_dir = make_model_config_dir("create_empty_basic");
+    let out_dir = std::env::temp_dir().join(format!(
+        "larql_lql_create_empty_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&out_dir);
+
+    let mut session = Session::new();
+    let stmt = parser::parse(&format!(
+        r#"CREATE VINDEX "{}" ARCHITECTURE "{}" EMPTY;"#,
+        lql_path(&out_dir),
+        lql_path(&model_dir),
+    ))
+    .unwrap();
+
+    let result = session.execute(&stmt).expect("create_vindex_empty should succeed");
+    assert!(!result.is_empty(), "expected non-empty output");
+    assert!(result[0].contains("Created empty vindex"));
+
+    // Read back and verify this is the initial object (num_features = 0 ∀ layer).
+    let config = larql_vindex::load_vindex_config(&out_dir)
+        .expect("index.json should be present after CREATE VINDEX EMPTY");
+    assert_eq!(config.num_layers, 2, "num_layers should match architecture");
+    assert_eq!(config.hidden_size, 16);
+    assert_eq!(config.intermediate_size, 32);
+    assert_eq!(
+        config.extract_level,
+        larql_vindex::ExtractLevel::Browse,
+        "empty vindex is Browse-tier (initial object)"
+    );
+    for layer_info in &config.layers {
+        assert_eq!(
+            layer_info.num_features, 0,
+            "initial object has no features at layer {}",
+            layer_info.layer
+        );
+    }
+    assert_eq!(config.layers.len(), 2);
+
+    let _ = std::fs::remove_dir_all(&model_dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn create_vindex_empty_then_apply_patch_yields_rank1_object() {
+    use larql_vindex::{PatchOp, VindexPatch};
+
+    let model_dir = make_model_config_dir("create_empty_patch");
+    let out_dir = std::env::temp_dir().join(format!(
+        "larql_lql_create_empty_patch_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&out_dir);
+
+    // Create the empty vindex (initial object).
+    let mut session = Session::new();
+    let create_stmt = parser::parse(&format!(
+        r#"CREATE VINDEX "{}" ARCHITECTURE "{}" EMPTY;"#,
+        lql_path(&out_dir),
+        lql_path(&model_dir),
+    ))
+    .unwrap();
+    session.execute(&create_stmt).expect("CREATE VINDEX EMPTY");
+
+    // Apply a one-operation patch (inserts one feature → rank-1 object).
+    let patch = VindexPatch {
+        version: 2,
+        base_model: "tinymodel".to_string(),
+        base_checksum: None,
+        created_at: "2026-06-05T00:00:00Z".to_string(),
+        description: None,
+        author: None,
+        tags: vec![],
+        dependencies: None,
+        operations: vec![PatchOp::Insert {
+            layer: 0,
+            feature: 0,
+            relation: Some("capital".to_string()),
+            entity: "France".to_string(),
+            target: "Paris".to_string(),
+            confidence: Some(0.9),
+            gate_vector_b64: None,
+            up_vector_b64: None,
+            down_vector_b64: None,
+            down_meta: None,
+            quality: None,
+        }],
+    };
+    let patch_path = out_dir.join("test.vlp");
+    let patch_json = serde_json::to_string_pretty(&patch).unwrap();
+    std::fs::write(&patch_path, &patch_json).unwrap();
+
+    let apply_stmt = parser::parse(&format!(
+        r#"APPLY PATCH "{}";"#,
+        lql_path(&patch_path)
+    ))
+    .unwrap();
+
+    // USE the vindex first so the session has a backend.
+    let use_stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&out_dir))).unwrap();
+    session.execute(&use_stmt).expect("USE empty vindex");
+    session.execute(&apply_stmt).expect("APPLY PATCH to empty vindex");
+
+    let _ = std::fs::remove_dir_all(&model_dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
+}

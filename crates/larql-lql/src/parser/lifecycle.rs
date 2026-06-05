@@ -297,4 +297,40 @@ impl Parser {
             ))),
         }
     }
+
+    /// `CREATE VINDEX "path" ARCHITECTURE "model-id-or-path" EMPTY;`
+    pub(crate) fn parse_create_vindex(&mut self) -> Result<Statement, ParseError> {
+        self.expect_keyword(Keyword::Create)?;
+        // VINDEX parsed as a case-insensitive identifier (same pattern as COMPILE INTO VINDEX)
+        match self.peek() {
+            crate::lexer::Token::Ident(ref s) if s.eq_ignore_ascii_case("vindex") => {
+                self.advance();
+            }
+            other => {
+                return Err(ParseError(format!(
+                    "expected VINDEX after CREATE, got {other:?}"
+                )));
+            }
+        }
+        let path = self.expect_string()?;
+        // ARCHITECTURE parsed as a case-insensitive identifier
+        match self.peek() {
+            crate::lexer::Token::Ident(ref s) if s.eq_ignore_ascii_case("architecture") => {
+                self.advance();
+            }
+            other => {
+                return Err(ParseError(format!(
+                    "expected ARCHITECTURE after path, got {other:?}"
+                )));
+            }
+        }
+        let architecture = self.expect_string()?;
+        self.expect_keyword(Keyword::Empty)?;
+        self.eat_semicolon();
+        Ok(Statement::CreateVindex {
+            path,
+            architecture,
+            init: VindexInit::Empty,
+        })
+    }
 }

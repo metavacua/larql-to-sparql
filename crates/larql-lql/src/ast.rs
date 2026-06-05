@@ -152,6 +152,14 @@ pub enum Statement {
         lambda: Option<f32>,
     },
 
+    // ── Lifecycle (constructors) ──
+    /// CREATE VINDEX "path" ARCHITECTURE "model-id-or-path" EMPTY
+    CreateVindex {
+        path: String,
+        architecture: String,
+        init: VindexInit,
+    },
+
     // ── Patch ──
     BeginPatch {
         path: String,
@@ -377,4 +385,12 @@ pub enum TracePositionMode {
 pub struct Assignment {
     pub field: String,
     pub value: Value,
+}
+
+/// How a new vindex should be initialised by `CREATE VINDEX`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VindexInit {
+    /// The initial object in the category of vindexes: zero features per layer,
+    /// ExtractLevel::Browse. Every non-empty vindex is an extension of this.
+    Empty,
 }

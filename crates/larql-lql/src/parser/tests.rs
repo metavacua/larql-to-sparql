@@ -2001,3 +2001,48 @@ fn parse_export_patch_message_before_branch() {
         _ => panic!("expected ExportPatch"),
     }
 }
+
+// ── CREATE VINDEX ──
+
+#[test]
+fn parse_create_vindex_empty() {
+    let stmt =
+        parse(r#"CREATE VINDEX "/tmp/new.vindex" ARCHITECTURE "gemma-3-4b" EMPTY;"#).unwrap();
+    match stmt {
+        Statement::CreateVindex {
+            path,
+            architecture,
+            init,
+        } => {
+            assert_eq!(path, "/tmp/new.vindex");
+            assert_eq!(architecture, "gemma-3-4b");
+            assert_eq!(init, VindexInit::Empty);
+        }
+        _ => panic!("expected CreateVindex"),
+    }
+}
+
+#[test]
+fn parse_create_vindex_empty_no_semicolon() {
+    let stmt =
+        parse(r#"CREATE VINDEX "/out" ARCHITECTURE "google/gemma-3-4b-it" EMPTY"#).unwrap();
+    assert!(matches!(
+        stmt,
+        Statement::CreateVindex {
+            init: VindexInit::Empty,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn parse_create_vindex_case_insensitive_keywords() {
+    let stmt = parse(r#"create vindex "/x" architecture "model" empty"#).unwrap();
+    assert!(matches!(
+        stmt,
+        Statement::CreateVindex {
+            init: VindexInit::Empty,
+            ..
+        }
+    ));
+}

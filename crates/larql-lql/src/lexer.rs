@@ -142,6 +142,8 @@ pub enum Keyword {
     Export,
     Branch,
     Message,
+    Create,
+    Empty,
 }
 
 impl Keyword {
@@ -258,6 +260,8 @@ impl Keyword {
             Self::Export => "export",
             Self::Branch => "branch",
             Self::Message => "message",
+            Self::Create => "create",
+            Self::Empty => "empty",
         }
     }
 
@@ -371,6 +375,8 @@ impl Keyword {
             "EXPORT" => Some(Self::Export),
             "BRANCH" => Some(Self::Branch),
             "MESSAGE" => Some(Self::Message),
+            "CREATE" => Some(Self::Create),
+            "EMPTY" => Some(Self::Empty),
             _ => None,
         }
     }

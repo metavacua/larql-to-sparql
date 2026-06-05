@@ -118,6 +118,11 @@ impl Session {
             }
             Statement::Use { target } => self.exec_use(target),
             Statement::Stats { vindex } => self.exec_stats(vindex.as_deref()),
+            Statement::CreateVindex {
+                path,
+                architecture,
+                init,
+            } => self.exec_create_vindex(path, architecture, *init),
             Statement::Walk {
                 prompt,
                 top,
