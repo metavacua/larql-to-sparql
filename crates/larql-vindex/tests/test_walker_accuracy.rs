@@ -93,11 +93,13 @@ fn canonicalise_edges(graph: &Graph, layer_field: &str, feature_field: &str) -> 
 // Regenerated 2026-05-10: the canonicalisation strips the `_header`
 // record so the wall-clock `extraction_date` field doesn't make the
 // golden drift every day.
-#[cfg(not(windows))]
+// Android targets use a different BLAS (NDK math) that produces
+// different f32 rounding; same exclusion logic as Windows.
+#[cfg(not(any(windows, target_os = "android")))]
 const GOLDEN_VECTOR_EXTRACTOR_FFN_DOWN_LAYER0: &str =
     "8b5e221b150147ed40b0cfa67fdfc264e0628ab6cd6c59c2f9419e9350589b83";
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "android")))]
 fn check_or_print(label: &str, actual: &str, golden: &str) {
     if std::env::var("LARQL_PRINT_GOLDEN").is_ok() {
         eprintln!("{label} = {actual:?}");
@@ -238,8 +240,8 @@ fn assert_structural_invariants(graph: &Graph, second_field: &str, expected_laye
 // happen to produce matching textual output; Windows OpenBLAS rounds the
 // last digit of some entries differently, so the hash drifts. The test
 // stays useful as a same-platform regression on Linux/macOS — skipping
-// it on Windows rather than weakening it to a "shape only" check.
-#[cfg(not(windows))]
+// it on Windows and Android rather than weakening it to a "shape only" check.
+#[cfg(not(any(windows, target_os = "android")))]
 #[test]
 fn vector_extractor_ffn_down_byte_identical() {
     let dir = fixture("vex");
