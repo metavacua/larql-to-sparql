@@ -34,10 +34,10 @@ use larql_vindex::walker::{
 };
 
 // Vector-extractor imports are only used by the byte-identical golden
-// test, which is gated off on Windows (BLAS f32 round-tripping drifts
-// the JSONL hash). Keep the imports under the same gate so a Windows
-// build doesn't flag them as unused.
-#[cfg(not(windows))]
+// test, which is gated off on Windows and Android (BLAS f32 round-tripping
+// drifts the JSONL hash on those platforms). Keep the imports under the
+// same gate so excluded builds don't flag them as unused.
+#[cfg(not(any(windows, target_os = "android")))]
 use larql_vindex::walker::vector_extractor::{
     ExtractConfig, SilentExtractCallbacks, VectorExtractor,
 };
