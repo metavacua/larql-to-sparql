@@ -21,7 +21,12 @@ use larql_vindex::{
 };
 
 /// Minimal tempdir that cleans up on drop.
+///
+/// Uses a process-wide atomic counter in addition to a nanosecond timestamp
+/// so parallel tests on macOS (where SystemTime resolution can be coarser than
+/// the test run interval) don't collide on the same directory path.
 struct TempDir(std::path::PathBuf);
+static TEMPDIR_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 impl TempDir {
     fn new(label: &str) -> Self {
         let base = std::env::temp_dir();
@@ -29,7 +34,12 @@ impl TempDir {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let p = base.join(format!("fp4_synth_{label}_{}_{}", std::process::id(), ts));
+        let seq = TEMPDIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let p = base.join(format!(
+            "fp4_synth_{label}_{}_{}_{seq}",
+            std::process::id(),
+            ts,
+        ));
         std::fs::create_dir_all(&p).unwrap();
         Self(p)
     }
