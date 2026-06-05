@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Gate trace_final_residual_matches_raw_forward_logits
 - Guard vector-extractor imports under Android exclusion
 - Pin evalexpr to v11.3.1 (MIT) to avoid AGPL-3.0 at v12
+- Prefix mem_370k with _ to silence unused-variable on armv7
 - Prevent arithmetic overflow in lm_head vocab calculation on 32-bit platforms
 - Pull Q4K vindex weight artifacts
 - Remove BLIS dependency due to yanked transitive versions
