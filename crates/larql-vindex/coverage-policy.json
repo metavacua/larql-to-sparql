@@ -50,6 +50,8 @@
     "crates/larql-vindex/src/quant/convert_q4k.rs": 56.1,
     "crates/larql-vindex/src/quant/scan.rs": 86.6,
     "crates/larql-vindex/src/trie/mod.rs": 70.0,
-    "crates/larql-vindex/src/vindexfile/mod.rs": 72.0
+    "crates/larql-vindex/src/vindexfile/mod.rs": 72.0,
+    "crates/larql-vindex/src/format/checksums.rs": 90.0,
+    "crates/larql-vindex/src/vindexfile/github.rs": 90.0
   }
 }

@@ -4992,6 +4992,75 @@ fn compact_major_skips_inserts_with_no_relation() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// Gap E: FeatureQuality propagation — DIFF INTO PATCH carries quality annotations
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn diff_into_patch_carries_feature_quality_annotations() {
+    // DIFF base → modified with INTO PATCH; the emitted .vlp ops must carry
+    // quality annotations derived from the target c_score via from_c_score().
+    let dir_a = make_test_vindex_dir("fq_diff_a");
+    let dir_b = make_modified_test_vindex_dir("fq_diff_b");
+    let patch_path = std::env::temp_dir().join(format!(
+        "larql_fq_diff_{}_{}_.vlp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    ));
+    let mut session = Session::new();
+    let stmt = parser::parse(&format!(
+        r#"DIFF "{}" "{}" INTO PATCH "{}";"#,
+        lql_path(&dir_a),
+        lql_path(&dir_b),
+        lql_path(&patch_path),
+    ))
+    .unwrap();
+    session
+        .execute(&stmt)
+        .expect("DIFF INTO PATCH for quality check");
+
+    let patch =
+        larql_vindex::VindexPatch::load(&patch_path).expect("patch file should be loadable");
+
+    // L0F0: Paris→Madrid (c_score 0.92 → Monosemantic) → Update op
+    // L1F1: None→Rome   (c_score 0.85 → Monosemantic) → Insert op
+    let update_quality = patch.operations.iter().find_map(|op| match op {
+        larql_vindex::PatchOp::Update {
+            layer: 0,
+            feature: 0,
+            quality,
+            ..
+        } => quality.as_ref(),
+        _ => None,
+    });
+    assert_eq!(
+        update_quality,
+        Some(&larql_vindex::patch::format::FeatureQuality::Monosemantic),
+        "L0F0 Update op (c_score 0.92) must be annotated Monosemantic"
+    );
+
+    let insert_quality = patch.operations.iter().find_map(|op| match op {
+        larql_vindex::PatchOp::Insert {
+            layer: 1,
+            feature: 1,
+            quality,
+            ..
+        } => quality.as_ref(),
+        _ => None,
+    });
+    assert_eq!(
+        insert_quality,
+        Some(&larql_vindex::patch::format::FeatureQuality::Monosemantic),
+        "L1F1 Insert op (c_score 0.85) must be annotated Monosemantic"
+    );
+
+    let _ = std::fs::remove_file(&patch_path);
+    let _ = std::fs::remove_dir_all(&dir_a);
+    let _ = std::fs::remove_dir_all(&dir_b);
+}
+
 // CREATE VINDEX … EMPTY
 // ══════════════════════════════════════════════════════════════
 

@@ -508,4 +508,49 @@ mod tests {
         pv.apply_patch(delete);
         assert_eq!(pv.knn_store.len(), 0);
     }
+
+    // Gap A: apply_patch_verified — checksum paths
+
+    #[test]
+    fn apply_patch_verified_succeeds_when_base_checksum_is_none() {
+        // base_checksum = None skips verification regardless of base_dir content.
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut pv = empty_pv();
+        let patch = make_patch(vec![]);
+        // No index.json needed — the None branch is a no-op.
+        pv.apply_patch_verified(patch, dir.path())
+            .expect("no-verify path should succeed");
+    }
+
+    #[test]
+    fn apply_patch_verified_succeeds_when_checksums_match() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("index.json"), b"{\"version\":2}").unwrap();
+        let actual = crate::format::checksums::compute_base_checksum(dir.path()).unwrap();
+
+        let mut pv = empty_pv();
+        let mut patch = make_patch(vec![]);
+        patch.base_checksum = Some(actual);
+        pv.apply_patch_verified(patch, dir.path())
+            .expect("matching checksum should succeed");
+    }
+
+    #[test]
+    fn apply_patch_verified_returns_checksum_mismatch_on_wrong_hash() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("index.json"), b"{\"version\":2}").unwrap();
+
+        let mut pv = empty_pv();
+        let mut patch = make_patch(vec![]);
+        patch.base_checksum =
+            Some("0000000000000000000000000000000000000000000000000000000000000000".into());
+
+        let err = pv
+            .apply_patch_verified(patch, dir.path())
+            .expect_err("mismatched checksum must error");
+        assert!(
+            matches!(err, crate::error::VindexError::ChecksumMismatch { .. }),
+            "expected ChecksumMismatch, got {err:?}"
+        );
+    }
 }
