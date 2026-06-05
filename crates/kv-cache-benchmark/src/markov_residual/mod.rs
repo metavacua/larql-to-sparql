@@ -160,14 +160,17 @@ mod tests {
             "Cold tier (token IDs) should be < 2MB at 370K"
         );
 
-        // Total should be WAY less than standard KV
-        let standard_mem = config.kv_memory(370_000);
-        assert!(
-            mem_370k < standard_mem / 100,
-            "Markov RS at 370K ({}) should be <1% of standard KV ({})",
-            mem_370k,
-            standard_mem
-        );
+        // kv_memory(370_000) overflows usize on 32-bit; only run on 64-bit.
+        #[cfg(target_pointer_width = "64")]
+        {
+            let standard_mem = config.kv_memory(370_000);
+            assert!(
+                mem_370k < standard_mem / 100,
+                "Markov RS at 370K ({}) should be <1% of standard KV ({})",
+                mem_370k,
+                standard_mem
+            );
+        }
     }
 
     #[test]
