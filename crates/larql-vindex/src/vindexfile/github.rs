@@ -26,8 +26,7 @@ fn io_err(msg: impl Into<String>) -> VindexError {
 pub(crate) const GH_TEST_BASE_ENV: &str = "LARQL_GH_TEST_BASE";
 
 fn gh_api_base() -> String {
-    std::env::var(GH_TEST_BASE_ENV)
-        .unwrap_or_else(|_| "https://api.github.com".to_string())
+    std::env::var(GH_TEST_BASE_ENV).unwrap_or_else(|_| "https://api.github.com".to_string())
 }
 
 // ── URL parsing ─────────────────────────────────────────────────────────
@@ -287,7 +286,10 @@ fn get_branch_head_oid(
     branch: &str,
     token: &str,
 ) -> Result<String, VindexError> {
-    let url = format!("{}/repos/{owner}/{repo}/git/refs/heads/{branch}", gh_api_base());
+    let url = format!(
+        "{}/repos/{owner}/{repo}/git/refs/heads/{branch}",
+        gh_api_base()
+    );
 
     let resp = reqwest::blocking::Client::new()
         .get(&url)
@@ -379,8 +381,7 @@ mod tests {
 
     #[test]
     fn parse_gh_url_nested_path() {
-        let u =
-            GhUrl::parse("gh://metavacua/larql-to-sparql@knowledge/patches/foo.vlp").unwrap();
+        let u = GhUrl::parse("gh://metavacua/larql-to-sparql@knowledge/patches/foo.vlp").unwrap();
         assert_eq!(u.path, "patches/foo.vlp");
     }
 
@@ -697,9 +698,7 @@ mod tests {
             .mock("GET", "/repos/o/r/git/refs/heads/main")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                serde_json::json!({"object": {"sha": "headsha"}}).to_string(),
-            )
+            .with_body(serde_json::json!({"object": {"sha": "headsha"}}).to_string())
             .create();
 
         // GraphQL commit
@@ -743,9 +742,7 @@ mod tests {
             .mock("POST", "/graphql")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                serde_json::json!({"errors": [{"message": "branch not found"}]}).to_string(),
-            )
+            .with_body(serde_json::json!({"errors": [{"message": "branch not found"}]}).to_string())
             .create();
 
         assert!(graphql_commit("o", "r", "b", "msg", &[]).is_err());
