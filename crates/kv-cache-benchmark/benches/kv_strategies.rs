@@ -156,9 +156,10 @@ fn bench_engine_memory_accounting(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("engine_memory");
 
-    // seq_len * layers * 2 * kv_dim * 2 overflows usize on 32-bit for seq_len > ~61k.
+    // seq_len * 34 * 2 * 1024 * 2 overflows u32 at seq_len > ~30_844 on 32-bit.
+    // Safe cap is 4096; 32768 already wraps (4.56B > u32::MAX).
     #[cfg(not(target_pointer_width = "64"))]
-    let engine_lens: &[usize] = &[512, 4096, 32768];
+    let engine_lens: &[usize] = &[512, 4096];
     #[cfg(target_pointer_width = "64")]
     let engine_lens: &[usize] = &[512, 4096, 32768, 131_072, 370_000];
     for &seq_len in engine_lens {
