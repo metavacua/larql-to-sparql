@@ -178,7 +178,7 @@ jobs:
       - name: Save baseline (main only)
         if: github.ref == 'refs/heads/main'
         shell: bash
-        run: make bench-save
+        run: bash scripts/bench-regress.sh save
 
       - name: Check vs baseline (PRs + manual)
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
@@ -188,7 +188,7 @@ jobs:
           # exits 2. Treat as neutral: the first PR after CI is stood
           # up shouldn't fail just because there's no baseline yet.
           set +e
-          make bench-check
+          bash scripts/bench-regress.sh check
           rc=$?
           set -e
           if [ "$rc" -eq 2 ]; then

@@ -56,7 +56,7 @@ fn test_graph_walk_matches_forward_pass_detection() {
 
 #[test]
 fn test_graph_walk_routing_table_coverage() {
-    let queries = vec![
+    let queries = [
         vec!["capital", "of", "France"],
         vec!["capital", "of", "Germany"],
         vec!["capital", "of", "Japan"],
