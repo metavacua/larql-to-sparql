@@ -16,7 +16,7 @@ use serde::Deserialize;
 use crate::error::VindexError;
 
 fn io_err(msg: impl Into<String>) -> VindexError {
-    VindexError::Io(std::io::Error::new(std::io::ErrorKind::Other, msg.into()))
+    VindexError::Io(std::io::Error::other(msg.into()))
 }
 
 // ── URL parsing ─────────────────────────────────────────────────────────
