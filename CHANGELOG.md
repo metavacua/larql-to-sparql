@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+
 ## [Unreleased]
 
 ### Added
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - DeepSeekV4Arch — V4 tensor naming (no model. prefix, ffn, w1/w2/w3)
 - EXPORT PATCH TO gh:// + gh:// Vindexfile resolver
 - MXFP4-aware streaming gate_vectors path
+- Add CREATE VINDEX … EMPTY — initial object constructor
 - Add Nix flake for reproducible builds; track Cargo.lock (#34)
 - Add deterministic changelog and SemVer preflight checks
 - Add modular Nix flake with demos, OCI containers, and model catalog
@@ -57,6 +59,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Allow pulling vindexes from HF model repos
 - Also gate 131_072 behind 64-bit in format_comparative_table
 - Apply rustfmt and fix clippy::unnecessary_sort_by
+- Apply rustfmt formatting to CREATE VINDEX EMPTY implementation
 - Bump pinned versions and drop fmt CI duplication
 - Bump toolchain to 1.88 and unpin scanner-tool versions
 - Configure Android cross-compilation with linker and PATH setup
