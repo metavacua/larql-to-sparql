@@ -164,6 +164,12 @@ pub enum Statement {
     RemovePatch {
         path: String,
     },
+    /// EXPORT PATCH TO "gh://owner/repo" [BRANCH "branch"] [MESSAGE "msg"]
+    ExportPatch {
+        target: String,
+        branch: Option<String>,
+        message: Option<String>,
+    },
 
     // ── Trace ──
     /// Residual stream trace — decomposed forward pass.

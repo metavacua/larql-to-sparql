@@ -268,6 +268,11 @@ impl Session {
             Statement::ApplyPatch { path } => self.exec_apply_patch(path),
             Statement::ShowPatches => self.exec_show_patches(),
             Statement::RemovePatch { path } => self.exec_remove_patch(path),
+            Statement::ExportPatch {
+                target,
+                branch,
+                message,
+            } => self.exec_export_patch(target, branch.as_deref(), message.as_deref()),
             // ── Trace commands ──
             Statement::Trace {
                 prompt,

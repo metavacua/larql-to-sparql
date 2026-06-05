@@ -2126,6 +2126,7 @@ dependencies = [
 name = "larql-lql"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "criterion",
  "larql-compute",
  "larql-core",

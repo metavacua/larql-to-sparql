@@ -82,6 +82,7 @@ impl Parser {
             Token::Keyword(Keyword::Remove) => self.parse_remove(),
             Token::Keyword(Keyword::Trace) => self.parse_trace(),
             Token::Keyword(Keyword::Compact) => self.parse_compact(),
+            Token::Keyword(Keyword::Export) => self.parse_export_patch(),
             _ => Err(ParseError(format!(
                 "expected statement keyword, got {:?}",
                 self.peek()

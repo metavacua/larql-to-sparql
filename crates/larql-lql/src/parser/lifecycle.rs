@@ -211,6 +211,38 @@ impl Parser {
         Ok(Statement::Use { target })
     }
 
+    /// `EXPORT PATCH TO "gh://owner/repo" [BRANCH "branch"] [MESSAGE "msg"];`
+    pub(crate) fn parse_export_patch(&mut self) -> Result<Statement, ParseError> {
+        self.expect_keyword(Keyword::Export)?;
+        self.expect_keyword(Keyword::Patch)?;
+        self.expect_keyword(Keyword::To)?;
+        let target = self.expect_string()?;
+
+        let mut branch = None;
+        let mut message = None;
+
+        loop {
+            match self.peek() {
+                crate::lexer::Token::Keyword(Keyword::Branch) => {
+                    self.advance();
+                    branch = Some(self.expect_string()?);
+                }
+                crate::lexer::Token::Keyword(Keyword::Message) => {
+                    self.advance();
+                    message = Some(self.expect_string()?);
+                }
+                _ => break,
+            }
+        }
+
+        self.eat_semicolon();
+        Ok(Statement::ExportPatch {
+            target,
+            branch,
+            message,
+        })
+    }
+
     /// `COMPACT MINOR;`
     /// `COMPACT MAJOR [FULL] [WITH LAMBDA = <f>];`
     pub(crate) fn parse_compact(&mut self) -> Result<Statement, ParseError> {
