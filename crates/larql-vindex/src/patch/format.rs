@@ -48,7 +48,7 @@ impl FeatureQuality {
     pub fn from_c_score(c_score: f32) -> Self {
         if c_score > 0.7 {
             Self::Monosemantic
-        } else if c_score > 0.3 {
+        } else if c_score >= 0.3 {
             Self::Ambiguous
         } else {
             Self::Polysemantic
