@@ -14,7 +14,13 @@ fn test_all_strategies_memory_ordering() {
     let markov = MarkovResidual::new(512);
     let graph = GraphWalk::gemma_4b();
 
-    for &seq_len in &[4096, 32768, 370_000] {
+    // 370_000 * kv_bytes_per_token overflows usize on 32-bit; skip on non-64-bit targets.
+    #[cfg(not(target_pointer_width = "64"))]
+    let lengths: &[usize] = &[4096, 32768];
+    #[cfg(target_pointer_width = "64")]
+    let lengths: &[usize] = &[4096, 32768, 370_000];
+
+    for &seq_len in lengths {
         let mem_std = standard.memory_bytes(&config, seq_len);
         let mem_tq = tq4.memory_bytes(&config, seq_len);
         let mem_mrk = markov.memory_bytes(&config, seq_len);
@@ -43,12 +49,16 @@ fn test_all_strategies_memory_ordering() {
 
     // At very long contexts, MarkovRS stays flat while TurboQuant grows O(n).
     // Crossover: MarkovRS fixed window (~192 MB) < TurboQuant at ~11K+ tokens.
-    let mem_mrk_370k = markov.memory_bytes(&config, 370_000) as f64;
-    let mem_tq_370k = tq4.memory_bytes(&config, 370_000) as f64;
-    assert!(
-        mem_tq_370k > mem_mrk_370k,
-        "At 370K: TurboQuant ({mem_tq_370k:.0}) should exceed Markov RS ({mem_mrk_370k:.0})"
-    );
+    // kv_memory(370_000) overflows usize on 32-bit; only run on 64-bit.
+    #[cfg(target_pointer_width = "64")]
+    {
+        let mem_mrk_370k = markov.memory_bytes(&config, 370_000) as f64;
+        let mem_tq_370k = tq4.memory_bytes(&config, 370_000) as f64;
+        assert!(
+            mem_tq_370k > mem_mrk_370k,
+            "At 370K: TurboQuant ({mem_tq_370k:.0}) should exceed Markov RS ({mem_mrk_370k:.0})"
+        );
+    }
 }
 
 #[test]
@@ -92,6 +102,7 @@ fn test_comparative_table_format() {
 }
 
 #[test]
+#[cfg(target_pointer_width = "64")]
 fn test_370k_memory_ratios() {
     let config = ModelConfig::gemma_4b();
     let standard = StandardKv;
