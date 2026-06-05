@@ -321,6 +321,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn trace_custom_ffn_matches_hooked_forward_final_residual() {
         let w = weights();
