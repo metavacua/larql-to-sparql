@@ -92,6 +92,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Skip BLAS entirely for Android cross-compilation
 - Skip default features check for Android in larql-compute
 - Skip default features check for Android in larql-core
+- Supply github_token to buf-setup-action to avoid rate limiting
 - Unblock CI tests broken by e67b4f3
 - Update runtime to use Engine with Config
 - Use >= 0.3 boundary for Ambiguous quality tier
