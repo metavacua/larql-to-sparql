@@ -67,6 +67,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Error on missing config.json / required topology fields (#22)
 - Exclude golden-hash check on Android targets
+- Gate 370k overflow tests behind 64-bit in test_markov
 - Gate 370k usize literals behind cfg(target_pointer_width = "64")
 - Gate 370k usize literals behind cfg(target_pointer_width = "64") in kv-cache-benchmark
 - Gate UDS listener bind behind cfg(unix)
