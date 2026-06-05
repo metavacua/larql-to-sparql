@@ -131,9 +131,9 @@ pub fn format_comparative_table(config: &ModelConfig, strategies: &[&dyn KvStrat
     out.push_str(&"-".repeat(25 + strategies.len() * (col_width + 1)));
     out.push('\n');
 
-    // 370_000 * kv_bytes_per_token overflows usize on 32-bit targets.
+    // kv_bytes_per_token ≈ 69_632; any seq_len > ~61_718 overflows usize on 32-bit.
     #[cfg(not(target_pointer_width = "64"))]
-    let seq_lens: &[usize] = &[512, 4096, 32768, 131_072];
+    let seq_lens: &[usize] = &[512, 4096, 32768];
     #[cfg(target_pointer_width = "64")]
     let seq_lens: &[usize] = &[512, 4096, 32768, 131_072, 370_000];
     for &seq_len in seq_lens {
