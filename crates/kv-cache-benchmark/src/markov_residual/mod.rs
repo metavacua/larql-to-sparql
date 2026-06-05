@@ -147,7 +147,7 @@ mod tests {
         let config = ModelConfig::gemma_4b();
 
         let _mem_4k = strategy.memory_bytes(&config, 4096);
-        let mem_370k = strategy.memory_bytes(&config, 370_000);
+        let _mem_370k = strategy.memory_bytes(&config, 370_000);
 
         // Hot window dominates (window × layers × hidden × 4): bounded regardless of seq_len.
         // Cold tier token IDs grow linearly at 4 bytes/token.
@@ -165,9 +165,9 @@ mod tests {
         {
             let standard_mem = config.kv_memory(370_000);
             assert!(
-                mem_370k < standard_mem / 100,
+                _mem_370k < standard_mem / 100,
                 "Markov RS at 370K ({}) should be <1% of standard KV ({})",
-                mem_370k,
+                _mem_370k,
                 standard_mem
             );
         }
