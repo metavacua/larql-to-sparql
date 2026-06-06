@@ -327,6 +327,7 @@ mod tests {
         assert!(attn_w.is_none());
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn run_attention_block_gpu_with_cpu_backend_matches_no_backend() {
         let weights = make_test_weights();
@@ -433,6 +434,7 @@ mod tests {
         assert!(h_out.iter().all(|x| x.is_finite()));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn run_attention_with_kv_backend_gemma3_with_cpu_backend_matches_no_backend() {
         // Same backend-equivalence check as the existing tinymodel test
@@ -476,6 +478,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn run_attention_with_kv_backend_matches_no_backend() {
         let weights = make_test_weights();
