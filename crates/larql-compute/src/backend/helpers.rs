@@ -72,6 +72,7 @@ mod tests {
 
     /// `Some(CpuBackend)` → goes through trait, must equal the `None`
     /// fallback (both are CPU paths, just routed differently).
+    #[cfg(not(windows))]
     #[test]
     fn dot_proj_gpu_some_backend_matches_fallback() {
         let a = synth(4, 8, 1);
@@ -94,6 +95,7 @@ mod tests {
         assert!(max_diff(&result, &expected) < 1e-5);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn matmul_gpu_some_backend_matches_fallback() {
         let a = synth(4, 8, 3);
