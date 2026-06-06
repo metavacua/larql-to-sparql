@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Gate Windows cross-dispatch-path BLAS precision tests in larql-compute
 - Gate Windows-BLAS dead-code and cross-path precision tests
 - Gate bench overflow on 32-bit in kv_strategies benches
+- Gate entire helpers test module on non-Windows to silence dead-code clippy
 - Gate forward_raw_logits imports alongside their sole user
 - Gate kv_memory(370k) comparison behind 64-bit cfg in markov test
 - Gate metal-only code behind target_os = "macos" (#48)
