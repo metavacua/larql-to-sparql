@@ -149,15 +149,18 @@ pub fn trace(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ffn::FfnBackend;
-    // Both imports are only used by tests gated off on Windows (non-
-    // reproducible BLAS summation order). Keep them under the same gate.
-    #[cfg(not(windows))]
-    use crate::forward::{forward_raw_logits, hidden_to_raw_logits, trace_forward_with_ffn};
     use crate::test_utils::make_test_weights;
     use larql_models::ModelWeights;
-    use ndarray::Array2;
     use std::sync::OnceLock;
+    // All items below are only used by tests gated off on Windows:
+    // non-reproducible OpenBLAS summation order across dispatch paths
+    // means cross-path residual comparisons can't meet any tight tolerance.
+    #[cfg(not(windows))]
+    use crate::ffn::FfnBackend;
+    #[cfg(not(windows))]
+    use crate::forward::{forward_raw_logits, hidden_to_raw_logits, trace_forward_with_ffn};
+    #[cfg(not(windows))]
+    use ndarray::Array2;
 
     fn weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
