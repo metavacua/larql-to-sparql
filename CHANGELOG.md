@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Gate UDS listener bind behind cfg(unix)
 - Gate UDS shard transport behind cfg(unix)
 - Gate Windows cross-dispatch-path BLAS precision tests in larql-compute
+- Gate Windows cross-dispatch-path BLAS precision tests in larql-inference
 - Gate Windows-BLAS dead-code and cross-path precision tests
 - Gate bench overflow on 32-bit in kv_strategies benches
 - Gate entire helpers test module on non-Windows to silence dead-code clippy
