@@ -32,7 +32,10 @@ pub fn matmul_gpu(
     }
 }
 
-#[cfg(test)]
+// All helpers tests compare cross-dispatch-path BLAS results. Windows OpenBLAS
+// parallel reduction produces non-reproducible summation order across paths,
+// so the entire test module is excluded on Windows.
+#[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
     use crate::CpuBackend;
@@ -53,10 +56,6 @@ mod tests {
             .fold(0.0f32, f32::max)
     }
 
-    /// `None` backend → ndarray fallback. Pin the pure-CPU `a @ b^T`.
-    /// Skipped on Windows: OpenBLAS parallel-reduction produces non-reproducible
-    /// summation order across `dot_proj_gpu` and `a.dot(&b.t())`, exceeding 1e-5.
-    #[cfg(not(windows))]
     #[test]
     fn dot_proj_gpu_none_backend_uses_ndarray() {
         let a = synth(4, 8, 1);
@@ -70,9 +69,6 @@ mod tests {
         assert!(max_diff(&result, &expected) < 1e-5);
     }
 
-    /// `Some(CpuBackend)` → goes through trait, must equal the `None`
-    /// fallback (both are CPU paths, just routed differently).
-    #[cfg(not(windows))]
     #[test]
     fn dot_proj_gpu_some_backend_matches_fallback() {
         let a = synth(4, 8, 1);
@@ -83,7 +79,6 @@ mod tests {
         assert!(max_diff(&routed, &fallback) < 1e-5);
     }
 
-    #[cfg(not(windows))]
     #[test]
     fn matmul_gpu_none_backend_uses_ndarray() {
         let a = synth(4, 8, 3);
@@ -95,7 +90,6 @@ mod tests {
         assert!(max_diff(&result, &expected) < 1e-5);
     }
 
-    #[cfg(not(windows))]
     #[test]
     fn matmul_gpu_some_backend_matches_fallback() {
         let a = synth(4, 8, 3);
