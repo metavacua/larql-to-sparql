@@ -131,8 +131,14 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
+      # `--test-threads=1` serialises the run so the async OpenAI streaming
+      # route tests (routes/openai/completions.rs, chat.rs) deterministically
+      # cover their streaming paths. Under cargo's default parallel runner the
+      # CI box races on them and intermittently drops completions.rs coverage
+      # (~87% local/serial -> ~70% CI/parallel). Same fix the metal + inference
+      # coverage jobs use; this profdata feeds the policy check below.
       - name: Coverage summary
-        run: cargo llvm-cov --package larql-server --summary-only --fail-under-lines "$LARQL_SERVER_COVERAGE_MIN"
+        run: cargo llvm-cov --package larql-server --summary-only --fail-under-lines "$LARQL_SERVER_COVERAGE_MIN" -- --test-threads=1
 
       - name: Coverage policy
         run: |
