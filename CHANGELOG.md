@@ -75,6 +75,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Gate 370k usize literals behind cfg(target_pointer_width = "64") in kv-cache-benchmark
 - Gate UDS listener bind behind cfg(unix)
 - Gate UDS shard transport behind cfg(unix)
+- Gate Windows-BLAS dead-code and cross-path precision tests
 - Gate bench overflow on 32-bit in kv_strategies benches
 - Gate forward_raw_logits imports alongside their sole user
 - Gate kv_memory(370k) comparison behind 64-bit cfg in markov test
