@@ -486,7 +486,7 @@ def main() -> None:
     elif args.layers == "syntax":
         scan_layers = list(range(0, syntax_end))
     else:  # all
-        scan_layers = list(range(0, knowledge_end))
+        scan_layers = list(range(0, num_layers))
 
     print(
         f"  Layer bands: syntax L0-L{syntax_end - 1},"
@@ -512,9 +512,11 @@ def main() -> None:
     print("Building match indexes...")
     knowledge_index = build_match_index(triples)
     syntax_index = build_match_index(syntax) if syntax else {}
+    combined_index = {**knowledge_index, **syntax_index}
     print(
         f"  knowledge: {len(knowledge_index)} entries,"
-        f" syntax: {len(syntax_index)} entries"
+        f" syntax: {len(syntax_index)} entries,"
+        f" combined: {len(combined_index)} entries"
     )
 
     # ── Load templates ──
@@ -629,15 +631,14 @@ def main() -> None:
                 for layer in scan_layers:
                     if layer not in residuals or layer not in gates:
                         continue
-                    # Use the right index for this layer band
-                    layer_index = syntax_index if layer < syntax_end else knowledge_index
+                    layer_index = combined_index
                     r = residuals[layer]
                     scores = gates[layer] @ r
-                    top_indices = np.argsort(-np.abs(scores))[:args.top_k]
+                    top_indices = np.argsort(-scores)[:args.top_k]
 
                     for feat_idx in top_indices:
                         score = float(scores[feat_idx])
-                        if abs(score) < args.min_gate_score:
+                        if score < args.min_gate_score:
                             continue
                         tokens = down_meta.get((layer, int(feat_idx)), [])
                         if not tokens:
@@ -658,20 +659,20 @@ def main() -> None:
 
             # ── Prediction matching ──
             # Predictions come from the LM head (full model output).
-            # Match against knowledge index — predictions are knowledge-level.
+            # Match against combined index — predictions can be any relation.
             if predictions and has_vindex:
                 for pred_token, pred_prob in predictions[:10]:
                     if pred_prob < 0.01:
                         break
                     key = (subj_key, pred_token)
-                    if knowledge_index.get(key) == rel_name:
+                    if combined_index.get(key) == rel_name:
                         # Attribute to top features at peak scan layers
                         for layer in scan_layers[-4:]:
                             if layer not in residuals or layer not in gates:
                                 continue
                             r = residuals[layer]
                             scores = gates[layer] @ r
-                            top_idx = int(np.argmax(np.abs(scores)))
+                            top_idx = int(np.argmax(scores))
                             feat_key = f"L{layer}_F{top_idx}"
                             feature_hits[feat_key][rel_name] += 1
                         pred_matched += 1
