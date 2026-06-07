@@ -430,9 +430,15 @@ pub fn f16_to_f32(bits: u16) -> f32 {
         // gives a value in [6..15] for non-zero mant (16-bit input, top 6
         // bits guaranteed zero).  Subtract 16-10=6 to get LZ within the 10-bit
         // mantissa region.
+        // Exponent: half-subnormal value = mant/1024 * 2^(-14). The
+        // normalised mantissa (leading-1 implicit, 23 fractional bits) needs
+        // biased f32 exponent `127 + (-14 - 1 - lz)` = `112 - lz`. The
+        // previous formula `127 - 14 - lz = 113 - lz` was off by one →
+        // every subnormal decoded 2× too large. Latent because Q4_K's `d`
+        // is usually NORMAL f16; surfaced via Q6_K V/FFN_DOWN on Gemma 3 4B.
         let lz = (mant as u16).leading_zeros() - 6; // 0..=9
         let new_mant = (mant << (lz + 14)) & 0x7F_FFFF;
-        let new_exp = (127u32 - 14 - lz) << 23;
+        let new_exp = (112u32 - lz) << 23;
         return f32::from_bits(sign | new_exp | new_mant);
     }
     if exp == 31 {
@@ -927,38 +933,6 @@ mod tests {
             scores.iter().any(|&v| v.abs() > 0.01),
             "Q4 matvec should produce nonzero"
         );
-    }
-
-    /// Decode f16 bits to f32 (for test verification).
-    fn f16_to_f32(bits: u16) -> f32 {
-        let sign = ((bits >> 15) & 1) as u32;
-        let exp = ((bits >> 10) & 0x1F) as i32;
-        let mant = (bits & 0x3FF) as u32;
-        if exp == 0 {
-            if mant == 0 {
-                return if sign == 1 { -0.0 } else { 0.0 };
-            }
-            // Subnormal
-            let val = mant as f32 / 1024.0 * 2.0f32.powi(-14);
-            return if sign == 1 { -val } else { val };
-        }
-        if exp == 31 {
-            return if mant == 0 {
-                if sign == 1 {
-                    f32::NEG_INFINITY
-                } else {
-                    f32::INFINITY
-                }
-            } else {
-                f32::NAN
-            };
-        }
-        let val = (1.0 + mant as f32 / 1024.0) * 2.0f32.powi(exp - 15);
-        if sign == 1 {
-            -val
-        } else {
-            val
-        }
     }
 
     /// Test alias — dispatches to the canonical module-scope implementation.
