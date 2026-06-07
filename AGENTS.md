@@ -61,11 +61,6 @@ larql-cli         top-level `larql` binary (every subcommand lives in commands/)
                   tests/multimodal_e2e.rs (#[ignore], NOT FOR CI).
 larql-python      PyO3 bindings (maturin-built, module name `larql._native`)
 
-# Research / experimental (in root workspace, not default-members build)
-larql-geometric   alternative attention backends (hyperbolic, linear_complex,
-                  lambek, walk, reference) + WGPU GPU module; AGPL v3 PoC; not
-                  wired into larql-inference yet — standalone research crate
-
 # Portable (no LARQL deps; extract to sibling repo later, name stable)
 model-compute         bounded native kernels (arithmetic/datetime); wasmi-hosted
                       WASM modules (universal default, all platforms including
