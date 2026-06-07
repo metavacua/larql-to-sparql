@@ -30,6 +30,11 @@ larql-cli         top-level `larql` binary (every subcommand lives in commands/)
 larql-python      PyO3 bindings (maturin-built, module name `larql._native`)
 kv-cache-benchmark    standalone benchmark crate
 
+# Research / experimental (in root workspace, not default-members build)
+larql-geometric   alternative attention backends (hyperbolic, linear_complex,
+                  lambek, walk, reference) + WGPU GPU module; AGPL v3 PoC; not
+                  wired into larql-inference yet — standalone research crate
+
 # Portable (no LARQL deps; extract to sibling repo later, name stable)
 model-compute         bounded native kernels (arithmetic/datetime); wasmi-hosted
                       WASM modules (universal default, all platforms including
@@ -87,6 +92,45 @@ Or via the Makefile: `make python-setup | python-build | python-test | python-cl
 - **Walk FFN is sparse-by-design and can beat dense** (517ms vs 535ms on Gemma 4B) because gate KNN (K≈10) skips most of the 10,240 features per layer. If you touch FFN code, preserve this invariant — see [docs/ffn-graph-layer.md](docs/ffn-graph-layer.md).
 - **MXFP4 quantized MoE (GPT-OSS) has degraded DESCRIBE/WALK** due to 4-bit precision; `INFER` is the supported path. Don't assume all model families are equivalent — see [docs/specs/vindex-operations-spec.md](docs/specs/vindex-operations-spec.md).
 
+## WASM workspace (`crates/larql-wasm/`)
+
+A **separate nested Cargo workspace** — not a member of the root workspace. It is a
+refactoring sandbox: the goal is to verify wasm32v1-none compilability of core crates
+without touching the working root workspace implementation.
+
+**Three crate families:**
+- `*-interface` — byte-for-byte copies of the native crates. The interface inversion
+  step (Phase 1 of the WASM refactoring plan) will replace their bodies with references
+  to the `*-wasm32v1-none` crates.
+- `*-wasm32v1-none` — the authoritative pure implementations. All `*-wasm32v1-none`
+  crates depend only on other `*-wasm32v1-none` crates; zero contamination from native
+  or interface crates. Compile with `--target wasm32v1-none`.
+- `larql-wasm-certify`, `larql-vindex-mvv-cdylib`, `larql-wasm-math` — certification
+  tools and the MVV (Minimal-Viable Vindex) certified kernel artifact.
+
+**Key invariant:** `*-wasm32v1-none` crates must never depend on `-interface` crates.
+If you see such a dependency, it is a bug — the entire workspace would need to be
+re-derived.
+
+**Build the wasm workspace:**
+```bash
+cd crates/larql-wasm
+cargo build --target wasm32v1-none --release  # wasm32v1-none crates
+cargo test --all                               # native tests (interface crates)
+```
+
+**Certify the MVV kernel:**
+```bash
+cd crates/larql-wasm
+cargo build -p larql-vindex-mvv-cdylib --target wasm32v1-none --release
+cargo run -p larql-wasm-certify -- --strict \
+  target/wasm32v1-none/release/larql_vindex_mvv_cdylib.wasm
+# Expected: WASM-SAFE [¬L∧¬M]: import-free + call_indirect-free + memory.grow-free + recursion-free
+```
+
+See `docs/adr/0013-lql-wasm32v1-none-correspondence.md` for the ¬L∧¬M boundary for
+each LQL statement, and `ROADMAP-RESEARCH.md` Track 3 for the 6-phase refactoring plan.
+
 ## Where to find things
 
 - LQL language spec: [docs/specs/lql-spec.md](docs/specs/lql-spec.md) (v0.3)
@@ -97,3 +141,4 @@ Or via the Makefile: `make python-setup | python-build | python-test | python-cl
 - Trace format (.bin/.bndx/.ctxt): [docs/specs/trace-format-spec.md](docs/specs/trace-format-spec.md), [docs/residual-trace.md](docs/residual-trace.md)
 - Experimental work: `~/chris-source/chris-experiments/` — numbered 01-45, grouped into foundations, compilation, routing, and shannon series
 - Python bindings docs: [crates/larql-python/README.md](crates/larql-python/README.md), [docs/larql-python.md](docs/larql-python.md)
+- Research roadmap: [ROADMAP-RESEARCH.md](ROADMAP-RESEARCH.md) — 6 tracks orthogonal to production

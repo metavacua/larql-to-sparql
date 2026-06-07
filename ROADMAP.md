@@ -578,9 +578,15 @@ already 60–80% done**, not open research. Read the prior-evidence column
 before committing engineering time — these are not months-of-risk items.
 V3 is the genuinely-new-territory item.
 
+> **Upstream result (2026-06-06):** The within-expert path of V1 was run upstream
+> (`chrishayuk/larql`) as an aim-validation probe and **FALSIFIED** — this closes
+> KU4 upstream. The cross-layer (L0–L33) and cross-expert routing question remains
+> open. Before running V1 in this fork, incorporate and review the upstream result;
+> the framing below may need revision based on what exactly was falsified.
+
 | # | Test | Prior evidence | What it falsifies | What it produces | Effort |
 |---|------|----------------|-------------------|------------------|--------|
-| **V1** | Hash routing across all layers (extend exp 27) | **Exp 27 Gemma 3 4B L0 at top-2048/d_ffn (20% mask) → KL=0.030.** Walk boundary sweep (April 2026) progressively pushed the walk down through layers on Gemma 3 4B. **One-layer one-model evidence in hand.** | "5× FFN bandwidth reduction holds at end-to-end output, not just one layer" | Per-layer top-k threshold table (KL ≤ 0.05 per layer; end-to-end perplexity within X% of dense). Measured on Gemma 3 4B (existing exp 27 baseline) + Gemma 4 26B-A4B + Llama 2 7B + Mistral 7B. | ~1 week |
+| **V1** | Hash routing across all layers (extend exp 27) | **Exp 27 Gemma 3 4B L0 at top-2048/d_ffn (20% mask) → KL=0.030.** Walk boundary sweep (April 2026) progressively pushed the walk down through layers on Gemma 3 4B. **One-layer one-model evidence in hand.** **⚠ Upstream falsification result pending review — see note above.** | "5× FFN bandwidth reduction holds at end-to-end output, not just one layer" | Per-layer top-k threshold table (KL ≤ 0.05 per layer; end-to-end perplexity within X% of dense). Measured on Gemma 3 4B (existing exp 27 baseline) + Gemma 4 26B-A4B + Llama 2 7B + Mistral 7B. | ~1 week |
 | **V2** | FP4 generality (extend exp 26 across archs) | **Exp 26: gemma3-4b-f16.vindex is 99.83% FP4-friendly per-feature without QAT (down is the tail at 99.65%).** Single-arch evidence in hand. | "FP4-friendliness is universal, not Gemma-3-4B specific" | FP4-friendliness fraction per arch + per layer, with QAT-required threshold flagged. Cross-arch corpus. | ~1 week |
 | **V3** | mmap'd vindex with sparse access on disk-resident frontier MoE | **None.** This is the genuinely-new-territory item. Risk dominates the long-term tier confidence (~60%). | "Disk locality + page-fault behaviour is acceptable when only top-k experts fire" | Page-fault rate, p50/p99 disk-read latency, end-to-end tok/s on a model that doesn't fit RAM. Compare cold-start vs warm-conversation locality. Use existing 26B-A4B vindex on a 32 GB-RAM machine to force paging. | ~2 weeks |
 | **V4** | **Compound test** (V1+V2+V3 stacked end-to-end on a real MoE model) | **D-RMS-FUSE Phase 1 (2026-05-09)**: predicted ~0.2 ms/tok savings collapsed to zero. ADR-015 has a concrete instance. | "Independent wins compound multiplicatively, not destructively" — per ADR-015. The framing's central claim. | End-to-end tok/s on Gemma 4 26B-A4B (or larger if available) with hash routing + FP4 + mmap'd disk-resident vindex active simultaneously. Measure perplexity degradation, tok/s, and compare to product-of-individual-speedups prediction. | ~1 week (after V1–V3) |
@@ -614,6 +620,11 @@ test (per the user's falsification-log convention).
 **This is the work to do next.** Everything else in the long-term roadmap
 either gates on these tests or is engineering on assumptions these tests
 verify.
+
+**Research tracks:** See `ROADMAP-RESEARCH.md` for the parallel research
+roadmap covering larql-geometric, larql-gpu (WGPU), larql-wasm refactoring,
+LM synthesis, data model formalization, and query language triangulation.
+These are orthogonal to the production track here and run in parallel with V1–V4.
 
 ---
 
