@@ -25,12 +25,16 @@ use super::half::{decode_bf16, decode_f16};
 use crate::detect::ModelError;
 
 pub mod legacy;
+pub mod q3_k;
 pub mod q4_k;
+pub mod q5_k;
 pub mod q6_k;
 pub mod quantize;
 
 pub use legacy::{dequantize_q4_0, dequantize_q5_0, dequantize_q5_1};
+pub use q3_k::dequantize_q3_k;
 pub use q4_k::{dequantize_q4_k, q4k_row_dot, q4k_row_scaled_add};
+pub use q5_k::dequantize_q5_k;
 pub use q6_k::{dequantize_q6_k, q6k_row_dot, q6k_row_scaled_add};
 pub use quantize::{quantize_q4_0, quantize_q8_0};
 
@@ -90,6 +94,16 @@ pub const Q4_K_BLOCK_BYTES: usize = 144;
 /// Elements per Q4_K super-block.
 pub const Q4_K_BLOCK_ELEMS: usize = K_QUANT_BLOCK_ELEMS;
 
+/// Bytes per Q3_K super-block (256 elements): 32 hmask + 64 qs + 12 scales + 2 d.
+pub const Q3_K_BLOCK_BYTES: usize = 110;
+/// Elements per Q3_K super-block.
+pub const Q3_K_BLOCK_ELEMS: usize = K_QUANT_BLOCK_ELEMS;
+
+/// Bytes per Q5_K super-block (256 elements): 2 d + 2 dmin + 12 scales + 32 qh + 128 qs.
+pub const Q5_K_BLOCK_BYTES: usize = 176;
+/// Elements per Q5_K super-block.
+pub const Q5_K_BLOCK_ELEMS: usize = K_QUANT_BLOCK_ELEMS;
+
 /// Bytes per Q6_K super-block (256 elements): 128 + 64 + 16 + 2.
 pub const Q6_K_BLOCK_BYTES: usize = 210;
 /// Elements per Q6_K super-block.
@@ -142,7 +156,9 @@ pub fn tensor_data_size(tensor_type: u32, n_elements: usize) -> Result<usize, Mo
         TYPE_Q5_0 => Ok(n_elements / LEGACY_BLOCK_ELEMS * Q5_0_BLOCK_BYTES),
         TYPE_Q5_1 => Ok(n_elements / LEGACY_BLOCK_ELEMS * Q5_1_BLOCK_BYTES),
         TYPE_Q8_0 => Ok(n_elements / LEGACY_BLOCK_ELEMS * Q8_0_BLOCK_BYTES),
+        TYPE_Q3_K => Ok(n_elements / K_QUANT_BLOCK_ELEMS * Q3_K_BLOCK_BYTES),
         TYPE_Q4_K => Ok(n_elements / K_QUANT_BLOCK_ELEMS * Q4_K_BLOCK_BYTES),
+        TYPE_Q5_K => Ok(n_elements / K_QUANT_BLOCK_ELEMS * Q5_K_BLOCK_BYTES),
         TYPE_Q6_K => Ok(n_elements / K_QUANT_BLOCK_ELEMS * Q6_K_BLOCK_BYTES),
         _ => Err(ModelError::Parse(format!(
             "tensor_data_size: unsupported type id {tensor_type}"
@@ -203,7 +219,9 @@ pub fn dequantize(
         TYPE_Q8_0 => legacy::dequantize_q8_0(data, n_elements),
         TYPE_Q5_0 => dequantize_q5_0(data, n_elements),
         TYPE_Q5_1 => dequantize_q5_1(data, n_elements),
+        TYPE_Q3_K => dequantize_q3_k(data, n_elements),
         TYPE_Q4_K => dequantize_q4_k(data, n_elements),
+        TYPE_Q5_K => dequantize_q5_k(data, n_elements),
         TYPE_Q6_K => dequantize_q6_k(data, n_elements),
         other => Err(ModelError::UnsupportedDtype(format!("GGML type {other}"))),
     }

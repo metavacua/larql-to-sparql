@@ -90,7 +90,7 @@ pub(super) fn q4k_row_dot_scalar(data: &[u8], x: &[f32], n_blocks: usize) -> f32
 
 /// 12 packed bytes → 8 six-bit scales + 8 six-bit mins.
 #[inline]
-fn unpack_q4k_scales(scales_bytes: &[u8]) -> ([u8; 8], [u8; 8]) {
+pub(super) fn unpack_q4k_scales(scales_bytes: &[u8]) -> ([u8; 8], [u8; 8]) {
     let mut scales = [0u8; 8];
     let mut mins = [0u8; 8];
     for j in 0..4 {
