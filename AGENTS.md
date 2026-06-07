@@ -166,7 +166,7 @@ cargo run -p larql-wasm-certify -- --strict \
 ```
 
 See `docs/adr/0013-lql-wasm32v1-none-correspondence.md` for the ¬L∧¬M boundary for
-each LQL statement, and `ROADMAP-RESEARCH.md` Track 3 for the 6-phase refactoring plan.
+each LQL statement.
 
 ## Where to find things
 
@@ -178,4 +178,3 @@ each LQL statement, and `ROADMAP-RESEARCH.md` Track 3 for the 6-phase refactorin
 - Trace format (.bin/.bndx/.ctxt): [docs/specs/trace-format-spec.md](docs/specs/trace-format-spec.md), [docs/residual-trace.md](docs/residual-trace.md)
 - Experimental work: `~/chris-source/chris-experiments/` — numbered 01-45, grouped into foundations, compilation, routing, and shannon series
 - Python bindings docs: [crates/larql-python/README.md](crates/larql-python/README.md), [docs/larql-python.md](docs/larql-python.md)
-- Research roadmap: [ROADMAP-RESEARCH.md](ROADMAP-RESEARCH.md) — 6 tracks orthogonal to production
