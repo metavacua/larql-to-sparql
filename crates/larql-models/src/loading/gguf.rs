@@ -47,6 +47,17 @@ const GGUF_ATTENTION_HEAD_COUNT: &str = "attention.head_count";
 const GGUF_ATTENTION_HEAD_COUNT_KV: &str = "attention.head_count_kv";
 const GGUF_ATTENTION_KEY_LENGTH: &str = "attention.key_length";
 const GGUF_ROPE_FREQ_BASE: &str = "rope.freq_base";
+// MLA-specific metadata keys emitted by llama.cpp for DeepSeek-V2/V3/Kimi-K2
+// family models. `_mla` variants carry the pre-absorption per-head dims;
+// non-`_mla` variants carry the (possibly larger) absorbed/effective sizes.
+// `rope.dimension_count` is the RoPE-positional portion of each Q/K head
+// (qk_rope_head_dim in the HF config).
+const GGUF_ATTENTION_KEY_LENGTH_MLA: &str = "attention.key_length_mla";
+const GGUF_ATTENTION_VALUE_LENGTH: &str = "attention.value_length";
+const GGUF_ATTENTION_VALUE_LENGTH_MLA: &str = "attention.value_length_mla";
+const GGUF_ATTENTION_Q_LORA_RANK: &str = "attention.q_lora_rank";
+const GGUF_ATTENTION_KV_LORA_RANK: &str = "attention.kv_lora_rank";
+const GGUF_ROPE_DIMENSION_COUNT: &str = "rope.dimension_count";
 const GGUF_VOCAB_SIZE: &str = "vocab_size";
 
 const HF_MODEL_TYPE: &str = "model_type";
@@ -429,6 +440,46 @@ impl GgufFile {
         }
         if let Some(vocab_size) = get_arch_u32_opt(GGUF_VOCAB_SIZE).filter(|&v| v > 0) {
             config[HF_VOCAB_SIZE] = serde_json::json!(vocab_size);
+        }
+
+        // ── MLA fields (DeepSeek-V2/V3 family, e.g. Kimi K2) ─────────────────
+        // The HF config exposes `q_lora_rank` / `kv_lora_rank` /
+        // `qk_nope_head_dim` / `qk_rope_head_dim` / `v_head_dim`. llama.cpp
+        // emits the equivalent fields under the `{arch}.attention.*` and
+        // `{arch}.rope.dimension_count` namespace; we surface them here so
+        // the existing parser → `ModelConfig` path picks them up and MLA
+        // absorption (PR #96) fires for GGUF-sourced inputs.
+        //
+        // For per-head dims we prefer the `_mla` variants when present —
+        // those carry the pre-absorption (DeepSeek-V3 standard) split that
+        // `mla_absorb::absorb()` operates on. The non-`_mla` keys can hold
+        // post-absorption / "effective" widths (576/512 on Kimi K2.6) which
+        // are too large to feed back into the absorption math.
+        if let Some(q_lora) = get_arch_u32_opt(GGUF_ATTENTION_Q_LORA_RANK).filter(|&v| v > 0) {
+            config["q_lora_rank"] = serde_json::json!(q_lora);
+        }
+        if let Some(kv_lora) = get_arch_u32_opt(GGUF_ATTENTION_KV_LORA_RANK).filter(|&v| v > 0) {
+            config["kv_lora_rank"] = serde_json::json!(kv_lora);
+        }
+        let qk_rope = get_arch_u32_opt(GGUF_ROPE_DIMENSION_COUNT).filter(|&v| v > 0);
+        if let Some(rope) = qk_rope {
+            config["qk_rope_head_dim"] = serde_json::json!(rope);
+        }
+        // qk_head_dim total: prefer key_length_mla, fall back to key_length.
+        let key_length_mla = get_arch_u32_opt(GGUF_ATTENTION_KEY_LENGTH_MLA).filter(|&v| v > 0);
+        let key_length = get_arch_u32_opt(GGUF_ATTENTION_KEY_LENGTH).filter(|&v| v > 0);
+        let qk_head_dim = key_length_mla.or(key_length);
+        if let (Some(qk_total), Some(rope)) = (qk_head_dim, qk_rope) {
+            if qk_total > rope {
+                config["qk_nope_head_dim"] = serde_json::json!(qk_total - rope);
+            }
+        }
+        // v_head_dim: prefer value_length_mla, fall back to value_length.
+        let v_head = get_arch_u32_opt(GGUF_ATTENTION_VALUE_LENGTH_MLA)
+            .filter(|&v| v > 0)
+            .or_else(|| get_arch_u32_opt(GGUF_ATTENTION_VALUE_LENGTH).filter(|&v| v > 0));
+        if let Some(v) = v_head {
+            config["v_head_dim"] = serde_json::json!(v);
         }
 
         config
@@ -1373,6 +1424,199 @@ mod tests {
         assert!(cfg.get(HF_ROPE_THETA).is_none());
         let arch = crate::detect_from_json_validated(&cfg).unwrap();
         assert_eq!(arch.config().rope_base, 10_000.0);
+    }
+
+    #[test]
+    fn test_kimi_k2_gguf_to_config_json_extracts_mla_fields() {
+        // Synthesize GGUF metadata matching Kimi K2.6's unsloth Q8_K_XL shape.
+        // Verifies the MLA fields surface into the HF-style config that the
+        // parser → ModelConfig path consumes, so that PR #96's MLA absorption
+        // fires for GGUF-sourced DeepSeek-V2/V3/Kimi-K2 models. Closes #67.
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("deepseek2".to_string()),
+        );
+        metadata.insert(
+            "deepseek2.embedding_length".to_string(),
+            GgufValue::U32(7168),
+        );
+        metadata.insert("deepseek2.block_count".to_string(), GgufValue::U32(61));
+        metadata.insert(
+            "deepseek2.attention.head_count".to_string(),
+            GgufValue::U32(64),
+        );
+        metadata.insert(
+            "deepseek2.attention.head_count_kv".to_string(),
+            GgufValue::U32(1),
+        );
+        metadata.insert(
+            "deepseek2.feed_forward_length".to_string(),
+            GgufValue::U32(18432),
+        );
+        metadata.insert("deepseek2.vocab_size".to_string(), GgufValue::U32(163840));
+        // MLA-specific keys emitted by llama.cpp for DeepSeek-V2/V3 family.
+        // `_mla` carries the pre-absorption per-head split that PR #96 needs.
+        metadata.insert(
+            "deepseek2.attention.q_lora_rank".to_string(),
+            GgufValue::U32(1536),
+        );
+        metadata.insert(
+            "deepseek2.attention.kv_lora_rank".to_string(),
+            GgufValue::U32(512),
+        );
+        metadata.insert(
+            "deepseek2.attention.key_length".to_string(),
+            GgufValue::U32(576),
+        );
+        metadata.insert(
+            "deepseek2.attention.value_length".to_string(),
+            GgufValue::U32(512),
+        );
+        metadata.insert(
+            "deepseek2.attention.key_length_mla".to_string(),
+            GgufValue::U32(192),
+        );
+        metadata.insert(
+            "deepseek2.attention.value_length_mla".to_string(),
+            GgufValue::U32(128),
+        );
+        metadata.insert(
+            "deepseek2.rope.dimension_count".to_string(),
+            GgufValue::U32(64),
+        );
+
+        let gguf = GgufFile {
+            metadata,
+            tensor_infos: Vec::new(),
+            data_offset: 0,
+            path: std::path::PathBuf::from("<no-file>"),
+        };
+        let cfg = gguf.to_config_json();
+
+        // Model type maps deepseek2 → deepseek_v2 (existing logic).
+        assert_eq!(cfg["model_type"], "deepseek_v2");
+        // MLA fields populated from GGUF metadata.
+        assert_eq!(cfg["q_lora_rank"], 1536);
+        assert_eq!(cfg["kv_lora_rank"], 512);
+        assert_eq!(cfg["qk_rope_head_dim"], 64);
+        // qk_nope_head_dim = key_length_mla - rope.dimension_count = 192-64 = 128
+        // (prefers _mla variant over the absorbed key_length=576).
+        assert_eq!(cfg["qk_nope_head_dim"], 128);
+        // v_head_dim prefers the _mla variant (128 pre-absorption, not 512).
+        assert_eq!(cfg["v_head_dim"], 128);
+
+        // Architecture-detection path picks the fields up into ModelConfig.
+        let arch = crate::detect_from_json(&cfg);
+        assert_eq!(arch.mla_qk_nope_head_dim(), Some(128));
+        assert_eq!(arch.mla_qk_rope_head_dim(), Some(64));
+        assert_eq!(arch.mla_v_head_dim(), Some(128));
+        assert_eq!(arch.q_lora_rank(), 1536);
+        assert_eq!(arch.kv_lora_rank(), 512);
+        assert!(arch.uses_mla());
+    }
+
+    #[test]
+    fn test_gguf_mla_falls_back_to_non_mla_key_length_when_mla_keys_absent() {
+        // Some DeepSeek-V2 GGUFs may not emit the `_mla` variants. The
+        // loader must fall back to attention.key_length / value_length so
+        // the pre-absorption split is still computed.
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("deepseek2".to_string()),
+        );
+        metadata.insert(
+            "deepseek2.embedding_length".to_string(),
+            GgufValue::U32(5120),
+        );
+        metadata.insert("deepseek2.block_count".to_string(), GgufValue::U32(27));
+        metadata.insert(
+            "deepseek2.attention.head_count".to_string(),
+            GgufValue::U32(128),
+        );
+        metadata.insert(
+            "deepseek2.attention.head_count_kv".to_string(),
+            GgufValue::U32(128),
+        );
+        metadata.insert(
+            "deepseek2.feed_forward_length".to_string(),
+            GgufValue::U32(12288),
+        );
+        metadata.insert(
+            "deepseek2.attention.q_lora_rank".to_string(),
+            GgufValue::U32(1536),
+        );
+        metadata.insert(
+            "deepseek2.attention.kv_lora_rank".to_string(),
+            GgufValue::U32(512),
+        );
+        // Only non-`_mla` variants present.
+        metadata.insert(
+            "deepseek2.attention.key_length".to_string(),
+            GgufValue::U32(192),
+        );
+        metadata.insert(
+            "deepseek2.attention.value_length".to_string(),
+            GgufValue::U32(128),
+        );
+        metadata.insert(
+            "deepseek2.rope.dimension_count".to_string(),
+            GgufValue::U32(64),
+        );
+
+        let gguf = GgufFile {
+            metadata,
+            tensor_infos: Vec::new(),
+            data_offset: 0,
+            path: std::path::PathBuf::from("<no-file>"),
+        };
+        let cfg = gguf.to_config_json();
+        assert_eq!(cfg["qk_nope_head_dim"], 128); // 192 - 64
+        assert_eq!(cfg["qk_rope_head_dim"], 64);
+        assert_eq!(cfg["v_head_dim"], 128);
+    }
+
+    #[test]
+    fn test_gguf_mla_fields_absent_for_non_mla_architectures() {
+        // Llama / Qwen / Mistral GGUFs do not emit MLA keys. The config
+        // builder must leave the optional MLA fields out so `uses_mla()`
+        // stays false and the streaming path keeps its existing behaviour.
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("llama".to_string()),
+        );
+        metadata.insert("llama.embedding_length".to_string(), GgufValue::U32(4096));
+        metadata.insert("llama.block_count".to_string(), GgufValue::U32(32));
+        metadata.insert(
+            "llama.feed_forward_length".to_string(),
+            GgufValue::U32(11008),
+        );
+        metadata.insert("llama.attention.head_count".to_string(), GgufValue::U32(32));
+        metadata.insert(
+            "llama.attention.head_count_kv".to_string(),
+            GgufValue::U32(8),
+        );
+        metadata.insert(
+            "llama.attention.key_length".to_string(),
+            GgufValue::U32(128),
+        );
+
+        let gguf = GgufFile {
+            metadata,
+            tensor_infos: Vec::new(),
+            data_offset: 0,
+            path: std::path::PathBuf::from("<no-file>"),
+        };
+        let cfg = gguf.to_config_json();
+
+        assert!(cfg.get("q_lora_rank").is_none());
+        assert!(cfg.get("kv_lora_rank").is_none());
+        assert!(cfg.get("qk_nope_head_dim").is_none());
+        assert!(cfg.get("v_head_dim").is_none());
+        // qk_rope_head_dim is also absent without rope.dimension_count.
+        assert!(cfg.get("qk_rope_head_dim").is_none());
     }
 
     /// Build a minimal GGUF file with one 2-D F32 tensor, but truncate the
