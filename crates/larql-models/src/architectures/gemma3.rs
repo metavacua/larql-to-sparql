@@ -210,5 +210,4 @@ mod tests {
         assert_eq!(arch.rope_position_divisor_for_layer(5), 8.0);
         assert_eq!(arch.rope_position_divisor_for_layer(4), 1.0);
     }
->>>>>>> 2d10daa8 (feat(vindex): wire MLA absorption into f32 weight writer)
 }

@@ -90,11 +90,21 @@ impl<'a> BuildContext<'a> {
         dtype: StorageDtype,
         down_top_k: usize,
     ) -> Self {
+        // Preserve any vocab-row padding the GGUF carries (Qwen3.6
+        // has 248320 padded vs 248044 logical — the extra rows hold
+        // special tokens like `<|im_start|>`/`<|im_end|>` that the
+        // chat template emits). Without preserving them, the embed
+        // lookup at the special-token IDs lands in unwritten space,
+        // gets zero-padded by the loader's workaround, and corrupts
+        // the DeltaNet recurrent state across the first ~6 layers of
+        // every prompt.
+        let stored_embed_rows = weights.embed.shape()[0];
+        let vocab_size = stored_embed_rows.max(weights.vocab_size);
         Self {
             num_layers: weights.num_layers,
             hidden_size: weights.hidden_size,
             intermediate_size: weights.intermediate_size,
-            vocab_size: weights.vocab_size,
+            vocab_size,
             embed_scale: weights.arch.embed_scale(),
             is_moe: weights.arch.is_moe(),
             n_experts: weights.arch.num_experts(),

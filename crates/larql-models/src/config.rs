@@ -353,6 +353,14 @@ pub trait ModelArchitecture: Send + Sync {
         self.config().rope_base
     }
 
+    /// Position divisor applied to the RoPE position index for a specific
+    /// layer. Gemma 3 global-attention layers use 8.0 on full-attention
+    /// layers only and 1.0 on sliding layers, matching the HF
+    /// `Gemma3TextConfig.rope_scaling.full_attention` structure.
+    fn rope_position_divisor_for_layer(&self, _layer: usize) -> f64 {
+        1.0
+    }
+
     /// Head dimension for a given layer. Models with different head dims for
     /// sliding vs global attention (e.g., Gemma 4) override this.
     /// Default: config.head_dim for all layers.
