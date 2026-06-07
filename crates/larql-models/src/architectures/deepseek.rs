@@ -105,6 +105,18 @@ impl ModelArchitecture for DeepSeekArch {
         self.config.q_lora_rank.unwrap_or(1536)
     }
 
+    fn mla_qk_nope_head_dim(&self) -> Option<usize> {
+        self.config.qk_nope_head_dim
+    }
+
+    fn mla_qk_rope_head_dim(&self) -> Option<usize> {
+        self.config.qk_rope_head_dim
+    }
+
+    fn mla_v_head_dim(&self) -> Option<usize> {
+        self.config.v_head_dim
+    }
+
     fn mla_kv_a_key(&self, layer: usize) -> Option<String> {
         Some(format!(
             "{}self_attn.kv_a_proj_with_mqa.weight",

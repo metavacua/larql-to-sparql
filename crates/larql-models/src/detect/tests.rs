@@ -564,7 +564,10 @@ fn test_detect_deepseek_v3() {
         "num_experts_per_tok": 8,
         "n_shared_experts": 1,
         "kv_lora_rank": 512,
-        "q_lora_rank": 1536
+        "q_lora_rank": 1536,
+        "qk_nope_head_dim": 128,
+        "qk_rope_head_dim": 64,
+        "v_head_dim": 128
     });
 
     let arch = detect_from_json(&config);
@@ -573,6 +576,11 @@ fn test_detect_deepseek_v3() {
     assert_eq!(arch.num_experts(), 256);
     assert_eq!(arch.num_experts_per_token(), 8);
     assert_eq!(arch.num_shared_experts(), 1);
+
+    // MLA geometry fields
+    assert_eq!(arch.mla_qk_nope_head_dim(), Some(128));
+    assert_eq!(arch.mla_qk_rope_head_dim(), Some(64));
+    assert_eq!(arch.mla_v_head_dim(), Some(128));
 }
 
 #[test]

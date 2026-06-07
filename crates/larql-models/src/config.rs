@@ -89,6 +89,12 @@ pub struct ModelConfig {
     // MLA fields
     pub kv_lora_rank: Option<usize>,
     pub q_lora_rank: Option<usize>,
+    /// DS-V3 MLA: non-RoPE part of head dim (nope). qk_head_dim = qk_nope_head_dim + qk_rope_head_dim.
+    pub qk_nope_head_dim: Option<usize>,
+    /// DS-V3 MLA: RoPE part of head dim.
+    pub qk_rope_head_dim: Option<usize>,
+    /// DS-V3 MLA: V head dim (may differ from qk_nope+rope total).
+    pub v_head_dim: Option<usize>,
     // RoPE scaling
     pub rope_scaling: Option<RopeScaling>,
     // Softcapping (Gemma2)
@@ -760,6 +766,21 @@ pub trait ModelArchitecture: Send + Sync {
 
     /// MLA Q up-projection key (decompress).
     fn mla_q_b_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// DS-V3 MLA: non-RoPE head dim (nope). Combined qk_head_dim = nope + rope.
+    fn mla_qk_nope_head_dim(&self) -> Option<usize> {
+        None
+    }
+
+    /// DS-V3 MLA: RoPE head dim portion.
+    fn mla_qk_rope_head_dim(&self) -> Option<usize> {
+        None
+    }
+
+    /// DS-V3 MLA: V head dim (after absorption may differ from qk dims).
+    fn mla_v_head_dim(&self) -> Option<usize> {
         None
     }
 
