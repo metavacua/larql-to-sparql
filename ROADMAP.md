@@ -762,6 +762,11 @@ test (per the user's falsification-log convention).
 either gates on these tests or is engineering on assumptions these tests
 verify.
 
+**Research tracks:** See `ROADMAP-RESEARCH.md` for the parallel research
+roadmap covering larql-geometric, larql-gpu (WGPU), larql-wasm refactoring,
+LM synthesis, data model formalization, and query language triangulation.
+These are orthogonal to the production track here and run in parallel with V1–V4.
+
 ---
 
 ## P0 — Engine ↔ Backend unification (specs landed 2026-05-16)
