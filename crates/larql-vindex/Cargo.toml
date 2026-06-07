@@ -61,6 +61,7 @@ default = []
 metal = ["larql-compute/metal"]
 
 [dev-dependencies]
+larql-inference = { path = "../larql-inference" }
 criterion = "0.5"
 tempfile = "3"
 # HTTP mocking for the publish trio (lfs / remote / upload).
