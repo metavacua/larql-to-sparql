@@ -15,7 +15,7 @@
 ///
 /// The absorbed tensors feed directly into `gqa_attention_asym` because they have the
 /// asymmetric qk_head_dim / v_head_dim that function expects.
-use ndarray::{Array2, ArrayView2, s};
+use ndarray::{s, Array2, ArrayView2};
 
 pub struct MlaGeometry {
     pub num_q: usize,
@@ -148,7 +148,9 @@ mod tests {
         let mut state = seed;
         let data: Vec<f32> = (0..rows * cols)
             .map(|_| {
-                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let bits = (state >> 33) as u32;
                 (bits as f32 / u32::MAX as f32) * 2.0 - 1.0
             })
@@ -210,8 +212,7 @@ mod tests {
                 .slice_mut(s![.., dst_base..dst_base + qk_rope])
                 .assign(&k_rope_global);
             // nope
-            let k_nope_h = kv_latent
-                .dot(&kv_b.slice(s![kv_base..kv_base + qk_nope, ..]).t());
+            let k_nope_h = kv_latent.dot(&kv_b.slice(s![kv_base..kv_base + qk_nope, ..]).t());
             k_out
                 .slice_mut(s![.., dst_base + qk_rope..dst_base + qk_head_dim])
                 .assign(&k_nope_h);
@@ -222,7 +223,11 @@ mod tests {
         for h in 0..num_kv {
             let kv_base = h * (qk_nope + v_hd);
             let dst_base = h * v_hd;
-            let v_h = kv_latent.dot(&kv_b.slice(s![kv_base + qk_nope..kv_base + qk_nope + v_hd, ..]).t());
+            let v_h = kv_latent.dot(
+                &kv_b
+                    .slice(s![kv_base + qk_nope..kv_base + qk_nope + v_hd, ..])
+                    .t(),
+            );
             v_out
                 .slice_mut(s![.., dst_base..dst_base + v_hd])
                 .assign(&v_h);
@@ -273,13 +278,33 @@ mod tests {
         let qk_head_dim = g.qk_head_dim();
         let reps = g.num_q / g.num_kv;
         let scale = 1.0 / (qk_head_dim as f64).sqrt();
-        let ref_out = gqa_attention_asym(&q_ref, &k_ref, &v_ref, g.num_q, qk_head_dim, g.v_hd, reps, scale, seq);
+        let ref_out = gqa_attention_asym(
+            &q_ref,
+            &k_ref,
+            &v_ref,
+            g.num_q,
+            qk_head_dim,
+            g.v_hd,
+            reps,
+            scale,
+            seq,
+        );
 
         // Absorbed path: project through absorbed weight matrices, then run gqa_attention_asym
         let q_abs = x.dot(&w_q.t());
         let k_abs = x.dot(&w_k.t());
         let v_abs = x.dot(&w_v.t());
-        let abs_out = gqa_attention_asym(&q_abs, &k_abs, &v_abs, g.num_q, qk_head_dim, g.v_hd, reps, scale, seq);
+        let abs_out = gqa_attention_asym(
+            &q_abs,
+            &k_abs,
+            &v_abs,
+            g.num_q,
+            qk_head_dim,
+            g.v_hd,
+            reps,
+            scale,
+            seq,
+        );
 
         // Must match numerically (within float precision)
         let max_diff = ref_out
@@ -319,9 +344,15 @@ mod tests {
             .iter()
             .copied()
             .collect();
-        assert!(head0_rope.iter().any(|v| v.abs() > 1e-6), "rope-K must be non-zero");
+        assert!(
+            head0_rope.iter().any(|v| v.abs() > 1e-6),
+            "rope-K must be non-zero"
+        );
         for (a, b) in head0_rope.iter().zip(head1_rope.iter()) {
-            assert!((a - b).abs() < 1e-6, "rope-K must be identical across heads: {a} vs {b}");
+            assert!(
+                (a - b).abs() < 1e-6,
+                "rope-K must be identical across heads: {a} vs {b}"
+            );
         }
     }
 }

@@ -287,7 +287,10 @@ pub fn gqa_attention_asym(
         for qi in 0..seq_len {
             let causal_len = qi + 1;
             let q_row = q.slice(ndarray::s![qi, q_off..q_off + qk_head_dim]);
-            let k_block = k.slice(ndarray::s![0..causal_len, kv_qk_off..kv_qk_off + qk_head_dim]);
+            let k_block = k.slice(ndarray::s![
+                0..causal_len,
+                kv_qk_off..kv_qk_off + qk_head_dim
+            ]);
             let raw_scores = k_block.dot(&q_row);
 
             for i in 0..causal_len {
@@ -815,8 +818,17 @@ mod tests {
         let q = small(seq, qk_hd, 0.1);
         let k = small(seq, qk_hd, 0.1);
         let v = small(seq, v_hd, 0.1);
-        let out =
-            gqa_attention_asym(&q, &k, &v, 1, qk_hd, v_hd, 1, 1.0 / (qk_hd as f64).sqrt(), seq);
+        let out = gqa_attention_asym(
+            &q,
+            &k,
+            &v,
+            1,
+            qk_hd,
+            v_hd,
+            1,
+            1.0 / (qk_hd as f64).sqrt(),
+            seq,
+        );
         // Output must equal V exactly (weight=1 on single token).
         let v_row: Vec<f32> = v.row(0).to_vec();
         let out_row: Vec<f32> = out.row(0).to_vec();

@@ -2254,6 +2254,7 @@ dependencies = [
  "hf-hub",
  "larql-compute",
  "larql-core",
+ "larql-inference",
  "larql-models",
  "libc",
  "memmap2",

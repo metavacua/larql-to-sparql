@@ -25,6 +25,7 @@ use crate::format::filenames::*;
 use crate::format::load::load_vindex_config;
 
 use super::capabilities::{ensure_standard_attention_supported, SURFACE_F32_WEIGHT_WRITER};
+use super::mla_absorb::{self, MlaGeometry};
 use larql_models::ModelWeights;
 
 /// Manifest `kind` discriminators — wire-format strings written into
@@ -283,7 +284,32 @@ pub fn write_model_weights_with_opts(
         .unwrap_or(crate::config::dtype::StorageDtype::F32);
 
     let arch = source.arch();
-    ensure_standard_attention_supported(arch, SURFACE_F32_WEIGHT_WRITER)?;
+    // MLA absorption: if the architecture uses MLA and all geometry dims are
+    // present, we absorb Q/K/V in-flight and write standard dense tensors.
+    // Otherwise fall through to the standard guard (which rejects MLA).
+    let mla_geom: Option<MlaGeometry> = if arch.uses_mla() {
+        match (
+            arch.mla_qk_nope_head_dim(),
+            arch.mla_qk_rope_head_dim(),
+            arch.mla_v_head_dim(),
+        ) {
+            (Some(qk_nope), Some(qk_rope), Some(v_hd)) => Some(MlaGeometry {
+                num_q: arch.config().num_q_heads,
+                num_kv: arch.config().num_kv_heads,
+                qk_nope,
+                qk_rope,
+                v_hd,
+                kv_lora: arch.kv_lora_rank(),
+                q_lora: arch.q_lora_rank(),
+            }),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if mla_geom.is_none() {
+        ensure_standard_attention_supported(arch, SURFACE_F32_WEIGHT_WRITER)?;
+    }
     let num_layers = source.num_layers();
     let mut entries: Vec<WeightEntry> = Vec::new();
 
@@ -299,16 +325,84 @@ pub fn write_model_weights_with_opts(
 
         for layer in 0..num_layers {
             callbacks.on_layer_start(COMP_ATTN_WEIGHTS, layer, num_layers);
-            for key in &[
-                arch.attn_q_key(layer),
-                arch.attn_k_key(layer),
-                arch.attn_v_key(layer),
-                arch.attn_o_key(layer),
-            ] {
-                if let Some((data, rows, cols)) = source.get_tensor(key) {
+
+            if let Some(ref g) = mla_geom {
+                // MLA absorption path: fetch the four low-rank projections,
+                // absorb into dense Q/K/V, write under the standard key names
+                // so the loader needs no MLA awareness.
+                let hidden = arch.config().hidden_size;
+                let qk_hd = g.qk_nope + g.qk_rope;
+                let kv_a_key = arch.mla_kv_a_key(layer).unwrap_or_default();
+                let kv_b_key = arch.mla_kv_b_key(layer).unwrap_or_default();
+                let q_a_key = arch.mla_q_a_key(layer).unwrap_or_default();
+                let q_b_key = arch.mla_q_b_key(layer).unwrap_or_default();
+
+                let kv_a_raw = source.get_tensor(&kv_a_key);
+                let kv_b_raw = source.get_tensor(&kv_b_key);
+                let q_a_raw = source.get_tensor(&q_a_key);
+                let q_b_raw = source.get_tensor(&q_b_key);
+
+                if let (
+                    Some((kv_a_d, _, _)),
+                    Some((kv_b_d, _, _)),
+                    Some((q_a_d, _, _)),
+                    Some((q_b_d, _, _)),
+                ) = (kv_a_raw, kv_b_raw, q_a_raw, q_b_raw)
+                {
+                    use ndarray::Array2;
+                    let kv_a = Array2::from_shape_vec((g.kv_lora + g.qk_rope, hidden), kv_a_d)
+                        .expect("kv_a shape mismatch");
+                    let kv_b = Array2::from_shape_vec(
+                        (g.num_kv * (g.qk_nope + g.v_hd), g.kv_lora),
+                        kv_b_d,
+                    )
+                    .expect("kv_b shape mismatch");
+                    let q_a = Array2::from_shape_vec((g.q_lora, hidden), q_a_d)
+                        .expect("q_a shape mismatch");
+                    let q_b = Array2::from_shape_vec((g.num_q * qk_hd, g.q_lora), q_b_d)
+                        .expect("q_b shape mismatch");
+
+                    let (w_q, w_k, w_v) = mla_absorb::absorb(&kv_a, &kv_b, &q_a, &q_b, g);
+
+                    for (tensor, key, rows, cols) in [
+                        (
+                            w_q.into_raw_vec_and_offset().0,
+                            arch.attn_q_key(layer),
+                            g.num_q * qk_hd,
+                            hidden,
+                        ),
+                        (
+                            w_k.into_raw_vec_and_offset().0,
+                            arch.attn_k_key(layer),
+                            g.num_kv * qk_hd,
+                            hidden,
+                        ),
+                        (
+                            w_v.into_raw_vec_and_offset().0,
+                            arch.attn_v_key(layer),
+                            g.num_kv * g.v_hd,
+                            hidden,
+                        ),
+                    ] {
+                        let len = write_floats(&mut attn_file, &tensor, dtype)?;
+                        entries.push(WeightEntry {
+                            key,
+                            kind: kind::TENSOR.into(),
+                            shape: vec![rows, cols],
+                            offset: attn_offset,
+                            length: len,
+                            file: ATTN_WEIGHTS_BIN.into(),
+                        });
+                        attn_offset += len;
+                    }
+                }
+
+                // O projection is a standard linear — no absorption needed
+                let o_key = arch.attn_o_key(layer);
+                if let Some((data, rows, cols)) = source.get_tensor(&o_key) {
                     let len = write_floats(&mut attn_file, &data, dtype)?;
                     entries.push(WeightEntry {
-                        key: key.clone(),
+                        key: o_key,
                         kind: kind::TENSOR.into(),
                         shape: vec![rows, cols],
                         offset: attn_offset,
@@ -316,6 +410,27 @@ pub fn write_model_weights_with_opts(
                         file: ATTN_WEIGHTS_BIN.into(),
                     });
                     attn_offset += len;
+                }
+            } else {
+                // Standard Q/K/V/O path
+                for key in &[
+                    arch.attn_q_key(layer),
+                    arch.attn_k_key(layer),
+                    arch.attn_v_key(layer),
+                    arch.attn_o_key(layer),
+                ] {
+                    if let Some((data, rows, cols)) = source.get_tensor(key) {
+                        let len = write_floats(&mut attn_file, &data, dtype)?;
+                        entries.push(WeightEntry {
+                            key: key.clone(),
+                            kind: kind::TENSOR.into(),
+                            shape: vec![rows, cols],
+                            offset: attn_offset,
+                            length: len,
+                            file: ATTN_WEIGHTS_BIN.into(),
+                        });
+                        attn_offset += len;
+                    }
                 }
             }
 

@@ -159,6 +159,15 @@ jobs:
           "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
           & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
 
+      # protoc on PATH satisfies the `cfg(not(windows))` skip in
+      # `larql-router-protocol`'s build.rs. Required by larql-vindex's
+      # dev-dep on `larql-inference` → transitive on `larql-router-protocol`
+      # (added in #96 for MLA absorption integration tests).
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v5
         with:
