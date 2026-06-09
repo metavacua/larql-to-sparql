@@ -2,9 +2,14 @@ use larql_models::ModelWeights;
 use larql_vindex::VectorIndex;
 use tokenizers::Tokenizer;
 
+use crate::attention::KvCache;
 use crate::forward::PredictResult;
 
+<<<<<<< HEAD:crates/larql-inference/src/vindex/kquant_forward/generation.rs
 use super::hidden::predict_kquant_hidden;
+=======
+use super::hidden::{predict_q4k_hidden, predict_q4k_hidden_with_cache};
+>>>>>>> ianblenke/main:crates/larql-inference/src/vindex/q4k_forward/generation.rs
 
 /// End-to-end predict on a Q4_K/Q6_K vindex.
 pub fn predict_kquant(
@@ -16,6 +21,37 @@ pub fn predict_kquant(
 ) -> PredictResult {
     let h = predict_kquant_hidden(weights, token_ids, index, None);
     crate::forward::predict::logits_to_predictions_pub(weights, &h, tokenizer, top_k, 1.0)
+}
+
+/// Variant of [`predict_q4k`] that threads a persistent [`KvCache`]. An empty
+/// cache performs a prefill (and populates the cache); a populated cache with
+/// `token_ids.len() == 1` performs a decode-step against the cached K/V. The
+/// caller is responsible for allocating a fresh cache per generation request.
+pub fn predict_q4k_with_cache(
+    weights: &mut ModelWeights,
+    tokenizer: &Tokenizer,
+    token_ids: &[u32],
+    top_k: usize,
+    index: &VectorIndex,
+    cache: &mut KvCache,
+) -> PredictResult {
+    let h = predict_q4k_hidden_with_cache(weights, token_ids, index, None, Some(cache));
+    crate::forward::predict::logits_to_predictions_pub(weights, &h, tokenizer, top_k, 1.0)
+}
+
+/// Full softmax distribution over the vocabulary at the next position.
+///
+/// Same compute as [`predict_q4k`] but skips the top-k truncation and
+/// returns the full `Vec<f32>` of length `vocab_size`. Used by phase 4b's
+/// naive `target_forward` to feed `verify_and_accept` per-position
+/// target distributions.
+pub fn predict_q4k_full_vocab_probs(
+    weights: &mut ModelWeights,
+    token_ids: &[u32],
+    index: &VectorIndex,
+) -> Vec<f32> {
+    let h = predict_q4k_hidden(weights, token_ids, index, None);
+    crate::forward::predict::full_vocab_probs(weights, &h, 1.0)
 }
 
 /// Common end-of-turn / EOS markers across Gemma, Llama, Mistral, ChatML.
@@ -214,8 +250,31 @@ where
     let mut out: Vec<(String, u32)> = Vec::with_capacity(max_tokens);
     let mut sampler = crate::layer_graph::Sampler::new(sampling);
 
+    // Allocate a KvCache for the request when the architecture supports it.
+    // Prefill is implicit on the first iteration (cache empty + full prompt);
+    // each subsequent iteration feeds only the newly-sampled token. On
+    // unsupported architectures (hybrid MoE / cross-layer K/V share),
+    // `cache` stays `None` and we feed the full appended `ids` slice each
+    // step — same per-token full-replay as before, correctness preserved.
+    let mut cache = if super::hidden::cpu_q4k_cache_supported(weights) {
+        Some(KvCache::with_layers(weights.num_layers))
+    } else {
+        None
+    };
+
     for _ in 0..max_tokens {
+<<<<<<< HEAD:crates/larql-inference/src/vindex/kquant_forward/generation.rs
         let h = predict_kquant_hidden(weights, &ids, index, None);
+=======
+        let last_id = ids.last().copied().unwrap_or(0);
+        let single = [last_id];
+        let input: &[u32] = if cache.is_some() && !generated.is_empty() {
+            &single
+        } else {
+            &ids
+        };
+        let h = predict_q4k_hidden_with_cache(weights, input, index, None, cache.as_mut());
+>>>>>>> ianblenke/main:crates/larql-inference/src/vindex/q4k_forward/generation.rs
         let last_hidden = h.row(h.nrows().saturating_sub(1)).to_owned();
         let last_2d = ndarray::Array2::from_shape_vec((1, last_hidden.len()), last_hidden.to_vec())
             .expect("shape");

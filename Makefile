@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 .PHONY: build release test test-fast test-full test-integration test-models check clean fmt lint demos bench bench-core bench-inference bench-compute bench-wire bench-routing bench-grid bench-all bench-vindex bench-vindex-scaling bench-save bench-check coverage coverage-summary larql-core-ci larql-core-test larql-core-fmt-check larql-core-lint larql-core-feature-test larql-core-bench-test larql-core-bench larql-core-examples larql-core-coverage larql-core-coverage-html larql-models-ci larql-models-test larql-models-fmt-check larql-models-lint larql-models-coverage larql-models-coverage-summary larql-models-coverage-html larql-models-coverage-policy larql-models-bench-test larql-vindex-ci larql-vindex-test larql-vindex-fmt-check larql-vindex-lint larql-vindex-examples larql-vindex-bench-test larql-vindex-bench larql-vindex-coverage larql-vindex-coverage-summary larql-vindex-coverage-html larql-vindex-coverage-policy larql-compute-test larql-compute-test-fast larql-compute-test-integration larql-compute-check-fast larql-compute-check-tests larql-compute-check-all larql-compute-test-metal-decode larql-compute-test-metal-lib larql-compute-fmt-check larql-compute-lint larql-compute-coverage larql-compute-coverage-summary larql-compute-coverage-html larql-compute-coverage-policy larql-compute-ci larql-compute-metal-test larql-compute-metal-test-tests larql-compute-metal-check larql-compute-metal-check-tests larql-compute-metal-check-all larql-compute-metal-fmt-check larql-compute-metal-lint larql-compute-metal-coverage larql-compute-metal-coverage-summary larql-compute-metal-coverage-html larql-compute-metal-coverage-policy larql-compute-metal-ci larql-boundary-ci larql-boundary-test larql-boundary-fmt-check larql-boundary-lint larql-boundary-bench-test larql-boundary-examples larql-kv-ci larql-kv-test larql-kv-fmt-check larql-kv-lint larql-kv-examples larql-kv-bench-test larql-kv-bench larql-kv-coverage larql-kv-coverage-summary larql-kv-coverage-html larql-kv-coverage-policy larql-server-ci larql-server-test larql-server-fmt-check larql-server-lint larql-server-coverage larql-server-coverage-summary larql-server-coverage-html larql-server-coverage-policy larql-router-ci larql-router-test larql-router-fmt-check larql-router-lint larql-router-coverage larql-router-coverage-summary larql-router-coverage-html larql-router-coverage-policy larql-lql-ci larql-lql-test larql-lql-fmt-check larql-lql-lint larql-lql-examples larql-lql-bench-test larql-lql-coverage-summary larql-cli-ci larql-cli-test larql-cli-fmt-check larql-cli-lint larql-cli-coverage larql-cli-coverage-summary larql-cli-coverage-html larql-cli-coverage-policy larql-inference-ci larql-inference-test larql-inference-fmt-check larql-inference-lint larql-inference-bench-test larql-inference-coverage-summary
+=======
+.PHONY: build release test test-fast test-full test-integration test-models check clean fmt lint demos demo bench bench-core bench-inference bench-compute bench-wire bench-routing bench-grid bench-all bench-vindex bench-vindex-scaling bench-save bench-check coverage coverage-summary coverage-check coverage-install ci-coverage traceability traceability-check gaps gaps-untested gaps-unbacked openspec-validate ci-cuda test-cuda rotorquant-sync cuda-rotorquant-bench cuda-oxide-doctor cuda-oxide-pilot cuda-oxide-cross-parity cuda-oxide-bench docker-ffn docker-gpu docker-up docker-up-cpu docker-down docker-logs cuda-status attention-smoke attention-validate attention-validate-gemma attention-bench larql-core-ci larql-core-test larql-core-fmt-check larql-core-lint larql-core-feature-test larql-core-bench-test larql-core-bench larql-core-examples larql-core-coverage larql-core-coverage-html larql-models-ci larql-models-test larql-models-fmt-check larql-models-lint larql-models-coverage-summary larql-models-bench-test larql-vindex-ci larql-vindex-test larql-vindex-fmt-check larql-vindex-lint larql-vindex-examples larql-vindex-bench-test larql-vindex-bench larql-vindex-coverage larql-vindex-coverage-summary larql-vindex-coverage-html larql-vindex-coverage-policy larql-compute-test larql-compute-test-fast larql-compute-test-integration larql-compute-check-fast larql-compute-check-tests larql-compute-check-all larql-compute-test-metal-decode larql-compute-test-metal-lib larql-compute-fmt-check larql-compute-lint larql-compute-coverage larql-compute-coverage-summary larql-compute-coverage-html larql-compute-coverage-policy larql-compute-ci larql-boundary-ci larql-boundary-test larql-boundary-fmt-check larql-boundary-lint larql-boundary-bench-test larql-boundary-examples larql-kv-ci larql-kv-test larql-kv-fmt-check larql-kv-lint larql-kv-examples larql-kv-bench-test larql-kv-bench larql-kv-coverage larql-kv-coverage-summary larql-kv-coverage-html larql-kv-coverage-policy larql-server-ci larql-server-test larql-server-fmt-check larql-server-lint larql-server-coverage larql-server-coverage-summary larql-server-coverage-html larql-server-coverage-policy larql-lql-ci larql-lql-test larql-lql-fmt-check larql-lql-lint larql-lql-examples larql-lql-bench-test larql-lql-coverage-summary larql-cli-ci larql-cli-test larql-cli-fmt-check larql-cli-lint larql-cli-coverage-summary larql-inference-ci larql-inference-test larql-inference-fmt-check larql-inference-lint larql-inference-bench-test larql-inference-coverage-summary
+>>>>>>> ianblenke/main
 
 # Build
 build:
@@ -32,6 +36,135 @@ test-models:
 	cargo test -p larql-inference --test test_llm_dispatch -- --ignored --nocapture
 	cargo test -p larql-inference --test test_constrained_dispatch -- --ignored --nocapture
 	cargo test -p larql-inference --test test_trie_dispatch -- --ignored --nocapture
+
+# CUDA test suite — requires LARQL_CUDA_AVAILABLE=1 and a working CUDA
+# runtime (driver + libcublas matching the cudarc feature in
+# crates/larql-compute/Cargo.toml). Runs all gpu-gated parity tests for
+# f32 / Q4 / fused attention against synthetic inputs.
+test-cuda:
+	@if [ "${LARQL_CUDA_AVAILABLE}" != "1" ]; then \
+	  echo "Set LARQL_CUDA_AVAILABLE=1 to run CUDA parity tests."; \
+	  exit 2; \
+	fi
+	cargo test -p larql-compute --features cuda --test test_cuda_f32 -- --test-threads=1
+	cargo test -p larql-compute --features cuda --test test_cuda_q4  -- --test-threads=1
+	cargo test -p larql-compute --features cuda --test test_cuda_attn -- --test-threads=1
+	cargo test -p larql-inference --features cuda --test test_cpu_metal_parity -- --test-threads=1
+	cargo test -p larql-rotorquant
+	@echo "All CUDA + RotorQuant parity tests passed."
+
+ci-cuda: test-cuda
+
+rotorquant-sync:
+	scripts/rotorquant-sync.sh
+
+cuda-rotorquant-bench:
+	@if [ "${LARQL_CUDA_AVAILABLE}" = "1" ]; then \
+	  cargo run --release -p larql-rotorquant --features cuda --example cuda_round_trip_bench; \
+	else \
+	  echo "Skipping CUDA RotorQuant benchmark: set LARQL_CUDA_AVAILABLE=1 to run it."; \
+	fi
+
+cuda-oxide-doctor:
+	@if ! rustup toolchain list | grep -q '^nightly-2026-04-03'; then \
+	  echo "Missing Rust toolchain: rustup toolchain install nightly-2026-04-03"; \
+	  echo "Then add components: rustup component add rust-src rustc-dev --toolchain nightly-2026-04-03"; \
+	  exit 2; \
+	fi
+	@cargo +nightly-2026-04-03 oxide doctor || { \
+	  status=$$?; \
+	  echo "cuda-oxide doctor failed. Install cargo-oxide from NVlabs/cuda-oxide at commit 6de050946cd1013335a33cf2c5144888a32efab3 and ensure LLVM 21, clang-21, and CUDA Toolkit 13.1 are visible."; \
+	  exit $$status; \
+	}
+
+cuda-oxide-pilot: cuda-oxide-doctor
+	cd crates/larql-rotorquant && CUDA_OXIDE_PTX_DIR=$$(pwd) cargo +nightly-2026-04-03 oxide build --features cuda-oxide --arch sm_89
+	@if [ "${LARQL_CUDA_AVAILABLE}" = "1" ]; then \
+	  cargo +nightly-2026-04-03 test -p larql-rotorquant --features cuda-oxide --test cuda_oxide_round_trip -- --test-threads=1; \
+	else \
+	  echo "Skipping cuda-oxide GPU round-trip test: set LARQL_CUDA_AVAILABLE=1 to run it."; \
+	fi
+
+cuda-oxide-cross-parity: cuda-oxide-doctor
+	@if [ "${LARQL_CUDA_AVAILABLE}" != "1" ]; then \
+	  echo "Set LARQL_CUDA_AVAILABLE=1 to run cuda-oxide/cudarc parity."; \
+	  exit 2; \
+	fi
+	@set -e; \
+	tmp=$$(mktemp -d); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	LARQL_ROTORQUANT_PARITY_DIR=$$tmp cargo test -p larql-rotorquant --features cuda --test cuda_round_trip iso3_quantized_layout_dequantizes_like_cpu_reference -- --test-threads=1 --nocapture; \
+	cd crates/larql-rotorquant && CUDA_OXIDE_PTX_DIR=$$(pwd) cargo +nightly-2026-04-03 oxide build --features cuda-oxide --arch sm_89; \
+	LARQL_ROTORQUANT_PARITY_DIR=$$tmp cargo +nightly-2026-04-03 test -p larql-rotorquant --features cuda-oxide --test cuda_oxide_round_trip iso3_cuda_oxide_dequantize_matches_cpu -- --test-threads=1 --nocapture
+
+cuda-oxide-bench: cuda-oxide-pilot
+	@if [ "${LARQL_CUDA_AVAILABLE}" = "1" ]; then \
+	  cargo +nightly-2026-04-03 run --release -p larql-rotorquant --features cuda-oxide --example cuda_oxide_iso3_bench; \
+	else \
+	  echo "Skipping cuda-oxide benchmark: set LARQL_CUDA_AVAILABLE=1 to run it."; \
+	fi
+
+# Snapshot of cuda backend status against this dev box.
+cuda-status:
+	@echo "═══ CUDA capability snapshot ═══"
+	@echo
+	@nvidia-smi 2>/dev/null | grep -E 'CUDA Version|GeForce|Tesla|RTX|GTX' | head -5 || echo "(no nvidia-smi)"
+	@echo
+	@if [ -d "/usr/local/cuda/targets/x86_64-linux/lib" ]; then \
+	  echo "libcublas: $$(ls /usr/local/cuda/targets/x86_64-linux/lib/libcublas.so.* 2>/dev/null | head -1)"; \
+	fi
+	@echo
+	@cargo metadata --format-version 1 --quiet 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); pkg=[p for p in d['packages'] if p['name']=='larql-compute'][0]; print(f\"larql-compute features: {list(pkg['features'].keys())}\")" 2>/dev/null || true
+
+# ── Two-container deployment ──────────────────────────────────────────
+# See deploy/docker/README.md for the full topology + VRAM budget.
+
+docker-ffn:
+	docker build -f deploy/docker/Dockerfile.ffn -t larql-ffn:dev .
+
+docker-gpu:
+	docker build -f deploy/docker/Dockerfile.gpu -t larql-gpu:dev .
+
+docker-up:
+	cd deploy/docker && docker compose up --build
+
+docker-up-cpu:
+	cd deploy/docker && docker compose -f docker-compose.cpu.yml up --build
+
+docker-down:
+	cd deploy/docker && docker compose down -v
+
+docker-logs:
+	cd deploy/docker && docker compose logs -f
+
+demo:
+	deploy/docker/demo.sh
+
+# attention-service-routes change. Run a full HTTP smoke test against
+# a running attention server (defaults to http://localhost:8081).
+# Override target via: LARQL_ATTN_URL=... LARQL_MODEL_ID=... make attention-smoke
+attention-smoke:
+	python3 scripts/attention-service-smoke.py
+
+# Numerical-validation harness for the attention-service routes —
+# runs against the synthetic make_test_weights model in-process,
+# bit-comparing every per-layer residual against a direct
+# larql_inference forward pass. No network, no real model.
+attention-validate:
+	cargo test -p larql-server --test test_attention_validation
+
+# Same as attention-validate, but at Gemma-3-4B-shaped synthetic
+# dimensions (hidden=2560, num_q=8, num_kv=4, head_dim=320,
+# 4 layers). Takes ~10s due to the synthetic weight build.
+attention-validate-gemma:
+	cargo test -p larql-server --test test_attention_validation -- --ignored prefill_gemma_shaped
+
+# Latency benchmarks for the attention-service routes — drives
+# prefill at seq_len ∈ {1, 8, 32, 128}, plus decode and snapshot
+# after a 32-token prefill, against the synthetic model. Reports
+# numbers under target/criterion/.
+attention-bench:
+	cargo bench -p larql-server --bench attention_service
 
 # larql-core — graph engine, algorithms, extraction helpers, serialization
 larql-core-test:
@@ -827,8 +960,11 @@ fmt-check:
 lint:
 	cargo clippy --workspace --tests -- -D warnings
 
-# All quality checks
-ci: fmt-check lint test-full
+# All quality checks. The traceability gate is fast (pure Python over markdown +
+# `.rs` files) and runs in CI on every PR. The coverage gate is heavier; it has
+# its own target (`ci-coverage`) and is wired into a separate CI job so spec-only
+# PRs don't pay the cost.
+ci: fmt-check lint test-full traceability-check openspec-validate
 
 # Clean
 clean:
@@ -906,26 +1042,82 @@ bench-save:
 bench-check:
 	bash scripts/bench-regress.sh check
 
-# Coverage — uses cargo-llvm-cov (install with `cargo install cargo-llvm-cov`).
-# Writes an HTML report to coverage/ that can be opened in a browser.
-# Scoped to larql-vindex by default since the audit owner cares about
-# that crate; pass CRATE=… to scope elsewhere.
-COVERAGE_CRATE ?= larql-vindex
+# Coverage — uses cargo-llvm-cov.
+#
+#   coverage          — full workspace coverage; emits HTML + JSON.
+#   coverage-summary  — terse per-crate text summary.
+#   coverage-check    — enforce per-crate thresholds in coverage-thresholds.toml.
+#   ci-coverage       — combined: regenerate + check; intended for CI.
+#   coverage-install  — install rustup component + cargo-llvm-cov.
+#
+# Pass CRATE=<name> to scope `coverage` to a single crate (HTML only).
+COVERAGE_CRATE ?=
 coverage:
 	@if ! command -v cargo-llvm-cov >/dev/null 2>&1; then \
-		echo "cargo-llvm-cov not installed. Install with:"; \
-		echo "  cargo install cargo-llvm-cov"; \
+		echo "cargo-llvm-cov not installed. Run: make coverage-install"; \
 		exit 1; \
 	fi
-	cargo llvm-cov --package $(COVERAGE_CRATE) --html --output-dir coverage
-	@echo "Report: coverage/html/index.html"
+	@if [ -n "$(COVERAGE_CRATE)" ]; then \
+		cargo llvm-cov --package $(COVERAGE_CRATE) --html --output-dir target/llvm-cov/html; \
+		echo "Report: target/llvm-cov/html/index.html"; \
+	else \
+		cargo llvm-cov --workspace --json --output-path target/llvm-cov/coverage.json; \
+		cargo llvm-cov --workspace --html --output-dir target/llvm-cov/html --no-clean; \
+		echo "JSON:  target/llvm-cov/coverage.json"; \
+		echo "HTML:  target/llvm-cov/html/index.html"; \
+	fi
 
 coverage-summary:
 	@if ! command -v cargo-llvm-cov >/dev/null 2>&1; then \
-		echo "cargo-llvm-cov not installed."; \
+		echo "cargo-llvm-cov not installed. Run: make coverage-install"; \
 		exit 1; \
 	fi
-	cargo llvm-cov --package $(COVERAGE_CRATE) --summary-only
+	cargo llvm-cov --workspace --summary-only
+
+coverage-check:
+	@if [ ! -f target/llvm-cov/coverage.json ]; then \
+		echo "target/llvm-cov/coverage.json missing — run \`make coverage\` first."; \
+		exit 1; \
+	fi
+	python3 scripts/coverage-check.py
+
+ci-coverage: coverage coverage-check
+
+coverage-install:
+	rustup component add llvm-tools-preview
+	cargo install cargo-llvm-cov --locked
+
+# OpenSpec spec → test traceability.
+#
+#   traceability         — regenerate openspec/coverage/traceability.{md,json}.
+#   traceability-check   — fail if regenerated output diverges from committed.
+#   gaps-unbacked        — write openspec/changes/<change>/gaps-unbacked-scenarios.md.
+#   gaps-untested        — write gaps-untested-code.md (requires coverage JSON).
+#   gaps                 — both gap reports.
+#   openspec-validate    — `openspec validate <change> --strict` for the active change.
+traceability:
+	python3 scripts/spec-trace.py
+
+traceability-check:
+	python3 scripts/spec-trace.py --check
+
+gaps-unbacked:
+	python3 scripts/spec-trace.py --unbacked --quiet
+
+gaps-untested:
+	@if [ ! -f target/llvm-cov/coverage.json ]; then \
+		echo "target/llvm-cov/coverage.json missing — run \`make coverage\` first."; \
+		exit 1; \
+	fi
+	python3 scripts/spec-gap.py --untested-code
+
+gaps: gaps-unbacked gaps-untested
+
+openspec-validate:
+	@for change in $$(ls openspec/changes 2>/dev/null | grep -v '^archive$$'); do \
+		echo "openspec validate $$change --strict"; \
+		openspec validate $$change --strict || exit 1; \
+	done
 
 # Python extension (managed via uv)
 python-setup:

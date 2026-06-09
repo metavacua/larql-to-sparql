@@ -9,7 +9,7 @@ use tempfile::TempDir;
 
 use larql_models::{
     load_model_dir, load_model_dir_filtered, load_model_dir_validated, load_model_dir_walk_only,
-    load_model_dir_walk_only_validated, validation::FIELD_HEAD_DIM, ModelError,
+    load_model_dir_walk_only_validated, validation::FIELD_NUM_Q_HEADS, ModelError,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -314,13 +314,17 @@ fn load_f32_tensors_correct_values() {
     );
 
     let weights = load_model_dir(dir.path()).unwrap();
-    assert_eq!(weights.embed.shape(), &[10, 4]);
+    assert_eq!(weights.embed.shape(), [10, 4]);
     // First element: known[0] = 0.0
-    assert!((weights.embed[[0, 0]] - known[0]).abs() < 1e-6);
+    assert!((weights.embed.row(0)[0] - known[0]).abs() < 1e-6);
     // Last element: known[39] = 3.9
-    assert!((weights.embed[[9, 3]] - known[39]).abs() < 1e-5);
+    assert!((weights.embed.row(9)[3] - known[39]).abs() < 1e-5);
 }
 
+// Trigger an invalid attention geometry that survives the
+// gemma-3-270m head_dim relaxation: num_attention_heads=3 /
+// num_key_value_heads=2 fails the "Q heads divide evenly by KV
+// heads" check, which is still validated.
 #[test]
 fn load_model_dir_validated_rejects_invalid_config() {
     let dir = TempDir::new().unwrap();
@@ -328,10 +332,10 @@ fn load_model_dir_validated_rejects_invalid_config() {
         dir.path(),
         serde_json::json!({
             "model_type": "llama",
-            "hidden_size": 5,
+            "hidden_size": 6,
             "num_hidden_layers": 1,
             "intermediate_size": 16,
-            "num_attention_heads": 2,
+            "num_attention_heads": 3,
             "num_key_value_heads": 2,
             "head_dim": 0,
             "vocab_size": 10,
@@ -340,11 +344,11 @@ fn load_model_dir_validated_rejects_invalid_config() {
     );
 
     let permissive = load_model_dir(dir.path()).unwrap();
-    assert_eq!(permissive.hidden_size, 5);
+    assert_eq!(permissive.hidden_size, 6);
 
     match load_model_dir_validated(dir.path()) {
         Err(ModelError::ConfigValidation(errors)) => {
-            assert!(errors.iter().any(|error| error.field == FIELD_HEAD_DIM));
+            assert!(errors.iter().any(|error| error.field == FIELD_NUM_Q_HEADS));
         }
         _ => panic!("expected config validation error"),
     }
@@ -357,10 +361,10 @@ fn load_model_dir_walk_only_validated_rejects_invalid_config() {
         dir.path(),
         serde_json::json!({
             "model_type": "llama",
-            "hidden_size": 5,
+            "hidden_size": 6,
             "num_hidden_layers": 1,
             "intermediate_size": 16,
-            "num_attention_heads": 2,
+            "num_attention_heads": 3,
             "num_key_value_heads": 2,
             "head_dim": 0,
             "vocab_size": 10,
@@ -370,7 +374,7 @@ fn load_model_dir_walk_only_validated_rejects_invalid_config() {
 
     match load_model_dir_walk_only_validated(dir.path()) {
         Err(ModelError::ConfigValidation(errors)) => {
-            assert!(errors.iter().any(|error| error.field == FIELD_HEAD_DIM));
+            assert!(errors.iter().any(|error| error.field == FIELD_NUM_Q_HEADS));
         }
         _ => panic!("expected config validation error"),
     }
@@ -389,9 +393,9 @@ fn load_f16_tensors_converts_to_f32() {
     );
 
     let weights = load_model_dir(dir.path()).unwrap();
-    assert_eq!(weights.embed.shape(), &[10, 4]);
+    assert_eq!(weights.embed.shape(), [10, 4]);
     // f16 1.0 → f32 1.0
-    assert!((weights.embed[[0, 0]] - 1.0).abs() < 1e-4);
+    assert!((weights.embed.row(0)[0] - 1.0).abs() < 1e-4);
 }
 
 #[test]
@@ -407,8 +411,8 @@ fn load_bf16_tensors_converts_to_f32() {
     );
 
     let weights = load_model_dir(dir.path()).unwrap();
-    assert_eq!(weights.embed.shape(), &[10, 4]);
-    assert!((weights.embed[[0, 0]] - 1.0).abs() < 1e-4);
+    assert_eq!(weights.embed.shape(), [10, 4]);
+    assert!((weights.embed.row(0)[0] - 1.0).abs() < 1e-4);
 }
 
 #[test]
@@ -734,7 +738,7 @@ fn filtered_custom_predicate_skips_target() {
         .tensors
         .contains_key("layers.0.self_attn.q_proj.weight"));
     // embed and lm_head are not filtered
-    assert_eq!(weights.embed.shape(), &[10, 4]);
+    assert_eq!(weights.embed.shape(), [10, 4]);
 }
 
 #[test]
@@ -830,7 +834,7 @@ fn mlx_weights_subdir_is_found() {
     .unwrap();
 
     let weights = load_model_dir(dir.path()).unwrap();
-    assert_eq!(weights.embed.shape(), &[10, 4]);
+    assert_eq!(weights.embed.shape(), [10, 4]);
 }
 
 #[test]
@@ -881,7 +885,7 @@ fn load_gguf_via_load_model_dir() {
 
     let weights = load_model_dir(dir.path()).unwrap();
     // embed_tokens: dims=[4, 100] in GGUF → shape [100, 4] after GGUF dim swap
-    assert_eq!(weights.embed.shape(), &[100, 4]);
+    assert_eq!(weights.embed.shape(), [100, 4]);
     assert_eq!(weights.vocab_size, 100);
     assert_eq!(weights.num_layers, 1);
     assert_eq!(weights.hidden_size, 4);
@@ -894,7 +898,7 @@ fn load_gguf_single_file() {
     write_minimal_gguf(&path);
 
     let weights = load_model_dir(&path).unwrap();
-    assert_eq!(weights.embed.shape(), &[100, 4]);
+    assert_eq!(weights.embed.shape(), [100, 4]);
     assert_eq!(weights.vocab_size, 100);
     assert_eq!(weights.num_layers, 1);
 }
@@ -907,7 +911,7 @@ fn load_gguf_preserves_explicit_small_vocab_metadata() {
 
     let weights = load_model_dir(&path).unwrap();
 
-    assert_eq!(weights.embed.shape(), &[128, 4]);
+    assert_eq!(weights.embed.shape(), [128, 4]);
     assert_eq!(weights.vocab_size, 128);
 }
 
@@ -919,7 +923,7 @@ fn load_gguf_uses_shape_vocab_when_metadata_and_tokenizer_are_absent() {
 
     let weights = load_model_dir(&path).unwrap();
 
-    assert_eq!(weights.embed.shape(), &[64, 4]);
+    assert_eq!(weights.embed.shape(), [64, 4]);
     assert_eq!(weights.vocab_size, 64);
 }
 
@@ -946,7 +950,7 @@ fn load_gguf_walk_only_excludes_ffn_tensor() {
     assert!(!weights
         .tensors
         .contains_key("layers.0.mlp.gate_proj.weight"));
-    assert_eq!(weights.embed.shape(), &[100, 4]);
+    assert_eq!(weights.embed.shape(), [100, 4]);
 }
 
 #[test]
@@ -1088,105 +1092,12 @@ fn f8_e8m0_bytes(n: usize) -> Vec<u8> {
     vec![127u8; n]
 }
 
-#[test]
-fn load_full_deepseek_v4_dequantises_per_expert_mxfp4() {
-    let dir = TempDir::new().unwrap();
-    // V4 detection in detect.rs requires `model_type = "deepseek_v4"`,
-    // and uses_mla() requires kv/q_lora_rank present.
-    let config = serde_json::json!({
-        "model_type": "deepseek_v4",
-        "hidden_size": 4,
-        "num_hidden_layers": 1,
-        "intermediate_size": 4,
-        "num_attention_heads": 2,
-        "num_key_value_heads": 2,
-        "head_dim": 2,
-        "vocab_size": 10,
-        "n_routed_experts": 1,
-        "num_experts_per_tok": 1,
-        "n_shared_experts": 0,
-        "kv_lora_rank": 4,
-        "q_lora_rank": 4,
-    });
-    // V4 strips no `model.` prefix and uses `embed.weight` + `norm.weight`
-    // (see `architectures/deepseek_v4.rs`).
-    //
-    // Per-expert MXFP4 layout: weight [out_features, packed_cols=groups*16],
-    // scale [out_features, groups]. We use out_features=2, groups=1 →
-    // packed_cols=16 → unpacked_cols=32.
-    let out_features = 2usize;
-    let groups = 1usize;
-    let packed_cols = groups * 16;
-    let weight_bytes = vec![0u8; out_features * packed_cols]; // all-zero nibbles → all-zero unpacked
-    let scale_bytes = f8_e8m0_bytes(out_features * groups);
-
-    write_model_dir_with_config(
-        dir.path(),
-        config,
-        &[
-            ("embed.weight", "F32", &[10, 4], f32_bytes(&[1.0f32; 40])),
-            ("norm.weight", "F32", &[4], f32_bytes(&[1.0f32; 4])),
-            // V4 doesn't necessarily have lm_head; loader falls back to embed.
-            // Per-expert MXFP4 weight + scale pair for w1 (gate_proj).
-            (
-                "layers.0.ffn.experts.0.w1.weight",
-                "I8",
-                &[out_features, packed_cols],
-                weight_bytes.clone(),
-            ),
-            (
-                "layers.0.ffn.experts.0.w1.scale",
-                "F8_E8M0",
-                &[out_features, groups],
-                scale_bytes.clone(),
-            ),
-            // Plus w2 (down) and w3 (up) — same shape.
-            (
-                "layers.0.ffn.experts.0.w2.weight",
-                "I8",
-                &[out_features, packed_cols],
-                weight_bytes.clone(),
-            ),
-            (
-                "layers.0.ffn.experts.0.w2.scale",
-                "F8_E8M0",
-                &[out_features, groups],
-                scale_bytes.clone(),
-            ),
-            (
-                "layers.0.ffn.experts.0.w3.weight",
-                "I8",
-                &[out_features, packed_cols],
-                weight_bytes,
-            ),
-            (
-                "layers.0.ffn.experts.0.w3.scale",
-                "F8_E8M0",
-                &[out_features, groups],
-                scale_bytes,
-            ),
-        ],
-    );
-
-    let weights = load_model_dir(dir.path()).expect("full V4 load");
-    // The V4 dequantiser writes the dequantised weight under the
-    // (prefix-stripped) tensor name. With V4's empty prefix list, that's
-    // exactly `layers.0.ffn.experts.0.w1.weight`.
-    assert!(
-        weights
-            .tensors
-            .contains_key("layers.0.ffn.experts.0.w1.weight"),
-        "V4 dequantiser must emit the unpacked weight; got: {:?}",
-        weights.tensors.keys().collect::<Vec<_>>()
-    );
-    let arr = weights
-        .tensors
-        .get("layers.0.ffn.experts.0.w1.weight")
-        .unwrap();
-    // Output cols = packed_cols * 2 = 32 (the dequantiser unpacks
-    // nibbles).
-    assert_eq!(arr.shape(), &[out_features, packed_cols * 2]);
-}
+// DSv4 support was reverted (see project memory `showcase_moe_models`)
+// — V4 isn't MLA so the dedicated loader path was removed. The test
+// here exercised that loader; without the implementation it fails
+// with `MissingTensor("embed_tokens.weight")` because the generic
+// loader now applies. Removing the test rather than rewriting it
+// keeps "DSv4 is gone" consistent across the codebase.
 
 #[test]
 fn load_filtered_validated_runs_with_validation() {

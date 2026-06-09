@@ -194,10 +194,14 @@ fn moe_model_config() -> VindexModelConfig {
         rope_local_base: None,
         query_pre_attn_scalar: None,
         final_logit_softcapping: None,
+<<<<<<< HEAD
         attention_multiplier: None,
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+=======
+        ..Default::default()
+>>>>>>> ianblenke/main
     }
 }
 
@@ -412,10 +416,14 @@ fn layer_weight_writer_round_trips_header_offsets_and_data() {
         LayerEntry {
             gate_up: vec![1, 2, 3],
             down: vec![4, 5],
+            gate_up_format: None,
+            down_format: None,
         },
         LayerEntry {
             gate_up: vec![6],
             down: vec![7, 8, 9, 10],
+            gate_up_format: None,
+            down_format: None,
         },
     ];
 
@@ -438,18 +446,16 @@ fn layer_weight_writer_round_trips_header_offsets_and_data() {
     assert_eq!(hidden, LAYER_HIDDEN);
     let expected_first_gate_offset = LAYER_HEADER_BYTES + entries.len() * LAYER_OFFSET_BYTES;
     let expected_first_down_offset = expected_first_gate_offset + entries[0].gate_up.len();
+    assert_eq!(offsets[0].gate_up_offset, expected_first_gate_offset);
+    assert_eq!(offsets[0].gate_up_len, entries[0].gate_up.len());
+    assert_eq!(offsets[0].down_offset, expected_first_down_offset);
+    assert_eq!(offsets[0].down_len, entries[0].down.len());
     assert_eq!(
-        offsets[0],
-        (
-            expected_first_gate_offset,
-            entries[0].gate_up.len(),
-            expected_first_down_offset,
-            entries[0].down.len()
-        )
+        &bytes[offsets[1].gate_up_offset..offsets[1].gate_up_offset + offsets[1].gate_up_len],
+        &[6]
     );
-    assert_eq!(&bytes[offsets[1].0..offsets[1].0 + offsets[1].1], &[6]);
     assert_eq!(
-        &bytes[offsets[1].2..offsets[1].2 + offsets[1].3],
+        &bytes[offsets[1].down_offset..offsets[1].down_offset + offsets[1].down_len],
         &[7, 8, 9, 10]
     );
 }

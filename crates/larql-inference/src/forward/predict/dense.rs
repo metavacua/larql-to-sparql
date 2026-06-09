@@ -98,6 +98,30 @@ unsafe fn f32_dot_neon(a: &[f32], b: &[f32]) -> f32 {
     acc
 }
 
+/// Project the LAST row of `h_final` ([seq_len-1..seq_len, ..]) to raw
+/// pre-temperature logits.
+///
+/// Prefers the direct Q4_K × Q8_K matvec path via
+/// `weights.lm_head_quant` when available (rayon-parallel AVX2 row
+/// dot, no f32 materialisation of the vocab × hidden matrix). Falls
+/// back to f32 BLAS GEMV against `weights.lm_head` otherwise (Gemma 3 1B
+/// at hidden=1152 — not Q8_K-aligned, so `lm_head_quant` is None).
+pub(super) fn project_lm_head_last_row(
+    weights: &ModelWeights,
+    h_final: &Array2<f32>,
+    seq_len: usize,
+) -> Vec<f32> {
+    let last_2d = h_final.slice(ndarray::s![seq_len - 1..seq_len, ..]);
+    if let Some(lm_q) = weights.lm_head_quant.as_ref() {
+        let x = last_2d.row(0).to_owned();
+        if let Ok(v) = lm_q.matvec(&x) {
+            return v.to_vec();
+        }
+    }
+    let logits_raw = dot_proj(&last_2d, &weights.lm_head);
+    logits_raw.row(0).to_vec()
+}
+
 /// Descending order on the probability field of `(index, prob)` pairs,
 /// with NaN probabilities treated as the smallest value so they never
 /// displace a real top-k hit. Used by every top-k selector in this file
@@ -125,6 +149,7 @@ pub fn logits_to_predictions_pub(
     logits_to_predictions(weights, h, tokenizer, top_k, temperature)
 }
 
+<<<<<<< HEAD
 /// Q4_K-aware variant: when the vindex carries a synthesized Q4_K view
 /// of the LM head, route the matmul through it. Drops lm_head
 /// bandwidth from ~2.7 GB (f32) to ~0.7 GB (Q4_K) per step on a 262K-
@@ -254,14 +279,23 @@ pub(crate) fn logits_to_predictions(
     top_k: usize,
     temperature: f32,
 ) -> PredictResult {
+=======
+/// Project the final hidden state to a full softmax distribution over
+/// the vocabulary. Same compute as [`logits_to_predictions`] but
+/// returns the raw probability vector without top-k truncation.
+///
+/// Used by `larql_inference::speculative::target_forward` (phase 4b)
+/// to feed `verify_and_accept` per-position target distributions.
+pub fn full_vocab_probs(weights: &ModelWeights, h: &Array2<f32>, temperature: f32) -> Vec<f32> {
+>>>>>>> ianblenke/main
     let seq_len = h.shape()[0];
     let norm_offset = weights.arch.norm_weight_offset();
-
     let h_final = apply_norm(weights, h, weights.arch.final_norm_key(), norm_offset);
 
     let logits_scale = weights.arch.logits_scaling();
     let final_softcap = weights.arch.final_logit_softcapping();
 
+<<<<<<< HEAD
     let last_2d = h_final.slice(ndarray::s![seq_len - 1..seq_len, ..]);
     // ndarray's `last_2d.dot(&lm_head.t())` falls off the BLAS fast path
     // because `lm_head.t()` is a transposed view (non-standard layout) —
@@ -272,6 +306,11 @@ pub(crate) fn logits_to_predictions(
     let logits_raw = parallel_lm_head_logits(&last_2d, &weights.lm_head);
     let inv_scale = 1.0 / logits_scale;
     let logits: Vec<f32> = logits_raw
+=======
+    let logits_raw_vec = project_lm_head_last_row(weights, &h_final, seq_len);
+    let inv_scale = 1.0 / logits_scale;
+    let logits: Vec<f32> = logits_raw_vec
+>>>>>>> ianblenke/main
         .iter()
         .map(|&v| {
             let mut logit = v * inv_scale;
@@ -284,10 +323,52 @@ pub(crate) fn logits_to_predictions(
 
     let max_logit = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let exp_sum: f64 = logits.iter().map(|l| ((l - max_logit) as f64).exp()).sum();
-    let probs: Vec<f32> = logits
+    logits
         .iter()
         .map(|l| (((l - max_logit) as f64).exp() / exp_sum) as f32)
-        .collect();
+        .collect()
+}
+
+/// Batched variant of [`full_vocab_probs`] — returns one vocab-sized
+/// probability vector per row of `h_batch` (shape `[N, hidden]`).
+///
+/// Used by phase 4c's `target_forward_batched` to compute per-tree-node
+/// target distributions in one call site. This is the **C.1 stub** —
+/// CPU-batched (sequential calls to `full_vocab_probs` per row),
+/// correctness-first. Phase 4c task C.2 can replace this with a true
+/// batched GPU kernel (lm_head gemm + per-row softmax) for the perf
+/// win.
+///
+/// **Parity contract**: row `k` of the output SHALL bit-equal
+/// `full_vocab_probs(weights, &h_batch.row(k).to_owned_2d(), temperature)`
+/// for `0 ≤ k < N`. Phase 4c's GPU implementation must satisfy this
+/// within fp32 ordering tolerance (1e-5 absolute per element).
+pub fn full_vocab_probs_batched(
+    weights: &ModelWeights,
+    h_batch: &Array2<f32>,
+    temperature: f32,
+) -> Vec<Vec<f32>> {
+    let n = h_batch.shape()[0];
+    let mut out = Vec::with_capacity(n);
+    for k in 0..n {
+        // Slice the k-th row as its own [1, hidden] view, then collect
+        // to an owned Array2 (full_vocab_probs takes a single
+        // hidden-row 2D layout). This is sequential — phase 4c's GPU
+        // path batches the lm_head matmul + softmax in one launch.
+        let row = h_batch.slice(ndarray::s![k..k + 1, ..]).to_owned();
+        out.push(full_vocab_probs(weights, &row, temperature));
+    }
+    out
+}
+
+pub(crate) fn logits_to_predictions(
+    weights: &ModelWeights,
+    h: &Array2<f32>,
+    tokenizer: &tokenizers::Tokenizer,
+    top_k: usize,
+    temperature: f32,
+) -> PredictResult {
+    let probs = full_vocab_probs(weights, h, temperature);
 
     let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
     let k = top_k.min(indexed.len());

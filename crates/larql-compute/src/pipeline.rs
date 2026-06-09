@@ -26,6 +26,7 @@ pub enum QuantFormat {
     Q4_0,  // 18 bytes per 32 values (one f16 scale)
     Q4_K,  // 144 bytes per 256 values (GGUF-canonical, Ollama-compatible)
     Q4_KF, // 160 bytes per 256 values (pre-baked half scales — fast decode)
+    Q5_K,  // 176 bytes per 256 values (5-bit K-quant — common in Q4_K_S/M variants)
     Q6_K,  // 210 bytes per 256 values (6-bit with sub-block scales)
     Q8_0,  // int8 values + separate f32 scales
     BF16,  // raw bfloat16 (2 bytes per value, no quantization scales)
@@ -46,6 +47,7 @@ impl QuantFormat {
             Self::Q4_0 => Some((ggml::Q4_0_BLOCK_ELEMS, ggml::Q4_0_BLOCK_BYTES)),
             Self::Q4_K => Some((ggml::Q4_K_BLOCK_ELEMS, ggml::Q4_K_BLOCK_BYTES)),
             Self::Q4_KF => Some((ggml::Q4_K_BLOCK_ELEMS, Q4_KF_BLOCK_BYTES)),
+            Self::Q5_K => Some((ggml::Q5_K_BLOCK_ELEMS, ggml::Q5_K_BLOCK_BYTES)),
             Self::Q6_K => Some((ggml::Q6_K_BLOCK_ELEMS, ggml::Q6_K_BLOCK_BYTES)),
             _ => None,
         }

@@ -154,16 +154,16 @@ fn quant_matvec_q4k_dispatches_to_q4k_kernel() {
 
 #[test]
 fn quant_matvec_q4kf_dispatches_same_as_q4k() {
-    // Q4_KF is an alias → dispatches through q4k_matvec same as Q4_K.
+    // Q4_KF is the pre-baked half-scale layout used by the fast GPU path.
     let cpu = cpu_backend();
     let hidden = 256usize;
     let rows = 4usize;
     let weights: Vec<f32> = synth_vec(rows * hidden, 15);
     let x: Vec<f32> = synth_vec(hidden, 16);
-    let q4k = quantize_q4_k(&weights);
+    let q4kf = larql_compute::cpu::ops::q4_common::quantize_q4_kf(&weights);
     let result = cpu
-        .quant_matvec(QuantFormat::Q4_KF, &q4k, &x, rows, hidden)
-        .expect("CPU should support Q4_KF via q4k_matvec");
+        .quant_matvec(QuantFormat::Q4_KF, &q4kf, &x, rows, hidden)
+        .expect("CPU should support Q4_KF via q4kf_matvec");
     assert_eq!(result.len(), rows);
 }
 
@@ -340,13 +340,20 @@ impl ForwardingDecodeBackend {
 }
 
 impl DecodeBackend for ForwardingDecodeBackend {
+    #[allow(clippy::too_many_arguments)]
     fn full_pipeline_q4(
         &self,
         _layers: &[larql_compute::FullPipelineLayer<'_>],
         _x: &[f32],
         _hidden: usize,
         _inter: usize,
+        _q_dim: usize,
+        _kv_dim: usize,
         seq_len: usize,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
         _use_qk_norm: bool,
         _softcap: f32,
     ) -> Option<Vec<f32>> {
@@ -355,36 +362,61 @@ impl DecodeBackend for ForwardingDecodeBackend {
         Some(vec![seq_len as f32])
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn decode_token(
         &self,
         _layers: &[larql_compute::FullPipelineLayer<'_>],
         x: &[f32],
         _hidden: usize,
         _inter: usize,
+        _q_dim: usize,
+        _kv_dim: usize,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
     ) -> Option<Vec<f32>> {
         self.decode_calls.set(self.decode_calls.get() + 1);
         Some(x.to_vec())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn decode_token_with_moe(
         &self,
         _layers: &[larql_compute::FullPipelineLayer<'_>],
         x: &[f32],
         _hidden: usize,
         _inter: usize,
+        _q_dim: usize,
+        _kv_dim: usize,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
         moe_fn: &mut dyn FnMut(usize, &[f32]) -> Vec<f32>,
     ) -> Option<Vec<f32>> {
         self.moe_calls.set(self.moe_calls.get() + 1);
         Some(moe_fn(7, x))
     }
 
+<<<<<<< HEAD
     fn prefill_kquant(
+=======
+    #[allow(clippy::too_many_arguments)]
+    fn prefill_q4(
+>>>>>>> ianblenke/main
         &self,
         _layers: &[larql_compute::FullPipelineLayer<'_>],
         x: &[f32],
         _hidden: usize,
         _inter: usize,
+        _q_dim: usize,
+        _kv_dim: usize,
         seq_len: usize,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
         _use_qk_norm: bool,
         _softcap: f32,
     ) -> Option<Vec<f32>> {
@@ -439,24 +471,53 @@ fn quant_matvec_defaults_forward_and_dequantise_q8_tail() {
 
 #[test]
 fn decode_defaults_forward_to_specialized_entrypoints() {
+    // Verifies the `DecodeBackend` trait's default impls forward to the
+    // specialised entrypoints (full_pipeline_q4 / decode_token / etc.) —
+    // we override only those four leaf methods on `ForwardingDecodeBackend`
+    // and the rest go through the default delegations.
+    //
+    // The geometry args (q_dim/kv_dim/num_q_heads/num_kv_heads/head_dim/
+    // rope_base) are placeholders for this forwarding check — the stub
+    // ignores them all and returns deterministic shapes derived from
+    // hidden/seq_len so the test only asserts the call-count + return-shape
+    // contract, not real attention semantics.
     let be = ForwardingDecodeBackend::new();
     let layers: Vec<larql_compute::FullPipelineLayer<'_>> = Vec::new();
     let x = vec![1.0f32, 2.0, 3.0, 4.0];
+    // hidden=4, inter=8, num_q_heads=num_kv_heads=1, head_dim=4 → q_dim=kv_dim=4.
+    let (hidden, inter, q_dim, kv_dim, nqh, nkvh, hd, rope) = (4, 8, 4, 4, 1, 1, 4, 10000.0);
 
-    assert_eq!(
-        be.full_pipeline_q4_with_head_replacement(&layers, &x, 4, 8, 3, false, 0.0, 2, 0, &x,)
-            .unwrap(),
-        vec![3.0]
+    // `full_pipeline_q4_with_head_replacement`'s default impl returns
+    // `None` (intervention hook — callers fall back to a CPU path
+    // implemented at the larql-inference layer). It does NOT forward to
+    // `full_pipeline_q4`, so the stub's counter stays at 0 here.
+    assert!(
+        be.full_pipeline_q4_with_head_replacement(
+            &layers, &x, hidden, inter, 3, false, 0.0, 2, 0, &x,
+        )
+        .is_none()
     );
-    assert_eq!(be.full_pipeline_calls.get(), 1);
+    assert_eq!(be.full_pipeline_calls.get(), 0);
 
     let mut ignored = 0usize;
     assert_eq!(
-        be.decode_token_with_moe(&layers, &x, 4, 8, &mut |layer, h| {
-            ignored += layer + h.len();
-            vec![9.0; h.len()]
-        },)
-            .unwrap(),
+        be.decode_token_with_moe(
+            &layers,
+            &x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            nqh,
+            nkvh,
+            hd,
+            rope,
+            &mut |layer, h| {
+                ignored += layer + h.len();
+                vec![9.0; h.len()]
+            },
+        )
+        .unwrap(),
         vec![9.0; 4]
     );
     assert_eq!(be.moe_calls.get(), 1);
@@ -468,8 +529,14 @@ fn decode_defaults_forward_to_specialized_entrypoints() {
         be.decode_token_with_moe_split(
             &layers,
             &x,
-            4,
-            8,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            nqh,
+            nkvh,
+            hd,
+            rope,
             &mut |layer, h| fired += layer + h.len(),
             &mut |layer| {
                 collected += layer;
@@ -482,17 +549,27 @@ fn decode_defaults_forward_to_specialized_entrypoints() {
     assert_eq!((fired, collected), (11, 7));
 
     assert_eq!(
-        be.decode_token_split_profile(&layers, &x, 4, 8),
+        be.decode_token_split_profile(
+            &layers, &x, hidden, inter, q_dim, kv_dim, nqh, nkvh, hd, rope
+        ),
         (Some(x.clone()), 0.0, 0.0, 0.0)
     );
     assert_eq!(be.decode_calls.get(), 1);
 
+<<<<<<< HEAD
     assert_eq!(
         be.prefill_kquant_with_head_replacement(&layers, &x, 4, 8, 2, false, 0.0, 0, 0, &x,)
             .unwrap(),
         vec![1.0, 2.0]
     );
     assert_eq!(be.prefill_calls.get(), 1);
+=======
+    // `prefill_q4_with_head_replacement` was a method on `DecodeBackend`
+    // in an earlier API; it has since been removed from the trait. The
+    // forwarding-default behaviour of bare `prefill_q4` is exercised
+    // implicitly by `decode_token_split_profile` above and the per-backend
+    // integration tests, so we no longer assert it here.
+>>>>>>> ianblenke/main
 }
 
 #[test]
@@ -585,29 +662,57 @@ fn default_decode_stubs() {
     be.preallocate_kv_cache_per_layer(&[(1, 4)], 16);
     be.truncate_kv_cache(0);
     be.reset_kv_cache(); // default no-op, must not panic
+                         // Placeholder geometry — all default-impl methods return None so the
+                         // values are never read; only arity matches the current trait.
+    let (hidden, inter, q_dim, kv_dim, nqh, nkvh, hd, rope) = (4, 8, 4, 4, 1, 1, 4, 10000.0);
     assert!(be
-        .full_pipeline_q4(&layers, &x, 4, 8, 1, false, 0.0)
+        .full_pipeline_q4(
+            &layers, &x, hidden, inter, q_dim, kv_dim, 1, nqh, nkvh, hd, rope, false, 0.0,
+        )
         .is_none());
+    assert!(
+        be.full_pipeline_q4_with_head_replacement(
+            &layers, &x, hidden, inter, 1, false, 0.0, 0, 0, &x,
+        )
+        .is_none()
+    );
+    assert!(be.multi_layer_q4_ffn(&[], &x, inter, hidden).is_none());
     assert!(be
-        .full_pipeline_q4_with_head_replacement(&layers, &x, 4, 8, 1, false, 0.0, 0, 0, &x,)
+        .decode_token(&layers, &x, hidden, inter, q_dim, kv_dim, nqh, nkvh, hd, rope)
         .is_none());
-    assert!(be.multi_layer_q4_ffn(&[], &x, 8, 4).is_none());
-    assert!(be.decode_token(&layers, &x, 4, 8).is_none());
 
     let mut fired = 0usize;
     let mut collected = 0usize;
     assert!(be
-        .decode_token_with_moe(&layers, &x, 4, 8, &mut |layer, h| {
-            fired += layer + h.len();
-            vec![1.0; h.len()]
-        },)
+        .decode_token_with_moe(
+            &layers,
+            &x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            nqh,
+            nkvh,
+            hd,
+            rope,
+            &mut |layer, h| {
+                fired += layer + h.len();
+                vec![1.0; h.len()]
+            },
+        )
         .is_none());
     assert!(be
         .decode_token_with_moe_split(
             &layers,
             &x,
-            4,
-            8,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            nqh,
+            nkvh,
+            hd,
+            rope,
             &mut |layer, h| {
                 fired += layer + h.len();
             },
@@ -619,10 +724,13 @@ fn default_decode_stubs() {
         .is_none());
     assert_eq!((fired, collected), (0, 0));
     assert_eq!(
-        be.decode_token_split_profile(&layers, &x, 4, 8),
+        be.decode_token_split_profile(
+            &layers, &x, hidden, inter, q_dim, kv_dim, nqh, nkvh, hd, rope
+        ),
         (None, 0.0, 0.0, 0.0)
     );
     assert!(be
+<<<<<<< HEAD
         .prefill_kquant(&layers, &x, 4, 8, 1, false, 0.0)
         .is_none());
     assert!(be
@@ -630,5 +738,37 @@ fn default_decode_stubs() {
         .is_none());
     assert!(be
         .prefill_kquant_with_head_replacement(&layers, &x, 4, 8, 1, false, 0.0, 0, 0, &x,)
+=======
+        .prefill_q4(&layers, &x, hidden, inter, q_dim, kv_dim, 1, nqh, nkvh, hd, rope, false, 0.0,)
         .is_none());
+    assert!(be
+        .full_pipeline_q4_capture_pre_wo(&layers, &x, hidden, inter, 1, false, 0.0, 0, 0,)
+>>>>>>> ianblenke/main
+        .is_none());
+    // `prefill_q4_with_head_replacement` was removed from the trait — see
+    // note in `decode_defaults_forward_to_specialized_entrypoints`.
+}
+
+#[test]
+fn default_speculative_tree_keep_cache_returns_none() {
+    // `cuda-spec-branching-tree` T3.2 default: backends that don't
+    // implement the tree-mask kernel return None so the spec
+    // dispatcher routes to the conservative fallback.
+    let be = MinimalBackend;
+    let x = vec![vec![0.0_f32; 16]; 3];
+    let ancestors = vec![0b001, 0b011, 0b101]; // 3-node tree
+    let out = be.decode_tokens_speculative_tree_keep_cache(
+        &[],
+        &x,
+        &ancestors,
+        16,
+        16,
+        16,
+        16,
+        1,
+        1,
+        16,
+        10_000.0,
+    );
+    assert!(out.is_none());
 }

@@ -10,6 +10,7 @@ categories = ["data-structures"]
 
 [dependencies]
 ndarray = "0.16"
+rayon = "1.10"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -17,6 +18,7 @@ thiserror = { workspace = true }
 # Model weight loading
 safetensors = "0.7"
 memmap2 = "0.9"
+bytemuck = "1"
 
 [features]
 default = []
@@ -29,7 +31,18 @@ test-utils = []
 [dev-dependencies]
 criterion = "0.5"
 tempfile = "3"
+# Used by `q4k_q8k_kernel` bench to generate synthetic Q4_K / Q8_K
+# fixtures so the per-row dot exercises a realistic numerical range.
+rand = "0.8"
+rand_chacha = "0.3"
 
 [[bench]]
 name = "models"
 harness = false
+
+[[bench]]
+name = "q4k_q8k_kernel"
+harness = false
+
+[lints]
+workspace = true

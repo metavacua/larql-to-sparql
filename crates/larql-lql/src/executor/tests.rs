@@ -488,8 +488,11 @@ fn make_test_weights() -> larql_inference::ModelWeights {
         skipped_tensors: Vec::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
-        embed,
+        embed: larql_models::embed::EmbedMatrix::Heap(embed),
+        embed_quant: None,
         lm_head,
+        lm_head_quant: None,
+        quant_tensors: std::collections::HashMap::new(),
         position_embed: None,
         num_layers,
         hidden_size: hidden,
@@ -948,7 +951,7 @@ fn make_full_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         let new_vocab = weights.vocab_size + 1;
         let hidden = weights.hidden_size;
         let mut extended = Array2::<f32>::zeros((new_vocab, hidden));
-        for (i, row) in weights.embed.rows().into_iter().enumerate() {
+        for (i, row) in weights.embed.as_array().rows().into_iter().enumerate() {
             for (j, v) in row.iter().enumerate() {
                 extended[[i, j]] = *v;
             }
@@ -958,7 +961,7 @@ fn make_full_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         for j in 0..hidden {
             extended[[weights.vocab_size, j]] = 0.01_f32 * (j as f32 + 1.0);
         }
-        weights.embed = extended.into_shared();
+        weights.embed = larql_models::embed::EmbedMatrix::Heap(extended.into_shared());
         weights.vocab_size = new_vocab;
         // Mirror into the lm_head if it shared the original embed.
         let mut lm_extended = Array2::<f32>::zeros((new_vocab, hidden));
@@ -973,7 +976,9 @@ fn make_full_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         weights.lm_head = lm_extended.into_shared();
         // Update embed_key tensor too so manifest stays consistent.
         let embed_key = weights.arch.embed_key().to_string();
-        weights.tensors.insert(embed_key, weights.embed.clone());
+        weights
+            .tensors
+            .insert(embed_key, weights.embed.as_array().clone().into_owned());
     }
     let vindex = larql_inference::test_utils::make_test_vindex(&weights);
 
@@ -1013,10 +1018,14 @@ fn make_full_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         rope_local_base: None,
         query_pre_attn_scalar: None,
         final_logit_softcapping: None,
+<<<<<<< HEAD
         attention_multiplier: None,
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+=======
+        ..Default::default()
+>>>>>>> ianblenke/main
     };
 
     let mut config = VindexConfig {
@@ -1050,7 +1059,7 @@ fn make_full_test_vindex_dir(tag: &str) -> std::path::PathBuf {
     larql_vindex::write_model_weights(&weights, &dir, &mut build_cb).unwrap();
 
     // 3. Write embeddings.bin from `weights.embed`.
-    let embed_slice = weights.embed.as_slice().unwrap();
+    let embed_slice = weights.embed.as_array().as_slice().unwrap().to_vec();
     let mut embed_bytes = Vec::with_capacity(embed_slice.len() * bpf);
     for v in embed_slice {
         embed_bytes.extend_from_slice(&v.to_le_bytes());
@@ -1176,8 +1185,11 @@ fn make_large_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         packed_mmaps: HashMap::new(),
         skipped_tensors: Vec::new(),
         packed_byte_ranges: HashMap::new(),
-        embed: embed.clone(),
+        embed: larql_models::embed::EmbedMatrix::Heap(embed.clone()),
+        embed_quant: None,
         lm_head,
+        lm_head_quant: None,
+        quant_tensors: HashMap::new(),
         position_embed: None,
         arch,
         num_layers: NUM_LAYERS,
@@ -1242,10 +1254,14 @@ fn make_large_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         rope_local_base: None,
         query_pre_attn_scalar: None,
         final_logit_softcapping: None,
+<<<<<<< HEAD
         attention_multiplier: None,
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+=======
+        ..Default::default()
+>>>>>>> ianblenke/main
     };
 
     let mut config = VindexConfig {
@@ -1331,7 +1347,7 @@ fn make_moe_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         let new_vocab = weights.vocab_size + 1;
         let hidden = weights.hidden_size;
         let mut extended = Array2::<f32>::zeros((new_vocab, hidden));
-        for (i, row) in weights.embed.rows().into_iter().enumerate() {
+        for (i, row) in weights.embed.as_array().rows().into_iter().enumerate() {
             for (j, v) in row.iter().enumerate() {
                 extended[[i, j]] = *v;
             }
@@ -1339,7 +1355,7 @@ fn make_moe_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         for j in 0..hidden {
             extended[[weights.vocab_size, j]] = 0.01_f32 * (j as f32 + 1.0);
         }
-        weights.embed = extended.into_shared();
+        weights.embed = larql_models::embed::EmbedMatrix::Heap(extended.into_shared());
         weights.vocab_size = new_vocab;
         let mut lm_extended = Array2::<f32>::zeros((new_vocab, hidden));
         for (i, row) in weights.lm_head.rows().into_iter().enumerate() {
@@ -1352,7 +1368,9 @@ fn make_moe_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         }
         weights.lm_head = lm_extended.into_shared();
         let embed_key = weights.arch.embed_key().to_string();
-        weights.tensors.insert(embed_key, weights.embed.clone());
+        weights
+            .tensors
+            .insert(embed_key, weights.embed.as_array().clone().into_owned());
     }
     let vindex = larql_inference::test_utils::make_test_vindex(&weights);
 
@@ -1396,10 +1414,14 @@ fn make_moe_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         rope_local_base: None,
         query_pre_attn_scalar: None,
         final_logit_softcapping: None,
+<<<<<<< HEAD
         attention_multiplier: None,
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+=======
+        ..Default::default()
+>>>>>>> ianblenke/main
     };
 
     let mut config = VindexConfig {
@@ -1452,7 +1474,7 @@ fn make_moe_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         std::fs::write(&index_path, serde_json::to_string_pretty(&on_disk).unwrap()).unwrap();
     }
 
-    let embed_slice = weights.embed.as_slice().unwrap();
+    let embed_slice = weights.embed.as_array().as_slice().unwrap().to_vec();
     let mut embed_bytes = Vec::with_capacity(embed_slice.len() * bpf);
     for v in embed_slice {
         embed_bytes.extend_from_slice(&v.to_le_bytes());
@@ -3965,7 +3987,7 @@ fn weight_backend_session(model_id: &str) -> Session {
     let new_vocab = weights.vocab_size + 1;
     let hidden = weights.hidden_size;
     let mut extended = Array2::<f32>::zeros((new_vocab, hidden));
-    for (i, row) in weights.embed.rows().into_iter().enumerate() {
+    for (i, row) in weights.embed.as_array().rows().into_iter().enumerate() {
         for (j, v) in row.iter().enumerate() {
             extended[[i, j]] = *v;
         }
@@ -3973,7 +3995,7 @@ fn weight_backend_session(model_id: &str) -> Session {
     for j in 0..hidden {
         extended[[weights.vocab_size, j]] = 0.01_f32 * (j as f32 + 1.0);
     }
-    weights.embed = extended.into_shared();
+    weights.embed = larql_models::embed::EmbedMatrix::Heap(extended.into_shared());
     let mut lm_extended = Array2::<f32>::zeros((new_vocab, hidden));
     for (i, row) in weights.lm_head.rows().into_iter().enumerate() {
         if i >= new_vocab {
@@ -3986,7 +4008,9 @@ fn weight_backend_session(model_id: &str) -> Session {
     weights.lm_head = lm_extended.into_shared();
     weights.vocab_size = new_vocab;
     let embed_key = weights.arch.embed_key().to_string();
-    weights.tensors.insert(embed_key, weights.embed.clone());
+    weights
+        .tensors
+        .insert(embed_key, weights.embed.as_array().clone().into_owned());
 
     // Match the embed by passing vocab_size-1 to the tokenizer so [UNK]
     // lands at id new_vocab-1 (= old vocab_size), inside the extended

@@ -120,6 +120,39 @@ pub static QUANT_FORMATS: &[QuantFormatInfo] = &[
         row_dot: Some(ggml::q6k_row_dot),
         row_scaled_add: Some(ggml::q6k_row_scaled_add),
     },
+    QuantFormatInfo {
+        tag: "Q5_K",
+        block_elements: ggml::K_QUANT_BLOCK_ELEMS,
+        bytes_per_block: ggml::Q5_K_BLOCK_BYTES,
+        dequantize: ggml::dequantize_q5_k,
+        // No f32-input `q5k_row_dot` (only the Q8K-input fast path);
+        // consumers that need a row_dot can dequantize first via the
+        // `dequantize` fn pointer. The qwen35 forward dispatches Q5_K
+        // through `QuantTensor::matvec` which has its own
+        // q5k_q8k_row_dot fast path.
+        row_dot: None,
+        row_scaled_add: None,
+    },
+    QuantFormatInfo {
+        tag: "Q8_0",
+        block_elements: ggml::LEGACY_BLOCK_ELEMS,
+        bytes_per_block: ggml::Q8_0_BLOCK_BYTES,
+        dequantize: ggml::dequantize_q8_0,
+        row_dot: Some(ggml::q8_0_row_dot),
+        // No dedicated `q8_0_row_scaled_add` kernel; consumers that
+        // need scaled-add fall back to dequant + ndarray axpy.
+        row_scaled_add: None,
+    },
+    QuantFormatInfo {
+        tag: "MXFP4",
+        block_elements: ggml::MXFP4_BLOCK_ELEMS,
+        bytes_per_block: ggml::MXFP4_BLOCK_BYTES,
+        dequantize: ggml::dequantize_mxfp4,
+        // No f32-input MXFP4 matvec kernel yet; `QuantTensor::matvec`
+        // dispatches MXFP4 via per-row dequant + scalar dot.
+        row_dot: None,
+        row_scaled_add: None,
+    },
 ];
 
 /// Look up a format by its on-disk tag (e.g. `"Q4_K"`). Returns
@@ -170,7 +203,10 @@ mod tests {
     fn lookup_unknown_returns_none() {
         // The whole point of the registry: typo'd tags fail loudly at
         // the seam instead of triggering a silent `_ => None` arm.
-        assert!(lookup("Q5_K").is_none());
+        // Q5_K was added 2026-05-19 (PR #197); Q5_M / iq4_xs / etc. still
+        // aren't supported, so they should still return None.
+        assert!(lookup("Q5_M").is_none());
+        assert!(lookup("iq4_xs").is_none());
         assert!(lookup("q4_k").is_none()); // case-sensitive — manifest uses "Q4_K"
         assert!(lookup("").is_none());
     }

@@ -353,6 +353,8 @@ pub fn load_single_vindex(
         embed_store,
         release_mmap_after_request: opts.release_mmap_after_request,
         weights: std::sync::OnceLock::new(),
+        qwen35_weights: std::sync::OnceLock::new(),
+        dsv4_resident: std::sync::OnceLock::new(),
         probe_labels,
         ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(num_layers),
         layer_latency_tracker: std::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
@@ -361,6 +363,7 @@ pub fn load_single_vindex(
         expert_filter: opts.expert_filter,
         unit_filter: opts.unit_filter.clone(),
         moe_remote: opts.moe_remote.clone(),
+        tokenizer_cache: std::sync::Arc::new(crate::tokenizer_cache::TokenizerCache::from_env()),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
         metal_backend: std::sync::OnceLock::new(),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
@@ -893,6 +896,10 @@ pub async fn serve(cli: Cli) -> Result<(), BoxError> {
         api_key: cli.api_key.clone(),
         sessions: SessionManager::new(DEFAULT_SESSION_TTL_SECS),
         describe_cache: DescribeCache::new(cli.cache_ttl),
+        // REST attention sessions: defaults align with upstream's stub.
+        // TTL: 1 hour, cap: 128 in-flight sessions.
+        attention_sessions: crate::attention_session::AttentionSessionMap::new(3600, 128),
+        default_kv_format: None,
     });
 
     if cli.cache_ttl > 0 {

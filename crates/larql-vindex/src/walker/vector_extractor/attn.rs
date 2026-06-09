@@ -61,7 +61,7 @@ impl VectorExtractor {
             }
 
             // Top-k: project vocab through OV, find most amplified
-            let transformed = self.weights.embed.dot(&ov.t());
+            let transformed = self.weights.embed.as_array().dot(&ov.t());
             let norms: Vec<f32> = (0..self.weights.vocab_size)
                 .map(|i| {
                     let row = transformed.row(i);

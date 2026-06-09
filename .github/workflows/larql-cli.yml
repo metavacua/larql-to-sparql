@@ -5,10 +5,6 @@
 # `--no-default-features` so the CPU-only surface is exercised. macOS
 # runs include defaults so the Metal feature path is checked too.
 #
-# `convert_moe_to_per_layer` example currently doesn't build against
-# the post-refactor `larql-inference` API; CI checks bins + tests
-# instead of `--all-targets` until that example is repaired.
-
 name: larql-cli
 
 on:
@@ -96,20 +92,30 @@ jobs:
       - name: Format check
         run: cargo fmt -p larql-cli -- --check
 
-      - name: Check (CPU only) on Linux/Windows
+      - name: Check all targets (CPU only) on Linux/Windows
         if: runner.os != 'macOS'
-        run: cargo check -p larql-cli --bins --tests --no-default-features
+        run: cargo check -p larql-cli --all-targets --no-default-features
 
+<<<<<<< HEAD
       - name: Check (default features incl. gpu) on macOS
+=======
+      - name: Check all targets (default features incl. metal) on macOS
+>>>>>>> ianblenke/main
         if: runner.os == 'macOS'
-        run: cargo check -p larql-cli --bins --tests
+        run: cargo check -p larql-cli --all-targets
 
-      # Clippy is intentionally skipped: as of 2026-05-10 `larql-cli`
-      # carries ~82 pre-existing errors under default features and ~112
-      # under `--no-default-features` (mostly `large_enum_variant` and
-      # `dead_code` on metal-only paths). Re-enable once that backlog
-      # is cleared; the other crates' workflows already enforce
-      # `clippy -- -D warnings`.
+      - name: Clippy (CPU only) on Linux/Windows
+        if: runner.os != 'macOS'
+        # `--no-deps` keeps lints scoped to larql-cli itself; transitive
+        # debt would otherwise surface here. The previously-acknowledged
+        # 82-112 backlog of `large_enum_variant` / `dead_code` errors
+        # has been cleaned up — gate on `-D warnings` again so the next
+        # batch is caught at PR time.
+        run: cargo clippy -p larql-cli --all-targets --no-default-features --no-deps -- -D warnings
+
+      - name: Clippy (default features) on macOS
+        if: runner.os == 'macOS'
+        run: cargo clippy -p larql-cli --all-targets --no-deps -- -D warnings
 
       - name: Tests (CPU only) on Linux/Windows
         if: runner.os != 'macOS'

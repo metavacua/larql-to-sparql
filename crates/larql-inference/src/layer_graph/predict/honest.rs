@@ -82,11 +82,25 @@ pub fn predict_honest(
                 let softcap = arch.attn_logit_softcapping().unwrap_or(0.0);
                 let qk_norm = arch.attn_q_norm_key(layer_range.start).is_some();
 
+                let l0 = &layers[0];
+                let l0_q_dim = l0.num_q_heads * l0.head_dim;
+                let l0_kv_dim = l0.num_kv_heads * l0.head_dim;
                 if seq_len == 1 {
                     // Decode path (seq=1): try KV-cached decode first, then full_pipeline
                     let x: Vec<f32> = h.row(0).to_vec();
 
-                    if let Some(result) = backend.decode_token(&layers, &x, hidden, intermediate) {
+                    if let Some(result) = backend.decode_token(
+                        &layers,
+                        &x,
+                        hidden,
+                        intermediate,
+                        l0_q_dim,
+                        l0_kv_dim,
+                        l0.num_q_heads,
+                        l0.num_kv_heads,
+                        l0.head_dim,
+                        l0.rope_base,
+                    ) {
                         let mut row = h.row_mut(0);
                         for j in 0..hidden {
                             row[j] = result[j];
@@ -107,7 +121,13 @@ pub fn predict_honest(
                         &x,
                         hidden,
                         intermediate,
+                        l0_q_dim,
+                        l0_kv_dim,
                         1,
+                        l0.num_q_heads,
+                        l0.num_kv_heads,
+                        l0.head_dim,
+                        l0.rope_base,
                         qk_norm,
                         softcap,
                     ) {
@@ -130,7 +150,13 @@ pub fn predict_honest(
                         &x,
                         hidden,
                         intermediate,
+                        l0_q_dim,
+                        l0_kv_dim,
                         seq_len,
+                        l0.num_q_heads,
+                        l0.num_kv_heads,
+                        l0.head_dim,
+                        l0.rope_base,
                         qk_norm,
                         softcap,
                     ) {

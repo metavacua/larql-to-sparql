@@ -794,10 +794,14 @@ fn v2_config_full_round_trip() {
             rope_local_base: None,
             query_pre_attn_scalar: None,
             final_logit_softcapping: None,
+<<<<<<< HEAD
             attention_multiplier: None,
             residual_multiplier: None,
             logits_scaling: None,
             norm_eps: None,
+=======
+            ..Default::default()
+>>>>>>> ianblenke/main
         }),
         fp4: None,
         ffn_layout: None,
@@ -888,10 +892,14 @@ fn v2_config_with_moe() {
             rope_local_base: None,
             query_pre_attn_scalar: None,
             final_logit_softcapping: None,
+<<<<<<< HEAD
             attention_multiplier: None,
             residual_multiplier: None,
             logits_scaling: None,
             norm_eps: None,
+=======
+            ..Default::default()
+>>>>>>> ianblenke/main
         }),
         fp4: None,
         ffn_layout: None,
@@ -1024,10 +1032,14 @@ fn moe_layer_info_round_trip() {
             rope_local_base: None,
             query_pre_attn_scalar: None,
             final_logit_softcapping: None,
+<<<<<<< HEAD
             attention_multiplier: None,
             residual_multiplier: None,
             logits_scaling: None,
             norm_eps: None,
+=======
+            ..Default::default()
+>>>>>>> ianblenke/main
         }),
         fp4: None,
         ffn_layout: None,
@@ -1932,8 +1944,11 @@ fn make_synthetic_model() -> larql_models::ModelWeights {
         skipped_tensors: Vec::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
-        embed,
+        embed: larql_models::embed::EmbedMatrix::Heap(embed),
+        embed_quant: None,
         lm_head,
+        lm_head_quant: None,
+        quant_tensors: std::collections::HashMap::new(),
         position_embed: None,
         num_layers,
         hidden_size: hidden,
@@ -2300,10 +2315,15 @@ fn gguf_config_from_metadata() {
         tensor_infos: vec![],
         data_offset: 0,
         path: std::path::PathBuf::new(),
+<<<<<<< HEAD
         shards: vec![ShardInfo {
             path: std::path::PathBuf::new(),
             data_offset: 0,
         }],
+=======
+        shard_paths: vec![std::path::PathBuf::new()],
+        shard_data_offsets: vec![0],
+>>>>>>> ianblenke/main
     };
     let config = gguf.to_config_json();
     assert_eq!(config["model_type"], "llama");

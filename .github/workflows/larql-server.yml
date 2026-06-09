@@ -99,17 +99,14 @@ jobs:
       - name: Format check
         run: cargo fmt -p larql-server -- --check
 
-      # `bench_expert_server` example currently doesn't build against
-      # the post-refactor `larql-inference` API. Check the surface that
-      # does compile (lib + bin + tests) until that example is fixed.
-      - name: Check lib + bins + tests
-        run: cargo check -p larql-server --lib --bins --tests
+      - name: Check all targets
+        run: cargo check -p larql-server --all-targets
 
       - name: Clippy
         # `--no-deps` keeps lints scoped to larql-server itself;
         # otherwise pre-existing clippy debt in `larql-inference` (a
         # transitive dep) would surface here.
-        run: cargo clippy -p larql-server --lib --bins --tests --no-deps -- -D warnings
+        run: cargo clippy -p larql-server --all-targets --no-deps -- -D warnings
 
       - name: Tests
         run: cargo test -p larql-server

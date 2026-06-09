@@ -16,6 +16,7 @@
 pub mod graph_backend;
 pub mod local_moe;
 pub mod moe_remote;
+pub mod q4k_direct;
 pub mod remote;
 pub mod sparse;
 pub mod sparse_compute;
@@ -29,10 +30,15 @@ pub use larql_compute::ffn::{
 
 // ── Re-exports ──
 
+<<<<<<< HEAD
 pub use local_moe::LocalMoeFfn;
 pub use moe_remote::{
     MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, RemoteMoeFfn, ShardConfig,
 };
+=======
+pub use moe_remote::{MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig};
+pub use q4k_direct::Q4kDirectFfn;
+>>>>>>> ianblenke/main
 pub use remote::{
     LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteLatencyStats, RemoteWalkBackend,
     WirePreference,

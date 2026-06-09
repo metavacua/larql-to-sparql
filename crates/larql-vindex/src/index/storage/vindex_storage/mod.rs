@@ -75,8 +75,14 @@ use crate::index::storage::attn::ATTN_TENSORS_PER_LAYER;
 use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER;
 use crate::index::types::GateLayerSlice;
 
+/// Number of Q4_K matmul tensors emitted per linear-attention
+/// (DeltaNet) layer: attn_qkv, attn_gate, ssm_alpha, ssm_beta, ssm_out
+/// in that fixed order. Mirrors [`ATTN_TENSORS_PER_LAYER`] for the
+/// full-attention path.
+pub const DELTANET_TENSORS_PER_LAYER: usize = 5;
+
 mod mmap_storage;
-pub use mmap_storage::MmapStorage;
+pub use mmap_storage::{AttnManifestEntry, DeltanetManifestEntry, MmapStorage};
 
 /// Borrowed view into a substore's whole-file `Bytes`. Carries the
 /// (offset, length) cut without paying the refcount bump that
@@ -206,6 +212,17 @@ pub trait VindexStorage: sealed::Sealed + Send + Sync {
         layer: usize,
     ) -> Option<[(BytesView<'_>, &str); ATTN_TENSORS_PER_LAYER]>;
 
+    /// Like [`attn_q4k_layer_data`] but resolves the layer via key-prefix
+    /// match instead of `layer * 4` index arithmetic. Required for
+    /// sparse manifests where only some global layers (e.g. the 10
+    /// full-attention layers on qwen35moe) carry Q/K/V/O entries.
+    /// Returns `(bytes, fmt, shape)` per tensor so consumers can build
+    /// `QuantTensor::from_raw` without re-parsing the manifest.
+    fn attn_q4k_sparse_layer_data(
+        &self,
+        layer: usize,
+    ) -> Option<[(BytesView<'_>, &str, &[usize]); ATTN_TENSORS_PER_LAYER]>;
+
     /// Whole-file Q4_0 attention buffer.
     fn attn_q4_whole_buffer(&self) -> Option<Bytes>;
 
@@ -223,6 +240,36 @@ pub trait VindexStorage: sealed::Sealed + Send + Sync {
         &self,
         layer: usize,
     ) -> Option<[(BytesView<'_>, BytesView<'_>); ATTN_TENSORS_PER_LAYER]>;
+
+    // ── DeltaNet (Qwen 3.6 linear-attention) ────────────────────────────
+
+    /// Q4_K matmul tensors for one DeltaNet linear-attention layer:
+    /// `[(attn_qkv, fmt, shape), (attn_gate, fmt, shape),
+    ///   (ssm_alpha, fmt, shape), (ssm_beta, fmt, shape),
+    ///   (ssm_out, fmt, shape)]`.
+    ///
+    /// `layer` is the **global** layer index. The accessor looks up
+    /// manifest entries by `layers.{layer}.` key prefix rather than by
+    /// `layer * 5` arithmetic, so it tolerates sparse manifests where
+    /// only the linear-attention layers carry entries (3 out of every
+    /// 4 layers on Qwen 3.6 at `full_attention_interval=4`).
+    ///
+    /// `shape` is the writer-recorded `[rows, padded_cols]` slice —
+    /// what the reader bridge needs to call
+    /// `QuantTensor::from_raw(bytes, type, rows, cols)`. Borrowed from
+    /// the underlying manifest so callers don't pay an allocation per
+    /// lookup.
+    ///
+    /// Returns `None` when:
+    /// - no `deltanet_weights_q4k.bin` was loaded
+    /// - the requested layer is a full-attention layer (its weights
+    ///   live in the `attn_weights_q4k.bin` store instead)
+    /// - any of the 5 expected tensors is missing from the manifest
+    ///   (a partial layer would mislead callers)
+    fn deltanet_q4k_layer_data(
+        &self,
+        layer: usize,
+    ) -> Option<[(BytesView<'_>, &str, &[usize]); DELTANET_TENSORS_PER_LAYER]>;
 
     // ── lm_head ─────────────────────────────────────────────────────────
 

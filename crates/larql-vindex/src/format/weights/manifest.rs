@@ -38,6 +38,7 @@ impl Q4kManifestEntry {
         self.shape.get(1).copied()
     }
 
+<<<<<<< HEAD
     /// Format tag as the on-disk string (`"Q4_K"` / `"Q6_K"` / …).
     /// `quant::registry::lookup` consumes this directly. Lifetime is
     /// borrowed because the `Other(String)` variant carries a runtime
@@ -45,6 +46,18 @@ impl Q4kManifestEntry {
     /// without a typed enum variant.
     pub fn format_tag(&self) -> &str {
         self.format.tag()
+=======
+    /// Format tag as the on-disk string. `quant::registry::lookup`
+    /// consumes this directly.
+    pub fn format_tag(&self) -> &'static str {
+        match self.format {
+            QuantBlockFormat::Q4K => "Q4_K",
+            QuantBlockFormat::Q5K => "Q5_K",
+            QuantBlockFormat::Q6K => "Q6_K",
+            QuantBlockFormat::Q8_0 => "Q8_0",
+            QuantBlockFormat::Mxfp4 => "MXFP4",
+        }
+>>>>>>> ianblenke/main
     }
 }
 

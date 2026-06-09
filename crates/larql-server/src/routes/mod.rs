@@ -1,5 +1,6 @@
 //! Router setup — maps URL paths to handlers.
 
+pub mod attention;
 pub mod describe;
 pub mod embed;
 pub mod expert;
@@ -30,6 +31,9 @@ use axum::Router;
 // positions into one call per layer (N_positions × top_K × hidden floats as
 // JSON). 64 MB covers: 512 positions × 8 experts × 2816 floats × ~7 bytes/float.
 const EXPERT_BATCH_BODY_LIMIT: usize = crate::http::REQUEST_BODY_LIMIT_BYTES;
+// Attention prefill and snapshot restore carry dense embeddings / base64 KV
+// blobs as JSON. Use the same bounded large-body policy as expert batches.
+const ATTENTION_BODY_LIMIT: usize = crate::http::REQUEST_BODY_LIMIT_BYTES;
 
 use crate::state::AppState;
 
@@ -69,6 +73,15 @@ const SHARD: &str = "/v1/shard/{model_id}/{range}";
 const OPENAI_EMBEDDINGS: &str = "/v1/embeddings";
 const OPENAI_COMPLETIONS: &str = "/v1/completions";
 const OPENAI_CHAT_COMPLETIONS: &str = "/v1/chat/completions";
+
+// attention-service-routes change.
+const ATTENTION_SESSION: &str = "/v1/attention/session";
+const ATTENTION_SESSION_BY_ID: &str = "/v1/attention/session/{id}";
+const ATTENTION_PREFILL: &str = "/v1/attention/prefill";
+const ATTENTION_DECODE: &str = "/v1/attention/decode";
+const KV_CACHE_SNAPSHOT: &str = "/v1/kv-cache/snapshot";
+const KV_CACHE_RESTORE: &str = "/v1/kv-cache/restore";
+const KV_CACHE_FREE: &str = "/v1/kv-cache/free";
 
 const M_DESCRIBE: &str = "/v1/{model_id}/describe";
 const M_WALK: &str = "/v1/{model_id}/walk";
@@ -146,6 +159,27 @@ pub fn single_model_router(state: Arc<AppState>) -> Router {
             OPENAI_CHAT_COMPLETIONS,
             post(openai::handle_chat_completions),
         )
+        // attention-service-routes change.
+        .route(
+            ATTENTION_SESSION,
+            post(attention::handle_create_session)
+                .layer(DefaultBodyLimit::max(ATTENTION_BODY_LIMIT)),
+        )
+        .route(
+            ATTENTION_SESSION_BY_ID,
+            get(attention::handle_get_session).delete(attention::handle_delete_session),
+        )
+        .route(
+            ATTENTION_PREFILL,
+            post(attention::handle_prefill).layer(DefaultBodyLimit::max(ATTENTION_BODY_LIMIT)),
+        )
+        .route(ATTENTION_DECODE, post(attention::handle_decode))
+        .route(KV_CACHE_SNAPSHOT, post(attention::handle_kv_snapshot))
+        .route(
+            KV_CACHE_RESTORE,
+            post(attention::handle_kv_restore).layer(DefaultBodyLimit::max(ATTENTION_BODY_LIMIT)),
+        )
+        .route(KV_CACHE_FREE, post(attention::handle_kv_free))
         .with_state(state)
 }
 

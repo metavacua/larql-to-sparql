@@ -41,6 +41,22 @@ impl ModelArchitecture for MixtralArch {
         self.config.num_experts_per_token.unwrap_or(2)
     }
 
+    /// Per-expert intermediate dimension. Mixtral has no separate
+    /// `moe_intermediate_size` field — each expert's w1/w3 are
+    /// `[intermediate_size, hidden]`, so the model-wide
+    /// `intermediate_size` IS the expert hidden dim. Honor an explicit
+    /// `moe_intermediate_size` override if a config provides one.
+    ///
+    /// Without this override the trait default (0) flows into the Q4_K
+    /// MoE writer, which records `moe_inter = 0` in the per-layer
+    /// weights header (silently corrupting the loader's view) and, for
+    /// non-256-aligned dims, panics in `quantize_q4_k`.
+    fn moe_intermediate_size(&self) -> usize {
+        self.config
+            .moe_intermediate_size
+            .unwrap_or(self.config.intermediate_size)
+    }
+
     fn moe_router_key(&self, layer: usize) -> Option<String> {
         Some(format!(
             "{}block_sparse_moe.gate.weight",

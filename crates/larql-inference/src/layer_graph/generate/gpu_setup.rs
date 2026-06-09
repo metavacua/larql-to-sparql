@@ -148,8 +148,34 @@ pub(super) fn prefill_kquant_prompt(
     softcap: f32,
     failure_reason: &'static str,
 ) -> Result<Vec<f32>, GenerateError> {
+    // Derive attention geometry from layer 0 — all production archs that
+    // hit this helper share the same Q/KV head shape across layers (the
+    // asymmetric-attention case routes through the CPU Q4K path instead).
+    let l0 = layers
+        .first()
+        .ok_or_else(|| GenerateError::prefill_failed(failure_reason))?;
+    let q_dim = l0.num_q_heads * l0.head_dim;
+    let kv_dim = l0.num_kv_heads * l0.head_dim;
     backend
+<<<<<<< HEAD
         .prefill_kquant(layers, x, hidden, intermediate, seq_len, qk_norm, softcap)
+=======
+        .prefill_q4(
+            layers,
+            x,
+            hidden,
+            intermediate,
+            q_dim,
+            kv_dim,
+            seq_len,
+            l0.num_q_heads,
+            l0.num_kv_heads,
+            l0.head_dim,
+            l0.rope_base,
+            qk_norm,
+            softcap,
+        )
+>>>>>>> ianblenke/main
         .ok_or_else(|| GenerateError::prefill_failed(failure_reason))
 }
 

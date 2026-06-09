@@ -28,6 +28,11 @@ default = []
 gpu = ["dep:larql-compute-metal", "larql-inference/gpu", "larql-vindex/gpu"]
 
 [dev-dependencies]
+# Enable `test-utils` so the inline executor tests' references to
+# `larql_inference::test_utils::{make_test_weights, make_test_vindex,
+# make_test_tokenizer}` resolve when `cargo test -p larql-lql` runs
+# without workspace feature unification (CI coverage profile does).
+larql-inference = { path = "../larql-inference", features = ["test-utils"] }
 criterion = "0.5"
 # Mocked HTTP server for testing the Remote backend's forwarders
 # without spinning up a real `larql-server`. Each test wires a
@@ -50,3 +55,6 @@ harness = false
 [[bench]]
 name = "compile"
 harness = false
+
+[lints]
+workspace = true

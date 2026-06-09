@@ -22,7 +22,7 @@ fn loader_loads_all_tensors() {
     assert_eq!(weights.head_dim, 4);
     assert_eq!(weights.num_q_heads, 2);
     assert_eq!(weights.num_kv_heads, 2);
-    assert_eq!(weights.embed.shape(), &[16, 8]);
+    assert_eq!(weights.embed.shape(), [16, 8]);
 
     assert!(weights
         .tensors

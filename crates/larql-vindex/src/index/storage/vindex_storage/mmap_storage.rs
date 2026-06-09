@@ -23,7 +23,47 @@ use crate::index::storage::ffn_store::{DownFeaturesQ4kEntry, FFN_COMPONENTS_PER_
 use crate::index::types::{GateLayerSlice, GateQ4Slice};
 
 use super::sealed::Sealed;
-use super::{BytesView, GateLayerView, VindexStorage};
+use super::{BytesView, GateLayerView, VindexStorage, DELTANET_TENSORS_PER_LAYER};
+
+/// Per-entry view of the `attn_weights_q4k_manifest.json` payload.
+/// Carries `key` + `shape` alongside the byte-range fields so a sparse
+/// manifest (qwen35moe ships only Q/K/V/O for the 10 full-attention
+/// layers, indices 3/7/11/…/39) can be queried by key prefix instead
+/// of via the position-arithmetic `attn_q4k_layer_data` accessor
+/// (which assumes 4 entries per layer for every layer).
+///
+/// Dense-manifest callers (Gemma 3, Gemma 4 dense, llama) continue
+/// using `attn_q4k_layer_data` — their manifest has 4 entries per
+/// layer in order, so `layer * 4` indexes correctly.
+#[derive(Clone, Debug)]
+pub struct AttnManifestEntry {
+    pub key: String,
+    pub shape: Vec<usize>,
+    pub offset: usize,
+    pub length: usize,
+    pub format: String,
+}
+
+/// Per-entry view of the `deltanet_weights_q4k_manifest.json` payload.
+/// Keys are kept so the layer accessor can resolve a global layer
+/// index → 5 entries by prefix match, sidestepping the position-based
+/// indexing the standard Q/K/V/O accessor uses (the DeltaNet manifest
+/// is sparse — only linear-attention layers carry entries).
+///
+/// `shape` is the writer-side `[rows, padded_cols]` tuple — the
+/// reader bridge into `weights.quant_tensors` needs both dimensions
+/// to call `QuantTensor::from_raw(bytes, type, rows, cols)`. Without
+/// `shape` here, the consumer would have to either derive shape from
+/// arch parameters (fragile across arch revisions) or re-parse the
+/// manifest from disk on every lookup.
+#[derive(Clone, Debug)]
+pub struct DeltanetManifestEntry {
+    pub key: String,
+    pub shape: Vec<usize>,
+    pub offset: usize,
+    pub length: usize,
+    pub format: String,
+}
 
 /// Parity wrapper over today's substore mmaps. Implements
 /// `VindexStorage` by cloning each substore's `Arc<Mmap>` (or
@@ -49,12 +89,27 @@ pub struct MmapStorage {
     pub(crate) interleaved_f32: Option<Bytes>,
 
     // ── Attention ────────────────────────────────────────────────────
+<<<<<<< HEAD
     pub(crate) attn_kquant: Option<Bytes>,
     pub(crate) attn_kquant_manifest: Option<Vec<(usize, usize, String)>>,
+=======
+    pub(crate) attn_q4k: Option<Bytes>,
+    pub(crate) attn_q4k_manifest: Option<Vec<AttnManifestEntry>>,
+>>>>>>> ianblenke/main
     pub(crate) attn_q4: Option<Bytes>,
     pub(crate) attn_q4_manifest: Option<Vec<(usize, usize)>>,
     pub(crate) attn_q8: Option<Bytes>,
     pub(crate) attn_q8_manifest: Option<Vec<(usize, usize, usize)>>,
+
+    // ── DeltaNet (Qwen 3.6 linear-attention) ─────────────────────────
+    //
+    // Manifest entries carry the key so the accessor can resolve a
+    // global layer index → 5 entries by prefix match, sidestepping
+    // the `layer * 5` index arithmetic that would break on sparse
+    // manifests (Qwen 3.6 emits entries for only the linear layers,
+    // i.e. 30 of 40 at `full_attention_interval=4`).
+    pub(crate) deltanet_q4k: Option<Bytes>,
+    pub(crate) deltanet_q4k_manifest: Option<Vec<DeltanetManifestEntry>>,
 
     // ── lm_head ──────────────────────────────────────────────────────
     pub(crate) lm_head_f32: Option<Bytes>,
@@ -148,7 +203,7 @@ impl MmapStorage {
     pub fn set_attn_kquant(
         &mut self,
         mmap: Arc<memmap2::Mmap>,
-        manifest: Option<Vec<(usize, usize, String)>>,
+        manifest: Option<Vec<AttnManifestEntry>>,
     ) {
         self.attn_kquant = Some(arc_mmap_to_bytes(&mmap));
         self.attn_kquant_manifest = manifest;
@@ -170,6 +225,17 @@ impl MmapStorage {
     ) {
         self.attn_q8 = Some(arc_mmap_to_bytes(&mmap));
         self.attn_q8_manifest = manifest;
+        self.register_mmap(&mmap);
+    }
+
+    /// Set the DeltaNet Q4_K mmap + manifest.
+    pub fn set_deltanet_q4k(
+        &mut self,
+        mmap: Arc<memmap2::Mmap>,
+        manifest: Option<Vec<DeltanetManifestEntry>>,
+    ) {
+        self.deltanet_q4k = Some(arc_mmap_to_bytes(&mmap));
+        self.deltanet_q4k_manifest = manifest;
         self.register_mmap(&mmap);
     }
 
@@ -274,8 +340,16 @@ impl MmapStorage {
     pub fn has_attn_q8(&self) -> bool {
         self.attn_q8.is_some()
     }
+<<<<<<< HEAD
     pub fn has_lm_head_kquant(&self) -> bool {
         self.lm_head_kquant.is_some()
+=======
+    pub fn has_deltanet_q4k(&self) -> bool {
+        self.deltanet_q4k.is_some()
+    }
+    pub fn has_lm_head_q4(&self) -> bool {
+        self.lm_head_q4.is_some()
+>>>>>>> ianblenke/main
     }
     pub fn has_lm_head_f16(&self) -> bool {
         self.lm_head_f16.is_some()
@@ -352,6 +426,8 @@ impl MmapStorage {
             attn_q4_manifest: None,
             attn_q8: None,
             attn_q8_manifest: None,
+            deltanet_q4k: None,
+            deltanet_q4k_manifest: None,
             lm_head_f32: None,
             lm_head_f16: None,
             lm_head_kquant: None,
@@ -484,13 +560,67 @@ impl VindexStorage for MmapStorage {
             return None;
         }
         for i in 0..ATTN_TENSORS_PER_LAYER {
-            let (offset, length, _) = &manifest[base + i];
-            checked_view(bytes, *offset, *length)?;
+            let e = &manifest[base + i];
+            checked_view(bytes, e.offset, e.length)?;
         }
         let out: [(BytesView<'_>, &str); ATTN_TENSORS_PER_LAYER] = std::array::from_fn(|i| {
-            let (offset, length, format) = &manifest[base + i];
-            (BytesView::new(bytes, *offset, *length), format.as_str())
+            let e = &manifest[base + i];
+            (BytesView::new(bytes, e.offset, e.length), e.format.as_str())
         });
+        Some(out)
+    }
+
+    fn attn_q4k_sparse_layer_data(
+        &self,
+        layer: usize,
+    ) -> Option<[(BytesView<'_>, &str, &[usize]); ATTN_TENSORS_PER_LAYER]> {
+        let bytes = self.attn_q4k.as_ref()?;
+        let manifest = self.attn_q4k_manifest.as_ref()?;
+
+        // Match by suffix so the layer-number prefix
+        // (`layers.{layer}.`) is the only structural assumption — the
+        // hybrid-attention manifest (qwen35moe) only carries entries
+        // for the 10 full-attention layers, so `layer * 4` arithmetic
+        // doesn't work.
+        const SUFFIXES: [&str; ATTN_TENSORS_PER_LAYER] = [
+            "self_attn.q_proj.weight",
+            "self_attn.k_proj.weight",
+            "self_attn.v_proj.weight",
+            "self_attn.o_proj.weight",
+        ];
+        let prefix = format!("layers.{layer}.");
+
+        let mut found: [Option<&AttnManifestEntry>; ATTN_TENSORS_PER_LAYER] =
+            [None; ATTN_TENSORS_PER_LAYER];
+        for entry in manifest {
+            let Some(rest) = entry.key.strip_prefix(&prefix) else {
+                continue;
+            };
+            for (i, suf) in SUFFIXES.iter().enumerate() {
+                if rest == *suf {
+                    found[i] = Some(entry);
+                    break;
+                }
+            }
+        }
+        for entry in found.iter().flatten() {
+            let end = entry.offset.checked_add(entry.length)?;
+            if end > bytes.len() {
+                return None;
+            }
+        }
+        if found.iter().any(|e| e.is_none()) {
+            return None;
+        }
+        let out: [(BytesView<'_>, &str, &[usize]); ATTN_TENSORS_PER_LAYER] =
+            std::array::from_fn(|i| {
+                let e = found[i].expect("checked above");
+                (
+                    BytesView::new(bytes, e.offset, e.length),
+                    e.format.as_str(),
+                    e.shape.as_slice(),
+                )
+            });
         Some(out)
     }
 
@@ -543,6 +673,61 @@ impl VindexStorage for MmapStorage {
                 let vals = BytesView::new(bytes, offset, vals_len);
                 let scales = BytesView::new(bytes, offset + vals_len, scales_len);
                 (vals, scales)
+            });
+        Some(out)
+    }
+
+    fn deltanet_q4k_layer_data(
+        &self,
+        layer: usize,
+    ) -> Option<[(BytesView<'_>, &str, &[usize]); DELTANET_TENSORS_PER_LAYER]> {
+        let bytes = self.deltanet_q4k.as_ref()?;
+        let manifest = self.deltanet_q4k_manifest.as_ref()?;
+
+        // Names emitted by `write_q4k::deltanet` per linear layer, in
+        // fixed order. Match by suffix so the layer-number prefix
+        // (`layers.{layer}.`) is the only structural assumption.
+        const SUFFIXES: [&str; DELTANET_TENSORS_PER_LAYER] = [
+            "self_attn.qkv_proj.weight",
+            "attn_gate.weight",
+            "ssm_alpha.weight",
+            "ssm_beta.weight",
+            "ssm_out.weight",
+        ];
+        let prefix = format!("layers.{layer}.");
+
+        let mut found: [Option<&DeltanetManifestEntry>; DELTANET_TENSORS_PER_LAYER] =
+            [None; DELTANET_TENSORS_PER_LAYER];
+        for entry in manifest {
+            let Some(rest) = entry.key.strip_prefix(&prefix) else {
+                continue;
+            };
+            for (i, suf) in SUFFIXES.iter().enumerate() {
+                if rest == *suf {
+                    found[i] = Some(entry);
+                    break;
+                }
+            }
+        }
+        // Every slot must be present — a partial layer is a writer bug
+        // we want to surface, not paper over with empty bytes.
+        for entry in found.iter().flatten() {
+            let end = entry.offset.checked_add(entry.length)?;
+            if end > bytes.len() {
+                return None;
+            }
+        }
+        if found.iter().any(|e| e.is_none()) {
+            return None;
+        }
+        let out: [(BytesView<'_>, &str, &[usize]); DELTANET_TENSORS_PER_LAYER] =
+            std::array::from_fn(|i| {
+                let e = found[i].expect("checked above");
+                (
+                    BytesView::new(bytes, e.offset, e.length),
+                    e.format.as_str(),
+                    e.shape.as_slice(),
+                )
             });
         Some(out)
     }
@@ -787,13 +972,24 @@ mod tests {
         let payload = vec![0u8; 256];
         let mut s = MmapStorage::empty(8);
 
+<<<<<<< HEAD
         s.set_attn_kquant(
+=======
+        let attn_entry = |key: &str, offset, length| AttnManifestEntry {
+            key: key.into(),
+            shape: vec![16, 16],
+            offset,
+            length,
+            format: "Q4_K".into(),
+        };
+        s.set_attn_q4k(
+>>>>>>> ianblenke/main
             arc_mmap_from(&payload),
             Some(vec![
-                (0, 16, "Q4_K".to_string()),
-                (16, 16, "Q4_K".to_string()),
-                (32, 16, "Q4_K".to_string()),
-                (48, 16, "Q4_K".to_string()),
+                attn_entry("layers.0.self_attn.q_proj.weight", 0, 16),
+                attn_entry("layers.0.self_attn.k_proj.weight", 16, 16),
+                attn_entry("layers.0.self_attn.v_proj.weight", 32, 16),
+                attn_entry("layers.0.self_attn.o_proj.weight", 48, 16),
             ]),
         );
         assert!(s.has_attn_kquant());
@@ -926,13 +1122,24 @@ mod tests {
                 num_features: 4,
             }],
         );
+<<<<<<< HEAD
         s.set_attn_kquant(
+=======
+        let attn_entry = |key: &str, offset, length| AttnManifestEntry {
+            key: key.into(),
+            shape: vec![16, 16],
+            offset,
+            length,
+            format: "Q4_K".into(),
+        };
+        s.set_attn_q4k(
+>>>>>>> ianblenke/main
             arc_mmap_from(&payload),
             Some(vec![
-                (0, 16, "Q4_K".into()),
-                (16, 16, "Q4_K".into()),
-                (32, 16, "Q4_K".into()),
-                (48, 16, "Q4_K".into()),
+                attn_entry("layers.0.self_attn.q_proj.weight", 0, 16),
+                attn_entry("layers.0.self_attn.k_proj.weight", 16, 16),
+                attn_entry("layers.0.self_attn.v_proj.weight", 32, 16),
+                attn_entry("layers.0.self_attn.o_proj.weight", 48, 16),
             ]),
         );
         s.set_attn_q4(

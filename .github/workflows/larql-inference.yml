@@ -4,11 +4,10 @@
 # norm. Tests that need real model weights are gated `#[ignore]`
 # (test_arch_golden, test_logits_goldens, test_gemma3_smoke,
 # test_generate_q4k_cpu, test_layer_graph_integration); CI runs the
-# default test set only. Several diagnostic examples
-# (cpu_gpu_diag, debug_generate, debug_gpu_step, debug_layers,
-# decode_vs_prefill, residual_diff, stage_bisect) currently lag the
-# refactored `larql-compute` decode API and are excluded from the
-# `cargo check` surface — repair them and add `--examples` here.
+# default test set only. The `metal`-gated examples (`cpu_gpu_diag`,
+# `decode_vs_prefill`, `residual_diff`, `stage_bisect`) are
+# `required-features = ["metal"]` in Cargo.toml so they're only
+# evaluated on macOS jobs.
 
 name: larql-inference
 
@@ -94,11 +93,11 @@ jobs:
       - name: Format check
         run: cargo fmt -p larql-inference -- --check
 
-      - name: Check lib + tests + benches
-        run: cargo check -p larql-inference --lib --tests --benches
+      - name: Check all targets
+        run: cargo check -p larql-inference --all-targets
 
       - name: Clippy
-        run: cargo clippy -p larql-inference --lib --tests --benches --no-deps -- -D warnings
+        run: cargo clippy -p larql-inference --all-targets --no-deps -- -D warnings
 
       # On Windows OpenBLAS' matmul intermittently emits
       # `BLAS : Bad memory unallocation!` and returns a

@@ -20,6 +20,8 @@ larql-compute = { path = "../larql-compute" }
 # Apple-only sibling backend.  Optional + activated by the local
 # `gpu` feature; non-Mac builds skip the dep graph entirely.
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
+# RotorQuant — general K/V quantization (used on the CPU path too, not just CUDA).
+larql-rotorquant = { path = "../larql-rotorquant" }
 larql-core = { path = "../larql-core" }
 larql-vindex = { path = "../larql-vindex" }
 serde = { workspace = true }
@@ -99,6 +101,17 @@ default = []
 # Cascades `larql-vindex/gpu` so its GPU-specific paths (bench harness,
 # hybrid decode glue) compile alongside ours.
 gpu = ["dep:larql-compute-metal", "larql-vindex/gpu"]
+# CUDA path (dormant/opt-in) — forwards to larql-compute's gated cuda feature.
+cuda = ["larql-compute/cuda"]
+# Expose the synthetic-weights fixtures at `larql_inference::test_utils`
+# for downstream crates' tests (larql-kv, larql-vindex). Pulls in no
+# extra deps — the fixture code uses tokenizers/ndarray which are
+# already always-on.
+test-utils = []
+
+[[example]]
+name = "mech_interp_demo"
+required-features = ["test-utils"]
 
 [[example]]
 name = "cpu_gpu_diag"
@@ -125,3 +138,6 @@ larql-kv = { path = "../larql-kv" }
 [[bench]]
 name = "wire_codec"
 harness = false
+
+[lints]
+workspace = true

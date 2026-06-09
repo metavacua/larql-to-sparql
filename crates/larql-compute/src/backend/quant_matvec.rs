@@ -55,27 +55,52 @@ pub trait QuantMatVec {
         hidden: usize,
     ) -> Option<Vec<f32>> {
         match format {
-            QuantFormat::Q4_K | QuantFormat::Q4_KF => self.q4k_matvec(weights, x, num_rows, hidden),
+            QuantFormat::Q4_K => self.q4k_matvec(weights, x, num_rows, hidden),
+            QuantFormat::Q4_KF => self.q4kf_matvec(weights, x, num_rows, hidden),
+            QuantFormat::Q5_K => self.q5k_matvec(weights, x, num_rows, hidden),
             QuantFormat::Q6_K => self.q6k_matvec(weights, x, num_rows, hidden),
             QuantFormat::Q4_0 => {
                 let (q8_x, q8_scales) = crate::cpu::ops::q4_common::quantize_to_q8(x);
                 self.q4_matvec(weights, &q8_x, &q8_scales, num_rows, hidden)
             }
             QuantFormat::Q8_0 => {
-                // Q8_0 weights are NOT a Q4_0 kernel input — Q8_0 blocks are 34
-                // bytes per 32 values (32 i8 quants + f16 scale) while Q4_0 is
-                // 18 (16 nibble bytes + f16 scale). Pre-2026-05-09 this branch
-                // routed Q8_0 weights through `q4_matvec`, which read the wrong
-                // byte stride and produced garbage. Returning `None` makes the
-                // missing capability loud — callers fall back to a dequant
-                // path or fail explicitly. Production decode reaches Q8_0
-                // weights via dedicated kernels (`q8_qkv_proj` /
-                // `q8_matvec_pipeline`), not through this trait method.
-                let (q8_x, q8_scales) = crate::cpu::ops::q4_common::quantize_to_q8(x);
-                self.q8_matvec(weights, &q8_x, &q8_scales, num_rows, hidden)
+                // Phase F.4 / F.6: try the f32-input direct path first
+                // (CUDA q8_0_direct kernel reads packed Q8_0 bytes in
+                // place). If the backend doesn't override `q8_0_matvec`,
+                // fall back to the pre-quantised-activation route
+                // through `q8_matvec`. Both are correct end-to-end;
+                // the direct path is faster on CUDA and the
+                // pre-quantised path is what production CPU decode
+                // uses via the dedicated q8 kernels.
+                if let Some(out) = self.q8_0_matvec(weights, x, num_rows, hidden) {
+                    Some(out)
+                } else {
+                    let (q8_x, q8_scales) = crate::cpu::ops::q4_common::quantize_to_q8(x);
+                    self.q8_matvec(weights, &q8_x, &q8_scales, num_rows, hidden)
+                }
             }
             QuantFormat::BF16 | QuantFormat::F16 | QuantFormat::F32 => None,
         }
+    }
+
+    /// Q8_0 weights × f32 input matvec.
+    ///
+    /// Distinct from `q4_matvec`, which takes pre-quantised Q8 *activations*
+    /// against Q4_0 weights — that path mis-routes Q8_0 weights through
+    /// the Q4_0 dequantiser. F.4 introduces this dedicated entry point so
+    /// the dispatch table can keep weight-format and activation-quant
+    /// flows separate.
+    ///
+    /// Default returns `None` (no Q8_0 support on the backend); the CUDA
+    /// backend overrides with host-dequant + cuBLAS GEMV.
+    fn q8_0_matvec(
+        &self,
+        _q8_0_data: &[u8],
+        _x: &[f32],
+        _num_rows: usize,
+        _hidden: usize,
+    ) -> Option<Vec<f32>> {
+        None
     }
 
     /// Format-aware matvec on **pre-quantised** Q8 input.
@@ -107,7 +132,7 @@ pub trait QuantMatVec {
         match format {
             QuantFormat::Q4_0 => self.q4_matvec(weights, q8_x, q8_scales, num_rows, hidden),
             QuantFormat::Q8_0 => self.q8_matvec(weights, q8_x, q8_scales, num_rows, hidden),
-            QuantFormat::Q4_K | QuantFormat::Q4_KF | QuantFormat::Q6_K => {
+            QuantFormat::Q4_K | QuantFormat::Q4_KF | QuantFormat::Q5_K | QuantFormat::Q6_K => {
                 // f32-input shaders — dequantise Q8 first.
                 let x_f32 = dequantise_q8(q8_x, q8_scales);
                 self.quant_matvec(format, weights, &x_f32, num_rows, hidden)
@@ -225,6 +250,7 @@ pub trait QuantMatVec {
         None
     }
 
+<<<<<<< HEAD
     /// Fused two-weight Q4_K matvec sharing one input vector.
     ///
     /// `out_a[N] = W_a[N, K] · x[K]`, `out_b[N] = W_b[N, K] · x[K]`
@@ -241,6 +267,16 @@ pub trait QuantMatVec {
         _num_rows: usize,
         _hidden: usize,
     ) -> Option<(Vec<f32>, Vec<f32>)> {
+=======
+    /// Q4_KF matvec: `scores[N] = Q4_KF[N, K] @ f32_x[K]`.
+    fn q4kf_matvec(
+        &self,
+        _q4kf_data: &[u8],
+        _x: &[f32],
+        _num_rows: usize,
+        _hidden: usize,
+    ) -> Option<Vec<f32>> {
+>>>>>>> ianblenke/main
         None
     }
 
@@ -281,6 +317,17 @@ pub trait QuantMatVec {
         None
     }
 
+    /// Q5_K matvec: `scores[N] = Q5_K[N, K] @ f32_x[K]`.
+    fn q5k_matvec(
+        &self,
+        _q5k_data: &[u8],
+        _x: &[f32],
+        _num_rows: usize,
+        _hidden: usize,
+    ) -> Option<Vec<f32>> {
+        None
+    }
+
     /// Q6_K matvec: `scores[N] = Q6_K[N, K] @ f32_x[K]`.
     fn q6k_matvec(
         &self,
@@ -302,6 +349,53 @@ pub trait QuantMatVec {
     fn supports_quant(&self, format: QuantFormat) -> bool {
         let _ = format;
         false
+    }
+
+    /// Batched in-place row-wise softmax with optional pre-scale and
+    /// softcap. Applies, for each row `r ∈ [0, n_rows)`:
+    /// 1. `x[r, j] *= scale` for all `j ∈ [0, n_cols)`.
+    /// 2. if `softcap > 0`: `x[r, j] = softcap * tanh(x[r, j] / softcap)`.
+    /// 3. `x[r, j] = exp(x[r, j] - max(x[r, :])) / sum(exp(x[r, :] - max))`.
+    ///
+    /// Used by speculative decode's `compute_full_vocab_probs_batched`
+    /// to skip the CPU-side scalar softmax (which dominates the spec
+    /// verify path at vocab=262144 × 4 rows). CUDA backend overrides
+    /// with the on-device `scaled_softmax` kernel; default returns
+    /// `None` so callers can fall back to a CPU loop.
+    fn softmax_inplace_batched(
+        &self,
+        _x: &mut [f32],
+        _n_rows: usize,
+        _n_cols: usize,
+        _scale: f32,
+        _softcap: f32,
+    ) -> Option<()> {
+        None
+    }
+
+    /// Fused Q4_K matmul + scale + softcap + softmax for the spec verify
+    /// lm_head step. Equivalent to calling
+    /// [`q4k_matmul`](Self::q4k_matmul) followed by
+    /// [`softmax_inplace_batched`](Self::softmax_inplace_batched) but
+    /// keeps the logits device-resident between the two — saves the
+    /// 4 MB f32 dtoh+htod round-trip at vocab=262144, m=4.
+    ///
+    /// Returns `m * num_rows` f32 probs row-major, or `None` if any
+    /// step fails. Default falls back to the separate calls.
+    #[allow(clippy::too_many_arguments)]
+    fn q4k_matmul_softmax(
+        &self,
+        q4k_data: &[u8],
+        x: &[f32],
+        num_rows: usize,
+        hidden: usize,
+        seq_len: usize,
+        scale: f32,
+        softcap: f32,
+    ) -> Option<Vec<f32>> {
+        let mut logits = self.q4k_matmul(q4k_data, x, num_rows, hidden, seq_len)?;
+        self.softmax_inplace_batched(&mut logits, seq_len, num_rows, scale, softcap)?;
+        Some(logits)
     }
 }
 

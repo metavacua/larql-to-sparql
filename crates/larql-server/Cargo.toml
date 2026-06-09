@@ -17,7 +17,9 @@ path = "src/main.rs"
 [dependencies]
 larql-vindex = { path = "../larql-vindex" }
 larql-inference = { path = "../larql-inference" }
+larql-rotorquant = { path = "../larql-rotorquant" }
 larql-models = { path = "../larql-models" }
+ndarray = "0.16"
 larql-router-protocol = { path = "../larql-router-protocol" }
 # Optional Metal backend for shard-side GPU experts (macOS).  When the
 # `metal-experts` feature is enabled, the server uses
@@ -28,6 +30,7 @@ larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 
 axum = { version = "0.8", features = ["ws"] }
 half = "2"
+rand = "0.8"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 reqwest = { version = "0.12", features = ["json"] }
 sha2 = "0.10"
@@ -49,10 +52,17 @@ rayon = "1.10"
 # tar — used by /v1/shard route for Mode B handoff and shard_loader for the
 # matching client unpack path. Pure-Rust; no system dep.
 tar = "0.4"
+# Used by `configure_rayon_threads` to pick physical-core count over
+# SMT-logical count for the rayon global pool — memory-bound matvec
+# kernels regress with sibling SMT threads competing for the same
+# L1/L2 cache.
+num_cpus = "1.16"
 tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# LRU for the tokenizer cache (server-tokenizer-cache change).
+lru = "0.12"
 
 clap = { version = "4", features = ["derive", "env"] }
 libc = "0.2"
@@ -92,6 +102,13 @@ default = []
 # the `larql-compute-metal` sibling crate directly (distinct from the
 # `gpu` umbrella feature on larql-cli/inference/kv/vindex).  macOS-only.
 metal-experts = ["dep:larql-compute-metal"]
+# Enable Linux CUDA-backed attention / RotorQuant code paths in the shard
+# server (dormant/opt-in). The Docker GPU image builds `larql-server --features cuda`.
+cuda = [
+    "larql-compute/cuda",
+    "larql-inference/cuda",
+    "larql-rotorquant/cuda",
+]
 # ADR-0010 QUIC transport for the grid `Join` stream. Servers can connect
 # to the router via `--join quic://router:PORT` when this is on. Forwards
 # to larql-router-protocol so all QUIC code paths share one feature flag.
@@ -110,3 +127,17 @@ tonic-build = "0.13"
 # (installed by CI via `arduino/setup-protoc`).
 [target.'cfg(not(windows))'.build-dependencies]
 protobuf-src = "2"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+# attention-service-routes: end-to-end prefill / decode / snapshot
+# benchmark against the synthetic `make_test_weights` model. Same
+# code path the test_attention_validation integration test
+# exercises, but timed at multiple seq_lens.
+[[bench]]
+name = "attention_service"
+harness = false
+
+[lints]
+workspace = true

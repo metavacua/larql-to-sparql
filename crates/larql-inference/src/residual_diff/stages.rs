@@ -262,7 +262,13 @@ impl StageCapture {
                 &prefill_x,
                 hidden,
                 intermediate,
+                pipeline_layers[0].num_q_heads * pipeline_layers[0].head_dim,
+                pipeline_layers[0].num_kv_heads * pipeline_layers[0].head_dim,
                 prefix_ids.len(),
+                pipeline_layers[0].num_q_heads,
+                pipeline_layers[0].num_kv_heads,
+                pipeline_layers[0].head_dim,
+                pipeline_layers[0].rope_base,
                 qk_norm_val,
                 softcap,
             )
@@ -275,7 +281,18 @@ impl StageCapture {
             ENV_STAGE_DUMP_LAYER,
             &layer.to_string(),
             || {
-                let _ = backend.decode_token(&pipeline_layers, &dec_x, hidden, intermediate);
+                let _ = backend.decode_token(
+                    &pipeline_layers,
+                    &dec_x,
+                    hidden,
+                    intermediate,
+                    pipeline_layers[0].num_q_heads * pipeline_layers[0].head_dim,
+                    pipeline_layers[0].num_kv_heads * pipeline_layers[0].head_dim,
+                    pipeline_layers[0].num_q_heads,
+                    pipeline_layers[0].num_kv_heads,
+                    pipeline_layers[0].head_dim,
+                    pipeline_layers[0].rope_base,
+                );
             },
         )?;
         let prefix = decode_layer_prefix(layer);

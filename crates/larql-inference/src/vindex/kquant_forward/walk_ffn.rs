@@ -1,5 +1,6 @@
 use larql_compute::cpu::ops::q4k_q8k_dot::{
-    q4k_q8k_gate_up_into, q4k_q8k_matvec_into, quantize_x_to_q8k, Q8KActivation,
+    q4k_q8k_gate_up_into, q4k_q8k_matvec_into, q6k_q8k_matvec_into, quantize_x_to_q8k,
+    Q8KActivation,
 };
 use larql_vindex::VectorIndex;
 use ndarray::Array2;
@@ -74,8 +75,11 @@ pub fn kquant_ffn_forward_layer(
 
 /// Q4_K × Q8_K variant: accepts a pre-quantised Q8_K activation vector
 /// (already RMS-normed by the client) and skips the dequant of gate/up by
-/// using the NEON/AVX2 `q4k_q8k_gate_up_into` kernel.  Down projection
-/// still goes through the f32 dequant path (no Q6K×Q8K kernel yet).
+/// using the NEON/AVX2 `q4k_q8k_gate_up_into` kernel. Down dispatches
+/// on the per-tensor format string: Q4_K via `q4k_q8k_matvec_into`,
+/// Q6_K via `q6k_q8k_matvec_into` (vindex extracts FFN_DOWN as Q6_K by
+/// default unless `--down-q4k` was passed). Any other format falls back
+/// to the f32 dequant path.
 ///
 /// `h_q8k.qs.len()` must equal `hidden` (= `x.ncols()`), which is a
 /// multiple of 256 (Q8_K block size).
@@ -126,17 +130,22 @@ pub fn kquant_ffn_forward_layer_q8k(
         _ => silu_gate_up(&gate, &up),
     };
 
-    // Down projection: Q4K×Q8K NEON — quantise the f32 activation once,
-    // then call the NEON matvec directly on the mmap Q4K bytes.
+    // Down projection: format-dispatched Q*K×Q8K matvec — quantise the
+    // f32 activation once, then call the matching matvec directly on the
+    // mmap bytes. Vindex extracts down as Q6_K by default (Q4_K under
+    // `--down-q4k`); other formats fall through to the f32 dequant path.
     // No dequant, no large f32 allocation, no BLAS thread-pool collision.
-    // Guard: intermediate must be Q8K-block-aligned (multiple of the
-    // Q4_K/Q8_K super-block size).
+    // Guard: intermediate must be Q8K-block-aligned (multiple of 256).
     // For non-aligned sizes (rare, non-production) fall back to OnceLock cache.
-    if intermediate.is_multiple_of(crate::ffn::Q4K_Q8K_SUPERBLOCK_ELEMS) {
+    if intermediate.is_multiple_of(256) && matches!(ffn[2].1, "Q4_K" | "Q6_K") {
         let activation_flat = activation.as_slice().expect("activation contiguous");
         let act_q8k = quantize_x_to_q8k(activation_flat);
         let mut out = vec![0.0f32; hidden];
-        q4k_q8k_matvec_into(&mut out, &act_q8k, ffn[2].0, hidden, intermediate);
+        match ffn[2].1 {
+            "Q4_K" => q4k_q8k_matvec_into(&mut out, &act_q8k, ffn[2].0, hidden, intermediate),
+            "Q6_K" => q6k_q8k_matvec_into(&mut out, &act_q8k, ffn[2].0, hidden, intermediate),
+            _ => unreachable!("matches! gate above"),
+        }
         Array2::from_shape_vec((1, hidden), out).expect("down output shape")
     } else {
         // Fallback: OnceLock cache + ndarray dot for non-256-aligned intermediate.

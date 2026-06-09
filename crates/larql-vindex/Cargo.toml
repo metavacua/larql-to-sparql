@@ -118,3 +118,6 @@ harness = false
 [[bench]]
 name = "vindex_storage_dispatch"
 harness = false
+
+[lints]
+workspace = true

@@ -710,6 +710,122 @@ impl UnlimitedContextEngine {
         self.current_window_tokens.extend_from_slice(chunk);
         Some(())
     }
+<<<<<<< HEAD
+=======
+
+    let ffn_format = if ffn_is_q4k {
+        larql_compute::QuantFormat::Q4_K
+    } else {
+        larql_compute::QuantFormat::Q4_0
+    };
+    let q4_ffn_per_matrix = ffn_format.packed_matrix_bytes(intermediate, hidden)?;
+
+    let layers = build_pipeline_layers(
+        weights,
+        index,
+        0..num_layers,
+        q4_ffn_mmap,
+        q4_ffn_per_matrix,
+        ffn_format,
+    );
+
+    let h_embed = larql_inference::forward::embed_tokens_pub(weights, token_ids);
+    let x: Vec<f32> = h_embed.as_slice().unwrap_or(&[]).to_vec();
+
+    let seq_len = token_ids.len();
+    let softcap = arch.attn_logit_softcapping().unwrap_or(0.0);
+    let qk_norm = arch.attn_q_norm_key(0).is_some();
+
+    backend.reset_kv_cache();
+    {
+        let kv_shapes: Vec<(usize, usize)> = (0..num_layers)
+            .map(|l| (arch.num_kv_heads_for_layer(l), arch.head_dim_for_layer(l)))
+            .collect();
+        backend.preallocate_kv_cache_per_layer(&kv_shapes, DEFAULT_GPU_KV_CACHE_MAX_SEQ);
+    }
+
+    let l0 = &layers[0];
+    let h_vec = backend.prefill_q4(
+        &layers,
+        &x,
+        hidden,
+        intermediate,
+        l0.num_q_heads * l0.head_dim,
+        l0.num_kv_heads * l0.head_dim,
+        seq_len,
+        l0.num_q_heads,
+        l0.num_kv_heads,
+        l0.head_dim,
+        l0.rope_base,
+        qk_norm,
+        softcap,
+    )?;
+
+    // Return pre-final_norm hidden state — the caller (hidden_to_raw_logits) applies it.
+    let h_2d = Array2::from_shape_vec((seq_len, hidden), h_vec).ok()?;
+    let last = h_2d.shape()[0] - 1;
+    Some(h_2d.slice(ndarray::s![last..=last, ..]).to_owned())
+}
+
+/// Run one Metal decode step via `backend.decode_token`.
+pub(crate) fn q4k_decode_token(
+    weights: &ModelWeights,
+    index: &VectorIndex,
+    token_id: u32,
+    backend: &dyn ComputeBackend,
+) -> Option<Array2<f32>> {
+    use larql_inference::layer_graph::pipeline_layer::build_pipeline_layers;
+    use larql_vindex::GateIndex;
+
+    let gate_index: &dyn GateIndex = index;
+    let (q4_ffn_mmap, ffn_is_q4k) = if let Some(m) = gate_index.interleaved_q4k_mmap_ref() {
+        (m, true)
+    } else if let Some(m) = gate_index.interleaved_q4_mmap_ref() {
+        (m, false)
+    } else {
+        return None;
+    };
+
+    let hidden = weights.hidden_size;
+    let num_layers = weights.num_layers;
+    let intermediate = gate_index.num_features(0);
+
+    let ffn_format = if ffn_is_q4k {
+        larql_compute::QuantFormat::Q4_K
+    } else {
+        larql_compute::QuantFormat::Q4_0
+    };
+    let q4_ffn_per_matrix = ffn_format.packed_matrix_bytes(intermediate, hidden)?;
+
+    let layers = build_pipeline_layers(
+        weights,
+        index,
+        0..num_layers,
+        q4_ffn_mmap,
+        q4_ffn_per_matrix,
+        ffn_format,
+    );
+
+    let h_tok = larql_inference::forward::embed_tokens_pub(weights, &[token_id]);
+    let x_dec: Vec<f32> = h_tok.row(0).to_vec();
+
+    let l0 = &layers[0];
+    let h_vec = backend.decode_token(
+        &layers,
+        &x_dec,
+        hidden,
+        intermediate,
+        l0.num_q_heads * l0.head_dim,
+        l0.num_kv_heads * l0.head_dim,
+        l0.num_q_heads,
+        l0.num_kv_heads,
+        l0.head_dim,
+        l0.rope_base,
+    )?;
+
+    // Return pre-final_norm hidden state — the caller (hidden_to_raw_logits) applies it.
+    Array2::from_shape_vec((1, hidden), h_vec).ok()
+>>>>>>> ianblenke/main
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

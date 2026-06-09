@@ -1,0 +1,24 @@
+mode,target_prompt_tokens,actual_prompt_tokens,decode_tokens,wall_s,decode_per_tok_avg_s,tok_per_s_overall,vram_pre_mib,vram_peak_mib,content
+f16,128,145,32,9.551664191298187,0.29848950597806834,3.3502015312842373,12492,15924,<think>
+
+</think>
+
+k brown fox jumps over the lazy dog. In a
+f16,512,557,32,31.939480365253985,0.998108761414187,1.0018948221465698,15916,19124,<think>
+
+</think>
+
+he lazy dog.
+
+It appears you have pasted 
+f16,1024,1110,32,62.24394516646862,1.9451232864521444,0.5141062301629089,19116,19860,ound there lived a hobbit. Far over the misty mountains cold
+f16,2048,2212,32,130.68548093363643,4.083921279176138,0.24486270220216708,19852,20404,<think>
+
+</think>
+
+It appears you have pasted a large block 
+f16,4096,4419,32,296.0718819433823,9.252246310730698,0.10808186103305596,20396,20788,<think>
+
+</think>
+
+It appears you have pasted a large block 

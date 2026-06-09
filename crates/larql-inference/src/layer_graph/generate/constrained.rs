@@ -280,7 +280,20 @@ where
 
         let h_tok = crate::forward::embed_tokens_pub(weights, &[current_token_id]);
         let x_dec: Vec<f32> = h_tok.row(0).to_vec();
-        let result = backend.decode_token(&layers, &x_dec, hidden, intermediate);
+        let attn =
+            crate::layer_graph::pipeline_layer::attention_geometry_for_arch_layer(weights, 0);
+        let result = backend.decode_token(
+            &layers,
+            &x_dec,
+            hidden,
+            intermediate,
+            attn.q_dim,
+            attn.kv_dim,
+            attn.num_q_heads,
+            attn.num_kv_heads,
+            attn.head_dim,
+            attn.rope_base,
+        );
 
         let h_1d = if let Some(h_out) = result {
             let h_arr = ndarray::Array2::from_shape_vec((1, hidden), h_out).unwrap();

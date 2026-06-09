@@ -1,0 +1,19 @@
+mode,target_prompt_tokens,actual_prompt_tokens,decode_tokens,wall_s,decode_per_tok_avg_s,tok_per_s_overall,vram_pre_mib,vram_peak_mib,content
+iso3,128,145,32,9.74520106613636,0.30453753331676126,3.2836674977591724,12332,15860,<think>
+
+</think>
+
+k brown fox jumps over the lazy dog.
+
+It 
+iso3,2048,2212,32,133.60393323842436,4.175122913700761,0.23951390669684888,15852,20404,
+<think>
+
+</think>
+
+It appears you have pasted a large block
+iso3,4096,4419,32,301.21025744918734,9.412820545287104,0.10623808189997726,20396,20852,<think>
+
+</think>
+
+It appears you have pasted a large block 

@@ -44,6 +44,16 @@ pub enum Capability {
     DecodeProfile,
     /// Multi-position prefill with KV cache population (`prefill_kquant`).
     PrefillQ4,
+
+    // ── Capabilities introduced by openspec change `cuda-and-rotorquant-kv` ──
+    /// Backend dispatches via CUDA / cuBLAS / cudarc. Set by `CudaBackend`.
+    Cuda,
+    /// Rust-authored custom CUDA kernels are built with cuda-oxide.
+    CudaOxide,
+    /// Fused Flash-Attention-v2-style attention kernel is available.
+    FlashAttentionV2,
+    /// KV-cache compression via RotorQuant `iso3` / `planar3` / `iso4` / `planar4`.
+    KvCompressionRotorQuant,
     /// Heterogeneous attention geometry: layers in the same model can
     /// have different `head_dim`, `num_kv_heads`, `num_q_heads`,
     /// `rope_base`, or sliding-window flags. Required by Gemma 4 31B

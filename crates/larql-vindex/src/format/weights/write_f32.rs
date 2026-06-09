@@ -88,14 +88,46 @@ pub trait WeightSource {
     /// Raw BF16 bytes for a packed expert tensor (e.g. Gemma 4 experts.gate_up_proj).
     /// Returns None if the key is absent or the tensor is not BF16.
     fn get_packed_bf16(&self, key: &str) -> Option<Vec<u8>>;
+
+    /// Raw quantised bytes for a tensor when the source carries it in
+    /// its native GGUF form (e.g. Q4_K / Q6_K from a GGUF GGML loader).
+    /// Returns `Some((bytes, tensor_type, rows, cols))`.
+    ///
+    /// Used by the Q4_K writer to **bit-passthrough** original GGUF
+    /// quants instead of round-tripping through f32 — preserves
+    /// imatrix-aware quantisation choices that the naive
+    /// `quantize_q4_k` re-quantizer would otherwise discard.
+    ///
+    /// Default: `None` (legacy: dequant→requant). Sources that carry
+    /// raw quant bytes (GGUF-backed `ModelWeights`) override this.
+    fn get_quant_raw(&self, _key: &str) -> Option<(Vec<u8>, u32, usize, usize)> {
+        None
+    }
 }
 
 // ── ModelWeights implementation ──
 
 impl WeightSource for ModelWeights {
     fn get_tensor(&self, key: &str) -> Option<(Vec<f32>, usize, usize)> {
-        let t = self.tensors.get(key)?;
-        Some((t.as_slice()?.to_vec(), t.shape()[0], t.shape()[1]))
+        // Dense path (safetensors-loaded): tensors map holds f32 weights.
+        if let Some(t) = self.tensors.get(key) {
+            return Some((t.as_slice()?.to_vec(), t.shape()[0], t.shape()[1]));
+        }
+        // GGUF MoE fallback: 3-D packed expert tensors live in
+        // `quant_tensors` via the per-expert HF aliases registered by
+        // `load_gguf_lazy_tensors` (post #120). Dequantize on demand —
+        // memory cost is ~one expert's worth of f32 (~6 MB at Qwen 3.6-
+        // 35B-A3B's 768×2048 shape) held only for this call. Used by
+        // `write_model_weights_with_opts`'s `up_weights.bin` /
+        // `down_weights.bin` per-expert loop (without this, those
+        // outputs were 0 bytes for MoE GGUFs — same class of bug
+        // #121 fixed for gate_vectors.bin in `build_vindex`).
+        let qt = self.quant_tensors.get(key)?;
+        let shape = qt.shape();
+        let n = shape[0].checked_mul(shape[1])?;
+        let floats =
+            larql_models::quant::ggml::dequantize(qt.raw_bytes(), qt.tensor_type(), n).ok()?;
+        Some((floats, shape[0], shape[1]))
     }
 
     fn get_vector(&self, key: &str) -> Option<Vec<f32>> {
@@ -121,6 +153,24 @@ impl WeightSource for ModelWeights {
 
     fn get_packed_bf16(&self, key: &str) -> Option<Vec<u8>> {
         self.raw_bytes.get(key).cloned()
+    }
+
+    fn get_quant_raw(&self, key: &str) -> Option<(Vec<u8>, u32, usize, usize)> {
+        let qt = self.quant_tensors.get(key)?;
+        let shape = qt.shape();
+        // Only 2D matrices supported in the passthrough path. Higher-rank
+        // packed expert tensors go through the dense path (they need
+        // per-expert slicing the Q4_K writer doesn't know how to do
+        // bit-exactly yet).
+        if shape.len() != 2 {
+            return None;
+        }
+        Some((
+            qt.raw_bytes().to_vec(),
+            qt.tensor_type(),
+            shape[0],
+            shape[1],
+        ))
     }
 }
 

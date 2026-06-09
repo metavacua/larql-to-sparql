@@ -17,6 +17,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     set_protoc();
     tonic_build::compile_protos("proto/grid.proto")?;
     tonic_build::compile_protos("proto/expert.proto")?;
+<<<<<<< HEAD
     tonic_build::compile_protos("proto/shard.proto")?;
+=======
+    // attention-service-routes change.
+    tonic_build::compile_protos("proto/attention.proto")?;
+>>>>>>> ianblenke/main
     Ok(())
 }

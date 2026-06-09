@@ -1,0 +1,970 @@
+//! Phase 4b call-site wiring helper — the single function the
+//! generate loop calls to opt into speculative decoding.
+//!
+//! ## Caller contract — KV cache management
+//!
+//! `run_naive_step` does NOT advance the canonical KV cache.
+//! `target_forward_naive` runs the target model from scratch on each
+//! tree node's ancestor chain (using its own internal per-call KV
+//! cache), so the canonical cache held by `DecodeBackend` is unchanged
+//! when this function returns.
+//!
+//! On `Some(tokens)`, the integrator MUST advance the canonical cache
+//! by `tokens.len()` positions before the next decode call. The
+//! simplest path is to call `backend.decode_token(...)` N times
+//! sequentially with each emitted token as input — wasteful (N
+//! redundant target forwards) but correct.
+//!
+//! Phase 4c eliminates this redundancy by having `target_forward`
+//! itself write to the canonical cache via the batched
+//! `cuda::attn_tree::tree_decode_attention` kernel. Until then, the
+//! naive path is **3× slower than baseline** — strictly a parity
+//! oracle for phase 4c's batched implementation.
+
+use std::cell::RefCell;
+use std::path::Path;
+
+use larql_models::ModelWeights;
+use larql_vindex::VectorIndex;
+use ndarray::Array2;
+
+use crate::error::InferenceError;
+
+use super::orchestrator::build_linear_tree;
+use super::target_forward::{target_forward_naive, target_forward_with_hidden};
+use super::verify::{verify_tree, VerifyRng};
+use super::{Drafter, SpecConfig, TokenId};
+
+/// Owns a separate `ModelWeights` instance + `VectorIndex` for
+/// speculative target re-runs. The bench loads this from the
+/// SAME vindex bytes as the canonical target — mmap means zero
+/// additional RSS despite logically duplicating the weights.
+///
+/// Resolves the borrow conflict at gpu.rs:735 documented in PR #18:
+/// the canonical decode loop holds `&layers` (borrowing the canonical
+/// weights), while the speculative target needs `&mut weights`. Owning
+/// a separate instance gives the speculative path its own mutable
+/// surface without touching the canonical one.
+pub struct SpeculativeTargetExecutor {
+    weights: ModelWeights,
+    index: VectorIndex,
+}
+
+impl SpeculativeTargetExecutor {
+    /// Load a separate weights+vindex pair from the same directory the
+    /// canonical target is using. Mmap is the underlying storage, so
+    /// peak RSS is unaffected.
+    pub fn from_vindex(path: impl AsRef<Path>) -> Result<Self, InferenceError> {
+        let path = path.as_ref();
+        let mut callbacks = larql_vindex::SilentLoadCallbacks;
+        let weights = larql_vindex::load_model_weights_q4k(path, &mut callbacks)
+            .map_err(InferenceError::Vindex)?;
+        let index = crate::open_inference_vindex(path)?;
+        Ok(Self { weights, index })
+    }
+
+    /// Run the target's full forward pass on `tokens` and return the
+    /// `[seq_len, hidden]` hidden state. Used as the closure body for
+    /// `target_forward_with_hidden`.
+    pub fn compute_hidden(&mut self, tokens: &[TokenId]) -> Array2<f32> {
+        crate::vindex::predict_q4k_hidden(&mut self.weights, tokens, &self.index, None)
+    }
+}
+
+thread_local! {
+    /// Per-thread speculative drafter. Set by the caller (e.g.
+    /// `larql bench` after `--draft-model` loads) before invoking
+    /// `generate_streaming`; read by the per-token loop in
+    /// `layer_graph::generate::gpu` to opt into speculative dispatch.
+    ///
+    /// Thread-local is the surgery-free alternative to changing the
+    /// signature of `generate()` and its 17 call sites. Single-thread
+    /// bench/CLI use case fits perfectly; if multi-thread serving
+    /// adopts speculative later, signature plumbing becomes worth it.
+    static THREAD_DRAFTER: RefCell<Option<Box<dyn super::Drafter>>> = const { RefCell::new(None) };
+    static THREAD_RNG: RefCell<Option<VerifyRng>> = const { RefCell::new(None) };
+    static THREAD_CFG: RefCell<SpecConfig> = const {
+        RefCell::new(SpecConfig {
+            depth: 2,
+            branches: 1,
+            swa_window: None,
+        })
+    };
+    /// Per-thread separately-loaded target executor. Set by the
+    /// caller before generate() begins; read by `try_thread_speculative_step_v2`.
+    /// Resolves the borrow conflict by owning its own `&mut ModelWeights`
+    /// independent of the canonical loop's weights.
+    static THREAD_TARGET_EXEC: RefCell<Option<SpeculativeTargetExecutor>> = const { RefCell::new(None) };
+    /// Per-thread spec-step telemetry. When `Some`, every successful
+    /// `try_thread_speculative_step_v3` call appends a row recording
+    /// the iter's draft + accept counts. Bench / phase-4d harnesses
+    /// install `Some(SpecStats::default())` before `generate()`,
+    /// take it back via `take_thread_spec_stats()` afterwards, and
+    /// compute α + emit-rate aggregates.
+    static THREAD_SPEC_STATS: RefCell<Option<SpecStats>> = const { RefCell::new(None) };
+}
+
+/// Per-iter accept-rate telemetry collected by
+/// `try_thread_speculative_step_v3` when a stats accumulator is
+/// installed via [`set_thread_spec_stats`]. Empty by default.
+///
+/// Shape: parallel arrays, one row per spec iter that ran.
+/// `iter_n_drafts[k] == cfg.depth` for iter k (constant per session
+/// unless cfg changes mid-run); `iter_n_accepted[k]` is R, the
+/// number of drafts the verifier accepted before the first rejection
+/// (0 ≤ R ≤ depth).
+///
+/// α (acceptance rate) for iter k is `iter_n_accepted[k] / iter_n_drafts[k]`.
+/// Aggregate α is `sum(n_accepted) / sum(n_drafts)`.
+#[derive(Debug, Clone, Default)]
+pub struct SpecStats {
+    pub iter_n_drafts: Vec<usize>,
+    pub iter_n_accepted: Vec<usize>,
+}
+
+impl SpecStats {
+    /// Total drafts proposed across all spec iters.
+    pub fn total_drafts(&self) -> usize {
+        self.iter_n_drafts.iter().sum()
+    }
+
+    /// Total drafts accepted across all spec iters.
+    pub fn total_accepted(&self) -> usize {
+        self.iter_n_accepted.iter().sum()
+    }
+
+    /// Aggregate accept rate α = accepted / drafted. Returns 0.0 when
+    /// no spec iter ran.
+    pub fn alpha(&self) -> f64 {
+        let drafts = self.total_drafts();
+        if drafts == 0 {
+            return 0.0;
+        }
+        self.total_accepted() as f64 / drafts as f64
+    }
+
+    /// Number of spec iters recorded.
+    pub fn n_iters(&self) -> usize {
+        self.iter_n_drafts.len()
+    }
+
+    /// Per-iter α distribution as sorted ascending Vec<f64> for
+    /// percentile reporting. Returns an empty vec when no iters ran.
+    pub fn alpha_distribution(&self) -> Vec<f64> {
+        let mut alphas: Vec<f64> = self
+            .iter_n_drafts
+            .iter()
+            .zip(&self.iter_n_accepted)
+            .map(|(&d, &a)| if d == 0 { 0.0 } else { a as f64 / d as f64 })
+            .collect();
+        alphas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        alphas
+    }
+}
+
+/// Install a drafter on the current thread. Pass `None` to clear.
+///
+/// Accepts any `Box<dyn Drafter>` — caller chooses between
+/// [`SmallModelDrafter`] (separate weights), [`PromptLookupDrafter`]
+/// (no model, n-gram lookup), or any future Drafter impl.
+pub fn set_thread_drafter(d: Option<Box<dyn super::Drafter>>) {
+    THREAD_DRAFTER.with(|cell| {
+        *cell.borrow_mut() = d;
+    });
+}
+
+/// Install a SpecConfig on the current thread (overrides default
+/// depth=2 branches=1).
+pub fn set_thread_spec_config(cfg: SpecConfig) {
+    THREAD_CFG.with(|cell| {
+        *cell.borrow_mut() = cfg;
+    });
+}
+
+/// Install an RNG seed on the current thread. The RNG is consumed
+/// (mutated) by each speculative step.
+pub fn set_thread_rng(seed: u64) {
+    THREAD_RNG.with(|cell| {
+        *cell.borrow_mut() = Some(VerifyRng::new(seed));
+    });
+}
+
+/// Install a separate target executor on the current thread. Pass
+/// `None` to clear. Required for `try_thread_speculative_step_v2`
+/// to dispatch.
+pub fn set_thread_target_executor(exec: Option<SpeculativeTargetExecutor>) {
+    THREAD_TARGET_EXEC.with(|cell| {
+        *cell.borrow_mut() = exec;
+    });
+}
+
+/// Install a stats accumulator on the current thread. While
+/// installed, every successful `try_thread_speculative_step_v3` call
+/// appends a row to it. Pass `None` to clear / disable.
+pub fn set_thread_spec_stats(stats: Option<SpecStats>) {
+    THREAD_SPEC_STATS.with(|cell| {
+        *cell.borrow_mut() = stats;
+    });
+}
+
+/// Take the current thread's spec stats, replacing with `None`.
+/// Returns the accumulated rows since the last `set_thread_spec_stats`
+/// or `take_thread_spec_stats` call.
+pub fn take_thread_spec_stats() -> Option<SpecStats> {
+    THREAD_SPEC_STATS.with(|cell| cell.borrow_mut().take())
+}
+
+/// Borrow-conflict-free dispatch helper. Takes `&ModelWeights`
+/// (immutable) for the lm_head + softmax projection inside
+/// `target_forward_with_hidden`. Mutability for `predict_q4k_hidden`
+/// comes from the thread-local `SpeculativeTargetExecutor`.
+///
+/// Returns `Some(emitted_tokens)` on a successful step (caller MUST
+/// advance KV cache by `tokens.len()`); `None` to fall through to
+/// the existing non-speculative path.
+///
+/// Returns `None` when:
+/// - `LARQL_SPECULATIVE_DECODE` is unset / not `1`
+/// - thread-local `THREAD_DRAFTER` is None
+/// - thread-local `THREAD_TARGET_EXEC` is None
+/// - SWA window leaves no slack
+/// - drafter declines (empty proposals)
+pub fn try_thread_speculative_step_v2(
+    weights: &ModelWeights,
+    history: &[TokenId],
+    cache_len: usize,
+) -> Option<Vec<TokenId>> {
+    if !super::enabled() {
+        return None;
+    }
+    THREAD_DRAFTER.with(|d_cell| {
+        let mut d_ref = d_cell.borrow_mut();
+        let drafter = d_ref.as_mut()?;
+        THREAD_TARGET_EXEC.with(|t_cell| {
+            let mut t_ref = t_cell.borrow_mut();
+            let target = t_ref.as_mut()?;
+            let cfg = THREAD_CFG.with(|c| *c.borrow());
+            let depth = cfg.effective_depth(cache_len);
+            if depth == 0 {
+                return None;
+            }
+            // Re-seed the drafter's internal history with the loop's
+            // canonical context every iteration. Wasteful (clones the
+            // history) but correct — without this, the drafter has no
+            // context for its propose() call. Phase 4c can optimize
+            // by tracking drafter history incrementally.
+            drafter.seed_history(history);
+            let drafts = drafter.propose(&[], depth);
+            if drafts.is_empty() {
+                return None;
+            }
+            let tree = build_linear_tree(&drafts);
+            let p_target = target_forward_with_hidden(weights, history, &tree, |toks| {
+                target.compute_hidden(toks)
+            });
+            if p_target.len() != tree.len() {
+                return None;
+            }
+            let span = THREAD_RNG.with(|r_cell| {
+                let mut r_ref = r_cell.borrow_mut();
+                let rng = r_ref.get_or_insert_with(|| VerifyRng::new(0xCAFE_BABE_DEAD_F00D));
+                verify_tree(&tree, &p_target, rng)
+            });
+            let emitted = span.tokens();
+            if emitted.is_empty() {
+                return None;
+            }
+            drafter.accept(&emitted);
+            Some(emitted)
+        })
+    })
+}
+
+/// **Phase 4c task C.2.d** — borrow-conflict-free dispatch using the
+/// canonical backend (no separate `SpeculativeTargetExecutor` needed).
+/// Composes `super::target_forward::target_forward_via_speculative_decode`
+/// (the C.2.b/c work — sequential decode_token + KV rollback, with
+/// linear-chain optimization) with `verify_tree` to produce the
+/// accepted span.
+///
+/// **Vs `try_thread_speculative_step_v2`**: v2 uses a separately-loaded
+/// `ModelWeights` instance (~6 GB peak heap, ~6s drafter forward per
+/// proposal because predict_q4k from-scratch). v3 uses the canonical
+/// backend's KV cache via decode_token (~7.5 ms per token) — drops
+/// target_forward cost from ~12s to ~15ms (~800× speedup).
+///
+/// Drafter still uses the SmallModelDrafter path (own KV cache via
+/// predict_q4k from scratch) — drafter perf optimization is a
+/// separate slice.
+///
+/// Returns `Some(emitted_tokens)` on a successful step (caller MUST
+/// advance the canonical KV cache by `tokens.len()`); `None` to fall
+/// through to the existing non-speculative path.
+///
+/// Returns `None` when:
+/// - `LARQL_SPECULATIVE_DECODE` is unset / not `1`
+/// - thread-local `THREAD_DRAFTER` is None
+/// - `backend.has_kv_cache()` returns false
+/// - `backend.kv_cache_len() != history.len()` (caller contract violation)
+/// - SWA window leaves no slack
+/// - drafter declines (empty proposals)
+///
+/// **Phase 4c skip-redundant-commit**: on success, this method:
+///   1. Runs the spec helper via `_keep_cache_with_probs` — the
+///      backend's KV cache is left advanced by `tree.len()` after
+///      the chain decode (drafts are committed to cache).
+///   2. Calls `verify_tree` to compute the accepted span (R + 1
+///      bonus).
+///   3. Truncates the cache to `pre_len + R` (drops drafts[R..N-1]).
+///   4. `decode_token`s the bonus to fill position `pre_len + R`,
+///      capturing its hidden state for the caller's next-token sample.
+///   5. Returns `(emitted, bonus_hidden)`.
+///
+/// Net cache state on return: `pre_len + R + 1` (= history.len() +
+/// emitted.len()), with R drafted tokens kept from the helper's
+/// chain decode and the bonus re-decoded fresh. The dispatcher does
+/// NOT need a commit phase — it just emits to the user and uses the
+/// returned `bonus_hidden` for the post-bonus sample.
+///
+/// On failure (helper None, verify empty, etc.), cache state is
+/// restored to `pre_len`.
+#[allow(clippy::too_many_arguments)]
+pub fn try_thread_speculative_step_v3(
+    weights: &ModelWeights,
+    history: &[TokenId],
+    cache_len: usize,
+    backend: &dyn larql_compute::ComputeBackend,
+    index: &larql_vindex::VectorIndex,
+    layers: &[larql_compute::FullPipelineLayer<'_>],
+    dims: super::target_forward::TargetForwardDims,
+) -> Option<(Vec<TokenId>, Vec<f32>)> {
+    if !super::enabled() {
+        return None;
+    }
+    THREAD_DRAFTER.with(|d_cell| {
+        let mut d_ref = d_cell.borrow_mut();
+        let drafter = d_ref.as_mut()?;
+        let cfg = THREAD_CFG.with(|c| *c.borrow());
+        let depth = cfg.effective_depth(cache_len);
+        if depth == 0 {
+            return None;
+        }
+        drafter.seed_history(history);
+        // `cuda-spec-branching-tree` T3.4: when cfg.branches > 1, ask
+        // the drafter for a tree of parallel chains. The drafter
+        // returns a linear DraftTree if it has only one match (i.e.
+        // PLD-tree at branches=2 degrades on non-repetitive prompts),
+        // so this is purely additive — never slower than linear.
+        let tree = if cfg.branches > 1 {
+            match drafter.propose_tree(&[], depth, cfg.branches) {
+                Some(t) => t,
+                None => return None,
+            }
+        } else {
+            let drafts = drafter.propose(&[], depth);
+            if drafts.is_empty() {
+                return None;
+            }
+            build_linear_tree(&drafts)
+        };
+
+        let arch = &*weights.arch;
+        let final_norm = weights.tensors.get(arch.final_norm_key());
+        let norm_offset = arch.norm_weight_offset();
+        let logits_scale = arch.logits_scaling();
+        let final_softcap = arch.final_logit_softcapping();
+
+        // Skip-redundant-commit path: helper leaves cache at pre_len+N.
+        let pre_len = history.len();
+        let trace = std::env::var("LARQL_SPEC_TRACE").ok().as_deref() == Some("1");
+        let use_batched_lmh =
+            std::env::var("LARQL_SPEC_BATCHED_LMH").ok().as_deref() != Some("0");
+        let t0 = std::time::Instant::now();
+        let n_lmh_calls = std::cell::Cell::new(0usize);
+        let t_fwd_only;
+        let t_lmh;
+        let p_target = if use_batched_lmh {
+            // Phase 4d batched-lm_head: get all hiddens first (one
+            // batched forward), then run final_norm + lm_head + softmax
+            // once across the whole tree. Saves ~3-5 ms per tree node
+            // vs the per-node compute_probs loop because the Q4_K
+            // matmul amortises dequant + launch overhead.
+            let hiddens =
+                super::target_forward::target_forward_via_speculative_decode_keep_cache_hiddens(
+                    weights, history, &tree, backend, layers, dims,
+                )?;
+            t_fwd_only = t0.elapsed();
+            let t_lmh_start = std::time::Instant::now();
+            let probs = compute_full_vocab_probs_batched(
+                weights,
+                index,
+                backend,
+                &hiddens,
+                arch.final_norm_key(),
+                norm_offset,
+                logits_scale,
+                final_softcap,
+                final_norm.is_some(),
+            );
+            t_lmh = t_lmh_start.elapsed();
+            n_lmh_calls.set(1);
+            match probs {
+                Some(p) if p.len() == tree.len() => p,
+                _ => {
+                    backend.truncate_kv_cache(pre_len);
+                    return None;
+                }
+            }
+        } else {
+            // Legacy per-node compute_probs closure path.
+            let t_lmh_total = std::cell::Cell::new(std::time::Duration::ZERO);
+            let timed_compute_probs = |h: &[f32]| -> Vec<f32> {
+                let t = std::time::Instant::now();
+                let h_arr = match ndarray::Array2::from_shape_vec((1, h.len()), h.to_vec()) {
+                    Ok(a) => a,
+                    Err(_) => return Vec::new(),
+                };
+                let h_final = match final_norm {
+                    Some(_) => crate::forward::apply_norm(
+                        weights,
+                        &h_arr,
+                        arch.final_norm_key(),
+                        norm_offset,
+                    ),
+                    None => h_arr,
+                };
+                let h_1d = h_final.row(0).to_owned();
+                let logits = compute_full_vocab_logits(weights, index, backend, &h_1d);
+                if logits.is_empty() {
+                    return Vec::new();
+                }
+                let inv_scale = 1.0 / logits_scale;
+                let scaled: Vec<f32> = logits
+                    .iter()
+                    .map(|&v| {
+                        let mut l = v * inv_scale;
+                        if let Some(cap) = final_softcap {
+                            l = (l / cap).tanh() * cap;
+                        }
+                        l
+                    })
+                    .collect();
+                let max_logit = scaled.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let exp_sum: f64 =
+                    scaled.iter().map(|l| ((l - max_logit) as f64).exp()).sum();
+                if exp_sum <= 0.0 {
+                    return Vec::new();
+                }
+                let r: Vec<f32> = scaled
+                    .iter()
+                    .map(|l| (((l - max_logit) as f64).exp() / exp_sum) as f32)
+                    .collect();
+                t_lmh_total.set(t_lmh_total.get() + t.elapsed());
+                n_lmh_calls.set(n_lmh_calls.get() + 1);
+                r
+            };
+            let p =
+                super::target_forward::target_forward_via_speculative_decode_keep_cache_with_probs(
+                    weights,
+                    history,
+                    &tree,
+                    backend,
+                    layers,
+                    dims,
+                    timed_compute_probs,
+                )?;
+            let total = t0.elapsed();
+            t_lmh = t_lmh_total.get();
+            t_fwd_only = total.saturating_sub(t_lmh);
+            p
+        };
+        if p_target.len() != tree.len() {
+            backend.truncate_kv_cache(pre_len);
+            return None;
+        }
+
+        let t_v0 = std::time::Instant::now();
+        let span = THREAD_RNG.with(|r_cell| {
+            let mut r_ref = r_cell.borrow_mut();
+            let rng = r_ref.get_or_insert_with(|| VerifyRng::new(0xCAFE_BABE_DEAD_F00D));
+            verify_tree(&tree, &p_target, rng)
+        });
+        let t_verify = t_v0.elapsed();
+        let emitted = span.tokens();
+        if emitted.is_empty() {
+            backend.truncate_kv_cache(pre_len);
+            return None;
+        }
+
+        // Truncate cache to keep the R accepted drafts; the bonus
+        // (emitted's last) is a resampled token NOT equal to drafts[R],
+        // so it needs a fresh decode_token to write the right K/V.
+        let r_accepted = emitted.len() - 1;
+        backend.truncate_kv_cache(pre_len + r_accepted);
+
+        // Decode the bonus to fill position pre_len + r_accepted.
+        let bonus = match emitted.last().copied() {
+            Some(b) => b,
+            None => {
+                backend.truncate_kv_cache(pre_len);
+                return None;
+            }
+        };
+        let t_b0 = std::time::Instant::now();
+        let h_embed = crate::forward::embed_tokens_pub(weights, &[bonus]);
+        let x: Vec<f32> = h_embed.row(0).to_vec();
+        let bonus_hidden = match backend.decode_token(
+            layers,
+            &x,
+            dims.hidden,
+            dims.intermediate,
+            dims.q_dim,
+            dims.kv_dim,
+            dims.num_q_heads,
+            dims.num_kv_heads,
+            dims.head_dim,
+            dims.rope_base,
+        ) {
+            Some(h) => h,
+            None => {
+                backend.truncate_kv_cache(pre_len);
+                return None;
+            }
+        };
+
+        let t_bonus = t_b0.elapsed();
+        drafter.accept(&emitted);
+
+        if trace {
+            // `cuda-spec-branching-tree` T4.1: include tree shape so
+            // bench traces show when the drafter is branching. Linear
+            // = single root-to-leaf path (most_likely path covers
+            // every node); else branching with the node count.
+            let n_paths = tree.root_to_leaf_paths().len();
+            let shape = if n_paths <= 1 {
+                "linear".to_string()
+            } else {
+                format!("branching({n_paths} paths)")
+            };
+            eprintln!(
+                "[spec_iter] depth={} shape={} accepted={} fwd_no_lmh={:?} lmh_total={:?} ({} calls) verify={:?} bonus={:?} total={:?}",
+                tree.len(),
+                shape,
+                r_accepted,
+                t_fwd_only,
+                t_lmh,
+                n_lmh_calls.get(),
+                t_verify,
+                t_bonus,
+                t0.elapsed(),
+            );
+        }
+
+        // Telemetry: record this iter's draft + accept counts if a
+        // stats accumulator is installed via `set_thread_spec_stats`.
+        // No-op when unset (default).
+        let n_drafts = tree.len();
+        THREAD_SPEC_STATS.with(|cell| {
+            if let Some(stats) = cell.borrow_mut().as_mut() {
+                stats.iter_n_drafts.push(n_drafts);
+                stats.iter_n_accepted.push(r_accepted);
+            }
+        });
+
+        Some((emitted, bonus_hidden))
+    })
+}
+
+/// Phase 4d batched-lm_head: run final_norm + lm_head + softmax on
+/// all `hiddens` rows in a single GEMM call (Q4_K matmul against the
+/// index's lm_head). Returns one prob vector per row, or `None` on
+/// any failure (caller falls back to the per-row `compute_probs`).
+///
+/// At depth=4 with α=0.83, this saves ~17-20 ms/iter vs the per-row
+/// `compute_full_vocab_logits` loop because the underlying batched
+/// Q4_K kernel amortises dequant + launch overhead across rows.
+#[allow(clippy::too_many_arguments)]
+fn compute_full_vocab_probs_batched(
+    weights: &ModelWeights,
+    index: &larql_vindex::VectorIndex,
+    backend: &dyn larql_compute::ComputeBackend,
+    hiddens: &[Vec<f32>],
+    final_norm_key: &str,
+    norm_offset: f32,
+    logits_scale: f32,
+    final_softcap: Option<f32>,
+    has_final_norm: bool,
+) -> Option<Vec<Vec<f32>>> {
+    let m = hiddens.len();
+    if m == 0 {
+        return Some(Vec::new());
+    }
+    let hidden = hiddens[0].len();
+    if hidden == 0 || hiddens.iter().any(|h| h.len() != hidden) {
+        return None;
+    }
+    let vocab = index.vocab_size;
+    if vocab == 0 {
+        return None;
+    }
+
+    // 1. Apply final norm batched (per-row, since `apply_norm` is
+    //    inherently per-row but cheap on hidden=2560).
+    let mut h_normed: Vec<f32> = Vec::with_capacity(m * hidden);
+    for h in hiddens {
+        if has_final_norm {
+            let h_arr = ndarray::Array2::from_shape_vec((1, hidden), h.clone()).ok()?;
+            let h_final = crate::forward::apply_norm(weights, &h_arr, final_norm_key, norm_offset);
+            h_normed.extend_from_slice(h_final.row(0).as_slice()?);
+        } else {
+            h_normed.extend_from_slice(h);
+        }
+    }
+
+    // 2. Fused GEMM + softmax (`q4k_matmul_softmax`) — keeps logits
+    //    device-resident between the matmul and softmax kernels,
+    //    skipping a 4 MB f32 dtoh+htod round-trip. Falls back to the
+    //    separate calls (and CPU softmax if both are unavailable).
+    let inv_scale = 1.0 / logits_scale;
+    let softcap_f = final_softcap.unwrap_or(0.0);
+    let probs_flat: Vec<f32> = if backend.has_q4() {
+        let q4_bytes: Option<&[u8]> = index.storage.lm_head_q4_view().map(|b| b.as_ref());
+        match q4_bytes {
+            Some(q4) => match backend
+                .q4k_matmul_softmax(q4, &h_normed, vocab, hidden, m, inv_scale, softcap_f)
+            {
+                Some(probs) if probs.len() == m * vocab => probs,
+                _ => {
+                    // Backend doesn't have a fused path or matmul rejected
+                    // the shape — fall back to separate GEMM + softmax,
+                    // optionally CPU softmax if backend has no softmax.
+                    let mut logits = backend.q4k_matmul(q4, &h_normed, vocab, hidden, m)?;
+                    if logits.len() != m * vocab {
+                        return None;
+                    }
+                    if backend
+                        .softmax_inplace_batched(&mut logits, m, vocab, inv_scale, softcap_f)
+                        .is_none()
+                    {
+                        // CPU softmax fallback.
+                        for row in 0..m {
+                            let raw = &mut logits[row * vocab..(row + 1) * vocab];
+                            for v in raw.iter_mut() {
+                                let mut l = *v * inv_scale;
+                                if let Some(cap) = final_softcap {
+                                    l = (l / cap).tanh() * cap;
+                                }
+                                *v = l;
+                            }
+                            let max_logit = raw.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                            let exp_sum: f64 =
+                                raw.iter().map(|l| ((l - max_logit) as f64).exp()).sum();
+                            if exp_sum <= 0.0 {
+                                return None;
+                            }
+                            for v in raw.iter_mut() {
+                                *v = (((*v - max_logit) as f64).exp() / exp_sum) as f32;
+                            }
+                        }
+                    }
+                    logits
+                }
+            },
+            None => return None,
+        }
+    } else {
+        return None;
+    };
+
+    let mut probs: Vec<Vec<f32>> = Vec::with_capacity(m);
+    for row in 0..m {
+        probs.push(probs_flat[row * vocab..(row + 1) * vocab].to_vec());
+    }
+    Some(probs)
+}
+
+/// Run lm_head on `h_1d` via the GPU path (Q4_K or f16 GEMV via the
+/// index's lm_head bytes). Falls through to the CPU `backend_lm_head_scores`
+/// path when the index lacks lm_head Q4 bytes AND f16 GEMV isn't
+/// specialised for the backend. Returns the full vocab logit vector
+/// (NOT softmax'd — caller applies scaling + softcap + softmax).
+#[allow(dead_code)]
+fn compute_full_vocab_logits(
+    weights: &ModelWeights,
+    index: &larql_vindex::VectorIndex,
+    backend: &dyn larql_compute::ComputeBackend,
+    h_1d: &ndarray::Array1<f32>,
+) -> Vec<f32> {
+    let vocab = index.vocab_size;
+    let hidden = h_1d.len();
+    if vocab == 0 || hidden == 0 {
+        return Vec::new();
+    }
+    let x = match h_1d.as_slice() {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+
+    // 1. Q4_K path (CudaBackend's q4k_matvec falls back to dequant +
+    //    cuBLAS GEMV when the kernel constraint isn't met).
+    if backend.has_q4() {
+        if let Some(q4_data) = index.storage.lm_head_q4_view().map(|b| b.as_ref() as &[u8]) {
+            if let Some(scores) = backend.q4k_matvec(q4_data, x, vocab, hidden) {
+                if scores.len() == vocab {
+                    return scores;
+                }
+            }
+        }
+    }
+    // 2. f16 mmap path (tied embeddings re-used as lm_head).
+    if let Some(f16_view) = index.storage.lm_head_f16_view() {
+        let expected = vocab * hidden * 2;
+        let f16_mmap: &[u8] = f16_view.as_ref();
+        if f16_mmap.len() >= expected {
+            if let Some(scores) = backend.f16_gemv(&f16_mmap[..expected], x, vocab, hidden) {
+                if scores.len() == vocab {
+                    return scores;
+                }
+            }
+        }
+    }
+    // 3. Last resort: f32 GEMV against `weights.lm_head` (slow CPU path).
+    let lm = &weights.lm_head;
+    if lm.is_empty() {
+        return Vec::new();
+    }
+    if let Some(scores) = backend.f32_gemv(lm.view(), x) {
+        return scores;
+    }
+    let q_row = match h_1d.view().into_shape_with_order((1, hidden)) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    backend.matmul_transb(q_row, lm.view()).row(0).to_vec()
+}
+
+/// Try one speculative step using the thread-local drafter (if set).
+/// Returns `Some(tokens)` on success — caller MUST advance KV cache by
+/// `tokens.len()` positions. `None` to fall through to the existing
+/// non-speculative path.
+///
+/// `weights`, `history`, `index` come from the inference loop's
+/// existing scope. Drafter, RNG, and SpecConfig come from
+/// thread-locals — set by the caller (e.g. `larql bench`) before
+/// generate begins.
+pub fn try_thread_speculative_step(
+    weights: &mut ModelWeights,
+    history: &[TokenId],
+    cache_len: usize,
+    index: &VectorIndex,
+) -> Option<Vec<TokenId>> {
+    if !super::enabled() {
+        return None;
+    }
+    THREAD_DRAFTER.with(|drafter_cell| {
+        let mut drafter_ref = drafter_cell.borrow_mut();
+        let drafter = drafter_ref.as_mut()?;
+        let cfg = THREAD_CFG.with(|c| *c.borrow());
+        THREAD_RNG.with(|rng_cell| {
+            let mut rng_ref = rng_cell.borrow_mut();
+            let rng = rng_ref.get_or_insert_with(|| VerifyRng::new(0xCAFE_BABE_DEAD_F00D));
+            run_naive_step(
+                weights,
+                drafter.as_mut(),
+                history,
+                cache_len,
+                cfg,
+                index,
+                rng,
+            )
+        })
+    })
+}
+
+/// One speculative step using the naive sequential `target_forward`.
+/// Returns `Some(emitted_tokens)` on a successful step (caller MUST
+/// advance KV cache by `tokens.len()`); `None` to signal fall-through
+/// to the existing non-speculative path.
+///
+/// Returns `None` when:
+/// - `LARQL_SPECULATIVE_DECODE` is unset / not `1`
+/// - SWA window leaves no slack (`cfg.effective_depth(cache_len) == 0`)
+/// - Drafter declines (returns empty proposals)
+/// - `target_forward_naive` returns the wrong number of distributions
+///   (defensive — should not happen but production retries non-spec)
+///
+/// `history` is the prompt + accepted span so far (the canonical
+/// token sequence at the target's current position). `cache_len`
+/// matches `history.len()` for sanity but the field is separate so
+/// the integrator can clamp via `effective_depth` against the SWA
+/// window.
+pub fn run_naive_step(
+    weights: &mut ModelWeights,
+    drafter: &mut dyn Drafter,
+    history: &[TokenId],
+    cache_len: usize,
+    cfg: SpecConfig,
+    index: &VectorIndex,
+    rng: &mut VerifyRng,
+) -> Option<Vec<TokenId>> {
+    if !super::enabled() {
+        return None;
+    }
+    let depth = cfg.effective_depth(cache_len);
+    if depth == 0 {
+        return None;
+    }
+    let drafts = drafter.propose(&[], depth);
+    if drafts.is_empty() {
+        return None;
+    }
+    let tree = build_linear_tree(&drafts);
+    let p_target = target_forward_naive(weights, history, &tree, index);
+    if p_target.len() != tree.len() {
+        return None;
+    }
+    let span = verify_tree(&tree, &p_target, rng);
+    let emitted = span.tokens();
+    if emitted.is_empty() {
+        return None;
+    }
+    drafter.accept(&emitted);
+    Some(emitted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::small_model::SmallModelDrafter;
+    use super::*;
+    use std::env;
+
+    fn vindex_path_or_skip() -> Option<std::path::PathBuf> {
+        env::var("LARQL_FULL_VOCAB_PROBS_VINDEX")
+            .ok()
+            .map(std::path::PathBuf::from)
+    }
+
+    fn load(path: &std::path::Path) -> ModelWeights {
+        let mut callbacks = larql_vindex::SilentLoadCallbacks;
+        larql_vindex::load_model_weights_q4k(path, &mut callbacks).expect("load weights")
+    }
+
+    fn open_index(path: &std::path::Path) -> VectorIndex {
+        crate::open_inference_vindex(path).expect("vindex")
+    }
+
+    #[test]
+    fn returns_none_when_env_disabled() {
+        let Some(path) = vindex_path_or_skip() else {
+            return;
+        };
+        let mut weights = load(&path);
+        let index = open_index(&path);
+        let mut drafter = SmallModelDrafter::from_vindex(&path).expect("drafter");
+        drafter.seed_history(&[2, 100, 200]);
+        let mut rng = VerifyRng::new(0);
+
+        unsafe {
+            env::remove_var("LARQL_SPECULATIVE_DECODE");
+        }
+        let result = run_naive_step(
+            &mut weights,
+            &mut drafter,
+            &[2, 100, 200],
+            3,
+            SpecConfig::default(),
+            &index,
+            &mut rng,
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn returns_some_tokens_when_env_enabled_and_drafter_proposes() {
+        let Some(path) = vindex_path_or_skip() else {
+            return;
+        };
+        let mut weights = load(&path);
+        let index = open_index(&path);
+        let mut drafter = SmallModelDrafter::from_vindex(&path).expect("drafter");
+        let history = vec![2u32, 100, 200];
+        drafter.seed_history(&history);
+        let mut rng = VerifyRng::new(0xCAFE);
+
+        unsafe {
+            env::set_var("LARQL_SPECULATIVE_DECODE", "1");
+        }
+        let cfg = SpecConfig {
+            depth: 2,
+            branches: 1,
+            swa_window: None,
+        };
+        let result = run_naive_step(
+            &mut weights,
+            &mut drafter,
+            &history,
+            3,
+            cfg,
+            &index,
+            &mut rng,
+        );
+        // With env on and a successful draft, run_naive_step returns
+        // at least one token. Exact count depends on acceptance rate
+        // (even drafter == target shows non-determinism between two
+        // separately-loaded ModelWeights instances at fp32 precision).
+        // The contract this test enforces: dispatch succeeds, we get
+        // tokens out, and the drafter's history advances.
+        let tokens = result.expect("expected tokens from successful step");
+        assert!(
+            !tokens.is_empty(),
+            "successful step must emit at least one token"
+        );
+        assert!(
+            tokens.len() <= 3,
+            "must not emit more than depth + 1 tokens"
+        );
+        assert_eq!(
+            drafter.history_len(),
+            history.len() + tokens.len(),
+            "drafter history must advance by emitted token count"
+        );
+        unsafe {
+            env::remove_var("LARQL_SPECULATIVE_DECODE");
+        }
+    }
+
+    #[test]
+    fn returns_none_when_swa_window_exhausted() {
+        let Some(path) = vindex_path_or_skip() else {
+            return;
+        };
+        let mut weights = load(&path);
+        let index = open_index(&path);
+        let mut drafter = SmallModelDrafter::from_vindex(&path).expect("drafter");
+        let history = vec![2u32, 100, 200];
+        drafter.seed_history(&history);
+        let mut rng = VerifyRng::new(0);
+
+        unsafe {
+            env::set_var("LARQL_SPECULATIVE_DECODE", "1");
+        }
+        let cfg = SpecConfig {
+            depth: 4,
+            branches: 1,
+            swa_window: Some(3),
+        };
+        let result = run_naive_step(
+            &mut weights,
+            &mut drafter,
+            &history,
+            3,
+            cfg,
+            &index,
+            &mut rng,
+        );
+        assert_eq!(result, None, "exhausted SWA window must fall through");
+        unsafe {
+            env::remove_var("LARQL_SPECULATIVE_DECODE");
+        }
+    }
+}

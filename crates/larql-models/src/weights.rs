@@ -1,5 +1,7 @@
 //! Model weight tensors — the loaded representation of a model's parameters.
 
+use crate::embed::EmbedMatrix;
+use crate::quant::lazy::QuantTensor;
 use crate::ModelArchitecture;
 use memmap2::Mmap;
 use ndarray::ArcArray2;
@@ -62,10 +64,39 @@ pub struct ModelWeights {
     pub skipped_tensors: Vec<(String, String)>,
     /// Byte ranges into `packed_mmaps`: maps tensor key → (file_name, offset, length).
     pub packed_byte_ranges: HashMap<String, (String, usize, usize)>,
-    pub embed: WeightArray,
+    /// Token embedding matrix (vocab × hidden). Wrapped in
+    /// [`EmbedMatrix`] (Arc 2) so the vindex loader's f32 path can
+    /// avoid the ~2 GB `to_vec` copy by mmap-wrapping
+    /// `embeddings.bin` directly. Heap-backed elsewhere
+    /// (safetensors, `load_gguf`, f16 vindex). Hot-path callers use
+    /// `.row(i)` which is zero-copy for both variants; cold-path
+    /// callers needing `Array2` semantics (`.dot()`, `.view()`,
+    /// scalar mult) use `.as_array()` which materialises on demand
+    /// for the Mmap variant.
+    pub embed: EmbedMatrix,
+    /// Optional lazy-quantised embed (Q4_K most commonly). When
+    /// populated, callers that only need per-token row lookup may
+    /// use `QuantTensor::row_to_f32(token_id)` and skip the ~5 GiB
+    /// f32 materialisation the dense `embed` field would otherwise
+    /// require for a 248k-vocab model.
+    pub embed_quant: Option<QuantTensor>,
     /// Output projection matrix. Same as embed if tie_word_embeddings=true,
     /// separate lm_head.weight otherwise.
     pub lm_head: WeightArray,
+    /// Optional lazy-quantized lm_head. When populated by
+    /// `load_gguf_lazy_lm_head`, callers may dispatch the final logits
+    /// matvec through `QuantTensor::matvec` to avoid the ~5 GiB f32
+    /// blow-up the dense `lm_head` field requires for a 248k-vocab
+    /// model. The two fields are mutually consistent (same matrix, one
+    /// dequantized, one not) — populate this AND keep the dense form,
+    /// or drop the dense form and rely on the lazy path.
+    pub lm_head_quant: Option<QuantTensor>,
+    /// Lazy-quantized tensors keyed by their normalised GGUF name.
+    /// When a key appears here, the corresponding dense entry in
+    /// `tensors` has been removed so the caller is not paying for
+    /// both forms. Callers (the Qwen3.6 bridge) check this map first
+    /// and fall back to `tensors` for any tensor not lazified.
+    pub quant_tensors: HashMap<String, QuantTensor>,
     /// Learned absolute positional embeddings, when the architecture uses
     /// them (GPT-2 / `wpe`). `None` for rotary or no-positional models.
     /// Indexed by token position; columns are hidden_size.
@@ -256,9 +287,9 @@ impl ModelWeights {
     ///
     /// Typical savings: ~2.7 GB for 4B / ~5.6 GB for 31B.
     pub fn drop_embed(&mut self) -> usize {
-        let freed = self.embed.len() * std::mem::size_of::<f32>();
-        self.embed = ndarray::ArcArray2::from_shape_vec((0, 0), Vec::new())
-            .expect("empty 0x0 array is always valid");
+        let [rows, cols] = self.embed.shape();
+        let freed = rows * cols * std::mem::size_of::<f32>();
+        self.embed = EmbedMatrix::empty();
         freed
     }
 }

@@ -157,8 +157,32 @@ pub struct ModelConfig {
     /// Number of layers at the end of the model that share KV from earlier layers.
     /// E.g., 20 means the last 20 layers reuse KV cache from earlier source layers.
     pub num_kv_shared_layers: Option<usize>,
+<<<<<<< HEAD
     /// Whether the model's config.json contains a `vision_config` section.
     pub has_vision_config: bool,
+=======
+
+    // ── Hybrid Gated DeltaNet + attention metadata (Qwen 3.6 family) ──
+    // All optional; `None` on non-hybrid architectures.
+    /// Stride at which a full softmax-attention layer appears.
+    /// Qwen 3.6: 4 (i.e. every 4th layer is full attention).
+    pub full_attention_interval: Option<usize>,
+    /// DeltaNet per-head state width (head_k = head_v dim).
+    /// Qwen 3.6: 128.
+    pub ssm_state_size: Option<usize>,
+    /// DeltaNet value-stream width (`head_v * n_v_heads`).
+    /// Qwen 3.6: 6144 dense / 4096 MoE.
+    pub ssm_inner_size: Option<usize>,
+    /// DeltaNet number of V heads — GGUF metadata calls this
+    /// `time_step_rank` despite the name. Qwen 3.6: 48 / 32.
+    pub ssm_dt_rank: Option<usize>,
+    /// DeltaNet number of K heads. Qwen 3.6: 16.
+    pub ssm_group_count: Option<usize>,
+    /// DeltaNet causal Conv1D window. Qwen 3.6: 4.
+    pub ssm_conv_kernel: Option<usize>,
+    /// Multi-section RoPE dimension partition. None = vanilla RoPE.
+    pub rope_dimension_sections: Option<Vec<usize>>,
+>>>>>>> ianblenke/main
 }
 
 /// Architecture-specific behavior. Describes how a model is structured
@@ -662,6 +686,15 @@ pub trait ModelArchitecture: Send + Sync {
         None
     }
 
+    /// Per-feature sigmoid gate applied to the shared-expert output
+    /// (HF Qwen3MoeSparseMoeBlock's `shared_expert_gate` 1-D row).
+    /// Qwen 3.6 35B-A3B and Qwen3-Coder-Next both ship one at
+    /// `ffn_gate_inp_shexp.weight`. Default: `None` for arches
+    /// without an explicit gate.
+    fn shared_expert_gate_inp_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
     // ── Hybrid MoE (Gemma 4 A4B: dense MLP + expert block summed per layer) ──
 
     /// Whether this model has a hybrid dense-MLP + expert block per layer.
@@ -766,6 +799,15 @@ pub trait ModelArchitecture: Send + Sync {
 
     /// Whether this model uses MLA instead of standard GQA.
     fn uses_mla(&self) -> bool {
+        false
+    }
+
+    /// Whether this model uses DeepSeek-V4-style compressed/latent
+    /// attention — low-rank Q + latent KV + grouped low-rank output
+    /// projection, plus HCA compression, the lightning indexer, and mHC
+    /// residual streams. The standard Q/K/V/O vindex writers cannot
+    /// represent these; a dedicated DSv4 extraction path is required.
+    fn uses_dsv4_attention(&self) -> bool {
         false
     }
 
@@ -877,6 +919,129 @@ pub trait ModelArchitecture: Send + Sync {
     /// `EmbeddingPlan` consumer landing in `larql-compute`.
     fn multimodal(&self) -> Option<&dyn crate::multimodal::MultiModalProtocol> {
         None
+    }
+
+    // ── Hybrid Gated DeltaNet + full-attention (Qwen 3.6 family) ──
+    //
+    // Models in this family (qwen35, qwen35moe) interleave Gated
+    // DeltaNet linear-attention layers with periodic full softmax-
+    // attention layers. The dispatcher picks the layer kind via
+    // `is_linear_attention_layer(layer)`. For linear layers, the
+    // `*_linear_*_key` methods supply the per-layer tensor names
+    // (fused QKV, Z gate, SSM block weights, etc.). For full-attn
+    // layers the existing `attn_q_key`/`attn_k_key`/... apply, though
+    // qwen35's full-attn layers also have a fused Q+per-head-gate
+    // projection (the `attn_q_key` returns the fused tensor; the
+    // caller splits the output along the head dim).
+    //
+    // Default impls return `false` / `None` so non-hybrid
+    // architectures are unaffected.
+
+    /// True iff layer `layer` is a Gated DeltaNet linear-attention
+    /// layer (as opposed to a full softmax-attention layer).
+    fn is_linear_attention_layer(&self, _layer: usize) -> bool {
+        false
+    }
+
+    /// Linear-attention fused QKV projection
+    /// (`attn_qkv.weight` → `[n_embd, 2*key_dim + value_dim]`).
+    fn attn_qkv_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Z-gate projection on linear-attention layers (DeltaNet's
+    /// post-mixer gate). For qwen35 full-attn layers this is
+    /// `None`; the fused Q+gate is part of `attn_q_key`'s tensor
+    /// instead.
+    fn attn_gate_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Causal depthwise Conv1D weight (`[d_conv, conv_dim]`).
+    fn ssm_conv1d_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Bias added to `alpha` before the softplus gate.
+    fn ssm_dt_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Per-head log-decay scalar (`[n_v_heads]`).
+    fn ssm_a_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Beta projection (delta-rule learning rate).
+    fn ssm_beta_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Alpha projection (pre-softplus gate input).
+    fn ssm_alpha_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Post-mixer RMSNorm weight (`[head_v_dim]`).
+    fn ssm_norm_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Linear-attention output projection (`[value_dim, n_embd]`).
+    fn ssm_out_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Per-head RMSNorm weight on Q in full-attention layers
+    /// (qwen35: `[head_dim]`, applied after Q split, before RoPE).
+    /// Distinct from `attn_q_norm_key` which on Qwen3 has shape
+    /// `[n_embd]`. None for non-qwen35 archs.
+    fn attn_q_per_head_norm_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Per-head RMSNorm weight on K in full-attention layers.
+    fn attn_k_per_head_norm_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Multi-section RoPE: per-section dimension counts. None =
+    /// vanilla single-section RoPE.
+    fn rope_dimension_sections(&self) -> Option<&[usize]> {
+        None
+    }
+
+    /// DeltaNet per-head state width (head_k = head_v dim).
+    /// 0 if this isn't a hybrid model.
+    fn ssm_state_size(&self) -> usize {
+        0
+    }
+
+    /// DeltaNet value-stream width (`head_v * n_v_heads`).
+    fn ssm_inner_size(&self) -> usize {
+        0
+    }
+
+    /// DeltaNet K head count.
+    fn ssm_group_count(&self) -> usize {
+        0
+    }
+
+    /// DeltaNet V head count.
+    fn ssm_dt_rank(&self) -> usize {
+        0
+    }
+
+    /// DeltaNet causal Conv1D window size.
+    fn ssm_conv_kernel(&self) -> usize {
+        0
+    }
+
+    /// Stride at which a full softmax-attention layer appears in a
+    /// hybrid architecture. `(layer + 1) % interval == 0` →
+    /// full-attention; else linear. 0 = not hybrid.
+    fn full_attention_interval(&self) -> usize {
+        0
     }
 }
 

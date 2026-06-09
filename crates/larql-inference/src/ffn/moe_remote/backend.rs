@@ -1,21 +1,16 @@
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use rayon::prelude::*;
 
 use super::config::ShardConfig;
 use super::error::RemoteMoeError;
-use super::metrics;
 use super::multi_layer_wire::{MultiLayerResult, MultiLayerTask, MultiLayerTaskQ8K};
 use super::router::{rms_norm, MoeRouterWeights};
 use super::shard::{Shard, ShardTransport};
 use super::stream::{InflightMoe, ShardStream};
 use super::wire::{ExpertCallItem, ExpertResultItem};
 use larql_compute::cpu::ops::moe::quantize_x_to_q8k;
-
-/// Per-shard call list element: (position, expert_id, residual).
-type ShardCallItem = (usize, usize, Vec<f32>);
-/// Output of `forward_layer_moe`: (output rows, optional per-expert (logit, weight)).
-type LayerMoeResult = (Vec<f32>, Vec<(f32, f32)>);
 
 // ── RemoteMoeBackend ───────────────────────────────────────────────────────
 
@@ -127,44 +122,15 @@ impl RemoteMoeBackend {
         //    work.  Each shard returns its own router-weighted partial sum;
         //    the client just sums shard partials (no per-expert weighting
         //    needed because the server already applied the weights).
-        let shard_timing = metrics::shard_timing_enabled();
-        let layer_start = std::time::Instant::now();
         let non_empty: Vec<(usize, &Vec<u32>, &Vec<f32>)> = shard_calls
             .iter()
             .filter(|(_, ids, _)| !ids.is_empty())
             .map(|(si, ids, ws)| (*si, ids, ws))
             .collect();
-        if metrics::enabled() {
-            for (si, ids, _) in &shard_calls {
-                if ids.is_empty() {
-                    metrics::record_skip(&shards[*si].config.url);
-                }
-            }
-        }
 
         let results_per_shard: Vec<Result<Vec<f32>, RemoteMoeError>> = non_empty
             .par_iter()
-            .map(|(si, ids, ws)| {
-                let shard_url = &shards[*si].config.url;
-                let issue_us = layer_start.elapsed().as_secs_f64() * 1e6;
-                if shard_timing {
-                    eprintln!(
-                        "[moe-shard-timing] transport=http layer={layer} shard={shard_url} K={} issue_us={issue_us:.0}",
-                        ids.len(),
-                    );
-                }
-                let call_start = std::time::Instant::now();
-                let result = shards[*si].call_layer_batch(layer, h, ids, ws);
-                if shard_timing {
-                    let done_us = layer_start.elapsed().as_secs_f64() * 1e6;
-                    let wall_us = call_start.elapsed().as_secs_f64() * 1e6;
-                    eprintln!(
-                        "[moe-shard-timing] transport=http layer={layer} shard={shard_url} K={} done_us={done_us:.0} wall_us={wall_us:.0}",
-                        ids.len(),
-                    );
-                }
-                result
-            })
+            .map(|(si, ids, ws)| shards[*si].call_layer_batch(layer, h, ids, ws))
             .collect();
 
         // 4. Sum shard partials into the layer's combined expert output.
@@ -224,12 +190,12 @@ impl RemoteMoeBackend {
         //    can reconstruct the output ordering.
         //    shard_items[si] = Vec<(pos, expert_id, residual)>
         let shards = self.shards.read().unwrap();
-        let mut shard_items: Vec<Vec<ShardCallItem>> =
+        let mut shard_items: Vec<Vec<(usize, usize, Vec<f32>)>> =
             (0..shards.len()).map(|_| Vec::new()).collect();
 
-        for (pos, route) in routing.iter().enumerate().take(seq_len) {
+        for pos in 0..seq_len {
             let row: Vec<f32> = h.row(pos).to_vec();
-            for &expert_id in &route.0 {
+            for &expert_id in &routing[pos].0 {
                 let si = shards
                     .iter()
                     .position(|s| s.owns_unit(layer, expert_id))
@@ -239,7 +205,7 @@ impl RemoteMoeBackend {
         }
 
         // 3. One batch call per shard that has work (parallel).
-        let non_empty: Vec<(usize, &Vec<ShardCallItem>)> = shard_items
+        let non_empty: Vec<(usize, &Vec<(usize, usize, Vec<f32>)>)> = shard_items
             .iter()
             .enumerate()
             .filter(|(_, items)| !items.is_empty())
@@ -385,15 +351,17 @@ impl RemoteMoeBackend {
         // 1. Route locally.
         let (_h_norm, expert_indices, expert_weights) = router.route(h, norm_offset, eps);
 
-        // 2. Encode residual bytes once. The client applies post-experts norm
-        // after collecting all shard outputs, so the gRPC request must not
-        // carry that hidden-sized tensor per shard/layer.
+        // 2. Encode residual + post_norm bytes once.
         let residual_bytes: Vec<u8> = h.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let post_norm_bytes: Vec<u8> = router
+            .post_experts_norm
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
 
         // 3. Distribute expert_ids/weights across shards.
         let shards_guard = self.shards.read().unwrap();
         let num_shards = shards_guard.len();
-        let shard_urls: Vec<String> = shards_guard.iter().map(|s| s.config.url.clone()).collect();
         let mut shard_eids: Vec<Vec<u32>> = vec![Vec::new(); num_shards];
         let mut shard_ewts: Vec<Vec<f32>> = vec![Vec::new(); num_shards];
         for (&eid, &w) in expert_indices.iter().zip(expert_weights.iter()) {
@@ -405,98 +373,55 @@ impl RemoteMoeBackend {
             shard_ewts[si].push(w);
         }
         drop(shards_guard);
-        let active_stream_indices: Vec<usize> = shard_eids
-            .iter()
-            .enumerate()
-            .filter_map(|(si, ids)| (!ids.is_empty()).then_some(si))
-            .collect();
-        if metrics::enabled() {
-            for (si, url) in shard_urls.iter().enumerate() {
-                if shard_eids[si].is_empty() {
-                    metrics::record_skip(url);
-                }
-            }
-        }
-        if active_stream_indices.is_empty() {
-            return Ok(InflightMoe {
-                layer,
-                hidden,
-                active_stream_indices,
-                post_experts_norm: router.post_experts_norm.to_vec(),
-                norm_offset,
-                eps,
-            });
-        }
-        if active_stream_indices.iter().any(|&si| si >= streams.len()) {
-            return Err(RemoteMoeError::BadResponse(format!(
-                "stream map has {} streams for {num_shards} shards",
-                streams.len()
-            )));
-        }
 
         // 4. Fire one input per stream in parallel.
         //
         // Each fire is `tokio::sync::mpsc::UnboundedSender::send` (non-blocking
         // channel push, ~1µs) plus building the `ExpertLayerInput` struct,
-        // which clones `residual_bytes` (~hidden × 4 = 11 KB) per shard.
-        // Rayon's thread pool is already initialised across the inference path
-        // and amortises scheduling to single-µs overhead per task, so parallel
-        // fire wins even at N=2 and scales linearly with shard count.
+        // which clones `residual_bytes` (~hidden × 4 = 11 KB) and
+        // `post_norm_bytes` per shard. With N shards the per-token clone work
+        // is N × ~5µs; scaling to 8+ shards (Kimi K2.6 / DeepSeek V4 grids)
+        // makes that ~3–10ms per token in serial. Rayon's thread pool is
+        // already initialised across the inference path and amortises
+        // scheduling to single-µs overhead per task, so parallel fire wins
+        // even at N=2 and scales linearly with shard count.
         //
         // Single-shard fast path skips the rayon overhead — same shape as
         // the parallel-collect path.
-        let shard_timing = metrics::shard_timing_enabled();
-        let layer_start = std::time::Instant::now();
-        if active_stream_indices.len() == 1 {
-            let si = active_stream_indices[0];
+        if streams.len() == 1 {
             let input = larql_router_protocol::ExpertLayerInput {
                 layer: layer as u32,
-                expert_ids: shard_eids[si].clone(),
-                expert_weights: shard_ewts[si].clone(),
+                expert_ids: shard_eids[0].clone(),
+                expert_weights: shard_ewts[0].clone(),
                 residual: residual_bytes.clone(),
-                post_experts_norm: Vec::new(),
+                post_experts_norm: post_norm_bytes.clone(),
                 norm_offset,
                 eps,
             };
-            if shard_timing {
-                let issue_us = layer_start.elapsed().as_secs_f64() * 1e6;
-                eprintln!(
-                    "[moe-shard-timing] transport=grpc layer={layer} shard={} K={} fire_us={issue_us:.0}",
-                    shard_urls[si],
-                    shard_eids[si].len(),
-                );
-            }
-            streams[si].fire(input)?;
+            streams[0].fire(input)?;
         } else {
             let residual_ref: &[u8] = &residual_bytes;
-            active_stream_indices
-                .par_iter()
-                .try_for_each(|&si| -> Result<(), RemoteMoeError> {
-                    let issue_us = layer_start.elapsed().as_secs_f64() * 1e6;
-                    if shard_timing {
-                        eprintln!(
-                            "[moe-shard-timing] transport=grpc layer={layer} shard={} K={} fire_us={issue_us:.0}",
-                            shard_urls[si],
-                            shard_eids[si].len(),
-                        );
-                    }
+            let post_norm_ref: &[u8] = &post_norm_bytes;
+            streams.par_iter().enumerate().try_for_each(
+                |(si, stream)| -> Result<(), RemoteMoeError> {
                     let input = larql_router_protocol::ExpertLayerInput {
                         layer: layer as u32,
                         expert_ids: shard_eids[si].clone(),
                         expert_weights: shard_ewts[si].clone(),
                         residual: residual_ref.to_vec(),
-                        post_experts_norm: Vec::new(),
+                        post_experts_norm: post_norm_ref.to_vec(),
                         norm_offset,
                         eps,
                     };
-                    streams[si].fire(input)
-                })?;
+                    stream.fire(input)
+                },
+            )?;
         }
 
         Ok(InflightMoe {
             layer,
             hidden,
-            active_stream_indices,
+            active_stream_indices: (0..streams.len()).collect(),
             post_experts_norm: router.post_experts_norm.to_vec(),
             norm_offset,
             eps,
@@ -528,9 +453,9 @@ impl RemoteMoeBackend {
         &self,
         streams: &[ShardStream],
         inflight: InflightMoe,
-    ) -> Result<LayerMoeResult, RemoteMoeError> {
+    ) -> Result<(Vec<f32>, Vec<(f32, f32)>), RemoteMoeError> {
         let InflightMoe {
-            layer,
+            layer: _,
             hidden,
             active_stream_indices,
             post_experts_norm,
@@ -553,29 +478,23 @@ impl RemoteMoeBackend {
         // Single-shard runs hit the `n_streams == 1` shortcut to skip the
         // thread::scope overhead (~50µs/layer) — measurable on a single-shard
         // colocated bench where parallel and sequential are equivalent anyway.
-        let shard_timing = metrics::shard_timing_enabled();
-        let collect_start = std::time::Instant::now();
-        type CollectResult = (usize, f32, Result<(Vec<f32>, f32), RemoteMoeError>);
+        type CollectResult = (f32, Result<(Vec<f32>, f32), RemoteMoeError>);
         let results: Vec<CollectResult> = if n_streams == 1 {
-            let si = active_stream_indices[0];
             let t0 = std::time::Instant::now();
-            let res = streams[si].collect_with_timing();
+            let res = streams[0].collect_with_timing();
             let wall_ms = t0.elapsed().as_secs_f32() * 1000.0;
-            vec![(si, wall_ms, res)]
+            vec![(wall_ms, res)]
         } else {
             std::thread::scope(|s| {
                 let handles: Vec<_> = streams
                     .iter()
-                    .enumerate()
-                    .filter_map(|(si, stream)| {
-                        active_stream_indices.contains(&si).then_some((si, stream))
-                    })
-                    .map(|(si, stream)| {
+                    .take(n_streams)
+                    .map(|stream| {
                         s.spawn(move || -> CollectResult {
                             let t0 = std::time::Instant::now();
                             let res = stream.collect_with_timing();
                             let wall_ms = t0.elapsed().as_secs_f32() * 1000.0;
-                            (si, wall_ms, res)
+                            (wall_ms, res)
                         })
                     })
                     .collect();
@@ -588,16 +507,8 @@ impl RemoteMoeBackend {
 
         let mut out = vec![0.0f32; hidden];
         let mut per_shard: Vec<(f32, f32)> = Vec::with_capacity(n_streams);
-        for (si, wall_ms, res) in results {
+        for (wall_ms, res) in results {
             let (partial, server_compute_ms) = res?;
-            if shard_timing {
-                let done_us = collect_start.elapsed().as_secs_f64() * 1e6;
-                eprintln!(
-                    "[moe-shard-timing] transport=grpc layer={layer} shard_index={si} collect_done_us={done_us:.0} wall_us={:.0} server_compute_us={:.0}",
-                    wall_ms as f64 * 1000.0,
-                    server_compute_ms as f64 * 1000.0,
-                );
-            }
             per_shard.push((wall_ms, server_compute_ms));
             if partial.len() == hidden {
                 for (acc, v) in out.iter_mut().zip(partial.iter()) {
@@ -716,7 +627,7 @@ impl RemoteMoeBackend {
                 // otherwise fall back to f32 residual.
                 // Q8K wire: 4× smaller upload (client pre-quantises h_norm).
                 // Disable with LARQL_DISABLE_Q8K_WIRE=1 for debugging.
-                let q8k_enabled = super::runtime::RemoteMoeRuntime::get().q8k_enabled();
+                let q8k_enabled = std::env::var("LARQL_DISABLE_Q8K_WIRE").is_err();
                 let use_q8k = q8k_enabled
                     && h_norm_per_layer.iter().enumerate().all(|(l, q)| {
                         let has_task = tasks.iter().any(|t| t.layer == l);
@@ -744,14 +655,7 @@ impl RemoteMoeBackend {
                         per_shard
                             .par_iter()
                             .enumerate()
-                            .filter(|(si, t)| {
-                                if t.is_empty() {
-                                    metrics::record_skip(&shards_guard[*si].config.url);
-                                    false
-                                } else {
-                                    true
-                                }
-                            })
+                            .filter(|(_, t)| !t.is_empty())
                             .map(|(si, t)| (si, shards_guard[si].call_multi_layer_batch_q8k(t)))
                             .collect()
                     } else {
@@ -768,14 +672,7 @@ impl RemoteMoeBackend {
                         per_shard
                             .par_iter()
                             .enumerate()
-                            .filter(|(si, t)| {
-                                if t.is_empty() {
-                                    metrics::record_skip(&shards_guard[*si].config.url);
-                                    false
-                                } else {
-                                    true
-                                }
-                            })
+                            .filter(|(_, t)| !t.is_empty())
                             .map(|(si, t)| (si, shards_guard[si].call_multi_layer_batch(t)))
                             .collect()
                     };
@@ -784,7 +681,7 @@ impl RemoteMoeBackend {
                 let t_dispatch = t0.elapsed().as_secs_f64() * 1000.0;
                 let mut h2_per_layer: Vec<Vec<f32>> = vec![vec![0.0f32; hidden]; num_layers];
                 for (_, result) in shard_results {
-                    // Err: partial deployment — contribute zeros.
+                    // partial deployment — Err contributes zeros
                     if let Ok(results) = result {
                         for r in results {
                             if r.h2.len() == hidden {
@@ -796,7 +693,7 @@ impl RemoteMoeBackend {
                     }
                 }
                 let t_accum = t0.elapsed().as_secs_f64() * 1000.0;
-                if super::runtime::RemoteMoeRuntime::get().verbose {
+                if std::env::var("LARQL_VERBOSE").is_ok() {
                     eprintln!(
                         "[predispatch/multi] route={:.1}ms dispatch={:.1}ms accum={:.1}ms  shards={} wire={}",
                         t_route,

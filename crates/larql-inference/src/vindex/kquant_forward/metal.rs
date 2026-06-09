@@ -71,12 +71,32 @@ pub fn predict_kquant_metal(
     let embed_scale = arch.embed_scale();
 
     let mut h_vec: Vec<f32> = Vec::with_capacity(hidden);
+    // Derive attention geometry from layer 0 (all layers share these in the
+    // pre-asymmetric-attention era this helper targets).
+    let l0 = &layers[0];
+    let num_q_heads = l0.num_q_heads;
+    let num_kv_heads = l0.num_kv_heads;
+    let head_dim = l0.head_dim;
+    let q_dim = num_q_heads * head_dim;
+    let kv_dim = num_kv_heads * head_dim;
+    let rope_base = l0.rope_base;
     for &tok in token_ids {
         let row = embed.row(tok as usize);
         let x: Vec<f32> = row.iter().map(|v| v * embed_scale).collect();
 
         let out = backend
-            .decode_token(&layers, &x, hidden, weights.intermediate_size)
+            .decode_token(
+                &layers,
+                &x,
+                hidden,
+                weights.intermediate_size,
+                q_dim,
+                kv_dim,
+                num_q_heads,
+                num_kv_heads,
+                head_dim,
+                rope_base,
+            )
             .expect("backend doesn't support decode_token - need Metal with Q4 kernels");
         h_vec = out;
     }
@@ -164,8 +184,10 @@ pub fn predict_kquant_metal_with_replaced_head_residual_delta(
         );
     }
 
-    // Flat replacement delta: [seq_len × hidden].
-    let delta_flat = replacement_delta.as_slice()?.to_vec();
+    // Replacement delta laid out as [seq_len × head_dim] (or [seq_len ×
+    // hidden] if the caller has already projected). The Metal intervention
+    // hook expects `seq_len * head_dim` f32 values.
+    let delta_flat: Vec<f32> = replacement_delta.iter().copied().collect();
 
     let result = backend.full_pipeline_q4_with_head_replacement(
         &layers,
@@ -261,19 +283,22 @@ pub fn predict_kquant_metal_hidden(
     }
 
     // Use full_pipeline_q4 with per-position RoPE but no intervention.
-    let result = backend.full_pipeline_q4_with_head_replacement(
+    let _ = num_layers;
+    let l0 = &layers[0];
+    let result = backend.full_pipeline_q4(
         &layers,
         &x_all,
         hidden,
         weights.intermediate_size,
+        l0.num_q_heads * l0.head_dim,
+        l0.num_kv_heads * l0.head_dim,
         seq_len,
+        l0.num_q_heads,
+        l0.num_kv_heads,
+        l0.head_dim,
+        l0.rope_base,
         arch.attn_q_norm_key(0).is_some(),
         arch.attn_logit_softcapping().unwrap_or(0.0),
-        // Setting target_layer to num_layers means the hooks never fire
-        // (the condition `l == target_layer` is never true in the layer loop).
-        num_layers,
-        0,
-        &[], // empty delta — hooks will never fire so length doesn't matter
     )?;
 
     Array2::from_shape_vec((seq_len, hidden), result).ok()
@@ -356,7 +381,16 @@ pub fn predict_kquant_metal_capture_pre_wo(
         );
     }
 
+<<<<<<< HEAD:crates/larql-inference/src/vindex/kquant_forward/metal.rs
     backend.full_pipeline_kquant_capture_pre_wo(
+=======
+    // Dispatch the capture hook. The backend stops the forward pass
+    // after capturing the target head's pre-W_O output, so the returned
+    // vec is `[seq_len * head_dim]` rather than the full residual.
+    // Backends without the capture hook return None; the caller falls
+    // back to a CPU oracle path.
+    backend.full_pipeline_q4_capture_pre_wo(
+>>>>>>> ianblenke/main:crates/larql-inference/src/vindex/q4k_forward/metal.rs
         &layers,
         &x_all,
         hidden,

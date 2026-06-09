@@ -126,13 +126,35 @@ Or via the Makefile: `make python-setup | python-build | python-test | python-cl
 - **Substrate-vs-engine split** (ADR-0022): all CPU forward-pass math + attention + KvDispatch/AsyncComputeBackend traits live in `larql-compute`, not `larql-inference`. When adding a new substrate primitive (a kernel, an attention variant, a new norm), put it in `larql-compute` and re-export from `larql-inference` for back-compat. When adding engine-shaped code (a new session type, an FFN routing impl, a layer-graph dispatcher), it stays in `larql-inference`. The rule of thumb: substrate consumes `&dyn larql_compute::KvIndex` + `ModelWeights`; engines consume sessions, tokenizers, gRPC clients, layer_graphs.
 - **VectorIndex is reached through `KvIndex` from substrate.** `larql-compute`'s `KvDispatch` + `AsyncComputeBackend` + `kquant_forward` take `Option<&dyn KvIndex>` parameters. `larql-vindex` impls `KvIndex for VectorIndex` in `kv_index_impl.rs`. Engine callers passing `&VectorIndex` to substrate traits coerce with `.map(|v| v as &dyn larql_compute::KvIndex)`. Don't reach for `larql_vindex::*` from inside `larql-compute` — that's the cycle the trait was created to avoid.
 
+## Spec-first workflow (OpenSpec)
+
+LARQL is spec-driven. The 14-crate workspace is decomposed into
+**44 OpenSpec capabilities** under `openspec/specs/<capability>/spec.md`.
+Every Requirement uses SHALL/MUST language; every Scenario references at
+least one backing test via a `<!-- test: <fqn> -->` HTML comment.
+
+- Authoring rules and the full capability map: [openspec/README.md](openspec/README.md).
+- Initial inventory + design: [openspec/changes/backfill-specs/](openspec/changes/backfill-specs/).
+- Requirement → test traceability matrix: [openspec/coverage/traceability.md](openspec/coverage/traceability.md).
+- Outstanding gaps: [openspec/changes/backfill-specs/gaps-unbacked-scenarios.md](openspec/changes/backfill-specs/gaps-unbacked-scenarios.md) and [gaps-untested-code.md](openspec/changes/backfill-specs/gaps-untested-code.md).
+
+Workflow:
+
+1. Add or change behavior → write a change proposal under `openspec/changes/<id>/`.
+2. Tests for new scenarios live in the same crate as the capability they back.
+3. `make ci` runs fmt/clippy/tests + `make traceability-check` + `openspec validate`.
+4. `make ci-coverage` runs cargo-llvm-cov against per-crate thresholds in `coverage-thresholds.toml` (separate CI job).
+5. After merge, `openspec archive <change>` flips the change into `openspec/specs/`.
+
 ## Where to find things
 
-- LQL language spec: [docs/specs/lql-spec.md](docs/specs/lql-spec.md) (v0.3)
-- Vindex file format: [docs/specs/vindex-format-spec.md](docs/specs/vindex-format-spec.md)
-- Operations + patches: [docs/specs/vindex-operations-spec.md](docs/specs/vindex-operations-spec.md)
-- Ecosystem (HF publish, Vindexfile): [docs/specs/vindex-ecosystem-spec.md](docs/specs/vindex-ecosystem-spec.md)
+Each capability spec already references its own per-crate docs and ADRs. The legacy entrypoints are:
+
+- LQL language spec: [crates/larql-lql/docs/spec.md](crates/larql-lql/docs/spec.md)
+- Vindex file format: [crates/larql-vindex/docs/format-spec.md](crates/larql-vindex/docs/format-spec.md)
+- Operations + patches: [crates/larql-vindex/docs/operations-spec.md](crates/larql-vindex/docs/operations-spec.md)
+- Ecosystem (HF publish, Vindexfile): [crates/larql-vindex/docs/ecosystem-spec.md](crates/larql-vindex/docs/ecosystem-spec.md)
 - Inference engine internals: [docs/inference-engine.md](docs/inference-engine.md), [docs/ffn-graph-layer.md](docs/ffn-graph-layer.md)
-- Trace format (.bin/.bndx/.ctxt): [docs/specs/trace-format-spec.md](docs/specs/trace-format-spec.md), [docs/residual-trace.md](docs/residual-trace.md)
-- Experimental work: `~/chris-source/chris-experiments/` — numbered 01-45, grouped into foundations, compilation, routing, and shannon series
+- Trace format: [crates/larql-inference/docs/trace-format.md](crates/larql-inference/docs/trace-format.md), [docs/specs/trace-format-spec.md](docs/specs/trace-format-spec.md), [docs/residual-trace.md](docs/residual-trace.md)
+- Experimental work: [experiments/](experiments/) — fork's numbered 01-07 series; upstream maintains a separate 01-45 series grouped into foundations, compilation, routing, and shannon
 - Python bindings docs: [crates/larql-python/README.md](crates/larql-python/README.md), [docs/larql-python.md](docs/larql-python.md)

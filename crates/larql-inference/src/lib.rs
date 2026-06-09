@@ -41,19 +41,58 @@
 //! See `examples/mech_interp_demo.rs` for an end-to-end walkthrough on
 //! synthetic weights (no vindex required).
 
+<<<<<<< HEAD
 #[cfg(any(
     target_os = "linux",
     target_os = "freebsd",
     target_os = "macos",
     target_os = "windows"
 ))]
+=======
+#![allow(
+    deprecated,
+    dead_code,
+    private_interfaces,
+    unused_imports,
+    unused_mut,
+    unused_variables,
+    clippy::doc_nested_refdefs,
+    clippy::duplicated_attributes,
+    clippy::blocks_in_conditions,
+    clippy::collapsible_if,
+    clippy::doc_overindented_list_items,
+    clippy::erasing_op,
+    clippy::if_same_then_else,
+    clippy::identity_op,
+    clippy::items_after_test_module,
+    clippy::large_enum_variant,
+    clippy::let_and_return,
+    clippy::manual_find,
+    clippy::map_identity,
+    clippy::needless_borrow,
+    clippy::needless_borrows_for_generic_args,
+    clippy::needless_range_loop,
+    clippy::ptr_arg,
+    clippy::question_mark,
+    clippy::single_char_add_str,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::unnecessary_cast,
+    clippy::useless_vec
+)]
+
+>>>>>>> ianblenke/main
 extern crate blas_src;
 
 pub mod async_compute_backend;
 pub mod attention;
 pub mod capture;
 pub mod chat;
+<<<<<<< HEAD
 pub mod decode_stages;
+=======
+pub mod engines;
+>>>>>>> ianblenke/main
 pub mod error;
 pub mod experts;
 pub mod ffn;
@@ -68,10 +107,34 @@ pub mod model;
 pub mod prompt;
 pub mod residual;
 pub mod residual_diff;
-pub mod test_utils;
+pub mod speculative;
 pub mod tokenizer;
 pub mod trace;
+
+/// Shim that re-exports the engine-level synthetic test fixtures at
+/// `crate::test_utils::*` (and at the public
+/// `larql_inference::test_utils::*` path when the `test-utils`
+/// feature is enabled). The fork's source of truth lives at
+/// `engines::test_utils`; downstream crates' tests (larql-kv,
+/// larql-vindex) reach for `larql_inference::test_utils`, so this
+/// alias keeps them compiling without duplicating the synthetic-
+/// weights factory.
+///
+/// Includes `make_gemma3_test_weights()` and `make_starcoder2_test_weights()`
+/// which exercise the dormant Gemma3 (QK norm + post-norms + GeluTanh) and
+/// StarCoder2 (LayerNorm + non-gated FFN + biases) branches respectively.
+///
+/// Visibility is `pub` when the `test-utils` feature is on so other
+/// crates' `[dev-dependencies] larql-inference = { features =
+/// ["test-utils"] }` declarations resolve. Under `#[cfg(test)]`
+/// alone the module is the crate's own test fixture entry point.
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils {
+    pub use crate::engines::test_utils::*;
+}
+pub mod trie;
 pub mod vindex;
+pub mod walker;
 
 // Re-export dependencies for downstream crates.
 pub use larql_models;
@@ -80,12 +143,17 @@ pub use ndarray;
 pub use safetensors;
 pub use tokenizers;
 
-// Backend re-exports — only the names with external consumers via
-// `larql_inference::*`. Callers wanting other compute types should
-// `use larql_compute::...` directly.
-pub use larql_compute::cpu::ops::moe::{run_single_expert, run_single_expert_with_norm};
+// Backend re-exports (from larql-compute).
+pub use larql_compute::cpu::ops::moe::{
+    cpu_moe_forward, run_single_expert, run_single_expert_with_norm,
+};
+pub use larql_compute::Activation as ComputeActivation;
+pub use larql_compute::CpuBackend;
+pub use larql_compute::MoeLayerWeights;
 pub use larql_compute::QuantFormat;
-pub use larql_compute::{cpu_backend, default_backend, ComputeBackend};
+pub use larql_compute::{
+    cpu_backend, default_backend, dot_proj_gpu, matmul_gpu, ComputeBackend, MatMulOp,
+};
 
 /// CPU backend boxed as `EngineBackend`. Use when you need to construct
 /// a backend that satisfies the `EngineBackend` umbrella (so engines
@@ -167,6 +235,8 @@ pub fn activation_from_arch(
         _ => larql_compute::Activation::Silu,
     }
 }
+#[cfg(feature = "metal")]
+pub use larql_compute::MetalBackend;
 
 // Re-export essentials at crate root.
 pub use async_compute_backend::{
@@ -186,6 +256,7 @@ pub use ffn::{
     RemoteFfnError, RemoteLatencyStats, RemoteMoeBackend, RemoteMoeError, RemoteWalkBackend,
     ShardConfig, SparseFfn, WeightFfn, WirePreference,
 };
+<<<<<<< HEAD
 pub use kv_dispatch::{
     CompressionCodec, EngineBackend, KvDispatch, KvHandle, KvHandleInner, PerLayerDecodeState,
     ResidualHandle, ResidualHandleInner,
@@ -213,13 +284,23 @@ pub use forward::{
     predict_with_router, predict_with_strategy, run_memit, run_memit_with_target_opt,
     trace_forward, trace_forward_full, walk_trace_from_residuals, InferenceWeights, KnnOverride,
     KnnRouteMode, LayerAttentionCapture, MemitFact, MemitResult, PredictResult, TargetDeltaOpts,
+=======
+pub use forward::{
+    apply_knn_override, calibrate_scalar_gains, capture_decoy_residuals,
+    capture_ffn_activation_matrix, capture_residuals, capture_spec_residuals,
+    estimate_ffn_covariance, forward_from_layer, forward_raw_logits, forward_to_layer,
+    full_vocab_probs, full_vocab_probs_batched, generate_cached_constrained, hidden_to_raw_logits,
+    infer_patched, infer_patched_q4k, logit_lens_top1, predict, predict_from_hidden,
+    predict_from_hidden_with_ffn, predict_with_ffn, predict_with_ffn_attention,
+    predict_with_ffn_trace, predict_with_router, predict_with_strategy,
+    run_layer_with_ffn_capturing_h_post_attn, run_layer_with_ffn_capturing_h_post_attn_backend,
+    run_memit, run_memit_with_target_opt, trace_forward, trace_forward_full,
+    trace_forward_with_ffn, walk_trace_from_residuals, InferPatchedResult, InferenceWeights,
+    KnnOverride, LayerAttentionCapture, LayerMode, MemitFact, MemitFactResult, MemitResult,
+    PredictResult, PredictResultWithAttention, PredictResultWithResiduals, RawForward, SpecCapture,
+    TargetDelta, TargetDeltaOpts, TraceResult, KNN_COSINE_THRESHOLD,
+>>>>>>> ianblenke/main
 };
-// Crate-root layer_graph re-exports — kept for any name with external use
-// OR in-crate examples/tests/benches that import via the root. Truly-unused
-// names (no external + no inference example/test usage) dropped 2026-05-09:
-// `GridGenerateResult`, `ChatMLRenderer`, `GemmaRenderer`, `LayerOutput`,
-// `Llama3Renderer`, `PerLayerGraph`, `TurnRenderer`. They remain reachable
-// via `larql_inference::layer_graph::*`.
 pub use layer_graph::{
     build_adaptive_graph,
     detect_template,
@@ -229,7 +310,7 @@ pub use layer_graph::{
     // Expert grid generation
     grid::{
         generate_with_remote_ffn, generate_with_remote_ffn_batch, generate_with_remote_moe,
-        generate_with_remote_moe_batch,
+        generate_with_remote_moe_batch, GridGenerateResult,
     },
     hybrid::predict_hybrid,
     predict_honest,
@@ -239,28 +320,30 @@ pub use layer_graph::{
     predict_with_graph,
     predict_with_graph_vindex_logits,
     trace_with_graph,
-    try_generate,
-    try_generate_streaming,
-    try_generate_with_sampling,
     AttentionCache,
     CachedLayerGraph,
     // Multi-turn chat session
+    ChatMLRenderer,
     ChatSession,
     DenseLayerGraph,
     // Generation building blocks (EOS, detok, sampling)
     Detokenizer,
     EosConfig,
-    GenerateError,
+    GemmaRenderer,
     GenerateResult,
     GuidedWalkLayerGraph,
     // Production
     LayerGraph,
+    LayerOutput,
+    Llama3Renderer,
+    PerLayerGraph,
     PipelinedLayerGraph,
     Sampler,
     SamplingConfig,
     // Analysis/validation
     TemplatePattern,
     TemplateUniverse,
+    TurnRenderer,
     WalkLayerGraph,
 };
 pub use model::{load_model_dir, resolve_model_path, ModelWeights};
@@ -271,6 +354,7 @@ pub use trace::{
     TracePositions, TraceStore, TraceWriter,
 };
 pub use vindex::{
+<<<<<<< HEAD
     generate_kquant_cpu_remote, open_inference_vindex, predict_kquant, FfnL1Cache, WalkFfn,
     WalkFfnConfig,
 };
@@ -411,3 +495,25 @@ mod factory_tests {
         ));
     }
 }
+=======
+    open_inference_vindex, predict_q4k, predict_q4k_full_vocab_probs, FfnL1Cache, WalkFfn,
+    WalkFfnConfig,
+};
+
+// Engine re-exports.
+pub use engines::accuracy::{
+    compare_hidden, cosine_similarity, js_divergence, kl_divergence, mse, softmax, HiddenAccuracy,
+};
+pub use engines::markov_residual::MarkovResidualEngine;
+pub use engines::unlimited_context::UnlimitedContextEngine;
+pub use engines::{EngineInfo, EngineKind, KvEngine};
+
+// Walker re-exports.
+pub use walker::attention_walker::{AttentionLayerResult, AttentionWalker};
+pub use walker::vector_extractor::{
+    ExtractCallbacks, ExtractConfig, ExtractSummary, VectorExtractor,
+};
+pub use walker::weight_walker::{
+    walk_model, LayerResult, LayerStats, WalkCallbacks, WalkConfig, WeightWalker,
+};
+>>>>>>> ianblenke/main

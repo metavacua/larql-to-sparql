@@ -100,6 +100,9 @@ pub mod test_fixtures;
 pub use kv_index::{KvIndex, FFN_COMPONENTS_PER_LAYER};
 pub use per_layer_decode_state::PerLayerDecodeState;
 
+#[cfg(feature = "cuda")]
+pub mod cuda;
+
 // ── Re-exports: pipeline types ──
 
 pub use pipeline::{
@@ -113,8 +116,13 @@ pub use pipeline::{
 // ── Re-exports: backend ──
 
 pub use backend::{
+<<<<<<< HEAD
     dot_proj_gpu, matmul_gpu, Capability, ComputeBackend, DecodeBackend, DecodeStateDump, MatMul,
     MatMulOp, ProfileTimings, QuantMatVec, StateDumpMask,
+=======
+    dot_proj_gpu, matmul_gpu, Capability, ComputeBackend, DecodeBackend, MatMul, MatMulOp,
+    MoeFfnExpert, QuantMatVec,
+>>>>>>> ianblenke/main
 };
 
 /// Bring every backend sub-trait into scope at once.
@@ -150,6 +158,29 @@ pub use cpu::CpuBackend;
 ///         .map(|m| Box::new(m) as Box<dyn ComputeBackend>)
 ///         .unwrap_or_else(|| cpu_backend());
 /// ```
+<<<<<<< HEAD
+=======
+pub fn default_backend() -> Box<dyn ComputeBackend> {
+    #[cfg(all(feature = "metal", target_os = "macos"))]
+    {
+        if let Some(m) = metal::MetalBackend::new() {
+            m.calibrate();
+            return Box::new(m);
+        }
+        eprintln!("[compute] Metal not available, falling back to CPU");
+    }
+    #[cfg(feature = "cuda")]
+    {
+        match cuda::CudaBackend::new() {
+            Ok(c) => return Box::new(c),
+            Err(e) => eprintln!("[compute] CUDA not available ({e}), falling back to CPU"),
+        }
+    }
+    Box::new(cpu::CpuBackend)
+}
+
+/// Create the best available backend with explicit options.
+>>>>>>> ianblenke/main
 ///
 /// [`default_backend`] is a synonym kept for backwards compatibility
 /// with the pre-split callers.

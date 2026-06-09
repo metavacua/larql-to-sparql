@@ -6,14 +6,34 @@ use super::dequant::dequantize_matrix;
 /// Insert one Q4_K/Q6_K vindex layer's attention and dense FFN tensors into
 /// `weights.tensors` as dense f32 matrices.
 ///
-/// This is the shared research/intervention primitive behind Q4K CPU forward
-/// and OV/RD-style experiments. Call [`remove_layer_tensors`] with the returned
-/// keys after the layer has run to keep peak f32 memory bounded.
+/// **Idempotent.** If the layer's attention Q-projection key is already
+/// present in `weights.tensors`, the function assumes the rest of the
+/// layer is cached too and returns an empty key vec without dequantising
+/// anything. This is what turns the per-token "insert → run → remove"
+/// loop in `predict_q4k_hidden_with_cache` into a one-shot cache: drop
+/// the `remove_layer_tensors` calls on the hot path and the second
+/// token's `insert_q4k_layer_tensors` for layer L finds L's tensors
+/// already there and skips the dequant. Memory budget: ~10 GB resident
+/// across all layers for Gemma 3 4B, ~3 GB for 1B — both well within
+/// typical headroom.
+///
+/// Diagnostic / intervention callers that want clean per-layer state
+/// (e.g. `hooks.rs`) continue to pair this with [`remove_layer_tensors`]
+/// after each layer.
 pub fn insert_q4k_layer_tensors(
     weights: &mut ModelWeights,
     index: &VectorIndex,
     layer: usize,
 ) -> Result<Vec<String>, String> {
+    let arch = &*weights.arch;
+    let q_key = arch.attn_q_key(layer);
+    // Cache hit: presence of the Q tensor implies the whole layer was
+    // populated by a previous call. Return empty so a paired
+    // `remove_layer_tensors` (if any) becomes a no-op.
+    if weights.tensors.contains_key(&q_key) {
+        return Ok(Vec::new());
+    }
+
     let attn = index
         .attn_kquant_layer_data(layer)
         .ok_or_else(|| format!("attn Q4K slices missing for layer {layer}"))?;
@@ -21,7 +41,6 @@ pub fn insert_q4k_layer_tensors(
         .interleaved_kquant_layer_data(layer)
         .ok_or_else(|| format!("ffn Q4K slices missing for layer {layer}"))?;
 
-    let arch = &*weights.arch;
     let hidden = weights.hidden_size;
     let num_q = arch.num_q_heads_for_layer(layer);
     let num_kv = arch.num_kv_heads_for_layer(layer);
@@ -30,7 +49,6 @@ pub fn insert_q4k_layer_tensors(
     let kv_dim = num_kv * head_dim;
     let intermediate = index.num_features(layer);
 
-    let q_key = arch.attn_q_key(layer);
     let k_key = arch.attn_k_key(layer);
     let v_key = arch.attn_v_key(layer);
     let o_key = arch.attn_o_key(layer);

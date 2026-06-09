@@ -50,6 +50,10 @@ gpu = ["dep:larql-compute-metal", "larql-inference/gpu"]
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"
+# Re-enable larql-inference's `test_utils` (synthetic Gemma3/StarCoder2
+# fixtures) at the public `larql_inference::test_utils::*` path for
+# this crate's tests, benches, and examples.
+larql-inference = { path = "../larql-inference", features = ["test-utils"] }
 
 [[bench]]
 name = "engine_decode"

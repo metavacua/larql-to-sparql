@@ -109,7 +109,7 @@ impl AttentionWalker {
             let ov = o_h.dot(&v_h);
 
             // transformed = embed @ OV.T -> (vocab, hidden)
-            let transformed = self.weights.embed.dot(&ov.t());
+            let transformed = self.weights.embed.as_array().dot(&ov.t());
 
             // Norms: how much this head amplifies each input (c_in candidate)
             let norms: Vec<f32> = (0..self.weights.vocab_size)

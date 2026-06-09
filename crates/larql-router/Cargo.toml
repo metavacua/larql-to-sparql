@@ -70,3 +70,6 @@ http3 = ["quic", "larql-router-protocol/http3"]
 [[bench]]
 name = "routing"
 harness = false
+
+[lints]
+workspace = true

@@ -82,8 +82,9 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let hidden = config.hidden_size;
+    let embed_arr = weights.embed.as_array();
     let write: Vec<f32> = (0..hidden)
-        .map(|j| weights.embed[[ans_token as usize, j]])
+        .map(|j| embed_arr[[ans_token as usize, j]])
         .collect();
 
     let gate_pattern = detect_ffn_pattern(&weights.tensors, "gate");

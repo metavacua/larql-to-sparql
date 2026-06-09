@@ -7,14 +7,6 @@
 //! All methods default to `None` / no-op; only the GPU backend
 //! implements them today (CPU runs decode through the higher-level
 //! `larql-inference` path, not through `ComputeBackend`).
-//!
-//! All attention geometry (head_dim, num_q_heads, num_kv_heads,
-//! rope_base, sliding_window, etc.) is read per-layer from
-//! `FullPipelineLayer`. The trait surface intentionally does **not**
-//! take scalar geometry parameters — passing them would invite a
-//! single-layer fallback to silently corrupt heterogeneous models
-//! like Gemma 4 31B (50 sliding-attention layers + 10 global-attention
-//! layers, with different head_dim and num_kv_heads on each class).
 
 /// Per-layer state captured during a fused decode step. Engines
 /// (`markov_residual`, `markov_residual_codec`, `turbo_quant`) read
@@ -171,38 +163,74 @@ pub trait DecodeBackend {
         _x: &[f32],
         _hidden: usize,
         _inter: usize,
+        _q_dim: usize,
+        _kv_dim: usize,
         _seq_len: usize,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
         _use_qk_norm: bool,
         _softcap: f32,
     ) -> Option<Vec<f32>> {
         None
     }
 
-    /// Like `full_pipeline_q4` but replaces one attention head's residual
-    /// contribution at `target_layer` with `replacement_delta`.
+    /// Variant of [`Self::full_pipeline_q4`] that replaces head `target_head`
+    /// at `target_layer` with `replacement_delta` (a `[seq_len * head_dim]`
+    /// f32 slice). The kernel zeros that head's pre-W_O output then adds
+    /// the supplied delta in its place, so the rest of the forward pass
+    /// sees the intervened residual.
     ///
-    /// This is the Metal-accelerated path for Mode D head injection used by
-    /// the AHORD CEGIS loop. Default delegates to `full_pipeline_q4` (no
-    /// intervention — callers must fall back to the CPU path if this returns
-    /// `None`).
+    /// Used by the `dev ov_rd` circuit-intervention CLI (eval-program /
+    /// induce-program) to probe head contributions on the GPU.
+    ///
+    /// Default impl returns `None` so backends without the intervention
+    /// hook fall back to the CPU path.
     #[allow(clippy::too_many_arguments)]
     fn full_pipeline_q4_with_head_replacement(
         &self,
-        layers: &[crate::FullPipelineLayer<'_>],
-        x: &[f32],
-        hidden: usize,
-        inter: usize,
-        seq_len: usize,
-        use_qk_norm: bool,
-        softcap: f32,
-        target_layer: usize,
-        target_head: usize,
-        replacement_delta: &[f32],
+        _layers: &[crate::FullPipelineLayer<'_>],
+        _x: &[f32],
+        _hidden: usize,
+        _inter: usize,
+        _seq_len: usize,
+        _use_qk_norm: bool,
+        _softcap: f32,
+        _target_layer: usize,
+        _target_head: usize,
+        _replacement_delta: &[f32],
     ) -> Option<Vec<f32>> {
-        // Default: fall back to full pipeline without intervention.
-        // Metal backend overrides this with the intervention-aware path.
-        let _ = (target_layer, target_head, replacement_delta);
-        self.full_pipeline_q4(layers, x, hidden, inter, seq_len, use_qk_norm, softcap)
+        None
+    }
+
+    /// Variant of [`Self::full_pipeline_q4`] that captures the pre-W_O
+    /// output of head `target_head` at `target_layer` (i.e. the head's
+    /// contribution to the residual stream before the attention output
+    /// projection mixes heads together). After capturing, the dispatcher
+    /// stops short of running the rest of the layers; the returned vec
+    /// is `[seq_len * head_dim]` f32.
+    ///
+    /// Used by the `dev ov_rd` oracle PQ flow to compute residual
+    /// fingerprints from one head's output without paying the cost of
+    /// finishing the forward pass.
+    ///
+    /// Default impl returns `None` so backends without the capture hook
+    /// fall back to the CPU path.
+    #[allow(clippy::too_many_arguments)]
+    fn full_pipeline_q4_capture_pre_wo(
+        &self,
+        _layers: &[crate::FullPipelineLayer<'_>],
+        _x: &[f32],
+        _hidden: usize,
+        _inter: usize,
+        _seq_len: usize,
+        _use_qk_norm: bool,
+        _softcap: f32,
+        _target_layer: usize,
+        _target_head: usize,
+    ) -> Option<Vec<f32>> {
+        None
     }
 
     /// Multi-layer Q4 FFN in one submission: gate → up → GEGLU → down.
@@ -222,11 +250,6 @@ pub trait DecodeBackend {
     }
 
     /// Populate KV cache with prefill K/V data for one layer.
-    ///
-    /// `(num_kv_heads, head_dim)` here are this specific layer's
-    /// geometry — not vestigial scalars. The caller must pass per-layer
-    /// values (e.g. via `arch.num_kv_heads_for_layer(layer)`); a
-    /// uniform-from-layer-0 fallback would corrupt heterogeneous models.
     fn populate_kv_layer(
         &self,
         _layer: usize,
@@ -261,12 +284,19 @@ pub trait DecodeBackend {
     fn preallocate_kv_cache_per_layer(&self, _shapes: &[(usize, usize)], _max_seq: usize) {}
 
     /// Decode one token through all layers with KV cache.
+    #[allow(clippy::too_many_arguments)]
     fn decode_token(
         &self,
         _layers: &[crate::FullPipelineLayer<'_>],
         _x: &[f32],
         _hidden: usize,
         _inter: usize,
+        _q_dim: usize,
+        _kv_dim: usize,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
     ) -> Option<Vec<f32>> {
         None
     }
@@ -320,30 +350,33 @@ pub trait DecodeBackend {
     /// Like `decode_token` but calls `moe_fn(layer, h_post_attn)` for
     /// MoE layers (enables remote expert dispatch). Default delegates
     /// to `decode_token` and ignores the hook.
+    #[allow(clippy::too_many_arguments)]
     fn decode_token_with_moe(
         &self,
         layers: &[crate::FullPipelineLayer<'_>],
         x: &[f32],
         hidden: usize,
         inter: usize,
+        q_dim: usize,
+        kv_dim: usize,
+        num_q_heads: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+        rope_base: f32,
         _moe_fn: &mut dyn FnMut(usize, &[f32]) -> Vec<f32>,
     ) -> Option<Vec<f32>> {
-        self.decode_token(layers, x, hidden, inter)
-    }
-
-    /// Decode one token while dispatching Q4_K per-layer expert tensors on
-    /// the backend. The expert callback returns borrowed `(gate_up, down)`
-    /// byte slices for the requested `(layer, expert)` pair.
-    fn decode_token_q4k_moe<'w>(
-        &self,
-        _layers: &[crate::FullPipelineLayer<'_>],
-        _x: &[f32],
-        _hidden: usize,
-        _inter: usize,
-        _norm_eps: f32,
-        _get_expert: &dyn Fn(usize, usize) -> Option<(&'w [u8], &'w [u8])>,
-    ) -> Option<Vec<f32>> {
-        None
+        self.decode_token(
+            layers,
+            x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            num_q_heads,
+            num_kv_heads,
+            head_dim,
+            rope_base,
+        )
     }
 
     /// Split fire / collect variant of `decode_token_with_moe`.  At each MoE
@@ -356,12 +389,19 @@ pub trait DecodeBackend {
     /// Default impl combines the two callbacks into a single synchronous
     /// closure and forwards to `decode_token_with_moe` — backends that don't
     /// support encoder splitting see no behaviour change.
+    #[allow(clippy::too_many_arguments)]
     fn decode_token_with_moe_split(
         &self,
         layers: &[crate::FullPipelineLayer<'_>],
         x: &[f32],
         hidden: usize,
         inter: usize,
+        q_dim: usize,
+        kv_dim: usize,
+        num_q_heads: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+        rope_base: f32,
         moe_fire_fn: &mut dyn FnMut(usize, &[f32]),
         moe_collect_fn: &mut dyn FnMut(usize) -> Vec<f32>,
     ) -> Option<Vec<f32>> {
@@ -370,21 +410,224 @@ pub trait DecodeBackend {
             moe_fire_fn(layer, h);
             moe_collect_fn(layer)
         };
-        self.decode_token_with_moe(layers, x, hidden, inter, &mut combined)
+        self.decode_token_with_moe(
+            layers,
+            x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            num_q_heads,
+            num_kv_heads,
+            head_dim,
+            rope_base,
+            &mut combined,
+        )
     }
 
     /// Like `decode_token` but splits each layer into attn / gate+up /
     /// down command buffers and times each. Returns `(result, attn_ms,
     /// gate_up_ms, down_ms)`. Default delegates to `decode_token` with
     /// zero timings.
+    #[allow(clippy::too_many_arguments)]
     fn decode_token_split_profile(
         &self,
         layers: &[crate::FullPipelineLayer<'_>],
         x: &[f32],
         hidden: usize,
         inter: usize,
+        q_dim: usize,
+        kv_dim: usize,
+        num_q_heads: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+        rope_base: f32,
     ) -> (Option<Vec<f32>>, f64, f64, f64) {
-        (self.decode_token(layers, x, hidden, inter), 0.0, 0.0, 0.0)
+        (
+            self.decode_token(
+                layers,
+                x,
+                hidden,
+                inter,
+                q_dim,
+                kv_dim,
+                num_q_heads,
+                num_kv_heads,
+                head_dim,
+                rope_base,
+            ),
+            0.0,
+            0.0,
+            0.0,
+        )
+    }
+
+    /// Speculative-decode forward: process `x_per_token.len()` tokens
+    /// through all layers with KV cache, returning the per-position
+    /// hidden state for each.
+    ///
+    /// **Cache semantics**: this method advances the KV cache during
+    /// processing then RESTORES it to its pre-call length. The
+    /// caller (typically `larql_inference::speculative`) explores N
+    /// candidate tokens without committing them; on acceptance, the
+    /// caller separately calls `decode_token` for each accepted
+    /// token to commit it permanently to the cache.
+    ///
+    /// Returns `Some(hiddens)` on success — `hiddens.len() ==
+    /// x_per_token.len()`, with `hiddens[k]` the `[hidden]`-shaped
+    /// output of the target's forward pass after consuming
+    /// `x_per_token[..=k]`. Returns `None` if any per-token
+    /// `decode_token` call fails (cache state restored regardless).
+    ///
+    /// **Default impl**: sequential `decode_token` calls + cache
+    /// rollback via `truncate_kv_cache`. Backends with batched
+    /// kernels (`cuda::q4k_batched` + `cuda::attn_tree`) MAY
+    /// override for the perf win — phase 4c task C.2 implements
+    /// this for `CudaBackend`.
+    #[allow(clippy::too_many_arguments)]
+    fn decode_tokens_speculative(
+        &self,
+        layers: &[crate::FullPipelineLayer<'_>],
+        x_per_token: &[Vec<f32>],
+        hidden: usize,
+        inter: usize,
+        q_dim: usize,
+        kv_dim: usize,
+        num_q_heads: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+        rope_base: f32,
+    ) -> Option<Vec<Vec<f32>>> {
+        if !self.has_kv_cache() {
+            return None;
+        }
+        let pre_len = self.kv_cache_len();
+        let mut hiddens: Vec<Vec<f32>> = Vec::with_capacity(x_per_token.len());
+        for x in x_per_token {
+            match self.decode_token(
+                layers,
+                x,
+                hidden,
+                inter,
+                q_dim,
+                kv_dim,
+                num_q_heads,
+                num_kv_heads,
+                head_dim,
+                rope_base,
+            ) {
+                Some(h) => hiddens.push(h),
+                None => {
+                    // Restore cache before bailing.
+                    self.truncate_kv_cache(pre_len);
+                    return None;
+                }
+            }
+        }
+        self.truncate_kv_cache(pre_len);
+        Some(hiddens)
+    }
+
+    /// `cuda-spec-branching-tree` T3.2: tree-shaped variant of
+    /// [`Self::decode_tokens_speculative_keep_cache`]. Processes a
+    /// branching draft tree in one batched forward, masking attention
+    /// per-node so siblings don't leak.
+    ///
+    /// `ancestors[n]` SHALL be the u64 bitset for node `n` (per
+    /// `DraftTree::ancestor_bitsets()`). `ancestors.len() ==
+    /// x_per_node.len() <= 64`.
+    ///
+    /// On `None` (backend lacks tree-mask kernel, or tree size
+    /// exceeds the kernel's cap), the caller SHALL fall back to the
+    /// per-node `decode_token` path. Cache is restored to `pre_len`
+    /// on any error.
+    ///
+    /// Default impl returns `None` so backends without the tree-mask
+    /// kernel route to the conservative per-node fallback.
+    #[allow(clippy::too_many_arguments)]
+    fn decode_tokens_speculative_tree_keep_cache(
+        &self,
+        _layers: &[crate::FullPipelineLayer<'_>],
+        _x_per_node: &[Vec<f32>],
+        _ancestors: &[u64],
+        _hidden: usize,
+        _inter: usize,
+        _q_dim: usize,
+        _kv_dim: usize,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
+    ) -> Option<Vec<Vec<f32>>> {
+        None
+    }
+
+    /// Variant of [`Self::decode_tokens_speculative`] that does NOT
+    /// truncate the KV cache on success — the cache is left advanced
+    /// by `x_per_token.len()` positions. The CALLER is responsible for
+    /// truncating to the desired position (typically `pre_len + R`
+    /// where R is the number of accepted tokens after `verify_tree`)
+    /// and re-decoding the bonus token at position `pre_len + R`.
+    ///
+    /// **Why this exists** (phase 4c skip-redundant-commit): the
+    /// previous flow ran the helper, truncated cache back to pre_len,
+    /// then re-decoded ALL R+1 emitted tokens to commit them. The
+    /// first R of those re-decodes were redundant — the helper had
+    /// just decoded the same R tokens (drafts[0..R-1]). With this
+    /// keep-cache variant, the helper's chain decode commits drafts
+    /// to cache; the caller then truncates to drop drafts[R..N-1]
+    /// and re-decodes only the bonus (which is a resampled token,
+    /// not equal to drafts[R]).
+    ///
+    /// On error, cache IS restored to pre_len (matches the truncate
+    /// variant's error semantics).
+    ///
+    /// Returns `Some(hiddens)` with `hiddens[k]` = post-token-k hidden,
+    /// same shape as [`Self::decode_tokens_speculative`].
+    #[allow(clippy::too_many_arguments)]
+    fn decode_tokens_speculative_keep_cache(
+        &self,
+        layers: &[crate::FullPipelineLayer<'_>],
+        x_per_token: &[Vec<f32>],
+        hidden: usize,
+        inter: usize,
+        q_dim: usize,
+        kv_dim: usize,
+        num_q_heads: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+        rope_base: f32,
+    ) -> Option<Vec<Vec<f32>>> {
+        if !self.has_kv_cache() {
+            return None;
+        }
+        let pre_len = self.kv_cache_len();
+        let mut hiddens: Vec<Vec<f32>> = Vec::with_capacity(x_per_token.len());
+        for x in x_per_token {
+            match self.decode_token(
+                layers,
+                x,
+                hidden,
+                inter,
+                q_dim,
+                kv_dim,
+                num_q_heads,
+                num_kv_heads,
+                head_dim,
+                rope_base,
+            ) {
+                Some(h) => hiddens.push(h),
+                None => {
+                    // Restore cache before bailing — same as the
+                    // truncate variant's error semantics so callers
+                    // don't have to handle a partial-advance state.
+                    self.truncate_kv_cache(pre_len);
+                    return None;
+                }
+            }
+        }
+        // NO truncate on success — cache is left at pre_len + n.
+        Some(hiddens)
     }
 
     /// Multi-position prefill with KV-cache population. Stores
@@ -397,12 +640,19 @@ pub trait DecodeBackend {
         _x: &[f32],
         _hidden: usize,
         _inter: usize,
+        _q_dim: usize,
+        _kv_dim: usize,
         _seq_len: usize,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
         _use_qk_norm: bool,
         _softcap: f32,
     ) -> Option<Vec<f32>> {
         None
     }
+<<<<<<< HEAD
 
     /// Capture the target head's pre-W_O output at `target_layer` via GPU,
     /// then stop. Returns `[seq_len × head_dim]` f32 — the raw attention output
@@ -449,11 +699,14 @@ pub trait DecodeBackend {
         let _ = (target_layer, target_head, replacement_delta);
         self.prefill_kquant(layers, x, hidden, inter, seq_len, use_qk_norm, softcap)
     }
+=======
+>>>>>>> ianblenke/main
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+<<<<<<< HEAD
 
     #[test]
     fn profile_total_ms_sums_buckets() {
@@ -720,5 +973,44 @@ mod tests {
         );
         // Default delegates to `prefill_kquant` (None).
         assert!(r.is_none());
+=======
+    use crate::cpu::CpuBackend;
+
+    #[test]
+    fn cpu_full_pipeline_q4_with_head_replacement_returns_none() {
+        // CPU has no GPU intervention hook — default impl returns None,
+        // so callers fall back to a CPU intervention path implemented at
+        // the larql-inference layer.
+        let backend = CpuBackend;
+        let layers: Vec<crate::FullPipelineLayer<'_>> = Vec::new();
+        let out = backend.full_pipeline_q4_with_head_replacement(
+            &layers,
+            &[],
+            16,
+            32,
+            1,
+            false,
+            0.0,
+            0,
+            0,
+            &[],
+        );
+        assert!(
+            out.is_none(),
+            "CPU backend must NOT support head replacement"
+        );
+    }
+
+    #[test]
+    fn cpu_full_pipeline_q4_capture_pre_wo_returns_none() {
+        let backend = CpuBackend;
+        let layers: Vec<crate::FullPipelineLayer<'_>> = Vec::new();
+        let out =
+            backend.full_pipeline_q4_capture_pre_wo(&layers, &[], 16, 32, 1, false, 0.0, 0, 0);
+        assert!(
+            out.is_none(),
+            "CPU backend must NOT support pre-W_O capture"
+        );
+>>>>>>> ianblenke/main
     }
 }

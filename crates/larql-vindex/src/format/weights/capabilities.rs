@@ -6,6 +6,8 @@ pub(super) const SURFACE_Q4K_WEIGHT_WRITER: &str = "q4k weight writer";
 pub(crate) const SURFACE_EXTRACT_PIPELINE: &str = "extract pipeline";
 
 const FEATURE_MLA: &str = "multi-head latent attention (MLA)";
+const FEATURE_DSV4: &str =
+    "DeepSeek-V4 compressed/latent attention (low-rank Q/KV, grouped O, HCA/indexer/mHC)";
 
 /// Ensure the current vindex weight layout can represent this architecture's
 /// attention tensors.
@@ -13,6 +15,7 @@ const FEATURE_MLA: &str = "multi-head latent attention (MLA)";
 /// The existing f32 and Q4K manifests store standard decoder attention as
 /// Q/K/V/O tensors. Architectures such as DeepSeek MLA expose a different
 /// tensor contract (`mla_*`) and must be implemented explicitly before the
+<<<<<<< HEAD
 /// writer accepts them.
 ///
 /// As of #96, the f32 writer absorbs MLA Q_a/Q_b/KV_a/KV_b into standard
@@ -21,6 +24,12 @@ const FEATURE_MLA: &str = "multi-head latent attention (MLA)";
 /// In that case MLA is accepted because the absorbed output is a standard
 /// Q/K/V/O manifest. MLA architectures without complete geometry still
 /// fail here — there's no defensible default split for `qk_head_dim`.
+=======
+/// writer accepts them. DeepSeek-V4 is a distinct case: it is not classic
+/// MLA, but its low-rank/latent/grouped attention (+ HCA/indexer/mHC) is
+/// likewise unrepresentable by the standard writers, so it is gated here
+/// until the dedicated DSv4 extraction path lands (`dsv4-vindex-extraction`).
+>>>>>>> ianblenke/main
 pub(super) fn ensure_standard_attention_supported(
     arch: &dyn larql_models::ModelArchitecture,
     surface: &'static str,
@@ -40,6 +49,14 @@ pub(super) fn ensure_standard_attention_supported(
                 surface: surface.into(),
             });
         }
+    }
+
+    if arch.uses_dsv4_attention() {
+        return Err(VindexError::UnsupportedArchitecture {
+            family: arch.family().to_string(),
+            feature: FEATURE_DSV4.into(),
+            surface: surface.into(),
+        });
     }
 
     Ok(())
@@ -208,15 +225,65 @@ mod tests {
         );
     }
 
+<<<<<<< HEAD
     #[test]
     fn mla_with_full_geometry_is_accepted_so_absorption_can_run() {
         assert!(
             ensure_standard_attention_supported(&*mla_arch_with_geometry(), TEST_SURFACE).is_ok(),
             "MLA with full geometry must be accepted (post-#96 absorption path)"
+=======
+    // ── DeepSeek-V4 (dsv4-vindex-extraction V0) ──
+    // DSv4 is not classic MLA, but its low-rank/latent/grouped attention
+    // (+ HCA/indexer/mHC) is likewise unrepresentable by the standard
+    // writers, so it is gated here (distinct from the MLA reject) until
+    // the dedicated DSv4 extraction path lands.
+
+    const MODEL_TYPE_DEEPSEEK_V4: &str = "deepseek_v4";
+
+    fn dsv4_arch() -> Box<dyn larql_models::ModelArchitecture> {
+        // No kv_lora_rank → detect routes by model_type to DSv4, not V2/V3.
+        larql_models::detect_from_json(&serde_json::json!({
+            "model_type": MODEL_TYPE_DEEPSEEK_V4,
+            "hidden_size": HIDDEN_SIZE_TEST,
+            "intermediate_size": INTERMEDIATE_SIZE_TEST,
+            "num_hidden_layers": NUM_LAYERS_TEST,
+            "num_attention_heads": NUM_ATTENTION_HEADS_TEST,
+            "num_key_value_heads": NUM_KV_HEADS_TEST,
+            "head_dim": HEAD_DIM_TEST
+        }))
+    }
+
+    #[test]
+    fn dsv4_is_recognized_as_its_own_attention() {
+        let arch = dsv4_arch();
+        assert_eq!(arch.family(), "deepseek_v4");
+        assert!(
+            arch.uses_dsv4_attention(),
+            "detect must map deepseek_v4 to the DSv4 attention case"
+        );
+        assert!(!arch.uses_mla(), "DSv4 is not flagged as classic MLA");
+    }
+
+    #[test]
+    fn dsv4_rejected_with_distinct_feature() {
+        let arch = dsv4_arch();
+        let err = ensure_standard_attention_supported(&*arch, TEST_Q4K_SURFACE)
+            .expect_err("DSv4 must not be accepted by the standard Q/K/V/O writers");
+        let msg = err.to_string();
+        assert!(msg.contains("deepseek_v4"), "{msg}");
+        assert!(
+            msg.contains("DeepSeek-V4"),
+            "DSv4 feature message expected: {msg}"
+        );
+        assert!(
+            !msg.contains(FEATURE_MLA),
+            "DSv4 reject must be distinct from the MLA reject: {msg}"
+>>>>>>> ianblenke/main
         );
     }
 
     #[test]
+<<<<<<< HEAD
     fn shared_gate_passes_mla_with_geometry_for_q4k_surface() {
         assert!(
             ensure_standard_attention_supported(&*mla_arch_with_geometry(), TEST_Q4K_SURFACE)
@@ -238,6 +305,20 @@ mod tests {
         assert!(
             ensure_extract_level_supported(&*mla_arch_with_geometry(), ExtractLevel::All).is_ok(),
             "All-level extract should also accept MLA when geometry is complete"
+=======
+    fn extract_level_attention_rejects_dsv4() {
+        let err = ensure_extract_level_supported(&*dsv4_arch(), ExtractLevel::Attention)
+            .expect_err("Attention-level extract must reject DSv4 until its path lands");
+        assert!(err.to_string().contains(SURFACE_EXTRACT_PIPELINE));
+    }
+
+    #[test]
+    fn extract_level_browse_passes_for_dsv4() {
+        // Browse emits no attention — DSv4 must pass here, like MLA does.
+        assert!(
+            ensure_extract_level_supported(&*dsv4_arch(), ExtractLevel::Browse).is_ok(),
+            "Browse-level extract should accept DSv4"
+>>>>>>> ianblenke/main
         );
     }
 }

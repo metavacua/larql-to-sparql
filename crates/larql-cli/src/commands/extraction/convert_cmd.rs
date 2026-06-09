@@ -24,9 +24,45 @@ enum ConvertCommand {
         #[arg(long, default_value = "browse")]
         level: String,
 
-        /// Store in f16 (half precision).
+        /// Store in f16 (half precision). Default if `--quant` not set.
         #[arg(long)]
         f16: bool,
+
+        /// Storage quant format for inference weights. `f16` (default) emits
+        /// the dequantised half-precision weight files (`attn_weights.bin`,
+        /// `up_weights.bin`, `down_weights.bin`, `lm_head.bin`). `q4k` adds
+        /// the Q4_K_M fast-decode artefacts (`interleaved_q4k.bin`,
+        /// `attn_weights_q4k.bin`, `lm_head_q4.bin`) and strips the
+        /// redundant f16 weight files so the production decode path reads
+        /// the Q4_K layer directly. Requires `--level inference` or `--level
+        /// all` so the writer has weights to quantise. Internally still
+        /// roundtrips through f32 — true bitwise passthrough of GGUF Q4_K
+        /// blocks is a follow-up perf win.
+        #[arg(long, default_value = "f16", value_parser = ["f16", "q4k"])]
+        quant: String,
+    },
+
+    /// Convert a DeepSeek-V4-Flash GGUF to a (server-conforming) DSv4
+    /// vindex via the dedicated extraction path (`build_dsv4_vindex`).
+    /// Distinct from `gguf-to-vindex` — DSv4's low-rank/latent/grouped
+    /// attention can't go through the generic Q/K/V/O writer. Emits the
+    /// per-blob weight files + `index.json` (VindexConfig) + `embeddings.bin`,
+    /// and copies `--tokenizer` to `tokenizer.json` so larql-server can
+    /// load + serve it.
+    GgufToDsv4Vindex {
+        /// Path to the DeepSeek-V4-Flash `.gguf` file.
+        input: PathBuf,
+
+        /// Output vindex directory.
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Source HuggingFace `tokenizer.json` to copy into the vindex
+        /// (the GGUF stores tokenizer data as metadata KVs, not an HF
+        /// file, and there's no in-repo converter). Without it the vindex
+        /// has no `tokenizer.json` and the server can't tokenise.
+        #[arg(long)]
+        tokenizer: Option<PathBuf>,
     },
 
     /// Convert a safetensors model to a vindex (alias for extract-index).
@@ -181,7 +217,13 @@ pub fn run(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
             output,
             level,
             f16,
-        } => run_gguf_to_vindex(&input, &output, &level, f16),
+            quant,
+        } => run_gguf_to_vindex(&input, &output, &level, f16, &quant),
+        ConvertCommand::GgufToDsv4Vindex {
+            input,
+            output,
+            tokenizer,
+        } => run_gguf_to_dsv4_vindex(&input, &output, tokenizer.as_deref()),
         ConvertCommand::SafetensorsToVindex {
             input,
             output,
@@ -194,6 +236,74 @@ pub fn run(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
             run_add_feature_major_down(&input, quiet)
         }
     }
+}
+
+fn run_gguf_to_dsv4_vindex(
+    input: &std::path::Path,
+    output: &std::path::Path,
+    tokenizer: Option<&std::path::Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use larql_inference::attention::dsv4_storage_build::DsV4Hyperparams;
+    use larql_inference::attention::dsv4_vindex_build::build_dsv4_vindex;
+
+    eprintln!("Loading GGUF: {}", input.display());
+    let gguf = larql_models::loading::gguf::GgufFile::open(input)?;
+
+    if let Some(arch) = gguf
+        .metadata
+        .get("general.architecture")
+        .and_then(|v| v.as_str())
+    {
+        eprintln!("  Architecture: {arch}");
+        if arch != "deepseek4" && arch != "deepseek_v4" {
+            return Err(format!(
+                "expected a DeepSeek-V4 GGUF (general.architecture deepseek4), got {arch:?}"
+            )
+            .into());
+        }
+    }
+    let model_id = gguf
+        .metadata
+        .get("general.name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("deepseek-v4-flash")
+        .to_string();
+
+    let hp = DsV4Hyperparams::from_gguf(&gguf)
+        .map_err(|e| format!("DsV4Hyperparams::from_gguf: {e}"))?;
+
+    // Derive the layer count from the tensor names (`blk.<N>.*`) — robust
+    // against metadata-key drift.
+    let n_layer = gguf
+        .tensor_infos
+        .iter()
+        .filter_map(|i| {
+            i.name()
+                .strip_prefix("blk.")
+                .and_then(|r| r.split('.').next())
+                .and_then(|d| d.parse::<usize>().ok())
+        })
+        .max()
+        .map(|m| m + 1)
+        .ok_or("no blk.N.* tensors found — not a per-layer GGUF")?;
+
+    if tokenizer.is_none() {
+        eprintln!(
+            "  WARNING: no --tokenizer given; the vindex will have no \
+             tokenizer.json and larql-server won't be able to serve it."
+        );
+    }
+    eprintln!(
+        "  Building DSv4 vindex: {n_layer} layers → {}",
+        output.display()
+    );
+    let manifest = build_dsv4_vindex(&gguf, &hp, n_layer, &model_id, output, tokenizer)
+        .map_err(|e| format!("build_dsv4_vindex: {e}"))?;
+    eprintln!(
+        "  Done: {} layers, model_id={:?}, compress_ratios={:?}",
+        manifest.n_layer, manifest.model_id, manifest.compress_ratios
+    );
+    Ok(())
 }
 
 fn run_add_feature_major_down(
@@ -426,7 +536,15 @@ fn run_gguf_to_vindex(
     output: &std::path::Path,
     level: &str,
     use_f16: bool,
+    quant: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let q4k = matches!(quant, "q4k");
+    if q4k && level == "browse" {
+        return Err(
+            "--quant q4k requires --level inference or --level all (the Q4_K writer needs weights)"
+                .into(),
+        );
+    }
     eprintln!("Loading GGUF: {}", input.display());
 
     let gguf = larql_models::loading::gguf::GgufFile::open(input)?;
@@ -440,12 +558,84 @@ fn run_gguf_to_vindex(
     }
 
     eprintln!("  Loading and dequantizing tensors...");
-    let weights = larql_models::load_gguf(input)?;
+
+    // For MoE models, pre-scan the GGUF tensor list for 3-D packed
+    // expert tensors (`*ffn_{gate,up,down}_exps.weight`) and route them
+    // through the lazy loader — `load_gguf_lazy_tensors` populates
+    // `weights.quant_tensors` with per-expert HF-style aliases (post
+    // #120) over the same Arc mmap, zero copies. The dense
+    // `load_gguf` would skip 3-D tensors entirely (its
+    // `match info.n_dims` only handles 2-D / 1-D), leaving MoE expert
+    // weight files as 0 bytes — the silent-broken-vindex footgun that
+    // PR #119 guarded against with a fail-fast.
+    //
+    // `build_vindex`'s MoE branch now falls back to `quant_tensors`
+    // with on-demand dequant (see `lookup_expert_weight` in
+    // extract/build.rs), so the lazy aliases get consumed correctly
+    // when writing `gate_vectors.bin` / down meta.
+    let gguf_file = larql_models::loading::gguf::GgufFile::open(input)?;
+
+    // Lazy keys: 3-D MoE expert tensors (per-expert HF aliases, post #120)
+    // PLUS 2-D **quantised** tensors so their raw GGUF bytes are preserved
+    // in `quant_tensors` for the Q4_K writer's bit-passthrough fast paths
+    // (PRs #194/#195/#196: re-quantizing imatrix-aware GGUFs through f32
+    // diverges by ~0.1% per element; Unsloth Q4_K_M ships attn / lm_head /
+    // shared experts as Q8_0; Qwen3-Coder-Next ships attn_qkv / ssm_out as
+    // Q5_K — they must round-trip in their source format, NOT get
+    // downquantized to Q4_K).
+    use larql_models::quant::ggml::{TYPE_MXFP4, TYPE_Q4_K, TYPE_Q5_K, TYPE_Q6_K, TYPE_Q8_0};
+    let moe_lazy_keys: std::collections::HashSet<String> = gguf_file
+        .tensor_infos
+        .iter()
+        .filter(|info| {
+            // Exclude the input embed and output (lm_head). They have
+            // special-cased extract paths (`write_embeddings`,
+            // `write_lm_head_q4k`) that assume `weights.embed` /
+            // `weights.lm_head` are populated as dense f32 — the lazy
+            // loader instead steers them into `embed_quant` /
+            // `lm_head_quant` and zeroes the dense field, which makes
+            // the existing writers emit 0-byte files. The passthrough
+            // optimisation only matters for the per-layer matmuls
+            // (attn / deltanet) anyway; vocab-sized embed/lm_head
+            // matmuls are 1-shot per forward, not the per-layer
+            // compounding drift source.
+            let name = info.name();
+            if name == "token_embd.weight" || name == "output.weight" || name == "lm_head.weight" {
+                return false;
+            }
+            (info.dims().len() == 3
+                && (name.ends_with("ffn_gate_exps.weight")
+                    || name.ends_with("ffn_up_exps.weight")
+                    || name.ends_with("ffn_down_exps.weight")))
+                || (info.dims().len() == 2
+                    && matches!(
+                        info.tensor_type(),
+                        TYPE_Q4_K | TYPE_Q5_K | TYPE_Q6_K | TYPE_Q8_0 | TYPE_MXFP4
+                    ))
+        })
+        .map(|info| larql_models::loading::gguf::normalize_gguf_key(info.name()))
+        .collect();
+
+    let weights = if !moe_lazy_keys.is_empty() {
+        eprintln!(
+            "  Lazy loader: {} tensors (3-D MoE experts + 2-D Q4_K/Q5_K/Q6_K/Q8_0/MXFP4 matmuls)",
+            moe_lazy_keys.len()
+        );
+        larql_models::loading::gguf::load_gguf_lazy_tensors(input, &moe_lazy_keys)?
+    } else {
+        larql_models::load_gguf(input)?
+    };
 
     eprintln!(
         "  {} layers, hidden_size={}, intermediate_size={}, vocab_size={}",
         weights.num_layers, weights.hidden_size, weights.intermediate_size, weights.vocab_size
     );
+
+    // Hybrid SSM/DeltaNet arches (Qwen 3.6 dense + MoE) now flow through
+    // `write_q4k::deltanet` (matmul tensors), `write_q4k::norms`
+    // (ssm_norm/dt/a/conv1d), and `write_q4k::moe_layers` (PerExpert MoE
+    // layout). The earlier fast-fail guard at this point was removed in
+    // change `vindex-qwen35moe-extraction`.
 
     let extract_level = match level {
         "inference" => larql_vindex::ExtractLevel::Inference,
@@ -493,6 +683,47 @@ fn run_gguf_to_vindex(
         dtype,
         &mut callbacks,
     )?;
+
+    // --quant q4k: overlay the Q4_K fast-decode artefacts and drop the
+    // now-redundant f16 weight files. The Q4_K writer reads from the
+    // same in-memory `ModelWeights` (no separate vindex_to_q4k step)
+    // and patches `index.json` to `quant=Q4K`. Production decode then
+    // reads `interleaved_q4k.bin` / `attn_weights_q4k.bin` / `lm_head_q4.bin`
+    // instead of the f16 forms. Internally this still roundtrips
+    // GGUF Q4_K → f32 → Q4_K; true bitwise passthrough is a follow-up.
+    if q4k {
+        eprintln!("  Writing Q4_K weight artefacts...");
+        let q4k_opts = larql_vindex::Q4kWriteOptions::default();
+        larql_vindex::write_model_weights_q4k_with_opts(
+            &weights,
+            output,
+            &mut callbacks,
+            q4k_opts,
+        )?;
+        // The f16 weight files written by build_vindex are now
+        // strictly redundant — the Q4_K writer's manifest supersedes
+        // them and the decode path no longer reads the f16 names when
+        // `index.json::quant == q4k`. Delete the leftovers so the
+        // vindex on disk reflects only the Q4_K layout.
+        for name in [
+            ATTN_WEIGHTS_BIN,
+            UP_WEIGHTS_BIN,
+            DOWN_WEIGHTS_BIN,
+            LM_HEAD_BIN,
+        ] {
+            let p = output.join(name);
+            if p.exists() {
+                if let Err(e) = std::fs::remove_file(&p) {
+                    eprintln!(
+                        "  warning: could not remove redundant f16 file {}: {e}",
+                        p.display()
+                    );
+                }
+            }
+        }
+        eprintln!("  Q4_K artefacts written.");
+    }
+
     // GGUF conversion: HF metadata (tokenizer_config.json etc.) is not
     // packed in the GGUF itself, but if the user kept the HF files next
     // to the `.gguf`, snapshot them. Missing-file case is a no-op.

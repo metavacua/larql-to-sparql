@@ -110,7 +110,7 @@ fn main() {
         .values()
         .map(|v| v.len() * std::mem::size_of::<f32>())
         .sum();
-    let embed_bytes = weights.embed.len() * std::mem::size_of::<f32>();
+    let embed_bytes = weights.embed.nrows() * weights.embed.ncols() * std::mem::size_of::<f32>();
     let lm_head_bytes = weights.lm_head.len() * std::mem::size_of::<f32>();
     let raw_bytes: usize = weights.raw_bytes.values().map(Vec::len).sum();
     let packed_range_bytes: usize = weights

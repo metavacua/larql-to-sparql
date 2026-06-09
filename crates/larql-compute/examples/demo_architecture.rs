@@ -181,9 +181,19 @@ fn main() {
 
         let t = Instant::now();
         let result = backend.full_pipeline_q4(
-            &layers, &x, 2560, 10240, 1,     // seq_len
-            false, // use_qk_norm
-            0.0,   // softcap
+            &layers,
+            &x,
+            2560,                             // hidden
+            10240,                            // inter
+            8 * 128,                          // q_dim  = num_q_heads * head_dim
+            4 * 128,                          // kv_dim = num_kv_heads * head_dim
+            1,                                // seq_len
+            8,                                // num_q_heads
+            4,                                // num_kv_heads
+            128,                              // head_dim
+            larql_compute::ROPE_BASE_DEFAULT, // rope_base
+            false,                            // use_qk_norm
+            0.0,                              // softcap
         );
         println!(
             "   1 layer (attn+FFN): {:.2}ms",

@@ -48,10 +48,111 @@ pub fn q4k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
 
     #[cfg(target_arch = "aarch64")]
     unsafe {
-        Ok(q4k_row_dot_neon(data, x, n_blocks))
+        return Ok(q4k_row_dot_neon(data, x, n_blocks));
     }
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        // SAFETY: runtime check just confirmed AVX2 availability;
+        // input length checks above guarantee data and x are large
+        // enough for the n_blocks super-blocks the kernel walks.
+        return Ok(unsafe { q4k_row_dot_avx2(data, x, n_blocks) });
+    }
+    #[allow(unreachable_code)]
     Ok(q4k_row_dot_scalar(data, x, n_blocks))
+}
+
+/// AVX2 Q4_K row-dot for x86_64. Fully vectorised: dequant happens
+/// in registers (4-bit unpack → u8 → u32 → f32 → fma against scale
+/// and min), then a fused multiply-add against the activation
+/// produces the dot product accumulator. No intermediate stack
+/// buffer. Phase 3 of `qwen35-lazy-quant-matmul`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(dead_code)]
+unsafe fn q4k_row_dot_avx2(data: &[u8], x: &[f32], n_blocks: usize) -> f32 {
+    use std::arch::x86_64::*;
+
+    let mut acc = _mm256_setzero_ps();
+    let lo_mask_u8 = _mm256_set1_epi8(0x0F);
+
+    for sb in 0..n_blocks {
+        let block = &data[sb * 144..(sb + 1) * 144];
+        let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+        let dmin = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
+        let (scales, mins) = unpack_q4k_scales(&block[4..16]);
+        let quants_ptr = block.as_ptr().add(16);
+        let x_base = sb * 256;
+        let x_ptr = x.as_ptr().add(x_base);
+
+        // Process 32 quant bytes per group `g` (covers sub-blocks
+        // sb_lo = 2g and sb_hi = 2g+1, 32 elements each).
+        for g in 0..4 {
+            let sb_lo = 2 * g;
+            let sb_hi = 2 * g + 1;
+            let sc_lo = _mm256_set1_ps(d * scales[sb_lo] as f32);
+            let sc_hi = _mm256_set1_ps(d * scales[sb_hi] as f32);
+            let mn_lo = _mm256_set1_ps(dmin * mins[sb_lo] as f32);
+            let mn_hi = _mm256_set1_ps(dmin * mins[sb_hi] as f32);
+
+            // Load 32 quant bytes (256-bit register).
+            let q4 = _mm256_loadu_si256(quants_ptr.add(g * 32) as *const __m256i);
+            let lo_u8 = _mm256_and_si256(q4, lo_mask_u8);
+            let hi_u8 = _mm256_and_si256(_mm256_srli_epi16(q4, 4), lo_mask_u8);
+
+            // Activation pointers for this group's two sub-blocks.
+            let lo_x0 = x_ptr.add(sb_lo * 32);
+            let hi_x0 = x_ptr.add(sb_hi * 32);
+
+            // Process each 32-byte nibble vector as 4 chunks of 8
+            // bytes, extracted from 128-bit halves without going
+            // through memory.
+            let lo_lo128 = _mm256_castsi256_si128(lo_u8); // bytes 0-15
+            let lo_hi128 = _mm256_extracti128_si256(lo_u8, 1); // bytes 16-31
+            let hi_lo128 = _mm256_castsi256_si128(hi_u8);
+            let hi_hi128 = _mm256_extracti128_si256(hi_u8, 1);
+
+            // Quad of __m128i sources, ordered to match output
+            // positions 0..8, 8..16, 16..24, 24..32 within each
+            // nibble side.
+            let lo_srcs = [
+                lo_lo128,
+                _mm_srli_si128::<8>(lo_lo128),
+                lo_hi128,
+                _mm_srli_si128::<8>(lo_hi128),
+            ];
+            let hi_srcs = [
+                hi_lo128,
+                _mm_srli_si128::<8>(hi_lo128),
+                hi_hi128,
+                _mm_srli_si128::<8>(hi_hi128),
+            ];
+
+            for q in 0..4 {
+                let lo_off = q * 8;
+                // u8 (8 lanes) → u32 (8 lanes) → f32 (8 lanes).
+                let lo_f = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(lo_srcs[q]));
+                let hi_f = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(hi_srcs[q]));
+
+                // dequant = sc * f - mn
+                let lo_dq = _mm256_fmsub_ps(lo_f, sc_lo, mn_lo);
+                let hi_dq = _mm256_fmsub_ps(hi_f, sc_hi, mn_hi);
+
+                // acc += dequant * activation
+                let a_lo = _mm256_loadu_ps(lo_x0.add(lo_off));
+                let a_hi = _mm256_loadu_ps(hi_x0.add(lo_off));
+                acc = _mm256_fmadd_ps(lo_dq, a_lo, acc);
+                acc = _mm256_fmadd_ps(hi_dq, a_hi, acc);
+            }
+        }
+    }
+
+    // Horizontal sum of the 8-lane accumulator → scalar f32.
+    let lo = _mm256_castps256_ps128(acc);
+    let hi = _mm256_extractf128_ps(acc, 1);
+    let s128 = _mm_add_ps(lo, hi);
+    let s64 = _mm_add_ps(s128, _mm_movehl_ps(s128, s128));
+    let s32 = _mm_add_ss(s64, _mm_shuffle_ps(s64, s64, 0x55));
+    _mm_cvtss_f32(s32)
 }
 
 /// Scalar reference used on non-aarch64 and by tests.

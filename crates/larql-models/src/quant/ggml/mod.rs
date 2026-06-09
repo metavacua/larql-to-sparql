@@ -25,28 +25,76 @@ use super::half::{decode_bf16, decode_f16};
 use crate::detect::ModelError;
 
 pub mod legacy;
+<<<<<<< HEAD
 pub mod q3_k;
 pub mod q4_k;
 pub mod q5_k;
+=======
+pub mod mxfp4;
+pub mod q4_k;
+pub mod q4k_q8k;
+pub mod q5_k;
+pub mod q5k_q8k;
+>>>>>>> ianblenke/main
 pub mod q6_k;
+pub mod q6k_q8k;
+pub mod q8_0_q8k;
 pub mod quantize;
 pub mod tq;
 
+<<<<<<< HEAD
 pub use legacy::{dequantize_q4_0, dequantize_q5_0, dequantize_q5_1};
 pub use q3_k::dequantize_q3_k;
 pub use q4_k::{dequantize_q4_k, q4k_row_dot, q4k_row_scaled_add};
 pub use q5_k::dequantize_q5_k;
+=======
+pub use legacy::{
+    dequantize_q4_0, dequantize_q5_0, dequantize_q5_1, dequantize_q8_0, q8_0_row_dot,
+};
+pub use mxfp4::dequantize_mxfp4;
+pub use q4_k::{dequantize_q4_k, q4k_row_dot, q4k_row_scaled_add};
+pub use q4k_q8k::{q4k_q8k_row_dot, quantize_to_q8_k, Q8_K_BLOCK_BYTES, Q8_K_BLOCK_ELEMS};
+pub use q5_k::dequantize_q5_k;
+pub use q5k_q8k::q5k_q8k_row_dot;
+>>>>>>> ianblenke/main
 pub use q6_k::{dequantize_q6_k, q6k_row_dot, q6k_row_scaled_add};
+pub use q6k_q8k::q6k_q8k_row_dot;
+pub use q8_0_q8k::q8_0_q8k_row_dot;
 pub use quantize::{quantize_q4_0, quantize_q8_0};
 
 // ── Tensor-type IDs (match GGML wire format) ────────────────────────────
+//
+// Values come straight from llama.cpp's `enum ggml_type` in `ggml.h`:
+//
+// ```
+// GGML_TYPE_F32     = 0,
+// GGML_TYPE_F16     = 1,
+// GGML_TYPE_Q4_0    = 2,
+// GGML_TYPE_Q4_1    = 3,
+// // (4, 5) — Q4_2 / Q4_3 deprecated
+// GGML_TYPE_Q5_0    = 6,
+// GGML_TYPE_Q5_1    = 7,
+// GGML_TYPE_Q8_0    = 8,
+// GGML_TYPE_Q8_1    = 9,
+// GGML_TYPE_Q2_K    = 10,
+// GGML_TYPE_Q3_K    = 11,
+// GGML_TYPE_Q4_K    = 12,
+// GGML_TYPE_Q5_K    = 13,
+// GGML_TYPE_Q6_K    = 14,
+// ```
+//
+// (Prior to 2026-05-13 this file had `Q8_0=6, Q5_0=8` — wrong vs the
+//  on-disk format. Hit during F.3 MoE bring-up when Qwen3.6-35B-A3B's
+//  attention/shared-expert tensors come through as the legacy Q8_0
+//  type and started decoding as Q5_0 garbage.)
 pub const TYPE_F32: u32 = 0;
 pub const TYPE_F16: u32 = 1;
 pub const TYPE_Q4_0: u32 = 2;
 pub const TYPE_Q4_1: u32 = 3;
-pub const TYPE_Q8_0: u32 = 6;
-pub const TYPE_Q5_0: u32 = 8;
-pub const TYPE_Q5_1: u32 = 9;
+pub const TYPE_Q5_0: u32 = 6;
+pub const TYPE_Q5_1: u32 = 7;
+pub const TYPE_Q8_0: u32 = 8;
+pub const TYPE_Q8_1: u32 = 9;
 pub const TYPE_Q2_K: u32 = 10;
 pub const TYPE_Q3_K: u32 = 11;
 pub const TYPE_Q4_K: u32 = 12;
@@ -61,6 +109,33 @@ pub const TYPE_TQ2_0: u32 = 35;
 /// scale).  Used by `microsoft/bitnet-b1.58-2B-4T-gguf`.  Per-channel
 /// scale lives in adjacent `*_sub_norm.weight` F32 tensors.
 pub const TYPE_I2_S: u32 = 36;
+
+// Integer index types — used by hash-routing tables (DeepSeek V4
+// `ffn_gate_tid2eid` is I32 `[6, 129280]`, first 3 layers only) and
+// occasional metadata side-channels. The dequantise path returns
+// these unchanged as raw byte slices; no float conversion is
+// meaningful.
+pub const TYPE_I8: u32 = 24;
+pub const TYPE_I16: u32 = 25;
+pub const TYPE_I32: u32 = 26;
+pub const TYPE_I64: u32 = 27;
+
+/// MXFP4 (4-bit microscaling float) — interleaved block format used
+/// by recent GGUF builds (Qwen3-Coder-Next shared experts, GPT-OSS
+/// variants). Each 32-element block is laid out as
+/// `[scale(u8, E8M0), nibbles(16 × u8)]` = 17 bytes per 32 elements.
+/// Distinct from the safetensors MXFP4 layout (separate blocks + scales
+/// tensors) which `quant::mxfp4` already handles.
+pub const TYPE_MXFP4: u32 = 39;
+pub const MXFP4_BLOCK_ELEMS: usize = 32;
+pub const MXFP4_BLOCK_BYTES: usize = 17;
+
+/// True if `tensor_type` is one of the integer-index types
+/// (`I8`/`I16`/`I32`/`I64`). Callers that want to skip non-weight
+/// tensors during load can branch on this.
+pub fn is_integer_type(tensor_type: u32) -> bool {
+    matches!(tensor_type, TYPE_I8 | TYPE_I16 | TYPE_I32 | TYPE_I64)
+}
 
 // ── Block geometry (canonical GGML wire format) ─────────────────────────
 //
@@ -103,12 +178,19 @@ pub const Q4_K_BLOCK_BYTES: usize = 144;
 /// Elements per Q4_K super-block.
 pub const Q4_K_BLOCK_ELEMS: usize = K_QUANT_BLOCK_ELEMS;
 
+<<<<<<< HEAD
 /// Bytes per Q3_K super-block (256 elements): 32 hmask + 64 qs + 12 scales + 2 d.
 pub const Q3_K_BLOCK_BYTES: usize = 110;
 /// Elements per Q3_K super-block.
 pub const Q3_K_BLOCK_ELEMS: usize = K_QUANT_BLOCK_ELEMS;
 
 /// Bytes per Q5_K super-block (256 elements): 2 d + 2 dmin + 12 scales + 32 qh + 128 qs.
+=======
+/// Bytes per Q5_K super-block (256 elements): 2 + 2 + 12 + 32 + 128.
+///
+/// Layout: f16 d (2) + f16 dmin (2) + 12 packed (scale, min) bytes +
+/// 32 high-bit bytes (1 bit per element) + 128 low-nibble bytes.
+>>>>>>> ianblenke/main
 pub const Q5_K_BLOCK_BYTES: usize = 176;
 /// Elements per Q5_K super-block.
 pub const Q5_K_BLOCK_ELEMS: usize = K_QUANT_BLOCK_ELEMS;
@@ -188,6 +270,7 @@ pub fn tensor_data_size(tensor_type: u32, n_elements: usize) -> Result<usize, Mo
         TYPE_Q4_K => Ok(n_elements / K_QUANT_BLOCK_ELEMS * Q4_K_BLOCK_BYTES),
         TYPE_Q5_K => Ok(n_elements / K_QUANT_BLOCK_ELEMS * Q5_K_BLOCK_BYTES),
         TYPE_Q6_K => Ok(n_elements / K_QUANT_BLOCK_ELEMS * Q6_K_BLOCK_BYTES),
+<<<<<<< HEAD
         TYPE_TQ1_0 => Ok(n_elements / K_QUANT_BLOCK_ELEMS * TQ1_0_BLOCK_BYTES),
         TYPE_TQ2_0 => Ok(n_elements / K_QUANT_BLOCK_ELEMS * TQ2_0_BLOCK_BYTES),
         TYPE_I2_S => {
@@ -198,6 +281,13 @@ pub fn tensor_data_size(tensor_type: u32, n_elements: usize) -> Result<usize, Mo
             }
             Ok(n_elements / I2_S_BLOCK_ELEMS)
         }
+=======
+        TYPE_I8 => Ok(n_elements),
+        TYPE_I16 => Ok(n_elements * 2),
+        TYPE_I32 => Ok(n_elements * 4),
+        TYPE_I64 => Ok(n_elements * 8),
+        TYPE_MXFP4 => Ok(n_elements / MXFP4_BLOCK_ELEMS * MXFP4_BLOCK_BYTES),
+>>>>>>> ianblenke/main
         _ => Err(ModelError::Parse(format!(
             "tensor_data_size: unsupported type id {tensor_type}"
         ))),
@@ -224,6 +314,11 @@ pub fn type_name(tensor_type: u32) -> &'static str {
         TYPE_TQ2_0 => "TQ2_0",
         TYPE_I2_S => "I2_S",
         TYPE_BF16 => "BF16",
+        TYPE_MXFP4 => "MXFP4",
+        TYPE_I8 => "I8",
+        TYPE_I16 => "I16",
+        TYPE_I32 => "I32",
+        TYPE_I64 => "I64",
         _ => "unknown",
     }
 }
@@ -264,9 +359,13 @@ pub fn dequantize(
         TYPE_Q4_K => dequantize_q4_k(data, n_elements),
         TYPE_Q5_K => dequantize_q5_k(data, n_elements),
         TYPE_Q6_K => dequantize_q6_k(data, n_elements),
+<<<<<<< HEAD
         TYPE_TQ1_0 => tq::dequantize_tq1_0(data, n_elements),
         TYPE_TQ2_0 => tq::dequantize_tq2_0(data, n_elements),
         TYPE_I2_S => tq::dequantize_i2_s(data, n_elements),
+=======
+        TYPE_MXFP4 => dequantize_mxfp4(data, n_elements),
+>>>>>>> ianblenke/main
         other => Err(ModelError::UnsupportedDtype(format!("GGML type {other}"))),
     }
 }
@@ -447,16 +546,22 @@ mod tests {
 
     #[test]
     fn q5_0_mixed() {
-        // scale=2.0, high_bits=0x00000001 (bit 0 set), quants[0]=0x53
-        // element 0: lo4=3, hi1=bit0=1, combined=3|16=19, value=(19-16)*2=6.0
-        // element 1: lo4=5, hi1=bit1=0, combined=5, value=(5-16)*2=-22.0
+        // Q5_0 layout: 16 byte slots hold two 4-bit lanes each — lo
+        // nibbles emit to output positions [0..16), hi nibbles to
+        // [16..32). They do NOT interleave (lo0, hi0, lo1, hi1, ...);
+        // see the doc on `dequantize_q5_0`.
+        //
+        // scale=2.0, high_bits=0x00000001 (bit 0 set), quants[0]=0x53.
+        // For j=0: lo4=3, hi4=5, lo_hi1=bit0=1, hi_hi1=bit16=0,
+        //         lo_combined=3|16=19 → out[0]  = (19-16)*2 =   6.0
+        //         hi_combined=5       → out[16] = ( 5-16)*2 = -22.0
         let mut block = vec![0x00, 0x40]; // f16 2.0
         block.extend_from_slice(&0x00000001u32.to_le_bytes()); // high bits
         block.push(0x53); // quants[0]: lo=3, hi=5
         block.extend_from_slice(&[0x00; 15]); // rest zero
         let result = dequantize_q5_0(&block, 32).unwrap();
         assert!((result[0] - 6.0).abs() < 0.01);
-        assert!((result[1] - (-22.0)).abs() < 0.01);
+        assert!((result[16] - (-22.0)).abs() < 0.01);
     }
 
     #[test]

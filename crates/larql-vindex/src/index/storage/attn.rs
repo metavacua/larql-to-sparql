@@ -110,7 +110,7 @@ impl VectorIndex {
             // when the field was missing, which silently masked
             // malformed manifests — see ROADMAP P0 "Replace
             // unwrap_or(Q4_K) silent fallbacks".
-            let entries: Vec<(usize, usize, String)> = json
+            let entries: Vec<crate::index::storage::vindex_storage::AttnManifestEntry> = json
                 .iter()
                 .map(|e| {
                     let offset = e["offset"].as_u64().unwrap_or(0) as usize;
@@ -153,7 +153,13 @@ impl VectorIndex {
                             )));
                         }
                     }
-                    Ok((offset, length, tag.to_string()))
+                    Ok(crate::index::storage::vindex_storage::AttnManifestEntry {
+                        key: key.to_string(),
+                        shape,
+                        offset,
+                        length,
+                        format: tag.to_string(),
+                    })
                 })
                 .collect::<Result<Vec<_>, VindexError>>()?;
             Some(entries)
@@ -174,6 +180,22 @@ impl VectorIndex {
         for i in 0..ATTN_TENSORS_PER_LAYER {
             let (view, fmt) = arr[i];
             out[i] = (view.as_slice(), fmt);
+        }
+        Some(out)
+    }
+
+    /// Sparse-manifest variant of [`Self::attn_q4k_layer_data`].
+    /// Returns `(bytes, fmt, shape)` per tensor by key-prefix lookup
+    /// instead of `layer * 4` index arithmetic — required for
+    /// hybrid-attention manifests (qwen35moe) where only some global
+    /// layers carry Q/K/V/O entries.
+    pub fn attn_q4k_sparse_layer_data(&self, layer: usize) -> Option<[(&[u8], &str, &[usize]); 4]> {
+        let arr = self.storage.attn_q4k_sparse_layer_data(layer)?;
+        let mut out: [(&[u8], &str, &[usize]); ATTN_TENSORS_PER_LAYER] =
+            [(&[], "", &[]); ATTN_TENSORS_PER_LAYER];
+        for i in 0..ATTN_TENSORS_PER_LAYER {
+            let (view, fmt, shape) = arr[i];
+            out[i] = (view.as_slice(), fmt, shape);
         }
         Some(out)
     }
@@ -449,9 +471,17 @@ mod tests {
         // storage's pub(crate) manifest field is a test-only pattern
         // (production goes through `set_attn_kquant`).
         let storage = std::sync::Arc::make_mut(&mut idx.storage);
+<<<<<<< HEAD
         let m = storage.attn_kquant_manifest.as_mut().expect("manifest");
         m[2] = (len, 1, "Q4_K".to_string()); // offset = len → end = len + 1 > mmap.len()
         assert!(idx.attn_kquant_layer_data(0).is_none());
+=======
+        let m = storage.attn_q4k_manifest.as_mut().expect("manifest");
+        // offset = len → end = len + 1 > mmap.len()
+        m[2].offset = len;
+        m[2].length = 1;
+        assert!(idx.attn_q4k_layer_data(0).is_none());
+>>>>>>> ianblenke/main
     }
 
     /// `attn_q8_layer_data` must reject a manifest entry where

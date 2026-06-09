@@ -1,0 +1,311 @@
+//! Speculative decoding (`inference-speculative-decoding`).
+//!
+//! Phase 1 scaffolding: trait, config, env-flag dispatch, and the
+//! CPU reference `verify_and_accept` that later phases use as
+//! the parity oracle for the GPU `verify_tree` kernel.
+//!
+//! The full design lives in
+//! [openspec/changes/cuda-speculative-decoding](
+//! ../../../../openspec/changes/cuda-speculative-decoding/proposal.md).
+//!
+//! ## Linear vs branching draft trees
+//!
+//! Drafters propose candidate continuations in two shapes:
+//!
+//! - **Linear chain** (default, `cfg.branches == 1`): the drafter
+//!   returns a depth-N chain via [`Drafter::propose`]. The v3 dispatch
+//!   builds a [`DraftTree`] from the chain ([`build_linear_tree`])
+//!   and verifies via the existing per-position rejection-sampling
+//!   loop.
+//! - **Branching tree** (`cfg.branches > 1`, `cuda-spec-branching-tree`):
+//!   the drafter returns a [`DraftTree`] directly via
+//!   [`Drafter::propose_tree`]. Multiple parallel chains share a
+//!   root token; chains with a common prefix merge into a shared
+//!   subtree. Verifier picks the most-likely root-to-leaf path
+//!   ([`verify_tree`]).
+//!
+//! Activation is gated by `LARQL_SPECULATIVE_DECODE=1`. Any other
+//! value (unset, empty, `0`, anything else) falls through to the
+//! existing non-speculative `decode_token` path bit-exactly.
+//! `LARQL_SPEC_BRANCHES=N` (range 1..=8, default 1) enables branching
+//! when the drafter supports it (e.g. [`PromptLookupDrafter`]).
+//!
+//! The CUDA backend's tree path uses a tree-mask attention kernel
+//! (`fused_prefill_attention_tree_mask_f32`) that filters per-position
+//! attention via a per-node ancestor bitset built from
+//! [`DraftTree::ancestor_bitsets`]. Sibling chains share K/V cache
+//! slots at `base_pos + tree_index` (Strategy A in the design doc);
+//! the mask prevents sibling-branch leakage. Linear-chain inputs
+//! reduce bit-exactly to the existing causal kernel.
+//!
+//! ## Recommended configuration (PLD-friendly workloads)
+//!
+//! Bench results on RTX 4090, Gemma 3 4B Q4_K_M (2026-05-10) — see
+//! `openspec/changes/cuda-spec-branching-tree/design.md` for the full
+//! sweep:
+//!
+//! ```text
+//! LARQL_SPECULATIVE_DECODE=1
+//! LARQL_DRAFTER=prompt_lookup
+//! LARQL_SPEC_DEPTH=4
+//! LARQL_SPEC_BRANCHES=2
+//! ```
+//!
+//! On JSON-structured / RAG / code-completion prompts this yields
+//! ~1.42× FASTER than plain decode. PLD is **workload-specific**:
+//! on chat-style prompts with no prompt-echoing PLD's α drops to 0
+//! and the per-call overhead makes spec slower than plain decode,
+//! so we keep the env var opt-in rather than default-on.
+
+use std::env;
+
+pub mod dispatch;
+pub mod eagle;
+pub mod orchestrator;
+pub mod prompt_lookup;
+pub mod small_model;
+pub mod target_forward;
+pub mod tree;
+pub mod verify;
+pub mod wiring;
+
+pub use dispatch::maybe_speculative_step;
+pub use eagle::EagleDraftHead;
+pub use orchestrator::{build_linear_tree, SpeculativeStep, StepOutcome};
+pub use prompt_lookup::PromptLookupDrafter;
+pub use small_model::SmallModelDrafter;
+pub use target_forward::{
+    target_forward_batched, target_forward_naive, target_forward_via_speculative_decode,
+    target_forward_via_speculative_decode_keep_cache_hiddens,
+    target_forward_via_speculative_decode_keep_cache_with_probs,
+    target_forward_via_speculative_decode_with_probs, target_forward_with_hidden,
+    TargetForwardDims,
+};
+pub use tree::{DraftTree, TreeAttentionMask, TreeNode};
+pub use verify::{verify_and_accept, verify_tree, AcceptedSpan, VerifyRng};
+pub use wiring::{
+    run_naive_step, set_thread_drafter, set_thread_rng, set_thread_spec_config,
+    set_thread_spec_stats, set_thread_target_executor, take_thread_spec_stats,
+    try_thread_speculative_step, try_thread_speculative_step_v2, try_thread_speculative_step_v3,
+    SpecStats, SpeculativeTargetExecutor,
+};
+
+pub type TokenId = u32;
+
+/// Per-step draft proposal: a candidate token plus the draft
+/// model's probability assigned to it. `verify_and_accept` uses
+/// these probabilities for the rejection-sampling rule.
+#[derive(Clone, Debug)]
+pub struct DraftToken {
+    pub id: TokenId,
+    pub p_draft: f32,
+}
+
+/// Caller-supplied draft model. Phase 1 ships [`EagleDraftHead`];
+/// off-the-shelf small-model drafters use [`small_model::SmallModelDrafter`].
+///
+/// Drafter impls fall into two categories:
+///
+/// - **Hidden-state drafters** (e.g. EAGLE) — use `h_target` to propose
+///   conditionally on the target's hidden state. These typically share
+///   the target's tokenizer and live in the same process.
+/// - **Off-the-shelf drafters** — load a separate small model and
+///   maintain their own KV cache + token history. They ignore
+///   `h_target` and rely on `accept()` to keep history in sync with
+///   the target's accepted span.
+pub trait Drafter {
+    /// Propose `n` candidate continuations. Returns at most `n`
+    /// tokens; fewer is allowed (e.g. when constrained by sliding
+    /// window or when the drafter declines).
+    ///
+    /// `h_target` is the target model's last hidden state at the
+    /// current generation position. Hidden-state drafters use this;
+    /// off-the-shelf drafters ignore it.
+    fn propose(&mut self, h_target: &[f32], n: usize) -> Vec<DraftToken>;
+
+    /// Reset any per-sequence draft state (e.g. draft KV cache,
+    /// token history). Called at the start of each new generation.
+    fn reset(&mut self);
+
+    /// Notify the drafter of tokens the target accepted. Off-the-shelf
+    /// drafters use this to advance their internal token history so the
+    /// next `propose()` call sees the right context. Hidden-state
+    /// drafters typically no-op (default impl).
+    fn accept(&mut self, _accepted: &[TokenId]) {}
+
+    /// Seed (or extend) the drafter's history with the canonical
+    /// generation history (= prompt + accepted span so far). Called by
+    /// the v3 dispatch at the top of every iter so the drafter knows
+    /// the canonical context.
+    ///
+    /// Off-the-shelf drafters that maintain their own history use this
+    /// to align with the target's accepted span. Hidden-state drafters
+    /// typically no-op (default impl).
+    ///
+    /// Implementations SHOULD recognize prefix-extension (`tokens` is
+    /// a prefix-extension of the existing history) and append the new
+    /// suffix without resetting any cached state — without this fast
+    /// path every iter would re-prefill, defeating any incremental
+    /// optimization.
+    fn seed_history(&mut self, _tokens: &[TokenId]) {}
+
+    /// Propose a tree of `branches` parallel chains, each up to
+    /// `depth` tokens deep. Returns `None` if the drafter declines
+    /// (= empty `propose`).
+    ///
+    /// The default impl wraps [`Drafter::propose`] into a linear
+    /// chain (1 branch, `depth` tokens). Drafters that can cheaply
+    /// produce alternative continuations (e.g. PLD with multiple
+    /// n-gram matches) override this to return a true branching
+    /// tree. `branches == 1` SHALL produce a tree bit-identical to
+    /// the linear path so existing tests stay green.
+    fn propose_tree(
+        &mut self,
+        h_target: &[f32],
+        depth: usize,
+        _branches: usize,
+    ) -> Option<DraftTree> {
+        let proposals = self.propose(h_target, depth);
+        if proposals.is_empty() {
+            return None;
+        }
+        Some(orchestrator::build_linear_tree(&proposals))
+    }
+}
+
+/// Speculative-decoder configuration. Defaults match design.md
+/// phase 4 starting point: depth=2, branches=2 (5-node tree).
+#[derive(Clone, Copy, Debug)]
+pub struct SpecConfig {
+    pub depth: usize,
+    pub branches: usize,
+    /// Sliding-window upper bound. Per design.md, dispatched depth
+    /// is clamped to `min(depth, swa_window - cache_len)`.
+    pub swa_window: Option<usize>,
+}
+
+impl Default for SpecConfig {
+    fn default() -> Self {
+        Self {
+            depth: 2,
+            branches: 2,
+            swa_window: None,
+        }
+    }
+}
+
+impl SpecConfig {
+    /// Effective depth given the current cache length, after the
+    /// sliding-window clamp. Returns 0 if there is no slack
+    /// remaining — caller SHOULD fall back to non-speculative.
+    pub fn effective_depth(&self, cache_len: usize) -> usize {
+        match self.swa_window {
+            Some(w) => self.depth.min(w.saturating_sub(cache_len)),
+            None => self.depth,
+        }
+    }
+
+    /// Total tree node count given `depth` and `branches`. With
+    /// branches=K and depth=D this is `(K^(D+1) - 1) / (K - 1)`
+    /// for K > 1, or `D + 1` for K = 1. Cap is enforced at 64
+    /// (matches `DecodeScratch::max_tree_nodes` in design.md §2.3).
+    pub fn tree_nodes(&self) -> usize {
+        let nodes = if self.branches <= 1 {
+            self.depth + 1
+        } else {
+            // Geometric sum, plus the implicit root.
+            let mut sum = 1usize;
+            let mut term = 1usize;
+            for _ in 0..self.depth {
+                term = term.saturating_mul(self.branches);
+                sum = sum.saturating_add(term);
+            }
+            sum
+        };
+        nodes.min(64)
+    }
+}
+
+/// Returns true iff `LARQL_SPECULATIVE_DECODE=1`. Any other value
+/// falls through to the legacy path.
+pub fn enabled() -> bool {
+    env::var("LARQL_SPECULATIVE_DECODE")
+        .ok()
+        .as_deref()
+        .map(|v| v == "1")
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `LARQL_SPECULATIVE_DECODE` is process-global, so the four
+    /// {unset, "0", "1", "true"} cases must run sequentially. cargo
+    /// runs unit tests in parallel by default; splitting these into
+    /// separate `#[test]`s previously raced and intermittently
+    /// failed CI ("env_one_enables_spec_path: assertion failed:
+    /// enabled()" — another test's `remove_var` raced with the
+    /// `set_var` here). Consolidated into one test that the cargo
+    /// test runner serialises trivially.
+    #[test]
+    fn env_var_drives_spec_path() {
+        // SAFETY: this is the only test in the crate that mutates
+        // LARQL_SPECULATIVE_DECODE, and it owns the var for its full
+        // body — no race with `enabled()` readers elsewhere.
+        unsafe {
+            env::remove_var("LARQL_SPECULATIVE_DECODE");
+        }
+        assert!(
+            !enabled(),
+            "unset LARQL_SPECULATIVE_DECODE must disable spec path"
+        );
+
+        unsafe {
+            env::set_var("LARQL_SPECULATIVE_DECODE", "0");
+        }
+        assert!(!enabled(), "\"0\" must disable spec path");
+
+        unsafe {
+            env::set_var("LARQL_SPECULATIVE_DECODE", "1");
+        }
+        assert!(enabled(), "\"1\" must enable spec path");
+
+        unsafe {
+            env::set_var("LARQL_SPECULATIVE_DECODE", "true");
+        }
+        assert!(!enabled(), "non-\"1\" string must disable spec path");
+
+        unsafe {
+            env::remove_var("LARQL_SPECULATIVE_DECODE");
+        }
+    }
+
+    #[test]
+    fn effective_depth_clamps_to_swa_remainder() {
+        let cfg = SpecConfig {
+            depth: 4,
+            branches: 2,
+            swa_window: Some(100),
+        };
+        assert_eq!(cfg.effective_depth(99), 1);
+        assert_eq!(cfg.effective_depth(100), 0);
+        assert_eq!(cfg.effective_depth(50), 4);
+    }
+
+    #[test]
+    fn tree_nodes_default_is_seven() {
+        // depth=2, branches=2: 1 (root) + 2 + 4 = 7 nodes
+        assert_eq!(SpecConfig::default().tree_nodes(), 7);
+    }
+
+    #[test]
+    fn tree_nodes_caps_at_64() {
+        let cfg = SpecConfig {
+            depth: 10,
+            branches: 4,
+            swa_window: None,
+        };
+        assert_eq!(cfg.tree_nodes(), 64);
+    }
+}

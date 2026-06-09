@@ -3,7 +3,11 @@ pub mod config;
 pub mod connectors;
 pub mod defaults;
 pub mod detect;
+<<<<<<< HEAD
 pub mod encoders;
+=======
+pub mod embed;
+>>>>>>> ianblenke/main
 pub mod loading;
 pub mod multimodal;
 pub mod quant;
@@ -39,6 +43,7 @@ pub use architectures::llama::LlamaArch;
 pub use architectures::mistral::MistralArch;
 pub use architectures::mixtral::MixtralArch;
 pub use architectures::qwen::QwenArch;
+pub use architectures::qwen35::{Qwen35Arch, Qwen35MoeArch};
 pub use architectures::starcoder2::StarCoder2Arch;
 pub use architectures::tinymodel::TinyModelArch;
 
@@ -50,7 +55,8 @@ pub use vectors::{
 pub use weights::{ModelWeights, WeightArray};
 
 pub use loading::{
-    is_ffn_tensor, load_gguf, load_gguf_validated, load_model_dir, load_model_dir_filtered,
-    load_model_dir_filtered_validated, load_model_dir_validated, load_model_dir_walk_only,
-    load_model_dir_walk_only_validated, resolve_model_path,
+    is_ffn_tensor, load_gguf, load_gguf_lazy_lm_head, load_gguf_lazy_tensors, load_gguf_validated,
+    load_model_dir, load_model_dir_filtered, load_model_dir_filtered_validated,
+    load_model_dir_validated, load_model_dir_walk_only, load_model_dir_walk_only_validated,
+    resolve_model_path,
 };

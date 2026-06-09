@@ -6,6 +6,7 @@
 //! mutation paths live in `crate::index::mutate`.
 
 pub mod attn;
+pub mod deltanet;
 pub mod ffn_store;
 pub mod fp4_store;
 pub mod gate_accessors;

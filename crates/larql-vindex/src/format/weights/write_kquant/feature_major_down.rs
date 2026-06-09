@@ -72,10 +72,21 @@ impl FeatureMajorDownState {
         let bytes = match format {
             QuantBlockFormat::Q6K => quantize_q6_k(&fm_padded),
             QuantBlockFormat::Q4K => quantize_q4_k(&fm_padded),
+<<<<<<< HEAD:crates/larql-vindex/src/format/weights/write_kquant/feature_major_down.rs
             QuantBlockFormat::Other(ref tag) => {
                 return Err(VindexError::Parse(format!(
                     "feature-major-down writer cannot emit format {tag:?}; \
                      add an encode function and a typed variant first"
+=======
+            // feature_major_down only emits Q4_K / Q6_K (the formats
+            // it's called with by the FFN writer). Q5_K / Q8_0 / MXFP4
+            // storage is attn/deltanet-only for now and never reaches
+            // this site.
+            QuantBlockFormat::Q5K | QuantBlockFormat::Q8_0 | QuantBlockFormat::Mxfp4 => {
+                return Err(VindexError::Parse(format!(
+                    "feature_major_down does not yet support {:?} storage",
+                    format,
+>>>>>>> ianblenke/main:crates/larql-vindex/src/format/weights/write_q4k/feature_major_down.rs
                 )));
             }
         };

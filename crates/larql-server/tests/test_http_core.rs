@@ -356,6 +356,8 @@ async fn http_warmup_no_model_returns_404() {
         api_key: None,
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(0),
+        attention_sessions: larql_server::attention_session::AttentionSessionMap::new(600, 256),
+        default_kv_format: None,
     });
     let app = single_model_router(st);
     let resp = post_json(app, "/v1/warmup", serde_json::json!({})).await;

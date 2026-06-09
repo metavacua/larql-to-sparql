@@ -97,7 +97,17 @@ impl TestMoeArch {
                 attention_k_eq_v: false,
                 per_layer_embed_dim: None,
                 num_kv_shared_layers: None,
+<<<<<<< HEAD
                 has_vision_config: false,
+=======
+                full_attention_interval: None,
+                ssm_state_size: None,
+                ssm_inner_size: None,
+                ssm_dt_rank: None,
+                ssm_group_count: None,
+                ssm_conv_kernel: None,
+                rope_dimension_sections: None,
+>>>>>>> ianblenke/main
             },
         }
     }
@@ -248,8 +258,11 @@ fn make_loaded_model(
         packed_mmaps: HashMap::new(),
         skipped_tensors: Vec::new(),
         packed_byte_ranges: HashMap::new(),
-        embed: embed.clone(),
+        embed: larql_models::embed::EmbedMatrix::from_array(embed.clone()),
+        embed_quant: None,
         lm_head: embed,
+        lm_head_quant: None,
+        quant_tensors: HashMap::new(),
         position_embed: None,
         arch: Box::new(TestMoeArch::new()),
         num_layers: 1,
@@ -279,6 +292,7 @@ fn make_loaded_model(
         embed_store: None,
         release_mmap_after_request: false,
         weights: lock,
+        qwen35_weights: std::sync::OnceLock::new(),
         probe_labels: HashMap::new(),
         ffn_l2_cache: FfnL2Cache::new(1),
         layer_latency_tracker: std::sync::Arc::new(
@@ -289,6 +303,9 @@ fn make_loaded_model(
         expert_filter: None,
         unit_filter: None,
         moe_remote: None,
+        tokenizer_cache: std::sync::Arc::new(larql_server::tokenizer_cache::TokenizerCache::new(
+            64, 64,
+        )),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
         metal_backend: std::sync::OnceLock::new(),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
@@ -308,6 +325,8 @@ async fn spawn_server_with_model(model: LoadedModel) -> String {
         api_key: None,
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(60),
+        attention_sessions: larql_server::attention_session::AttentionSessionMap::new(3600, 1024),
+        default_kv_format: None,
     });
 
     let router = single_model_router(state);

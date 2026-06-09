@@ -33,10 +33,12 @@ use super::capabilities::{ensure_standard_attention_supported, SURFACE_Q4K_WEIGH
 use super::write_f32::WeightSource;
 
 mod attn;
+mod deltanet;
 mod ffn;
 mod lm_head;
 mod moe_layers;
 mod norms;
+<<<<<<< HEAD:crates/larql-vindex/src/format/weights/write_kquant/mod.rs
 
 pub mod feature_major_down;
 
@@ -57,8 +59,21 @@ pub mod feature_major_down;
 /// emitting a new format is a deliberate act that needs an encode
 /// function + user-config option).
 #[derive(Debug, Clone, PartialEq, Eq)]
+=======
+mod ple;
+mod shexp;
+
+pub mod feature_major_down;
+
+/// Per-block quantisation format for a single tensor in the Q4_K pipeline.
+/// Serde writes / reads the on-disk strings (`"Q4_K"`, `"Q5_K"`, `"Q6_K"`,
+/// `"Q8_0"`) to match llama.cpp / Ollama conventions. New formats land
+/// here + as a row in [`crate::quant::registry::QUANT_FORMATS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+>>>>>>> ianblenke/main:crates/larql-vindex/src/format/weights/write_q4k/mod.rs
 pub enum QuantBlockFormat {
     Q4K,
+<<<<<<< HEAD:crates/larql-vindex/src/format/weights/write_kquant/mod.rs
     Q6K,
     /// Tag the writer pipeline cannot emit but the reader can identify.
     /// Carries the on-disk string so dispatch can consult the registry.
@@ -104,6 +119,23 @@ impl<'de> Deserialize<'de> for QuantBlockFormat {
             _ => Self::Other(s),
         })
     }
+=======
+    #[serde(rename = "Q5_K")]
+    Q5K,
+    #[serde(rename = "Q6_K")]
+    Q6K,
+    /// Legacy GGUF 32-element-block 8-bit format. Higher precision
+    /// than Q4_K (2.7 bpw less compression). Used by Unsloth-style
+    /// "Q4_K_M" GGUFs to keep high-importance tensors (attn / lm_head)
+    /// at near-f16 precision while compressing FFN experts.
+    #[serde(rename = "Q8_0")]
+    Q8_0,
+    /// GGUF interleaved MXFP4 — 17 B per 32-element block. Used by
+    /// Qwen3-Coder-Next's `ffn_*_shexp.weight` (shared-expert gate/up).
+    /// Block size 32 — alignment constraint differs from K-quants.
+    #[serde(rename = "MXFP4")]
+    Mxfp4,
+>>>>>>> ianblenke/main:crates/larql-vindex/src/format/weights/write_q4k/mod.rs
 }
 
 /// Pad a row-major f32 buffer to the next multiple of 256 with zeros
@@ -153,6 +185,111 @@ pub(super) fn pad_rows_to_block(data: &[f32], rows: usize, cols: usize) -> (Vec<
         out.extend(std::iter::repeat_n(0.0f32, pad));
     }
     (out, padded_cols)
+}
+
+/// Try a bit-exact passthrough of GGUF Q4_K (or Q6_K) bytes from
+/// `source` into the writer when:
+///
+/// - the source carries the tensor as raw quant bytes (GGUF-backed)
+/// - the source's tensor_type matches the writer's target format
+/// - `cols` is already a multiple of the super-block size (256) so
+///   no row-padding is needed
+///
+/// Returns `Some((bytes, rows, cols))` on a successful passthrough.
+/// `None` falls back to the legacy dequant → re-quantize path
+/// (`quantize_q4_k(pad_rows_to_block(get_tensor(...)))`).
+///
+/// Imatrix-aware quantizers (Unsloth, TheBloke 2026, Qwen team)
+/// pick per-block scales informed by a calibration dataset's
+/// activation distribution. Our naïve `quantize_q4_k` doesn't have
+/// that signal — it minimizes per-block reconstruction error in
+/// f32 space. The two produce ~0.1% per-element divergence, which
+/// compounds through 40 layers × ~5 matmuls/layer into the residual
+/// stream and breaks chat-completion coherence by L31 on Qwen 3.6
+/// 35B-A3B (per PR #194's bisection).
+pub(super) fn try_q4k_passthrough(
+    source: &dyn WeightSource,
+    key: &str,
+    target: QuantBlockFormat,
+) -> Option<(Vec<u8>, usize, usize)> {
+    let (bytes, ttype, rows, cols) = source.get_quant_raw(key)?;
+    let block = larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
+    if !cols.is_multiple_of(block) {
+        return None;
+    }
+    let expected = match target {
+        QuantBlockFormat::Q4K => larql_models::quant::ggml::TYPE_Q4_K,
+        QuantBlockFormat::Q5K => larql_models::quant::ggml::TYPE_Q5_K,
+        QuantBlockFormat::Q6K => larql_models::quant::ggml::TYPE_Q6_K,
+        QuantBlockFormat::Q8_0 => larql_models::quant::ggml::TYPE_Q8_0,
+        QuantBlockFormat::Mxfp4 => larql_models::quant::ggml::TYPE_MXFP4,
+    };
+    if ttype != expected {
+        return None;
+    }
+    // Sanity-check the byte count matches the (rows, cols) at target format.
+    let block_bytes = match target {
+        QuantBlockFormat::Q4K => larql_models::quant::ggml::Q4_K_BLOCK_BYTES,
+        QuantBlockFormat::Q5K => larql_models::quant::ggml::Q5_K_BLOCK_BYTES,
+        QuantBlockFormat::Q6K => larql_models::quant::ggml::Q6_K_BLOCK_BYTES,
+        QuantBlockFormat::Q8_0 => larql_models::quant::ggml::Q8_0_BLOCK_BYTES,
+        QuantBlockFormat::Mxfp4 => larql_models::quant::ggml::MXFP4_BLOCK_BYTES,
+    };
+    let expected_bytes = rows * (cols / block) * block_bytes;
+    if bytes.len() != expected_bytes {
+        return None;
+    }
+    Some((bytes, rows, cols))
+}
+
+/// Source-preserving passthrough: pick the storage format from
+/// whatever the source carries (Q4_K / Q5_K / Q6_K / Q8_0), rather
+/// than requiring the caller to specify a target. Returns
+/// `(bytes, source_format, rows, cols)` when:
+///
+/// - the source carries the tensor as raw quant bytes (GGUF-backed)
+/// - the source tensor_type is one we know how to store
+/// - alignment + byte count check out for that format's block size
+///
+/// Use this in writer sites where the policy is "store at whatever
+/// precision the source provides" — i.e. preserve Q5_K / Q8_0
+/// instead of downquantizing to Q4_K. Falls back to `None` (caller
+/// dequant + requantize) for anything that doesn't match.
+///
+/// Q4_K / Q5_K / Q6_K share the K-quant 256-element super-block
+/// (144 / 176 / 210 B respectively). **Q8_0 uses 32-element blocks
+/// (34 B/block)** — different alignment constraint, so the check
+/// is per-format.
+pub(super) fn try_preserve_quant_passthrough(
+    source: &dyn WeightSource,
+    key: &str,
+) -> Option<(Vec<u8>, QuantBlockFormat, usize, usize)> {
+    use larql_models::quant::ggml::{
+        K_QUANT_BLOCK_ELEMS, LEGACY_BLOCK_ELEMS, MXFP4_BLOCK_BYTES, MXFP4_BLOCK_ELEMS,
+        Q4_K_BLOCK_BYTES, Q5_K_BLOCK_BYTES, Q6_K_BLOCK_BYTES, Q8_0_BLOCK_BYTES, TYPE_MXFP4,
+        TYPE_Q4_K, TYPE_Q5_K, TYPE_Q6_K, TYPE_Q8_0,
+    };
+    let (bytes, ttype, rows, cols) = source.get_quant_raw(key)?;
+    let (format, block_elems, block_bytes) = match ttype {
+        x if x == TYPE_Q4_K => (QuantBlockFormat::Q4K, K_QUANT_BLOCK_ELEMS, Q4_K_BLOCK_BYTES),
+        x if x == TYPE_Q5_K => (QuantBlockFormat::Q5K, K_QUANT_BLOCK_ELEMS, Q5_K_BLOCK_BYTES),
+        x if x == TYPE_Q6_K => (QuantBlockFormat::Q6K, K_QUANT_BLOCK_ELEMS, Q6_K_BLOCK_BYTES),
+        x if x == TYPE_Q8_0 => (QuantBlockFormat::Q8_0, LEGACY_BLOCK_ELEMS, Q8_0_BLOCK_BYTES),
+        x if x == TYPE_MXFP4 => (
+            QuantBlockFormat::Mxfp4,
+            MXFP4_BLOCK_ELEMS,
+            MXFP4_BLOCK_BYTES,
+        ),
+        _ => return None,
+    };
+    if !cols.is_multiple_of(block_elems) {
+        return None;
+    }
+    let expected_bytes = rows * (cols / block_elems) * block_bytes;
+    if bytes.len() != expected_bytes {
+        return None;
+    }
+    Some((bytes, format, rows, cols))
 }
 
 /// Resolve the V tensor for a layer in the Q4_K writer.
@@ -253,9 +390,17 @@ pub fn write_model_weights_kquant_with_opts(
     ensure_standard_attention_supported(arch, SURFACE_Q4K_WEIGHT_WRITER)?;
     let num_layers = source.num_layers();
 
+<<<<<<< HEAD:crates/larql-vindex/src/format/weights/write_kquant/mod.rs
     attn::write_attn_weights_kquant(source, dir, num_layers, callbacks)?;
     ffn::write_interleaved_ffn_kquant(source, dir, num_layers, opts, callbacks)?;
     moe_layers::write_per_layer_moe_kquant(source, dir, num_layers)?;
+=======
+    attn::write_attn_weights_q4k(source, dir, num_layers, callbacks)?;
+    deltanet::write_deltanet_weights_q4k(source, dir, num_layers, callbacks)?;
+    ffn::write_interleaved_ffn_q4k(source, dir, num_layers, opts, callbacks)?;
+    moe_layers::write_per_layer_moe_q4k(source, dir, num_layers)?;
+    shexp::write_shexp_weights_q4k(source, dir, num_layers)?;
+>>>>>>> ianblenke/main:crates/larql-vindex/src/format/weights/write_q4k/mod.rs
     let mut entries = norms::write_norms_and_router(source, dir, num_layers)?;
     super::ple_sidecar::write_ple_weights(source, dir, num_layers, &mut entries)?;
     lm_head::write_lm_head_kquant(source, dir, &mut entries)?;

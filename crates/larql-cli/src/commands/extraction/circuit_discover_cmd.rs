@@ -205,8 +205,8 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
                 let gate_key = arch.ffn_gate_key(layer);
                 if let Some(w_gate) = weights.tensors.get(&gate_key) {
                     let gate_row = w_gate.row(feat);
-                    *label =
-                        project_top_token(&weights.embed, &gate_row.to_vec(), model.tokenizer());
+                    let embed_arr = weights.embed.as_array();
+                    *label = project_top_token(&*embed_arr, &gate_row.to_vec(), model.tokenizer());
                 }
                 if (i + 1) % 500 == 0 {
                     eprint!("\r  {}/{} features...", i + 1, total);

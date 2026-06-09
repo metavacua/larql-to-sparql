@@ -144,6 +144,7 @@ pub fn model_functional(id: &str) -> Arc<LoadedModel> {
         embed_store: None,
         release_mmap_after_request: false,
         weights: std::sync::OnceLock::new(),
+        qwen35_weights: std::sync::OnceLock::new(),
         probe_labels: std::collections::HashMap::new(),
         ffn_l2_cache: larql_server::ffn_l2_cache::FfnL2Cache::new(1),
         layer_latency_tracker: std::sync::Arc::new(
@@ -154,6 +155,9 @@ pub fn model_functional(id: &str) -> Arc<LoadedModel> {
         expert_filter: None,
         unit_filter: None,
         moe_remote: None,
+        tokenizer_cache: std::sync::Arc::new(larql_server::tokenizer_cache::TokenizerCache::new(
+            64, 64,
+        )),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
         metal_backend: std::sync::OnceLock::new(),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
@@ -186,6 +190,7 @@ pub fn model_infer_enabled(id: &str) -> Arc<LoadedModel> {
         embed_store: None,
         release_mmap_after_request: false,
         weights: std::sync::OnceLock::new(),
+        qwen35_weights: std::sync::OnceLock::new(),
         probe_labels: std::collections::HashMap::new(),
         ffn_l2_cache: larql_server::ffn_l2_cache::FfnL2Cache::new(1),
         layer_latency_tracker: std::sync::Arc::new(
@@ -196,6 +201,103 @@ pub fn model_infer_enabled(id: &str) -> Arc<LoadedModel> {
         expert_filter: None,
         unit_filter: None,
         moe_remote: None,
+        tokenizer_cache: std::sync::Arc::new(larql_server::tokenizer_cache::TokenizerCache::new(
+            64, 64,
+        )),
+        #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+        metal_backend: std::sync::OnceLock::new(),
+        #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+        moe_scratches: std::sync::Mutex::new(std::collections::HashMap::new()),
+        #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+        metal_ffn_layer_bufs: std::sync::OnceLock::new(),
+    })
+}
+
+/// LoadedModel variant whose `weights` OnceLock is **pre-populated** with a
+/// minimal in-memory `ModelWeights`. Bypasses the lazy-load path in
+/// `ensure_weights_cell` so the chat / infer handlers reach their real
+/// lock-acquisition codepath (the one PR #123 fixed) instead of fast-
+/// failing on `/nonexistent`.
+///
+/// Used by the bounded-time regression test for the
+/// `/v1/chat/completions` `pick_template`-under-write-lock self-
+/// deadlock (task #127). The handler may still error downstream
+/// (synthetic tokenizer / index can't produce a real completion) — the
+/// test only asserts the call returns in bounded time, not that it
+/// produces a valid completion.
+pub fn model_with_loaded_weights(id: &str) -> Arc<LoadedModel> {
+    let arch_json = serde_json::json!({
+        "model_type": "tinymodel",
+        "hidden_size": 4,
+        "num_hidden_layers": 1,
+        "intermediate_size": 4,
+        "head_dim": 2,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 2,
+        "rope_theta": 10000.0,
+        "vocab_size": 8,
+    });
+    let arch = larql_models::detect_from_json(&arch_json);
+    let small = Array2::<f32>::zeros((4, 4)).into_shared();
+    let weights = larql_models::ModelWeights {
+        tensors: HashMap::new(),
+        vectors: HashMap::new(),
+        raw_bytes: HashMap::new(),
+        skipped_tensors: Vec::new(),
+        packed_mmaps: HashMap::new(),
+        packed_byte_ranges: HashMap::new(),
+        embed: larql_models::embed::EmbedMatrix::from_array(small.clone()),
+        embed_quant: None,
+        lm_head: small.clone(),
+        lm_head_quant: None,
+        quant_tensors: HashMap::new(),
+        position_embed: None,
+        arch,
+        num_layers: 1,
+        hidden_size: 4,
+        intermediate_size: 4,
+        vocab_size: 8,
+        head_dim: 2,
+        num_q_heads: 2,
+        num_kv_heads: 2,
+        rope_base: 10000.0,
+    };
+    let weights_cell = std::sync::OnceLock::new();
+    let _ = weights_cell.set(std::sync::RwLock::new(weights));
+    Arc::new(LoadedModel {
+        id: id.to_string(),
+        path: PathBuf::from("/nonexistent"),
+        config: test_config(),
+        patched: tokio::sync::RwLock::new(PatchedVindex::new(test_index())),
+        embeddings: {
+            let mut e = Array2::<f32>::zeros((8, 4));
+            e[[0, 0]] = 1.0;
+            e[[1, 1]] = 1.0;
+            e[[2, 2]] = 1.0;
+            e[[3, 3]] = 1.0;
+            e
+        },
+        embed_scale: 1.0,
+        tokenizer: functional_tokenizer(),
+        infer_disabled: false,
+        ffn_only: false,
+        embed_only: false,
+        embed_store: None,
+        release_mmap_after_request: false,
+        weights: weights_cell,
+        qwen35_weights: std::sync::OnceLock::new(),
+        probe_labels: std::collections::HashMap::new(),
+        ffn_l2_cache: larql_server::ffn_l2_cache::FfnL2Cache::new(1),
+        layer_latency_tracker: std::sync::Arc::new(
+            larql_server::metrics::LayerLatencyTracker::new(),
+        ),
+        requests_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        expert_filter: None,
+        unit_filter: None,
+        moe_remote: None,
+        tokenizer_cache: std::sync::Arc::new(larql_server::tokenizer_cache::TokenizerCache::new(
+            64, 64,
+        )),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
         metal_backend: std::sync::OnceLock::new(),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
@@ -269,6 +371,7 @@ impl ModelBuilder {
             embed_store: None,
             release_mmap_after_request: false,
             weights: std::sync::OnceLock::new(),
+            qwen35_weights: std::sync::OnceLock::new(),
             probe_labels: self.probe_labels,
             ffn_l2_cache: FfnL2Cache::new(1),
             layer_latency_tracker: std::sync::Arc::new(
@@ -279,6 +382,9 @@ impl ModelBuilder {
             expert_filter: None,
             unit_filter: None,
             moe_remote: None,
+            tokenizer_cache: std::sync::Arc::new(
+                larql_server::tokenizer_cache::TokenizerCache::new(64, 64),
+            ),
             #[cfg(all(feature = "metal-experts", target_os = "macos"))]
             metal_backend: std::sync::OnceLock::new(),
             #[cfg(all(feature = "metal-experts", target_os = "macos"))]
@@ -467,6 +573,8 @@ pub fn state(models: Vec<Arc<LoadedModel>>) -> Arc<AppState> {
         api_key: None,
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(0),
+        attention_sessions: larql_server::attention_session::AttentionSessionMap::new(3600, 1024),
+        default_kv_format: None,
     })
 }
 
@@ -478,6 +586,8 @@ pub fn state_with_key(models: Vec<Arc<LoadedModel>>, key: &str) -> Arc<AppState>
         api_key: Some(key.to_string()),
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(0),
+        attention_sessions: larql_server::attention_session::AttentionSessionMap::new(3600, 1024),
+        default_kv_format: None,
     })
 }
 
@@ -489,6 +599,8 @@ pub fn state_with_cache(models: Vec<Arc<LoadedModel>>, cache_size: u64) -> Arc<A
         api_key: None,
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(cache_size),
+        attention_sessions: larql_server::attention_session::AttentionSessionMap::new(3600, 1024),
+        default_kv_format: None,
     })
 }
 

@@ -6,6 +6,7 @@
 
 pub mod deepseek;
 pub mod deepseek_v4;
+pub mod deepseek_v4_tensors;
 pub mod gemma2;
 pub mod gemma3;
 pub mod gemma4;
@@ -17,5 +18,6 @@ pub mod llama;
 pub mod mistral;
 pub mod mixtral;
 pub mod qwen;
+pub mod qwen35;
 pub mod starcoder2;
 pub mod tinymodel;

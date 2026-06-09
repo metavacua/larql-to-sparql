@@ -140,7 +140,8 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
 
     eprintln!("\n── Extracting OV fingerprint modes ──\n");
 
-    let embed = &weights.embed;
+    let embed_cow = weights.embed.as_array();
+    let embed = &*embed_cow;
     let _vocab_size = weights.vocab_size;
 
     for &layer in &layers {

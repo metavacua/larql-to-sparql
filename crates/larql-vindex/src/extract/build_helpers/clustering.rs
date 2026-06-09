@@ -72,10 +72,11 @@ pub(crate) fn run_clustering_pipeline(
     );
 
     // Tier 2+3: embedding projection + pattern detection
+    let embed_arr = weights.embed.as_array();
     let (embed_labels, top_tokens_per_cluster) =
         crate::clustering::auto_label_clusters_from_embeddings(
             &centres,
-            &weights.embed,
+            &*embed_arr,
             tokenizer,
             &assignments,
             &data.top_tokens,

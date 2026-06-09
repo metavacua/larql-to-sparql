@@ -89,12 +89,17 @@ enum Commands {
     /// Remove a cached vindex.
     Rm(rm_cmd::RmArgs),
 
+<<<<<<< HEAD
     /// Benchmark decode throughput on a real vindex (Metal / CPU / Ollama).
     Bench(bench::BenchArgs),
 
     /// Split-axis accuracy suite — parametric vs in-context vs conflict,
     /// scored with top-1 match and Shannon bits-per-token.
     Accuracy(accuracy_cmd::AccuracyArgs),
+=======
+    /// Benchmark decode throughput on a real vindex (Metal / CUDA / CPU / Ollama).
+    Bench(bench_cmd::BenchArgs),
+>>>>>>> ianblenke/main
 
     /// Shannon-style next-token bit measurements and demo compression.
     #[command(subcommand)]

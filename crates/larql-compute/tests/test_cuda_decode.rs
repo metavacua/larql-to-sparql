@@ -1,0 +1,589 @@
+//! CUDA DecodeBackend smoke tests (`cuda-decode-backend`).
+//!
+//! These are intentionally small and env-gated. The first CUDA decode backend
+//! is correctness-first and host-visible, so these tests prove the trait
+//! contract is live before performance work starts.
+
+#![cfg(feature = "cuda")]
+
+use larql_compute::backend::{Capability, ComputeBackend, DecodeBackend};
+use larql_compute::cpu::ops::q4_common::quantize_q4_k;
+use larql_compute::cuda::CudaBackend;
+use larql_compute::{Activation, FfnType, FullPipelineLayer, NormType, QuantFormat, QuantWeight};
+
+fn gpu_or_skip() -> Option<CudaBackend> {
+    if std::env::var("LARQL_CUDA_AVAILABLE").ok().as_deref() != Some("1") {
+        eprintln!("skipping CUDA decode test: set LARQL_CUDA_AVAILABLE=1 to run");
+        return None;
+    }
+    CudaBackend::new().ok()
+}
+
+fn synth(n: usize, seed: u64) -> Vec<f32> {
+    let mut s = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    (0..n)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            ((s & 0xFF_FFFF) as f32 / 8_388_608.0) - 0.5
+        })
+        .collect()
+}
+
+fn f32_bytes(vals: &[f32]) -> Vec<u8> {
+    vals.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
+fn qw(bytes: &[u8]) -> QuantWeight<'_> {
+    QuantWeight {
+        data: bytes,
+        scales: None,
+        format: QuantFormat::F32,
+    }
+}
+
+fn q4k_qw(bytes: &[u8]) -> QuantWeight<'_> {
+    QuantWeight {
+        data: bytes,
+        scales: None,
+        format: QuantFormat::Q4_K,
+    }
+}
+
+fn f32_vals(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+        .collect()
+}
+
+fn rms_norm(x: &[f32], weight: &[f32], eps: f32) -> Vec<f32> {
+    let mean_sq = x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32;
+    let inv = 1.0 / (mean_sq + eps).sqrt();
+    x.iter().zip(weight).map(|(v, w)| v * inv * w).collect()
+}
+
+fn matvec_rows(w: &[f32], x: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    (0..rows)
+        .map(|r| {
+            let row = &w[r * cols..(r + 1) * cols];
+            row.iter().zip(x).map(|(a, b)| a * b).sum()
+        })
+        .collect()
+}
+
+fn scalar_first_token_reference(
+    x: &[f32],
+    input_norm: &[f32],
+    post_attn_norm: &[f32],
+    pre_ffn_norm: &[f32],
+    post_ffn_norm: &[f32],
+    wv: &[u8],
+    wo: &[u8],
+    gate: &[u8],
+    up: &[u8],
+    down: &[u8],
+    hidden: usize,
+    inter: usize,
+    q_dim: usize,
+    kv_dim: usize,
+    eps: f32,
+) -> Vec<f32> {
+    let x_norm = rms_norm(x, input_norm, eps);
+
+    // For the first decode position there is only one key in the cache, so
+    // softmax(QK^T) is exactly 1.0 and the attention output is V.
+    let v = matvec_rows(&f32_vals(wv), &x_norm, kv_dim, hidden);
+    let attn_delta = matvec_rows(&f32_vals(wo), &v, hidden, q_dim);
+    let attn_normed = rms_norm(&attn_delta, post_attn_norm, eps);
+    let mut h_post_attn = x.to_vec();
+    for (h, a) in h_post_attn.iter_mut().zip(attn_normed) {
+        *h += a;
+    }
+
+    let h_ffn = rms_norm(&h_post_attn, pre_ffn_norm, eps);
+    let gate = matvec_rows(&f32_vals(gate), &h_ffn, inter, hidden);
+    let up = matvec_rows(&f32_vals(up), &h_ffn, inter, hidden);
+    let act: Vec<f32> = gate
+        .iter()
+        .zip(up)
+        .map(|(g, u)| (g / (1.0 + (-g).exp())) * u)
+        .collect();
+    let ffn_delta = matvec_rows(&f32_vals(down), &act, hidden, inter);
+    let ffn_normed = rms_norm(&ffn_delta, post_ffn_norm, eps);
+    let mut h_out = h_post_attn;
+    for (h, f) in h_out.iter_mut().zip(ffn_normed) {
+        *h += f;
+    }
+    h_out
+}
+
+fn assert_close(got: &[f32], expected: &[f32], tol: f32) {
+    assert_eq!(got.len(), expected.len());
+    for (idx, (g, e)) in got.iter().zip(expected).enumerate() {
+        let diff = (g - e).abs();
+        assert!(
+            diff <= tol,
+            "mismatch at {idx}: got {g}, expected {e}, diff {diff}, tol {tol}"
+        );
+    }
+}
+
+#[test]
+fn decode_token_one_layer_matches_scalar_reference() {
+    let Some(backend) = gpu_or_skip() else { return };
+    let hidden = 16;
+    let inter = 32;
+    let head_dim = 16;
+    let num_q_heads = 1;
+    let num_kv_heads = 1;
+    let q_dim = num_q_heads * head_dim;
+    let kv_dim = num_kv_heads * head_dim;
+
+    let input_norm = vec![1.0; hidden];
+    let post_attn_norm = vec![1.0; hidden];
+    let pre_ffn_norm = vec![1.0; hidden];
+    let post_ffn_norm = vec![1.0; hidden];
+    let wq = f32_bytes(&synth(q_dim * hidden, 0x10));
+    let wk = f32_bytes(&synth(kv_dim * hidden, 0x11));
+    let wv = f32_bytes(&synth(kv_dim * hidden, 0x12));
+    let wo = f32_bytes(&synth(hidden * q_dim, 0x13));
+    let gate = f32_bytes(&synth(inter * hidden, 0x14));
+    let up = f32_bytes(&synth(inter * hidden, 0x15));
+    let down = f32_bytes(&synth(hidden * inter, 0x16));
+
+    let layer = FullPipelineLayer {
+        wq: qw(&wq),
+        wk: qw(&wk),
+        wv: qw(&wv),
+        wo: qw(&wo),
+        gate: qw(&gate),
+        up: qw(&up),
+        down: qw(&down),
+        input_norm: &input_norm,
+        post_attn_norm: &post_attn_norm,
+        pre_ffn_norm: Some(&pre_ffn_norm),
+        post_ffn_norm: Some(&post_ffn_norm),
+        norm_offset: 0.0,
+        eps: 1e-6,
+        has_post_norms: true,
+        norm_type: NormType::RmsNorm,
+        ffn_type: FfnType::Gated,
+        activation: Activation::Silu,
+        attn_scale: 1.0 / (head_dim as f32).sqrt(),
+        head_dim,
+        num_q_heads,
+        num_kv_heads,
+        rope_base: 10_000.0,
+        rotary_dim: head_dim,
+        ..FullPipelineLayer::default()
+    };
+    let x = synth(hidden, 0x20);
+    let out = backend
+        .decode_token(
+            &[layer],
+            &x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            num_q_heads,
+            num_kv_heads,
+            head_dim,
+            10_000.0,
+        )
+        .expect("cuda decode_token should return Some");
+    let expected = scalar_first_token_reference(
+        &x,
+        &input_norm,
+        &post_attn_norm,
+        &pre_ffn_norm,
+        &post_ffn_norm,
+        &wv,
+        &wo,
+        &gate,
+        &up,
+        &down,
+        hidden,
+        inter,
+        q_dim,
+        kv_dim,
+        1e-6,
+    );
+    assert_close(&out, &expected, 1e-3);
+    assert_eq!(backend.kv_cache_len(), 1);
+}
+
+#[test]
+fn prefill_populates_kv_cache_len() {
+    let Some(backend) = gpu_or_skip() else { return };
+    assert!(backend.supports(Capability::DecodeToken));
+    assert!(backend.supports(Capability::PrefillQ4));
+
+    let hidden = 8;
+    let inter = 16;
+    let head_dim = 8;
+    let num_q_heads = 1;
+    let num_kv_heads = 1;
+    let q_dim = head_dim;
+    let kv_dim = head_dim;
+    let input_norm = vec![1.0; hidden];
+    let post_attn_norm = vec![1.0; hidden];
+    let wq = f32_bytes(&synth(q_dim * hidden, 0x30));
+    let wk = f32_bytes(&synth(kv_dim * hidden, 0x31));
+    let wv = f32_bytes(&synth(kv_dim * hidden, 0x32));
+    let wo = f32_bytes(&synth(hidden * q_dim, 0x33));
+    let gate = f32_bytes(&synth(inter * hidden, 0x34));
+    let up = f32_bytes(&synth(inter * hidden, 0x35));
+    let down = f32_bytes(&synth(hidden * inter, 0x36));
+    let layer = FullPipelineLayer {
+        wq: qw(&wq),
+        wk: qw(&wk),
+        wv: qw(&wv),
+        wo: qw(&wo),
+        gate: qw(&gate),
+        up: qw(&up),
+        down: qw(&down),
+        input_norm: &input_norm,
+        post_attn_norm: &post_attn_norm,
+        norm_type: NormType::RmsNorm,
+        ffn_type: FfnType::Gated,
+        activation: Activation::Silu,
+        attn_scale: 1.0 / (head_dim as f32).sqrt(),
+        head_dim,
+        num_q_heads,
+        num_kv_heads,
+        rotary_dim: head_dim,
+        ..FullPipelineLayer::default()
+    };
+    let seq_len = 3;
+    let x = synth(seq_len * hidden, 0x40);
+    let out = backend
+        .prefill_q4(
+            &[layer],
+            &x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            seq_len,
+            num_q_heads,
+            num_kv_heads,
+            head_dim,
+            10_000.0,
+            false,
+            0.0,
+        )
+        .expect("cuda prefill_q4 should return Some");
+    assert_eq!(out.len(), seq_len * hidden);
+    assert_eq!(backend.kv_cache_len(), seq_len);
+}
+
+#[test]
+fn decode_q4k_projection_uses_quant_matvec() {
+    let Some(backend) = gpu_or_skip() else { return };
+    let hidden = 256;
+    let inter = 256;
+    let head_dim = 256;
+    let num_q_heads = 1;
+    let num_kv_heads = 1;
+    let q_dim = head_dim;
+    let kv_dim = head_dim;
+
+    let input_norm = vec![1.0; hidden];
+    let post_attn_norm = vec![1.0; hidden];
+    let pre_ffn_norm = vec![1.0; hidden];
+    let post_ffn_norm = vec![1.0; hidden];
+    let wq = quantize_q4_k(&synth(q_dim * hidden, 0x510));
+    let wk = quantize_q4_k(&synth(kv_dim * hidden, 0x511));
+    let wv = quantize_q4_k(&synth(kv_dim * hidden, 0x512));
+    let wo = quantize_q4_k(&synth(hidden * q_dim, 0x513));
+    let gate = quantize_q4_k(&synth(inter * hidden, 0x514));
+    let up = quantize_q4_k(&synth(inter * hidden, 0x515));
+    let down = quantize_q4_k(&synth(hidden * inter, 0x516));
+    let make_layer = || FullPipelineLayer {
+        wq: q4k_qw(&wq),
+        wk: q4k_qw(&wk),
+        wv: q4k_qw(&wv),
+        wo: q4k_qw(&wo),
+        gate: q4k_qw(&gate),
+        up: q4k_qw(&up),
+        down: q4k_qw(&down),
+        input_norm: &input_norm,
+        post_attn_norm: &post_attn_norm,
+        pre_ffn_norm: Some(&pre_ffn_norm),
+        post_ffn_norm: Some(&post_ffn_norm),
+        norm_offset: 0.0,
+        eps: 1e-6,
+        has_post_norms: true,
+        norm_type: NormType::RmsNorm,
+        ffn_type: FfnType::Gated,
+        activation: Activation::Silu,
+        attn_scale: 1.0 / (head_dim as f32).sqrt(),
+        head_dim,
+        num_q_heads,
+        num_kv_heads,
+        rope_base: 10_000.0,
+        rotary_dim: head_dim,
+        ..FullPipelineLayer::default()
+    };
+    let x = synth(hidden, 0x520);
+
+    std::env::remove_var("LARQL_CUDA_Q4K_HOST_DEQUANT");
+    backend.reset_kv_cache();
+    let direct = backend
+        .decode_token(
+            &[make_layer()],
+            &x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            num_q_heads,
+            num_kv_heads,
+            head_dim,
+            10_000.0,
+        )
+        .expect("direct Q4_K CUDA decode should return Some");
+
+    std::env::set_var("LARQL_CUDA_Q4K_HOST_DEQUANT", "1");
+    backend.reset_kv_cache();
+    let fallback = backend
+        .decode_token(
+            &[make_layer()],
+            &x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            num_q_heads,
+            num_kv_heads,
+            head_dim,
+            10_000.0,
+        )
+        .expect("host-dequant Q4_K CUDA decode should return Some");
+    std::env::remove_var("LARQL_CUDA_Q4K_HOST_DEQUANT");
+
+    assert_close(&direct, &fallback, 2e-3);
+}
+
+/// `cuda-decode-device-resident` Phase 1: the new device-resident
+/// `decode_token_device` path must match the legacy host-bouncing path
+/// to within 1e-3 max-element. We drive both paths off the same
+/// backend with a fresh KV cache between calls and assert parity.
+#[test]
+fn decode_token_phase1_matches_host_fallback() {
+    let Some(backend) = gpu_or_skip() else { return };
+    let hidden = 256;
+    let inter = 256;
+    let head_dim = 256;
+    let num_q_heads = 1;
+    let num_kv_heads = 1;
+    let q_dim = head_dim;
+    let kv_dim = head_dim;
+
+    let input_norm = vec![1.0; hidden];
+    let post_attn_norm = vec![1.0; hidden];
+    let pre_ffn_norm = vec![1.0; hidden];
+    let post_ffn_norm = vec![1.0; hidden];
+    let wq = quantize_q4_k(&synth(q_dim * hidden, 0x610));
+    let wk = quantize_q4_k(&synth(kv_dim * hidden, 0x611));
+    let wv = quantize_q4_k(&synth(kv_dim * hidden, 0x612));
+    let wo = quantize_q4_k(&synth(hidden * q_dim, 0x613));
+    let gate = quantize_q4_k(&synth(inter * hidden, 0x614));
+    let up = quantize_q4_k(&synth(inter * hidden, 0x615));
+    let down = quantize_q4_k(&synth(hidden * inter, 0x616));
+    let make_layer = || FullPipelineLayer {
+        wq: q4k_qw(&wq),
+        wk: q4k_qw(&wk),
+        wv: q4k_qw(&wv),
+        wo: q4k_qw(&wo),
+        gate: q4k_qw(&gate),
+        up: q4k_qw(&up),
+        down: q4k_qw(&down),
+        input_norm: &input_norm,
+        post_attn_norm: &post_attn_norm,
+        pre_ffn_norm: Some(&pre_ffn_norm),
+        post_ffn_norm: Some(&post_ffn_norm),
+        norm_offset: 0.0,
+        eps: 1e-6,
+        has_post_norms: true,
+        norm_type: NormType::RmsNorm,
+        ffn_type: FfnType::Gated,
+        activation: Activation::Silu,
+        attn_scale: 1.0 / (head_dim as f32).sqrt(),
+        head_dim,
+        num_q_heads,
+        num_kv_heads,
+        rope_base: 10_000.0,
+        rotary_dim: head_dim,
+        ..FullPipelineLayer::default()
+    };
+
+    // Device-resident path (default).
+    std::env::remove_var("LARQL_CUDA_DECODE_HOST_FALLBACK");
+    let mut device_outs: Vec<Vec<f32>> = Vec::new();
+    backend.reset_kv_cache();
+    for step in 0..3 {
+        let x = synth(hidden, 0x700 + step as u64);
+        let out = backend
+            .decode_token(
+                &[make_layer()],
+                &x,
+                hidden,
+                inter,
+                q_dim,
+                kv_dim,
+                num_q_heads,
+                num_kv_heads,
+                head_dim,
+                10_000.0,
+            )
+            .expect("device-resident decode");
+        device_outs.push(out);
+    }
+
+    // Host-fallback path.
+    std::env::set_var("LARQL_CUDA_DECODE_HOST_FALLBACK", "1");
+    let mut host_outs: Vec<Vec<f32>> = Vec::new();
+    backend.reset_kv_cache();
+    for step in 0..3 {
+        let x = synth(hidden, 0x700 + step as u64);
+        let out = backend
+            .decode_token(
+                &[make_layer()],
+                &x,
+                hidden,
+                inter,
+                q_dim,
+                kv_dim,
+                num_q_heads,
+                num_kv_heads,
+                head_dim,
+                10_000.0,
+            )
+            .expect("host-fallback decode");
+        host_outs.push(out);
+    }
+    std::env::remove_var("LARQL_CUDA_DECODE_HOST_FALLBACK");
+
+    for (i, (d, h)) in device_outs.iter().zip(host_outs.iter()).enumerate() {
+        let max_diff = d
+            .iter()
+            .zip(h)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_diff <= 1e-3,
+            "decode step {i}: max-element diff {max_diff} > 1e-3 between device and host paths",
+        );
+    }
+}
+
+/// `cuda-decode-cuda-graph` parity gate. Runs five decode steps with
+/// the captured-graph path enabled (default), then re-runs with
+/// `LARQL_CUDA_DECODE_GRAPH=0` forcing the legacy per-call kernel-
+/// launch path. Asserts per-step max-element ≤ 1e-3. This locks in
+/// the back-out contract: turning the graph path off SHALL produce
+/// bit-equivalent output to leaving it on.
+///
+/// <!-- test:
+/// openspec/changes/cuda-decode-cuda-graph/specs/compute-cuda-kernels/spec.md
+/// → "decode_token_device SHALL replay a captured CUDA graph" + the
+/// scenario "scratch reused across decode calls" -->
+#[test]
+fn decode_token_graph_matches_per_call_over_5_steps() {
+    let Some(backend) = gpu_or_skip() else { return };
+    let hidden = 256;
+    let inter = 256;
+    let head_dim = 256;
+    let num_q_heads = 1;
+    let num_kv_heads = 1;
+    let q_dim = head_dim;
+    let kv_dim = head_dim;
+
+    let input_norm = vec![1.0; hidden];
+    let post_attn_norm = vec![1.0; hidden];
+    let pre_ffn_norm = vec![1.0; hidden];
+    let post_ffn_norm = vec![1.0; hidden];
+    let wq = quantize_q4_k(&synth(q_dim * hidden, 0x710));
+    let wk = quantize_q4_k(&synth(kv_dim * hidden, 0x711));
+    let wv = quantize_q4_k(&synth(kv_dim * hidden, 0x712));
+    let wo = quantize_q4_k(&synth(hidden * q_dim, 0x713));
+    let gate = quantize_q4_k(&synth(inter * hidden, 0x714));
+    let up = quantize_q4_k(&synth(inter * hidden, 0x715));
+    let down = quantize_q4_k(&synth(hidden * inter, 0x716));
+    let make_layer = || FullPipelineLayer {
+        wq: q4k_qw(&wq),
+        wk: q4k_qw(&wk),
+        wv: q4k_qw(&wv),
+        wo: q4k_qw(&wo),
+        gate: q4k_qw(&gate),
+        up: q4k_qw(&up),
+        down: q4k_qw(&down),
+        input_norm: &input_norm,
+        post_attn_norm: &post_attn_norm,
+        pre_ffn_norm: Some(&pre_ffn_norm),
+        post_ffn_norm: Some(&post_ffn_norm),
+        norm_offset: 0.0,
+        eps: 1e-6,
+        has_post_norms: true,
+        norm_type: NormType::RmsNorm,
+        ffn_type: FfnType::Gated,
+        activation: Activation::Silu,
+        attn_scale: 1.0 / (head_dim as f32).sqrt(),
+        head_dim,
+        num_q_heads,
+        num_kv_heads,
+        rope_base: 10_000.0,
+        rotary_dim: head_dim,
+        ..FullPipelineLayer::default()
+    };
+
+    let run_five_steps = || -> Vec<Vec<f32>> {
+        backend.reset_kv_cache();
+        let mut outs = Vec::with_capacity(5);
+        for step in 0..5 {
+            let x = synth(hidden, 0x800 + step as u64);
+            let out = backend
+                .decode_token(
+                    &[make_layer()],
+                    &x,
+                    hidden,
+                    inter,
+                    q_dim,
+                    kv_dim,
+                    num_q_heads,
+                    num_kv_heads,
+                    head_dim,
+                    10_000.0,
+                )
+                .expect("decode_token");
+            outs.push(out);
+        }
+        outs
+    };
+
+    // Captured-graph path (default).
+    std::env::remove_var("LARQL_CUDA_DECODE_GRAPH");
+    std::env::remove_var("LARQL_CUDA_DECODE_HOST_FALLBACK");
+    let graph_outs = run_five_steps();
+
+    // Per-call kernel-launch path (back-out).
+    std::env::set_var("LARQL_CUDA_DECODE_GRAPH", "0");
+    let legacy_outs = run_five_steps();
+    std::env::remove_var("LARQL_CUDA_DECODE_GRAPH");
+
+    for (i, (g, l)) in graph_outs.iter().zip(legacy_outs.iter()).enumerate() {
+        let max_diff = g
+            .iter()
+            .zip(l)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_diff <= 1e-3,
+            "step {i}: graph vs legacy max-element diff {max_diff} > 1e-3",
+        );
+    }
+}

@@ -62,6 +62,7 @@ pub struct VindexModelConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_logit_softcapping: Option<f64>,
 
+<<<<<<< HEAD
     // ── Granite-family scaling multipliers ──
     // None on every other arch. Captured at vindex-build time so the
     // reconstructed `ModelArchitecture` knows about them at load time;
@@ -92,6 +93,155 @@ pub struct VindexModelConfig {
     /// fix in `docs/diagnoses/shannon-cross-engine-divergence.md`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub norm_eps: Option<f64>,
+=======
+    // ── Qwen 3.6 Gated DeltaNet / hybrid-attention metadata ──
+    // All optional. Present only on `qwen35` / `qwen35moe` arch. See
+    // `openspec/changes/inference-qwen35-deltanet/design.md` for the
+    // role of each.
+    /// Stride at which a full softmax-attention layer appears.
+    /// Layer `i` is full-attention iff `(i + 1) % full_attention_interval == 0`.
+    /// Qwen 3.6 27B: 4 (16 full-attn + 48 DeltaNet layers in 64 total).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_attention_interval: Option<usize>,
+    /// DeltaNet per-head state width (`S_k = S_v`). Qwen 3.6: 128.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssm_state_size: Option<usize>,
+    /// DeltaNet value-stream width: `head_v_dim * n_v_heads`.
+    /// Qwen 3.6: 6144 (dense) / 4096 (35B-A3B MoE).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssm_inner_size: Option<usize>,
+    /// DeltaNet number of V heads — confusingly named `time_step_rank`
+    /// in GGUF metadata. Qwen 3.6: 48 (dense) / 32 (35B-A3B).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssm_dt_rank: Option<usize>,
+    /// DeltaNet number of K heads — GGUF metadata calls this
+    /// `group_count`. K is broadcast (V_heads / K_heads)× to match V.
+    /// Qwen 3.6: 16.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssm_group_count: Option<usize>,
+    /// DeltaNet causal Conv1D kernel size. Qwen 3.6: 4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssm_conv_kernel: Option<usize>,
+    /// Multi-section RoPE dimension partition (for Qwen 3.6 attention
+    /// layers). Each entry is a per-section dimension count; sections
+    /// receive distinct rotation frequencies. None = vanilla single-
+    /// section RoPE.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rope_dimension_sections: Option<Vec<usize>>,
+
+    // ── DeepSeek-V4 ──
+    /// DSv4-specific hyperparameters (low-rank/grouped attention, mHC,
+    /// indexer, YARN). `Some` only for `deepseek_v4`; other arches leave
+    /// it `None`. Carries everything the DSv4 reader needs to rebuild its
+    /// hyperparameters without the source GGUF.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dsv4: Option<DsV4VindexMeta>,
+}
+
+impl Default for VindexModelConfig {
+    /// Minimal placeholder config — caller MUST overwrite the
+    /// architecture-essential fields (`model_type`, `head_dim`,
+    /// `num_q_heads`, `num_kv_heads`, `rope_base`). Default exists
+    /// so call sites can use `..Default::default()` to fill in the
+    /// growing set of optional fields without touching every init
+    /// when a new architecture lands.
+    fn default() -> Self {
+        Self {
+            model_type: String::new(),
+            head_dim: 0,
+            num_q_heads: 0,
+            num_kv_heads: 0,
+            rope_base: 0.0,
+            sliding_window: None,
+            moe: None,
+            global_head_dim: None,
+            num_global_kv_heads: None,
+            partial_rotary_factor: None,
+            sliding_window_pattern: None,
+            layer_types: None,
+            attention_k_eq_v: false,
+            num_kv_shared_layers: None,
+            per_layer_embed_dim: None,
+            rope_local_base: None,
+            query_pre_attn_scalar: None,
+            final_logit_softcapping: None,
+            full_attention_interval: None,
+            ssm_state_size: None,
+            ssm_inner_size: None,
+            ssm_dt_rank: None,
+            ssm_group_count: None,
+            ssm_conv_kernel: None,
+            rope_dimension_sections: None,
+            dsv4: None,
+        }
+    }
+}
+
+/// YARN RoPE scaling parameters for DSv4, mirroring the inference-side
+/// `DsV4RopeYarnConfig` so the reader can reconstruct it from the vindex.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DsV4YarnMeta {
+    /// Scaling type: `"none"` or `"yarn"`.
+    pub scaling_type: String,
+    pub freq_base: f64,
+    pub freq_scale: f32,
+    pub ext_factor: f32,
+    pub attn_factor: f32,
+    pub beta_fast: f32,
+    pub beta_slow: f32,
+    pub n_ctx_orig: usize,
+}
+
+/// DeepSeek-V4 hyperparameters carried in `index.json`. Mirrors the
+/// inference-side `DsV4Hyperparams` scalar set so a DSv4 vindex reader can
+/// rebuild it without the source GGUF. The reader (`larql-inference`)
+/// converts this into `DsV4Hyperparams`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DsV4VindexMeta {
+    pub n_embd: usize,
+    pub n_head: usize,
+    pub head_dim: usize,
+    /// Per-layer attention variant (one entry per transformer layer):
+    /// `0` = no-compress (SWA only), `1` = HCA compress, `4` = HCA +
+    /// indexer. Lets the DSv4 reader dispatch the right attention kernel
+    /// per layer. Kept here (not on the generic `VindexLayerInfo`) so all
+    /// DSv4 metadata stays isolated to this struct.
+    pub compress_ratios: Vec<u8>,
+    /// Q low-rank ("q_a"/"q_b") rank.
+    pub q_lora_rank: usize,
+    /// Grouped output-projection group count.
+    pub n_groups: usize,
+    /// Per-group output low-rank.
+    pub o_lora_rank: usize,
+    /// Rotated tail dimensions (the rest are no-rope).
+    pub n_rot: usize,
+    pub rope_base: f64,
+    /// RoPE pairing mode: `"neox"` or `"normal"`.
+    pub rope_mode: String,
+    pub window_size: usize,
+    pub norm_eps: f32,
+    /// mHC residual-stream count (DSv4-Flash: 4).
+    pub n_hc: usize,
+    pub n_expert: usize,
+    pub n_expert_used: usize,
+    pub n_ff_exp: usize,
+    pub n_expert_shared: usize,
+    pub expert_weights_norm: bool,
+    pub expert_weights_scale: f32,
+    /// Indexer head dim (`Some` iff the model has an indexer layer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexer_head_size: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_index_head: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<usize>,
+    /// Separate SWA RoPE base (DSv4-Flash: 160 000), if set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rope_base_swa: Option<f64>,
+    /// YARN config, if the model uses YARN scaling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yarn: Option<DsV4YarnMeta>,
+>>>>>>> ianblenke/main
 }
 
 /// MoE (Mixture of Experts) configuration.
@@ -161,10 +311,23 @@ impl VindexModelConfig {
             rope_local_base: cfg.rope_local_base,
             query_pre_attn_scalar: cfg.query_pre_attn_scalar,
             final_logit_softcapping: cfg.final_logit_softcapping,
+<<<<<<< HEAD
             attention_multiplier: cfg.attention_multiplier,
             residual_multiplier: cfg.residual_multiplier,
             logits_scaling: cfg.logits_scaling,
             norm_eps: cfg.norm_eps,
+=======
+            full_attention_interval: cfg.full_attention_interval,
+            ssm_state_size: cfg.ssm_state_size,
+            ssm_inner_size: cfg.ssm_inner_size,
+            ssm_dt_rank: cfg.ssm_dt_rank,
+            ssm_group_count: cfg.ssm_group_count,
+            ssm_conv_kernel: cfg.ssm_conv_kernel,
+            rope_dimension_sections: cfg.rope_dimension_sections.clone(),
+            // DSv4 metadata is populated by the DSv4 extraction path, not
+            // derivable from the generic arch config.
+            dsv4: None,
+>>>>>>> ianblenke/main
         }
     }
 }
@@ -193,10 +356,21 @@ mod tests {
             rope_local_base: None,
             query_pre_attn_scalar: None,
             final_logit_softcapping: None,
+<<<<<<< HEAD
             attention_multiplier: None,
             residual_multiplier: None,
             logits_scaling: None,
             norm_eps: None,
+=======
+            full_attention_interval: None,
+            ssm_state_size: None,
+            ssm_inner_size: None,
+            ssm_dt_rank: None,
+            ssm_group_count: None,
+            ssm_conv_kernel: None,
+            rope_dimension_sections: None,
+            dsv4: None,
+>>>>>>> ianblenke/main
         }
     }
 
@@ -209,6 +383,78 @@ mod tests {
         assert_eq!(back.head_dim, 256);
         assert_eq!(back.num_q_heads, 8);
         assert_eq!(back.num_kv_heads, 4);
+    }
+
+    // ── DSv4 metadata (dsv4-vindex-extraction V1) ──
+
+    fn dsv4_meta() -> DsV4VindexMeta {
+        DsV4VindexMeta {
+            n_embd: 4096,
+            n_head: 64,
+            head_dim: 512,
+            compress_ratios: vec![0, 0, 4, 128, 4], // NoCompress×2, Indexer, Compress, Indexer
+            q_lora_rank: 1024,
+            n_groups: 8,
+            o_lora_rank: 1024,
+            n_rot: 64,
+            rope_base: 10000.0,
+            rope_mode: "neox".into(),
+            window_size: 128,
+            norm_eps: 1e-6,
+            n_hc: 4,
+            n_expert: 256,
+            n_expert_used: 6,
+            n_ff_exp: 2048,
+            n_expert_shared: 1,
+            expert_weights_norm: true,
+            expert_weights_scale: 1.5,
+            indexer_head_size: Some(128),
+            n_index_head: Some(64),
+            top_k: Some(512),
+            rope_base_swa: Some(160000.0),
+            yarn: Some(DsV4YarnMeta {
+                scaling_type: "yarn".into(),
+                freq_base: 10000.0,
+                freq_scale: 0.0625,
+                ext_factor: 1.0,
+                attn_factor: 1.0,
+                beta_fast: 32.0,
+                beta_slow: 1.0,
+                n_ctx_orig: 65536,
+            }),
+        }
+    }
+
+    /// DSv4 metadata round-trips through `index.json` losslessly.
+    #[test]
+    fn dsv4_meta_serde_round_trip() {
+        let mut cfg = minimal_model_config();
+        cfg.model_type = "deepseek_v4".into();
+        cfg.dsv4 = Some(dsv4_meta());
+        let j = serde_json::to_string(&cfg).unwrap();
+        let back: VindexModelConfig = serde_json::from_str(&j).unwrap();
+        assert_eq!(back.dsv4, Some(dsv4_meta()), "DSv4 meta must round-trip");
+        let m = back.dsv4.unwrap();
+        assert_eq!(m.compress_ratios, vec![0, 0, 4, 128, 4]);
+        assert_eq!(m.top_k, Some(512));
+        assert_eq!(m.yarn.unwrap().n_ctx_orig, 65536);
+    }
+
+    /// Backward compat: an existing (non-DSv4) `index.json` with no `dsv4`
+    /// field deserializes with `dsv4 = None`, and a non-DSv4 config does
+    /// not emit the `dsv4` key.
+    #[test]
+    fn dsv4_field_is_backward_compatible() {
+        // Old JSON without the field → None.
+        let old = r#"{"model_type":"llama","head_dim":128,"num_q_heads":32,"num_kv_heads":32,"rope_base":10000.0}"#;
+        let cfg: VindexModelConfig = serde_json::from_str(old).unwrap();
+        assert!(cfg.dsv4.is_none());
+        // Non-DSv4 config omits the key entirely (skip_serializing_if).
+        let j = serde_json::to_string(&minimal_model_config()).unwrap();
+        assert!(
+            !j.contains("dsv4"),
+            "dsv4 key must be omitted when None: {j}"
+        );
     }
 
     #[test]
@@ -269,6 +515,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn granite_scalars_round_trip_through_from_arch() {
         // Granite 4.1 3B exact config. The four scalars must survive
         // arch detect → from_arch → JSON → deserialize so the vindex
@@ -461,5 +708,47 @@ mod tests {
         assert!(!json.contains("attention_multiplier"));
         assert!(!json.contains("residual_multiplier"));
         assert!(!json.contains("logits_scaling"));
+=======
+    fn qwen35_deltanet_fields_round_trip() {
+        let mut cfg = minimal_model_config();
+        cfg.model_type = "qwen35".into();
+        cfg.full_attention_interval = Some(4);
+        cfg.ssm_state_size = Some(128);
+        cfg.ssm_inner_size = Some(6144);
+        cfg.ssm_dt_rank = Some(48);
+        cfg.ssm_group_count = Some(16);
+        cfg.ssm_conv_kernel = Some(4);
+        cfg.rope_dimension_sections = Some(vec![16, 24, 24, 0]);
+        let j = serde_json::to_string(&cfg).unwrap();
+        let back: VindexModelConfig = serde_json::from_str(&j).unwrap();
+        assert_eq!(back.model_type, "qwen35");
+        assert_eq!(back.full_attention_interval, Some(4));
+        assert_eq!(back.ssm_state_size, Some(128));
+        assert_eq!(back.ssm_inner_size, Some(6144));
+        assert_eq!(back.ssm_dt_rank, Some(48));
+        assert_eq!(back.ssm_group_count, Some(16));
+        assert_eq!(back.ssm_conv_kernel, Some(4));
+        assert_eq!(back.rope_dimension_sections, Some(vec![16, 24, 24, 0]));
+    }
+
+    #[test]
+    fn qwen35_fields_omitted_when_none() {
+        let cfg = minimal_model_config();
+        let j = serde_json::to_string(&cfg).unwrap();
+        for k in [
+            "full_attention_interval",
+            "ssm_state_size",
+            "ssm_inner_size",
+            "ssm_dt_rank",
+            "ssm_group_count",
+            "ssm_conv_kernel",
+            "rope_dimension_sections",
+        ] {
+            assert!(
+                !j.contains(k),
+                "qwen35 field `{k}` SHALL be omitted when None"
+            );
+        }
+>>>>>>> ianblenke/main
     }
 }

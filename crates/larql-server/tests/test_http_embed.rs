@@ -1379,3 +1379,70 @@ async fn http_openai_chat_completions_503_uses_nested_envelope() {
     let v = body_json(resp.into_body()).await;
     assert_openai_error_envelope(&v, "service_unavailable_error");
 }
+
+/// Regression test for PR #123 / task #127.
+///
+/// Before #123, `run_chat_completion` and `stream_chat_completion` both
+/// held the `model.weights` write lock and then called `pick_template`,
+/// which itself tried to take a read lock on the same
+/// `std::sync::RwLock`. On glibc that's a self-deadlock — the chat
+/// request hung in `futex_wait` forever.
+///
+/// The other 503 / 400 chat tests don't exercise this codepath: they
+/// use `model("gemma")` (infer_disabled=true → 503 short-circuit) or
+/// `model_infer_enabled("gemma")` with an EMPTY `weights` OnceLock —
+/// both cause `lock_weights_for_gen` to fail before `pick_template`
+/// runs. This test uses `model_with_loaded_weights` which pre-
+/// populates the OnceLock so the handler reaches the lock-ordering
+/// site PR #123 fixed. Downstream the handler may error (the synthetic
+/// tokenizer / index can't actually produce a real completion), but
+/// the test only asserts the call returns in bounded time — a
+/// deadlock would hang forever.
+#[tokio::test]
+async fn http_openai_chat_completions_returns_in_bounded_time() {
+    let app = single_model_router(state(vec![model_with_loaded_weights("test")]));
+    let req_fut = post_json(
+        app,
+        "/v1/chat/completions",
+        serde_json::json!({
+            "model": "test",
+            "messages": [{"role": "user", "content": "France"}],
+            "max_tokens": 1
+        }),
+    );
+    let timeout = std::time::Duration::from_secs(30);
+    if tokio::time::timeout(timeout, req_fut).await.is_err() {
+        panic!(
+            "/v1/chat/completions did not return within {:?} — regression of \
+             PR #123 (pick_template under write lock self-deadlock).",
+            timeout
+        );
+    }
+}
+
+/// Same property for the streaming path (`stream_chat_completion`).
+/// PR #123 fixed the lock order in BOTH the buffered and SSE paths;
+/// this test guards the SSE path against the same regression.
+#[tokio::test]
+async fn http_openai_chat_completions_stream_returns_in_bounded_time() {
+    let app = single_model_router(state(vec![model_with_loaded_weights("test")]));
+    let req_fut = post_json(
+        app,
+        "/v1/chat/completions",
+        serde_json::json!({
+            "model": "test",
+            "messages": [{"role": "user", "content": "France"}],
+            "max_tokens": 1,
+            "stream": true
+        }),
+    );
+    let timeout = std::time::Duration::from_secs(30);
+    if tokio::time::timeout(timeout, req_fut).await.is_err() {
+        panic!(
+            "/v1/chat/completions (stream) did not return within {:?} — \
+             regression of PR #123 (pick_template under write lock \
+             self-deadlock).",
+            timeout
+        );
+    }
+}

@@ -78,3 +78,6 @@ tonic-build = "0.13"
 # build script falls back to that.
 [target.'cfg(not(windows))'.build-dependencies]
 protobuf-src = "2"
+
+[lints]
+workspace = true

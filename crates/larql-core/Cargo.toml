@@ -49,3 +49,6 @@ name = "graph_demo"
 
 [[example]]
 name = "serialization_demo"
+
+[lints]
+workspace = true

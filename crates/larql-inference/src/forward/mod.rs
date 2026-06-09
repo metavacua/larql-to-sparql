@@ -61,7 +61,19 @@ pub use infer_patched::{
     KNN_COSINE_THRESHOLD, KNN_VERIFY_TOPK,
 };
 pub use inference_weights::InferenceWeights;
+<<<<<<< HEAD
 pub use layer::{run_attention_public, run_ffn, run_layer_with_capture_hooked, run_layer_with_ffn};
+=======
+pub use kv_generate::{
+    generate_cached, generate_cached_backend, generate_cached_constrained, generate_cached_hooked,
+    generate_cached_with_window,
+};
+pub use layer::{
+    run_attention_public, run_ffn, run_layer_with_capture_hooked, run_layer_with_ffn,
+    run_layer_with_ffn_capturing_h_post_attn, run_layer_with_ffn_capturing_h_post_attn_backend,
+    run_layer_with_ffn_with_cache,
+};
+>>>>>>> ianblenke/main
 pub use layer_interventions::{
     run_layer_with_mapped_head_residual_delta, run_layer_with_mapped_pre_o_head,
     run_layer_with_original_head_residual_delta, run_layer_with_replaced_head_residual_delta,
@@ -75,11 +87,11 @@ pub use patching::{
     DonorState, PatchHook,
 };
 pub use predict::{
-    forward_from_layer, forward_raw_logits, forward_raw_logits_with_prefix, hidden_to_raw_logits,
-    logit_lens_top1, logits_to_predictions_pub, predict, predict_from_hidden,
-    predict_from_hidden_with_ffn, predict_with_ffn, predict_with_ffn_attention,
-    predict_with_ffn_trace, predict_with_router, predict_with_strategy, predict_with_temperature,
-    RawForward,
+    forward_from_layer, forward_raw_logits, forward_raw_logits_with_prefix, full_vocab_probs,
+    full_vocab_probs_batched, hidden_to_raw_logits, logit_lens_top1, logits_to_predictions_pub,
+    predict, predict_from_hidden, predict_from_hidden_with_ffn, predict_with_ffn,
+    predict_with_ffn_attention, predict_with_ffn_trace, predict_with_router, predict_with_strategy,
+    predict_with_temperature, RawForward,
 };
 pub use target_delta::{TargetDelta, TargetDeltaOpts};
 pub use trace::{

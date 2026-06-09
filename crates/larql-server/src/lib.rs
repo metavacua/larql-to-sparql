@@ -5,6 +5,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod announce;
+pub mod attention_session;
 pub mod auth;
 pub mod band_utils;
 pub mod bootstrap;
@@ -17,6 +18,7 @@ pub mod ffn_l2_cache;
 pub mod grpc;
 pub mod grpc_expert;
 pub mod http;
+pub mod kv_snapshot;
 pub mod metrics;
 pub mod openapi;
 pub mod ratelimit;
@@ -25,4 +27,5 @@ pub mod session;
 pub mod shard_loader;
 pub mod shard_query;
 pub mod state;
+pub mod tokenizer_cache;
 pub mod wire;

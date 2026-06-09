@@ -24,6 +24,7 @@ pub(super) fn backend_supports_fused_q4_pipeline(backend: &dyn ComputeBackend) -
     backend.supports(Capability::PrefillQ4) && backend.supports(Capability::DecodeToken)
 }
 
+<<<<<<< HEAD
 /// CPU Q4K generate path. For dense single-stream architectures (no
 /// hybrid MoE, no cross-layer KV sharing) this uses the KV-cached
 /// driver in [`crate::vindex::predict_kquant_prefill`] +
@@ -32,6 +33,17 @@ pub(super) fn backend_supports_fused_q4_pipeline(backend: &dyn ComputeBackend) -
 /// Falls back to the original O(N²) per-step `predict_kquant_hidden`
 /// loop for hybrid MoE (Gemma 4 26B A4B) and Gemma 4 E2B
 /// (cross-layer KV sharing).
+=======
+/// CPU Q4K generate path. On architectures the persistent KV cache supports
+/// (`crate::vindex::cpu_q4k_cache_supported` — dense, non-cross-layer-share),
+/// allocates a `KvCache` once per request: the first call prefills with the
+/// full prompt, every subsequent call passes only the single newly-sampled
+/// token. That eliminates the O(N²) per-token full-replay that this path was
+/// documented to perform; expected ~10×+ decode-tok/s on Gemma 3 4B Q4_K.
+///
+/// On unsupported architectures (hybrid MoE / cross-layer K/V share), falls
+/// back to the original full-replay loop. Correctness identical in both modes.
+>>>>>>> ianblenke/main
 pub(super) fn generate_via_cpu_q4k(
     weights: &mut ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -44,6 +56,7 @@ pub(super) fn generate_via_cpu_q4k(
         return GenerateResult::empty_success();
     }
 
+<<<<<<< HEAD
     if crate::vindex::supports_cached_decode(weights) {
         let use_direct = crate::vindex::supports_direct_matvec_decode(weights, index);
         generate_via_cpu_q4k_cached(
@@ -101,6 +114,21 @@ fn generate_via_cpu_q4k_cached(
         lm_head_vocab,
     );
     let mut t_lm_head = lm_head_start.elapsed().as_secs_f64() * 1000.0;
+=======
+    let mut cache = if crate::vindex::cpu_q4k_cache_supported(weights) {
+        Some(crate::attention::KvCache::with_layers(weights.num_layers))
+    } else {
+        None
+    };
+
+    let prefill_start = std::time::Instant::now();
+    // First-token pass covers the prompt — that's our "prefill" here.
+    let first = if let Some(ref mut c) = cache {
+        crate::vindex::predict_q4k_with_cache(weights, tokenizer, token_ids, 5, index, c)
+    } else {
+        crate::vindex::predict_q4k(weights, tokenizer, token_ids, 5, index)
+    };
+>>>>>>> ianblenke/main
     let prefill_ms = prefill_start.elapsed().as_secs_f64() * 1000.0;
 
     let mut tokens: Vec<(String, f64)> = Vec::with_capacity(max_tokens);
@@ -272,7 +300,17 @@ fn generate_via_cpu_q4k_uncached(
 
     for _step in 1..max_tokens {
         let t0 = std::time::Instant::now();
+<<<<<<< HEAD
         let (result, hidden_ms, lm_head_ms) = predict_q4k_timed(weights, tokenizer, &ids, 5, index);
+=======
+        let result = if let Some(ref mut c) = cache {
+            // Cache covers all prior positions; feed only the newly-sampled token.
+            let last_id = *ids.last().expect("seeded above");
+            crate::vindex::predict_q4k_with_cache(weights, tokenizer, &[last_id], 5, index, c)
+        } else {
+            crate::vindex::predict_q4k(weights, tokenizer, &ids, 5, index)
+        };
+>>>>>>> ianblenke/main
         let step_ms = t0.elapsed().as_secs_f64() * 1000.0;
         decode_ms.push(step_ms);
         t_cpu_fwd += hidden_ms;

@@ -452,6 +452,12 @@ fn stream_chat_completion(
     let chat_id = format!("chatcmpl-{}", new_id_suffix());
 
     tokio::task::spawn_blocking(move || {
+        // Pick template + render BEFORE locking weights — see comment in
+        // `run_chat_completion`. `pick_template` takes a read lock on
+        // `model.weights`, which deadlocks against our own write lock
+        // below on non-reentrant std::sync::RwLock (task #127).
+        let template = pick_template(&model);
+        let prompt = render(template, &messages);
         let mut weights_guard = match model.lock_weights_for_gen() {
             Ok(w) => w,
             Err(e) => {
@@ -460,8 +466,11 @@ fn stream_chat_completion(
             }
         };
         let weights: &mut larql_inference::ModelWeights = &mut weights_guard;
+<<<<<<< HEAD
         let template = pick_template(&model, Some(weights));
         let prompt = render(template, &messages);
+=======
+>>>>>>> ianblenke/main
         let encoding = match model.tokenizer.encode(prompt.as_str(), true) {
             Ok(e) => e,
             Err(e) => {
@@ -696,6 +705,32 @@ fn run_chat_completion(
     stop_strings: &[String],
     constrained_schema: Option<Schema>,
 ) -> Result<ChatGenerationOutput, ServerError> {
+    // Pick the chat template BEFORE acquiring the weights write lock.
+    // `pick_template` takes a read lock on `model.weights` to inspect
+    // the arch family — taking that read lock from the same thread that
+    // already holds the write lock deadlocks `std::sync::RwLock` on
+    // glibc (non-reentrant), which is what task #127 reported as
+    // `/v1/chat/completions` hanging.
+    let template = pick_template(model);
+    let prompt = render(template, messages);
+
+    // DeepSeek V4 Flash has its own resident-storage forward
+    // (`DsV4LayerWeightStorage[]` + `DsV4HeadStorage`), not the generic
+    // `ModelWeights`. It must branch BEFORE `lock_weights_for_gen` —
+    // that lazy-loads generic Q/K/V/O + FFN weight files a DSv4 vindex
+    // doesn't contain. The family comes from `config` (index.json), so
+    // no weights load is needed to route here.
+    if model.config.family == "deepseek_v4" {
+        return run_dsv4_chat_completion(
+            model,
+            &prompt,
+            max_tokens,
+            sampling_params,
+            stop_strings,
+            constrained_schema,
+        );
+    }
+
     // Take an exclusive write guard on the weights for the duration
     // of generation. `larql_inference::layer_graph::generate` mutates
     // `weights.tensors` (the per-layer Q4_K dequant cache), so other
@@ -705,9 +740,12 @@ fn run_chat_completion(
         .map_err(ServerError::InferenceUnavailable)?;
     let weights: &mut larql_inference::ModelWeights = &mut weights_guard;
 
+<<<<<<< HEAD
     let template = pick_template(model, Some(weights));
     let prompt = render(template, messages);
 
+=======
+>>>>>>> ianblenke/main
     let encoding = model
         .tokenizer
         .encode(prompt.as_str(), true)
@@ -726,7 +764,107 @@ fn run_chat_completion(
     let cached_layers = larql_inference::CachedLayerGraph::from_residuals(Vec::new());
     let num_layers = weights.num_layers;
 
-    let result = if let Some(schema) = constrained_schema {
+    // qwen35 / qwen35moe (Qwen 3.6 dense + 35B-A3B MoE) needs a
+    // separate generate driver because the per-token forward goes
+    // through `qwen35_forward_step` + `DeltaNetHybridCache`, not the
+    // generic `predict_q4k_hidden_with_cache` + `KvCache` path that
+    // `generate_with_sampling` drives. Forwarding through
+    // `generate_with_sampling` would compute on the wrong weight
+    // shapes (DeltaNet linear-attn layers have no Q/K/V/O tensors
+    // at all) and produce garbage logits.
+    //
+    // Constrained masking (response_format) and the qwen35 driver
+    // are not yet plumbed together — refuse with a clear error so
+    // schema-bound qwen35 callers know to wait. Free-form qwen35
+    // chat goes through the dedicated path below.
+    let arch_family = weights.arch.family();
+    // qwen3next (Qwen3-Coder-Next + siblings) is the same hybrid
+    // Gated-DeltaNet + full-attention MoE family as Qwen 3.6; routes
+    // through the same generate driver.
+    let is_qwen35 = matches!(arch_family, "qwen35" | "qwen35moe" | "qwen3next");
+    // DeepSeek V4 Flash is handled by the dedicated `deepseek_v4` branch
+    // at the top of this function (before the generic weights load) — it
+    // can't reach here.
+    if is_qwen35 && constrained_schema.is_some() {
+        return Err(ServerError::Internal(format!(
+            "/v1/chat/completions with response_format/tools is not yet wired \
+             through the qwen35 generate driver (arch `{arch_family}`). \
+             Drop response_format/tools or use a non-qwen35 model."
+        )));
+    }
+    let result = if is_qwen35 {
+        // Lazy-cache the heavy `Qwen35Weights` reconstruction (~30-40s
+        // for a 60 GB vindex) for the model's lifetime.
+        // Attach a CUDA backend (or the no-op CPU stub when the
+        // `cuda` feature is off) so the per-class GPU tier knobs
+        // (LARQL_QWEN35_GPU_NO_FFN etc.) fire. Before this, the qwen35
+        // forward saw `backend: None` and all `matvec_with_backend` /
+        // `qwen35_deltanet_step` etc. dispatches fell through to the
+        // CPU rayon path even with `LARQL_QWEN35_GPU=1` set. The fix
+        // is to attach exactly once at vindex-load time — the same
+        // Arc is shared across every chat request via OnceLock.
+        let qwen35_w = match model.qwen35_weights.get() {
+            Some(w) => std::sync::Arc::clone(w),
+            None => {
+                // `mut` is needed by the feature-gated `loaded.backend = …`
+                // assignment below; `#[allow]` keeps non-feature builds clean
+                // without splitting the binding.
+                #[allow(unused_mut)]
+                let mut loaded = larql_inference::attention::qwen35_load_vindex
+                    ::load_qwen35_weights_from_vindex(&model.path)
+                    .map_err(|e| ServerError::Internal(format!(
+                        "qwen35 vindex load failed: {e}"
+                    )))?;
+                // Attach the compute backend ONLY when a real GPU
+                // backend is compiled in. The non-feature build's
+                // `default_backend()` returns `CpuBackend`, whose
+                // `q4k_matvec` / `q5k_matvec` impls differ slightly
+                // from `QuantTensor::matvec` (different summation
+                // order in their inner row dots). Hooking it up
+                // would silently change the FFN output values and
+                // break greedy decode — verified empirically.
+                //
+                // When `--features cuda` (or future `--features metal`)
+                // is enabled, the same `attention_compute_backend()`
+                // path returns a real CUDA/Metal backend whose
+                // `quant_matvec` actually dispatches to GPU kernels;
+                // its CPU fallback (when the format isn't supported
+                // device-side) returns `None` to surface the issue
+                // rather than silently re-routing through a
+                // marginally-different CPU kernel.
+                #[cfg(any(feature = "cuda", all(feature = "metal-experts", target_os = "macos")))]
+                {
+                    // `LARQL_QWEN35_NO_BACKEND=1` skips backend attach
+                    // so the CPU-side batched-prefill matmul gates
+                    // (`backend.is_none()`) in qwen35_block /
+                    // deltanet_block fire. Useful for benching the
+                    // Phase 4 batched matmul work from a cuda-built
+                    // binary, and for production CPU-only deployments.
+                    if std::env::var("LARQL_QWEN35_NO_BACKEND").is_err() {
+                        loaded.backend = Some(std::sync::Arc::from(
+                            super::super::attention::attention_compute_backend(),
+                        ));
+                    }
+                }
+                let arc = std::sync::Arc::new(loaded);
+                // OnceLock semantics: first writer wins; if a parallel
+                // request already initialised, drop ours and use theirs.
+                let _ = model.qwen35_weights.set(std::sync::Arc::clone(&arc));
+                model.qwen35_weights.get().cloned().unwrap_or(arc)
+            }
+        };
+        let arch_ref: &dyn larql_models::ModelArchitecture = &*weights.arch;
+        let (sampling, eos) = super::util::build_sampling_eos(sampling_params, stop_strings);
+        larql_inference::attention::qwen35_load_vindex::qwen35_generate_with_sampling(
+            &qwen35_w,
+            arch_ref,
+            &model.tokenizer,
+            &prompt_ids,
+            max_tokens,
+            sampling,
+            &eos,
+        )
+    } else if let Some(schema) = constrained_schema {
         // Sampling under mask via the new `_sampled` variant — drives
         // selection through the user's SamplingConfig over the masked
         // logits. Greedy when no sampling fields are set.
@@ -780,6 +918,167 @@ fn run_chat_completion(
         // align with the truncated text. We can't perfectly reverse the
         // textual trim, but discarding tokens past the byte boundary is
         // a good approximation.
+        completion_tokens = trim_tokens_to_text(&completion_tokens, &completion_text);
+    }
+
+    let completion_token_count = completion_tokens.len();
+    Ok(ChatGenerationOutput {
+        text: completion_text,
+        tokens: completion_tokens,
+        finish_reason,
+        prompt_tokens: prompt_token_count,
+        completion_tokens: completion_token_count,
+    })
+}
+
+/// DeepSeek V4 Flash chat completion — runs the resident-storage forward
+/// (`dsv4_resident_generate_with_prefix_cache`) reconstructed from the
+/// vindex blobs, instead of the generic `ModelWeights` path. Lazy-builds
+/// and caches the resident model on `LoadedModel.dsv4_resident` on first
+/// use (reconstructing `DsV4LayerWeightStorage[]` from a ~161 GB vindex is
+/// far too slow per request).
+fn run_dsv4_chat_completion(
+    model: &LoadedModel,
+    prompt: &str,
+    max_tokens: usize,
+    sampling_params: super::util::SamplingParams,
+    stop_strings: &[String],
+    constrained_schema: Option<Schema>,
+) -> Result<ChatGenerationOutput, ServerError> {
+    use larql_inference::attention::dsv4_decode_loop::DecodeConfig;
+    use larql_inference::attention::dsv4_prefix_cache::DsV4PrefixCache;
+    use larql_inference::attention::dsv4_prefix_reuse::dsv4_resident_generate_with_prefix_cache;
+    use larql_inference::attention::dsv4_vindex_load::{
+        dsv4_hyperparams_from_meta, load_dsv4_vindex_resident,
+    };
+    use rand::SeedableRng;
+
+    // Constrained masking isn't wired through the DSv4 driver yet.
+    if constrained_schema.is_some() {
+        return Err(ServerError::Internal(
+            "/v1/chat/completions with response_format/tools is not yet wired \
+             through the DeepSeek-V4 generate driver. Drop response_format/tools."
+                .into(),
+        ));
+    }
+
+    let encoding = model
+        .tokenizer
+        .encode(prompt, true)
+        .map_err(|e| ServerError::Internal(format!("tokenize: {e}")))?;
+    let prompt_ids: Vec<u32> = encoding.get_ids().to_vec();
+    if prompt_ids.is_empty() {
+        return Err(ServerError::BadRequest(
+            "rendered prompt tokenises to empty".into(),
+        ));
+    }
+    let prompt_token_count = prompt_ids.len();
+
+    // Lazy-load + cache the resident model (reconstruct hp from
+    // index.json's model_config.dsv4, then load every layer's storage
+    // from the vindex blobs via the serving reader).
+    let resident = match model.dsv4_resident.get() {
+        Some(r) => std::sync::Arc::clone(r),
+        None => {
+            let meta = model
+                .config
+                .model_config
+                .as_ref()
+                .and_then(|m| m.dsv4.as_ref())
+                .ok_or_else(|| {
+                    ServerError::Internal(
+                        "DSv4 vindex missing model_config.dsv4 in index.json".into(),
+                    )
+                })?;
+            let hp = dsv4_hyperparams_from_meta(meta)
+                .map_err(|e| ServerError::Internal(format!("dsv4 hp reconstruct: {e}")))?;
+            let (layers, head, _manifest) = load_dsv4_vindex_resident(&model.path, &hp)
+                .map_err(|e| ServerError::Internal(format!("dsv4 resident load: {e}")))?;
+            let prefix_root = std::env::temp_dir().join("larql-dsv4-prefix-cache");
+            let prefix_cache = DsV4PrefixCache::open(&prefix_root, &model.id, 8 << 30)
+                .map_err(|e| ServerError::Internal(format!("dsv4 prefix cache: {e}")))?;
+            let arc = std::sync::Arc::new(crate::state::DsV4ResidentModel {
+                layers,
+                head,
+                hp,
+                prefix_cache: std::sync::Mutex::new(prefix_cache),
+            });
+            // OnceLock: first writer wins; reuse the winner if we raced.
+            let _ = model.dsv4_resident.set(std::sync::Arc::clone(&arc));
+            model.dsv4_resident.get().cloned().unwrap_or(arc)
+        }
+    };
+
+    // The DSv4 decode loop uses its own `dsv4_sampling::SamplingConfig`
+    // (distinct from the generic layer-graph one), so map directly from
+    // the request params. `build_sampling_eos` is reused only for the EOS
+    // id set + stop strings.
+    use larql_inference::attention::dsv4_sampling::SamplingConfig as DsV4Sampling;
+    let temp = sampling_params.temperature.unwrap_or(0.0).max(0.0);
+    let top_p = sampling_params.top_p.unwrap_or(0.95);
+    // `build_sampling_eos` consumes `sampling_params`; reused only for the
+    // EOS id set + stop strings (its generic SamplingConfig is discarded).
+    let (_generic_sampling, eos) = super::util::build_sampling_eos(sampling_params, stop_strings);
+    let sampling = if temp > 0.0 {
+        DsV4Sampling {
+            greedy: false,
+            temperature: temp,
+            top_k: 40,
+            top_p,
+        }
+    } else {
+        DsV4Sampling::greedy()
+    };
+    let decode = DecodeConfig {
+        max_new_tokens: max_tokens,
+        // The DSv4 decode loop stops on a single eos id; pick any from
+        // the eos set (DSv4-Flash has one canonical end-of-turn token).
+        eos_token: eos.eos_token_ids.iter().next().copied(),
+        sampling,
+    };
+    let backend = larql_compute::default_backend();
+    let mut rng = rand::rngs::StdRng::from_entropy();
+
+    // One generation at a time per model (the prefix cache is mutated);
+    // mirrors the generic path's weights write-lock.
+    let mut prefix_cache = resident
+        .prefix_cache
+        .lock()
+        .map_err(|e| ServerError::Internal(format!("dsv4 prefix cache poisoned: {e}")))?;
+    let (all_tokens, _cache_hit) = dsv4_resident_generate_with_prefix_cache(
+        &resident.layers,
+        &resident.hp,
+        &resident.head,
+        &prompt_ids,
+        decode,
+        &mut rng,
+        &mut prefix_cache,
+        Some(&*backend),
+    )
+    .map_err(|e| ServerError::Internal(format!("dsv4 generate: {e}")))?;
+    drop(prefix_cache);
+
+    // The returned vector is `prompt ++ generated`; slice off the prompt.
+    let gen_start = prompt_ids.len().min(all_tokens.len());
+    let mut completion_text = String::new();
+    let mut completion_tokens: Vec<(String, f64)> = Vec::new();
+    let mut finish_reason: &'static str = "length";
+    for &tid in &all_tokens[gen_start..] {
+        let piece = model
+            .tokenizer
+            .decode(&[tid], false)
+            .map_err(|e| ServerError::Internal(format!("detok: {e}")))?;
+        completion_text.push_str(&piece);
+        // Per-token logprobs aren't exposed by this entry point yet → 0.0.
+        completion_tokens.push((piece.clone(), 0.0));
+        if larql_inference::vindex::is_end_of_turn(&piece) {
+            finish_reason = "stop";
+            break;
+        }
+    }
+    if !stop_strings.is_empty() && contains_any(&completion_text, stop_strings) {
+        completion_text = trim_at_stop(&completion_text, stop_strings);
+        finish_reason = "stop";
         completion_tokens = trim_tokens_to_text(&completion_tokens, &completion_text);
     }
 

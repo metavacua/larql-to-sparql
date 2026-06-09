@@ -34,6 +34,7 @@ pub enum LayerWeightFormat {
     Q6_K = 5,
     Q8_0 = 6,
     FP4 = 7,
+    Q5_K = 8,
 }
 
 impl LayerWeightFormat {
@@ -43,22 +44,71 @@ impl LayerWeightFormat {
 }
 
 const MAGIC: u32 = u32::from_le_bytes(*b"LYRW");
-const FORMAT_VERSION: u32 = 1;
+/// LYRW v1: file-level format applies to all entries.
+/// LYRW v2: per-entry offset row carries optional per-projection
+/// format overrides (`0` = use file default). Writer emits v2 unless
+/// every entry is uniform (matching file default); reader supports both.
+pub const FORMAT_VERSION_V1: u32 = 1;
+pub const FORMAT_VERSION_V2: u32 = 2;
 const U32_FIELD_BYTES: usize = std::mem::size_of::<u32>();
 const U64_FIELD_BYTES: usize = std::mem::size_of::<u64>();
 const HEADER_FIELDS: usize = 6;
-const OFFSET_FIELDS_PER_ENTRY: usize = 4;
 const HEADER_BYTES: usize = HEADER_FIELDS * U32_FIELD_BYTES;
-const OFFSET_ENTRY_BYTES: usize = OFFSET_FIELDS_PER_ENTRY * U64_FIELD_BYTES;
+/// v1 row: 4 × u64 (gate_up_off, gate_up_len, down_off, down_len).
+const OFFSET_ENTRY_BYTES_V1: usize = 4 * U64_FIELD_BYTES;
+/// v2 row: 2 × u32 (gate_up_fmt, down_fmt) + 4 × u64 (offsets/lens).
+const OFFSET_ENTRY_BYTES_V2: usize = 2 * U32_FIELD_BYTES + 4 * U64_FIELD_BYTES;
 const BF16_BYTES: usize = std::mem::size_of::<u16>();
 
-/// One quantized entry: gate+up bytes and down bytes, both in the same format.
+/// One quantized entry: gate+up bytes and down bytes.
+///
+/// Up to LYRW v1 both projections were forced to the file-level
+/// `LayerWeightFormat`. v2 carries an **optional per-projection
+/// format override**: when `gate_up_format` / `down_format` are
+/// `Some(_)`, the writer stores that format alongside the bytes in
+/// the v2 offset table; when `None`, the file-level default applies.
+///
+/// Mixed-format use case: Unsloth Q4_K_M ships
+/// `ffn_gate_exps` / `ffn_up_exps` as Q4_K but `ffn_down_exps` as
+/// Q6_K. Preserving both source formats requires per-projection
+/// format tracking — uniform Q4_K downquantizes down at every
+/// expert (24,576 down matrices on Qwen3-Coder-Next).
 pub struct LayerEntry {
-    pub gate_up: Vec<u8>, // Q4_K [2*inter, hidden]
-    pub down: Vec<u8>,    // Q6_K [hidden, inter_padded]  (same format as gate_up)
+    pub gate_up: Vec<u8>,
+    pub down: Vec<u8>,
+    pub gate_up_format: Option<LayerWeightFormat>,
+    pub down_format: Option<LayerWeightFormat>,
 }
 
-pub type LayerWeightOffsets = Vec<(usize, usize, usize, usize)>;
+impl LayerEntry {
+    /// Convenience for the legacy single-format case: same format for
+    /// both projections, no overrides recorded in the offset table.
+    pub fn uniform(gate_up: Vec<u8>, down: Vec<u8>) -> Self {
+        Self {
+            gate_up,
+            down,
+            gate_up_format: None,
+            down_format: None,
+        }
+    }
+}
+
+/// One offset-table row in the parsed header. `gate_up_format` /
+/// `down_format` echo the writer's per-projection override (LYRW v2)
+/// or fall back to the file-level format on v1 files. Callers always
+/// see the **effective** format (never `None`) so v1 consumers don't
+/// need to know about v2's optional-override design.
+#[derive(Debug, Clone, Copy)]
+pub struct ParsedLayerOffset {
+    pub gate_up_offset: usize,
+    pub gate_up_len: usize,
+    pub gate_up_format: LayerWeightFormat,
+    pub down_offset: usize,
+    pub down_len: usize,
+    pub down_format: LayerWeightFormat,
+}
+
+pub type LayerWeightOffsets = Vec<ParsedLayerOffset>;
 pub type LayerWeightsHeader = (LayerWeightFormat, usize, usize, usize, LayerWeightOffsets);
 
 /// Write `layers/layer_{L:02}.weights` for one layer.
@@ -82,21 +132,42 @@ pub fn write_layer_weights(
 
     let num_entries = entries.len() as u32;
 
+    // Promote to v2 when any entry carries a per-projection format
+    // override. v1 stays the wire format for uniform-format entries
+    // so old readers see no on-disk change.
+    let needs_v2 = entries
+        .iter()
+        .any(|e| e.gate_up_format.is_some() || e.down_format.is_some());
+    let version = if needs_v2 {
+        FORMAT_VERSION_V2
+    } else {
+        FORMAT_VERSION_V1
+    };
+    let entry_bytes = if needs_v2 {
+        OFFSET_ENTRY_BYTES_V2
+    } else {
+        OFFSET_ENTRY_BYTES_V1
+    };
+
     // ── Header (6 × u32) ──
     f.write_all(&MAGIC.to_le_bytes())?;
-    f.write_all(&FORMAT_VERSION.to_le_bytes())?;
+    f.write_all(&version.to_le_bytes())?;
     f.write_all(&format.as_u32().to_le_bytes())?;
     f.write_all(&num_entries.to_le_bytes())?;
     f.write_all(&(inter as u32).to_le_bytes())?;
     f.write_all(&(hidden as u32).to_le_bytes())?;
 
-    // ── Offset table (num_entries × 4 × u64) ──
-    // Compute offsets: header, table, then data.
+    // ── Offset table ──
+    // v1 row: (gate_up_off, gate_up_len, down_off, down_len) — 4 × u64
+    // v2 row: (gate_up_fmt, down_fmt, gate_up_off, gate_up_len,
+    //          down_off, down_len) — 2 × u32 + 4 × u64
     let header_bytes: u64 = HEADER_BYTES as u64;
-    let table_bytes: u64 = num_entries as u64 * OFFSET_ENTRY_BYTES as u64;
+    let table_bytes: u64 = num_entries as u64 * entry_bytes as u64;
     let mut cursor: u64 = header_bytes + table_bytes;
 
-    let mut offsets: Vec<(u64, u64, u64, u64)> = Vec::with_capacity(entries.len());
+    // Compute offsets up front so we can write the table in one pass.
+    let mut rows: Vec<(LayerWeightFormat, LayerWeightFormat, u64, u64, u64, u64)> =
+        Vec::with_capacity(entries.len());
     for entry in entries {
         let gate_up_off = cursor;
         let gate_up_bytes = entry.gate_up.len() as u64;
@@ -104,10 +175,23 @@ pub fn write_layer_weights(
         let down_off = cursor;
         let down_bytes = entry.down.len() as u64;
         cursor += down_bytes;
-        offsets.push((gate_up_off, gate_up_bytes, down_off, down_bytes));
+        let gu_fmt = entry.gate_up_format.unwrap_or(format);
+        let dn_fmt = entry.down_format.unwrap_or(format);
+        rows.push((
+            gu_fmt,
+            dn_fmt,
+            gate_up_off,
+            gate_up_bytes,
+            down_off,
+            down_bytes,
+        ));
     }
 
-    for (gate_up_off, gate_up_bytes, down_off, down_bytes) in &offsets {
+    for (gu_fmt, dn_fmt, gate_up_off, gate_up_bytes, down_off, down_bytes) in &rows {
+        if needs_v2 {
+            f.write_all(&gu_fmt.as_u32().to_le_bytes())?;
+            f.write_all(&dn_fmt.as_u32().to_le_bytes())?;
+        }
         f.write_all(&gate_up_off.to_le_bytes())?;
         f.write_all(&gate_up_bytes.to_le_bytes())?;
         f.write_all(&down_off.to_le_bytes())?;
@@ -145,6 +229,7 @@ pub fn quantize_f32(data: &[f32], format: LayerWeightFormat) -> Result<Vec<u8>, 
         LayerWeightFormat::F16
         | LayerWeightFormat::BF16
         | LayerWeightFormat::Q4_0
+        | LayerWeightFormat::Q5_K
         | LayerWeightFormat::Q8_0
         | LayerWeightFormat::FP4 => {
             return Err(VindexError::Parse(format!(
@@ -198,7 +283,7 @@ pub fn quantize_dense_entry(
     let (down_padded, _) = pad_cols_to_256(down_f32, hidden, inter);
     let down = quantize_f32(&down_padded, format)?;
 
-    Ok(LayerEntry { gate_up, down })
+    Ok(LayerEntry::uniform(gate_up, down))
 }
 
 /// Build quantized entries for one MoE layer from BF16-packed expert tensors.
@@ -229,7 +314,7 @@ pub fn quantize_moe_entries(
             let (down_padded, _) = pad_cols_to_256(&down_f32_src, hidden, moe_inter);
             let down = quantize_f32(&down_padded, format)?;
 
-            Ok(LayerEntry { gate_up, down })
+            Ok(LayerEntry::uniform(gate_up, down))
         })
         .collect()
 }
@@ -246,9 +331,56 @@ pub fn parse_layer_weights_header(data: &[u8]) -> Option<LayerWeightsHeader> {
     if magic != MAGIC {
         return None;
     }
-    // format_version at [4..8] — currently ignored, forward-compatible
-    let quant_raw = u32::from_le_bytes(data[8..12].try_into().ok()?);
-    let format = match quant_raw {
+    let version = u32::from_le_bytes(data[4..8].try_into().ok()?);
+    let format = decode_layer_format(u32::from_le_bytes(data[8..12].try_into().ok()?))?;
+    let num_entries = u32::from_le_bytes(data[12..16].try_into().ok()?) as usize;
+    let inter = u32::from_le_bytes(data[16..20].try_into().ok()?) as usize;
+    let hidden = u32::from_le_bytes(data[20..24].try_into().ok()?) as usize;
+
+    let entry_bytes = match version {
+        FORMAT_VERSION_V1 => OFFSET_ENTRY_BYTES_V1,
+        FORMAT_VERSION_V2 => OFFSET_ENTRY_BYTES_V2,
+        _ => return None, // unknown version — refuse rather than misread offsets
+    };
+
+    let table_start = HEADER_BYTES;
+    let table_end = table_start + num_entries * entry_bytes;
+    if data.len() < table_end {
+        return None;
+    }
+
+    let mut offsets = Vec::with_capacity(num_entries);
+    for e in 0..num_entries {
+        let base = table_start + e * entry_bytes;
+        let (gate_up_format, down_format, off0) = if version == FORMAT_VERSION_V2 {
+            let gu_raw = u32::from_le_bytes(data[base..base + 4].try_into().ok()?);
+            let dn_raw = u32::from_le_bytes(data[base + 4..base + 8].try_into().ok()?);
+            (
+                decode_layer_format(gu_raw)?,
+                decode_layer_format(dn_raw)?,
+                base + 8,
+            )
+        } else {
+            (format, format, base)
+        };
+        let gate_up_offset = u64::from_le_bytes(data[off0..off0 + 8].try_into().ok()?) as usize;
+        let gate_up_len = u64::from_le_bytes(data[off0 + 8..off0 + 16].try_into().ok()?) as usize;
+        let down_offset = u64::from_le_bytes(data[off0 + 16..off0 + 24].try_into().ok()?) as usize;
+        let down_len = u64::from_le_bytes(data[off0 + 24..off0 + 32].try_into().ok()?) as usize;
+        offsets.push(ParsedLayerOffset {
+            gate_up_offset,
+            gate_up_len,
+            gate_up_format,
+            down_offset,
+            down_len,
+            down_format,
+        });
+    }
+    Some((format, num_entries, inter, hidden, offsets))
+}
+
+fn decode_layer_format(raw: u32) -> Option<LayerWeightFormat> {
+    Some(match raw {
         0 => LayerWeightFormat::F32,
         1 => LayerWeightFormat::F16,
         2 => LayerWeightFormat::BF16,
@@ -257,26 +389,7 @@ pub fn parse_layer_weights_header(data: &[u8]) -> Option<LayerWeightsHeader> {
         5 => LayerWeightFormat::Q6_K,
         6 => LayerWeightFormat::Q8_0,
         7 => LayerWeightFormat::FP4,
+        8 => LayerWeightFormat::Q5_K,
         _ => return None,
-    };
-    let num_entries = u32::from_le_bytes(data[12..16].try_into().ok()?) as usize;
-    let inter = u32::from_le_bytes(data[16..20].try_into().ok()?) as usize;
-    let hidden = u32::from_le_bytes(data[20..24].try_into().ok()?) as usize;
-
-    let table_start = HEADER_BYTES;
-    let table_end = table_start + num_entries * OFFSET_ENTRY_BYTES;
-    if data.len() < table_end {
-        return None;
-    }
-
-    let mut offsets = Vec::with_capacity(num_entries);
-    for e in 0..num_entries {
-        let base = table_start + e * OFFSET_ENTRY_BYTES;
-        let gate_up_off = u64::from_le_bytes(data[base..base + 8].try_into().ok()?) as usize;
-        let gate_up_bytes = u64::from_le_bytes(data[base + 8..base + 16].try_into().ok()?) as usize;
-        let down_off = u64::from_le_bytes(data[base + 16..base + 24].try_into().ok()?) as usize;
-        let down_bytes = u64::from_le_bytes(data[base + 24..base + 32].try_into().ok()?) as usize;
-        offsets.push((gate_up_off, gate_up_bytes, down_off, down_bytes));
-    }
-    Some((format, num_entries, inter, hidden, offsets))
+    })
 }

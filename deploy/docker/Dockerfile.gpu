@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1
+#
+# GPU attention container — runs attention + RotorQuant KV-cache on CUDA.
+# Built on nvidia/cuda devel image; requires `--gpus all` (or
+# `nvidia-container-toolkit`) at runtime.
+#
+# Build:
+#   docker build -f deploy/docker/Dockerfile.gpu -t larql-gpu:dev .
+# Run:
+#   docker run --rm --gpus all -p 8081:8080 -v larql-vindex:/data larql-gpu:dev
+
+# ---- builder: Rust + CUDA toolkit -----------------------------------------
+FROM nvidia/cuda:13.1.0-devel-ubuntu24.04 AS builder
+WORKDIR /build
+
+# Rust + build deps. We use rustup for toolchain version pinning so this
+# tracks our workspace's `rust-version`.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl pkg-config libssl-dev protobuf-compiler \
+        cmake g++ libopenblas-dev git \
+    && curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+
+# Target the dev-box RTX 4090 by default. CUDA 13 no longer accepts every
+# older sm_70-era target; set LARQL_CUDA_ARCH explicitly for other GPUs.
+ARG LARQL_CUDA_ARCH="89"
+ARG ENABLE_CUDA_OXIDE=0
+ENV LARQL_CUDA_ARCH=${LARQL_CUDA_ARCH}
+
+RUN if [ "$ENABLE_CUDA_OXIDE" = "1" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+            gnupg lsb-release wget software-properties-common && \
+        curl -sSf https://apt.llvm.org/llvm.sh | bash -s -- 21 && \
+        apt-get update && apt-get install -y --no-install-recommends \
+            libclang-common-21-dev clang-21 llvm-21 && \
+        rustup toolchain install nightly-2026-04-03 --profile minimal && \
+        rustup component add rust-src rustc-dev --toolchain nightly-2026-04-03 && \
+        cargo +nightly-2026-04-03 install --git https://github.com/NVlabs/cuda-oxide.git \
+            --rev 6de050946cd1013335a33cf2c5144888a32efab3 cargo-oxide; \
+    fi
+
+RUN RUSTFLAGS="-C target-feature=+avx2,+fma" \
+    cargo build --release -p larql-server -p larql-cli --features cuda \
+ && strip target/release/larql-server target/release/larql
+
+# ---- runtime: CUDA runtime only -------------------------------------------
+FROM nvidia/cuda:13.1.0-runtime-ubuntu24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates libssl3 curl python3 python3-pip libopenblas0 \
+    && pip3 install --no-cache-dir --break-system-packages \
+        huggingface_hub[hf_transfer] hf_transfer \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/larql-server /usr/local/bin/
+COPY --from=builder /build/target/release/larql /usr/local/bin/
+COPY deploy/docker/start.sh /start.sh
+RUN chmod +x /start.sh
+
+ENV ROLE=attention
+ENV KV_FORMAT=iso3
+EXPOSE 8080 8081
+
+# Sanity check at startup: refuse to run if no NVIDIA runtime is visible.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
+    CMD curl -fsS http://localhost:8080/v1/health || exit 1
+
+CMD ["/start.sh"]

@@ -25,11 +25,12 @@ pub fn q6k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
         )));
     }
 
-    #[cfg(target_arch = "aarch64")]
-    unsafe {
-        Ok(q6k_row_dot_neon(data, x, n_blocks))
-    }
-    #[cfg(not(target_arch = "aarch64"))]
+    // C.5j: the NEON path was built around the OLD (buggy) Q6_K element
+    // layout — sequential per-scale-subblock — but the correct llama.cpp
+    // layout is interleaved (`y[l]`, `y[l+32]`, `y[l+64]`, `y[l+96]`).
+    // Forcing scalar until the NEON path is rewritten to match. Loses
+    // ~3-4× on Apple Silicon Q6_K matvec but correctness > perf.
+    // TODO: port the interleaved layout to `q6k_row_dot_neon`.
     Ok(q6k_row_dot_scalar(data, x, n_blocks))
 }
 
@@ -37,26 +38,43 @@ pub fn q6k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
 #[inline]
 #[allow(dead_code)]
 pub(super) fn q6k_row_dot_scalar(data: &[u8], x: &[f32], n_blocks: usize) -> f32 {
+    // Mirror of llama.cpp `dequantize_row_q6_K` element layout — see the
+    // `dequantize_q6_k` body above for the per-half interleaved scheme.
     let mut acc = 0.0f32;
     for sb in 0..n_blocks {
         let block = &data[sb * 210..(sb + 1) * 210];
-        let ql = &block[0..128];
-        let qh = &block[128..192];
-        let scales = &block[192..208];
+        let ql_full = &block[0..128];
+        let qh_full = &block[128..192];
+        let sc_full = &block[192..208];
         let d = f16_to_f32(u16::from_le_bytes([block[208], block[209]]));
-        for (j, &sc_byte) in scales[..16].iter().enumerate() {
-            let sc = d * (sc_byte as i8) as f32;
-            for i in 0..16 {
-                let idx = j * 16 + i;
-                let lo4 = if idx % 2 == 0 {
-                    ql[idx / 2] & 0x0F
-                } else {
-                    (ql[idx / 2] >> 4) & 0x0F
-                };
-                let hi2_byte = qh[idx / 4];
-                let hi2 = (hi2_byte >> ((idx % 4) * 2)) & 0x03;
-                let val = ((lo4 as i32) | ((hi2 as i32) << 4)) - 32;
-                acc += sc * (val as f32) * x[sb * 256 + j * 16 + i];
+        let x_base = sb * 256;
+        for half in 0..2 {
+            let ql_off = half * 64;
+            let qh_off = half * 32;
+            let sc_off = half * 8;
+            let x_half = x_base + half * 128;
+            for l in 0..32_usize {
+                let is = l / 16;
+                let qh_byte = qh_full[qh_off + l];
+                let q1 = ((ql_full[ql_off + l] & 0x0F) | (((qh_byte >> 0) & 0x03) << 4)) as i8
+                    as i32
+                    - 32;
+                let q2 = ((ql_full[ql_off + l + 32] & 0x0F) | (((qh_byte >> 2) & 0x03) << 4)) as i8
+                    as i32
+                    - 32;
+                let q3 =
+                    ((ql_full[ql_off + l] >> 4) | (((qh_byte >> 4) & 0x03) << 4)) as i8 as i32 - 32;
+                let q4 = ((ql_full[ql_off + l + 32] >> 4) | (((qh_byte >> 6) & 0x03) << 4)) as i8
+                    as i32
+                    - 32;
+                let s0 = d * (sc_full[sc_off + is] as i8) as f32;
+                let s1 = d * (sc_full[sc_off + is + 2] as i8) as f32;
+                let s2 = d * (sc_full[sc_off + is + 4] as i8) as f32;
+                let s3 = d * (sc_full[sc_off + is + 6] as i8) as f32;
+                acc += s0 * q1 as f32 * x[x_half + l];
+                acc += s1 * q2 as f32 * x[x_half + l + 32];
+                acc += s2 * q3 as f32 * x[x_half + l + 64];
+                acc += s3 * q4 as f32 * x[x_half + l + 96];
             }
         }
     }
@@ -155,23 +173,38 @@ pub fn q6k_row_scaled_add(data: &[u8], alpha: f32, out: &mut [f32]) -> Result<()
     }
     for sb in 0..n_blocks {
         let block = &data[sb * block_size..(sb + 1) * block_size];
-        let ql = &block[0..128];
-        let qh = &block[128..192];
-        let scales = &block[192..208];
+        let ql_full = &block[0..128];
+        let qh_full = &block[128..192];
+        let sc_full = &block[192..208];
         let d = f16_to_f32(u16::from_le_bytes([block[208], block[209]]));
-        for (j, &sc_byte) in scales[..16].iter().enumerate() {
-            let sc = d * (sc_byte as i8) as f32;
-            for i in 0..16 {
-                let idx = j * 16 + i;
-                let lo4 = if idx % 2 == 0 {
-                    ql[idx / 2] & 0x0F
-                } else {
-                    (ql[idx / 2] >> 4) & 0x0F
-                };
-                let hi2_byte = qh[idx / 4];
-                let hi2 = (hi2_byte >> ((idx % 4) * 2)) & 0x03;
-                let val = ((lo4 as i32) | ((hi2 as i32) << 4)) - 32;
-                out[sb * 256 + j * 16 + i] += alpha * sc * (val as f32);
+        let out_base = sb * super_block;
+        for half in 0..2 {
+            let ql_off = half * 64;
+            let qh_off = half * 32;
+            let sc_off = half * 8;
+            let out_half = out_base + half * 128;
+            for l in 0..32_usize {
+                let is = l / 16;
+                let qh_byte = qh_full[qh_off + l];
+                let q1 = ((ql_full[ql_off + l] & 0x0F) | (((qh_byte >> 0) & 0x03) << 4)) as i8
+                    as i32
+                    - 32;
+                let q2 = ((ql_full[ql_off + l + 32] & 0x0F) | (((qh_byte >> 2) & 0x03) << 4)) as i8
+                    as i32
+                    - 32;
+                let q3 =
+                    ((ql_full[ql_off + l] >> 4) | (((qh_byte >> 4) & 0x03) << 4)) as i8 as i32 - 32;
+                let q4 = ((ql_full[ql_off + l + 32] >> 4) | (((qh_byte >> 6) & 0x03) << 4)) as i8
+                    as i32
+                    - 32;
+                let s0 = d * (sc_full[sc_off + is] as i8) as f32;
+                let s1 = d * (sc_full[sc_off + is + 2] as i8) as f32;
+                let s2 = d * (sc_full[sc_off + is + 4] as i8) as f32;
+                let s3 = d * (sc_full[sc_off + is + 6] as i8) as f32;
+                out[out_half + l] += alpha * s0 * q1 as f32;
+                out[out_half + l + 32] += alpha * s1 * q2 as f32;
+                out[out_half + l + 64] += alpha * s2 * q3 as f32;
+                out[out_half + l + 96] += alpha * s3 * q4 as f32;
             }
         }
     }
@@ -184,28 +217,53 @@ pub fn dequantize_q6_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
     let block_size = 210;
     let super_block = 256;
     let n_blocks = check_block_input("Q6_K", data, n_elements, super_block, block_size)?;
-    let mut out = Vec::with_capacity(n_elements);
+    let mut out = vec![0.0_f32; n_elements];
 
+    // Exact mirror of llama.cpp `dequantize_row_q6_K` (ggml/src/ggml-quants.c).
+    // Q6_K super-block: 256 elements stored as TWO halves of 128 each.
+    // Per half: 64 bytes ql (low 4 bits), 32 bytes qh (high 2 bits), 8 i8 scales.
+    // Within each half, l in 0..32 fills 4 interleaved output positions:
+    //   y[l + 0]  ← ql[l]      low4 | qh[l] bits 0..1
+    //   y[l + 32] ← ql[l + 32] low4 | qh[l] bits 2..3
+    //   y[l + 64] ← ql[l]      high4 | qh[l] bits 4..5
+    //   y[l + 96] ← ql[l + 32] high4 | qh[l] bits 6..7
+    // Scales applied per-32-element sub-block: sc[is+0], sc[is+2], sc[is+4], sc[is+6]
+    // where is = l/16 (0 for first 16 ls, 1 for second 16). All values offset by -32.
     for sb in 0..n_blocks {
         let block = &data[sb * block_size..(sb + 1) * block_size];
-        let ql = &block[0..128]; // lower 4 bits
-        let qh = &block[128..192]; // upper 2 bits
-        let scales = &block[192..208]; // 16 int8 scales
+        let ql_full = &block[0..128];
+        let qh_full = &block[128..192];
+        let sc_full = &block[192..208];
         let d = f16_to_f32(u16::from_le_bytes([block[208], block[209]]));
+        let y_base = sb * super_block;
 
-        for (j, &sc_byte) in scales[..16].iter().enumerate() {
-            let sc = d * (sc_byte as i8) as f32;
-            for i in 0..16 {
-                let idx = j * 16 + i;
-                let lo4 = if idx % 2 == 0 {
-                    ql[idx / 2] & 0x0F
-                } else {
-                    (ql[idx / 2] >> 4) & 0x0F
-                };
-                let hi2_byte = qh[idx / 4];
-                let hi2 = (hi2_byte >> ((idx % 4) * 2)) & 0x03;
-                let val = ((lo4 as i32) | ((hi2 as i32) << 4)) - 32;
-                out.push(sc * val as f32);
+        for half in 0..2 {
+            let ql_off = half * 64;
+            let qh_off = half * 32;
+            let sc_off = half * 8;
+            let y_half = y_base + half * 128;
+            for l in 0..32_usize {
+                let is = l / 16;
+                let qh_byte = qh_full[qh_off + l];
+                let q1 = ((ql_full[ql_off + l] & 0x0F) | (((qh_byte >> 0) & 0x03) << 4)) as i8
+                    as i32
+                    - 32;
+                let q2 = ((ql_full[ql_off + l + 32] & 0x0F) | (((qh_byte >> 2) & 0x03) << 4)) as i8
+                    as i32
+                    - 32;
+                let q3 =
+                    ((ql_full[ql_off + l] >> 4) | (((qh_byte >> 4) & 0x03) << 4)) as i8 as i32 - 32;
+                let q4 = ((ql_full[ql_off + l + 32] >> 4) | (((qh_byte >> 6) & 0x03) << 4)) as i8
+                    as i32
+                    - 32;
+                let s0 = d * (sc_full[sc_off + is] as i8) as f32;
+                let s1 = d * (sc_full[sc_off + is + 2] as i8) as f32;
+                let s2 = d * (sc_full[sc_off + is + 4] as i8) as f32;
+                let s3 = d * (sc_full[sc_off + is + 6] as i8) as f32;
+                out[y_half + l] = s0 * q1 as f32;
+                out[y_half + l + 32] = s1 * q2 as f32;
+                out[y_half + l + 64] = s2 * q3 as f32;
+                out[y_half + l + 96] = s3 * q4 as f32;
             }
         }
     }

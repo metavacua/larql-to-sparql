@@ -211,13 +211,10 @@ impl InferenceModel {
             );
 
             // Write residuals
+            let embed_arr = self.weights.embed.as_array();
             for (layer, vector) in &trace.residuals {
-                let top_k = project_to_vocab(
-                    &self.weights.embed,
-                    vector,
-                    DEFAULT_RESIDUAL_TOP_K,
-                    &self.tokenizer,
-                );
+                let top_k =
+                    project_to_vocab(&*embed_arr, vector, DEFAULT_RESIDUAL_TOP_K, &self.tokenizer);
 
                 let (top_token, top_token_id, c_score) = if let Some(first) = top_k.first() {
                     (first.token.clone(), first.token_id, first.logit)

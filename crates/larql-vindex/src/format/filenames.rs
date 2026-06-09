@@ -96,6 +96,27 @@ pub const LEGACY_ATTN_WEIGHTS_Q4K_MANIFEST_JSON: &str = "attn_weights_q4k_manife
 pub const ATTN_WEIGHTS_Q8_BIN: &str = "attn_weights_q8.bin";
 pub const ATTN_WEIGHTS_Q8_MANIFEST_JSON: &str = "attn_weights_q8_manifest.json";
 
+// ── DeltaNet (Qwen 3.6 linear-attention layers) ────────────────────────
+// Per-layer Q4_K matmul tensors for the linear-attention layers of
+// hybrid SSM/DeltaNet architectures (Qwen 3.6 27B dense + 35B-A3B MoE).
+// Tensors per layer: attn_qkv, attn_gate, ssm_alpha, ssm_beta, ssm_out
+// when each tensor's column dimension is 256-aligned. Layers where
+// `arch.is_linear_attention_layer(layer)` is false do NOT emit here —
+// they go through `attn_weights_q4k.bin` (Q/K/V/O).
+pub const DELTANET_WEIGHTS_Q4K_BIN: &str = "deltanet_weights_q4k.bin";
+pub const DELTANET_WEIGHTS_Q4K_MANIFEST_JSON: &str = "deltanet_weights_q4k_manifest.json";
+
+// ── Shared-expert weights (§5.12) ──────────────────────────────────────
+//
+// Per-layer shared-expert gate / up / down projections for MoE arches
+// that ship a shared expert alongside the routed top-K (Qwen 3.6 35B-A3B,
+// Qwen3-Coder-Next, future Kimi Linear). Each layer contributes 3
+// manifest entries (gate, up, down) with per-projection format strings —
+// reuses `Q4kManifestEntry` schema. File is absent on dense / non-shexp
+// MoE arches.
+pub const SHEXP_WEIGHTS_Q4K_BIN: &str = "shexp_weights_q4k.bin";
+pub const SHEXP_WEIGHTS_Q4K_MANIFEST_JSON: &str = "shexp_weights_q4k_manifest.json";
+
 // ── Per-layer FFN weights (§5.12) ──────────────────────────────────────
 //
 // Unified format for both dense and MoE FFN weights. One file per layer.
@@ -265,10 +286,17 @@ pub const HF_UPLOAD_FILES: &[&str] = &[
     LEGACY_INTERLEAVED_Q4K_BIN,
     LEGACY_INTERLEAVED_Q4K_MANIFEST_JSON,
     ATTN_WEIGHTS_BIN,
+<<<<<<< HEAD
     ATTN_WEIGHTS_KQUANT_BIN,
     ATTN_WEIGHTS_KQUANT_MANIFEST_JSON,
     LEGACY_ATTN_WEIGHTS_Q4K_BIN,
     LEGACY_ATTN_WEIGHTS_Q4K_MANIFEST_JSON,
+=======
+    ATTN_WEIGHTS_Q4K_BIN,
+    ATTN_WEIGHTS_Q4K_MANIFEST_JSON,
+    DELTANET_WEIGHTS_Q4K_BIN,
+    DELTANET_WEIGHTS_Q4K_MANIFEST_JSON,
+>>>>>>> ianblenke/main
     DOWN_FEATURES_BIN,
     UP_FEATURES_BIN,
     LM_HEAD_KQUANT_BIN,
@@ -322,10 +350,17 @@ mod tests {
             ATTN_WEIGHTS_BIN,
             ATTN_WEIGHTS_Q4_BIN,
             ATTN_WEIGHTS_Q4_MANIFEST_JSON,
+<<<<<<< HEAD
             ATTN_WEIGHTS_KQUANT_BIN,
             ATTN_WEIGHTS_KQUANT_MANIFEST_JSON,
             LEGACY_ATTN_WEIGHTS_Q4K_BIN,
             LEGACY_ATTN_WEIGHTS_Q4K_MANIFEST_JSON,
+=======
+            ATTN_WEIGHTS_Q4K_BIN,
+            ATTN_WEIGHTS_Q4K_MANIFEST_JSON,
+            DELTANET_WEIGHTS_Q4K_BIN,
+            DELTANET_WEIGHTS_Q4K_MANIFEST_JSON,
+>>>>>>> ianblenke/main
             ATTN_WEIGHTS_Q8_BIN,
             ATTN_WEIGHTS_Q8_MANIFEST_JSON,
             LM_HEAD_BIN,

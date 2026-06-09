@@ -303,21 +303,33 @@ pub fn quantize_q6_k(data: &[f32]) -> Vec<u8> {
             }
         }
 
-        // Pack lower 4 bits: 128 bytes (2 nibbles per byte)
+        // Pack into llama.cpp Q6_K layout (matches `dequantize_row_q6_K`).
+        // Two halves of 128 output positions each. Within each half, for
+        // l in 0..32:
+        //   ql[l +  0]: low4(y[l +  0]), high4(y[l + 64])
+        //   ql[l + 32]: low4(y[l + 32]), high4(y[l + 96])
+        //   qh[l]:      hi2(y[l +  0])@bits0..1, hi2(y[l + 32])@bits2..3,
+        //               hi2(y[l + 64])@bits4..5, hi2(y[l + 96])@bits6..7
         let mut ql = [0u8; 128];
-        for i in 0..128 {
-            ql[i] = (q6_vals[i * 2] & 0x0F) | ((q6_vals[i * 2 + 1] & 0x0F) << 4);
+        let mut qh = [0u8; 64];
+        for half in 0..2 {
+            let ql_off = half * 64;
+            let qh_off = half * 32;
+            let y_off = half * 128;
+            for l in 0..32 {
+                let v0 = q6_vals[y_off + l] as u32;
+                let v1 = q6_vals[y_off + l + 32] as u32;
+                let v2 = q6_vals[y_off + l + 64] as u32;
+                let v3 = q6_vals[y_off + l + 96] as u32;
+                ql[ql_off + l] = ((v0 & 0x0F) | ((v2 & 0x0F) << 4)) as u8;
+                ql[ql_off + l + 32] = ((v1 & 0x0F) | ((v3 & 0x0F) << 4)) as u8;
+                qh[qh_off + l] = ((v0 >> 4) & 0x03) as u8
+                    | (((v1 >> 4) & 0x03) << 2) as u8
+                    | (((v2 >> 4) & 0x03) << 4) as u8
+                    | (((v3 >> 4) & 0x03) << 6) as u8;
+            }
         }
         out.extend_from_slice(&ql);
-
-        // Pack upper 2 bits: 64 bytes (4 × 2 bits per byte)
-        let mut qh = [0u8; 64];
-        for (i, &q6_val) in q6_vals.iter().enumerate() {
-            let hi2 = (q6_val >> 4) & 0x03;
-            let byte_idx = i / 4;
-            let bit_offset = (i % 4) * 2;
-            qh[byte_idx] |= hi2 << bit_offset;
-        }
         out.extend_from_slice(&qh);
 
         // 16 × int8 scales
@@ -380,6 +392,54 @@ pub fn q4k_to_q4kf(q4k_data: &[u8], num_rows: usize, hidden: usize) -> Vec<u8> {
     out
 }
 
+/// Dequantize Q4_KF pre-baked half-scale blocks into f32 values.
+pub fn dequantize_q4_kf(q4kf_data: &[u8], n_elements: usize) -> Option<Vec<f32>> {
+    const BLOCK_ELEMS: usize = 256;
+    const BLOCK_BYTES: usize = crate::pipeline::Q4_KF_BLOCK_BYTES;
+
+    if !n_elements.is_multiple_of(BLOCK_ELEMS) {
+        return None;
+    }
+
+    let n_blocks = n_elements / BLOCK_ELEMS;
+    let expected = n_blocks * BLOCK_BYTES;
+    if q4kf_data.len() < expected {
+        return None;
+    }
+
+    let mut out = vec![0.0f32; n_elements];
+    for sb in 0..n_blocks {
+        let block = &q4kf_data[sb * BLOCK_BYTES..(sb + 1) * BLOCK_BYTES];
+        let mut scales = [0.0f32; 8];
+        let mut mins = [0.0f32; 8];
+        for j in 0..8 {
+            let scale = u16::from_le_bytes([block[j * 2], block[j * 2 + 1]]);
+            let min = u16::from_le_bytes([block[16 + j * 2], block[16 + j * 2 + 1]]);
+            scales[j] = f16_to_f32(scale);
+            mins[j] = f16_to_f32(min);
+        }
+
+        let quants = &block[32..160];
+        let sb_base = sb * BLOCK_ELEMS;
+        for group in 0..4 {
+            let lo_subblock = group * 2;
+            let hi_subblock = lo_subblock + 1;
+            let chunk = &quants[group * 32..(group + 1) * 32];
+            let lo_base = sb_base + lo_subblock * 32;
+            let hi_base = sb_base + hi_subblock * 32;
+            for lane in 0..32 {
+                let byte = chunk[lane];
+                out[lo_base + lane] =
+                    scales[lo_subblock] * (byte & 0x0F) as f32 - mins[lo_subblock];
+                out[hi_base + lane] =
+                    scales[hi_subblock] * ((byte >> 4) & 0x0F) as f32 - mins[hi_subblock];
+            }
+        }
+    }
+
+    Some(out)
+}
+
 /// Quantize f32 data directly to Q4_KF format (pre-baked half scales).
 pub fn quantize_q4_kf(data: &[f32]) -> Vec<u8> {
     assert!(
@@ -430,9 +490,18 @@ pub fn f16_to_f32(bits: u16) -> f32 {
         // gives a value in [6..15] for non-zero mant (16-bit input, top 6
         // bits guaranteed zero).  Subtract 16-10=6 to get LZ within the 10-bit
         // mantissa region.
+        //
+        // Exponent: half-subnormal value = mant/1024 * 2^(-14). The
+        // normalised mantissa (leading-1 implicit, 23 fractional bits) needs
+        // biased f32 exponent `127 + (-14 - 1 - lz)` = `112 - lz`. The
+        // previous formula `127 - 14 - lz = 113 - lz` was off by one in
+        // exponent → every subnormal decoded 2× too large. Latent for years
+        // because Q4_K's `d` is usually NORMAL f16; surfaced via Q6_K V/FFN_DOWN
+        // on Gemma 3 4B, where small weight magnitudes pushed d into the
+        // subnormal range.
         let lz = (mant as u16).leading_zeros() - 6; // 0..=9
         let new_mant = (mant << (lz + 14)) & 0x7F_FFFF;
-        let new_exp = (127u32 - 14 - lz) << 23;
+        let new_exp = (112u32 - lz) << 23;
         return f32::from_bits(sign | new_exp | new_mant);
     }
     if exp == 31 {
@@ -1399,38 +1468,6 @@ mod tests {
         );
     }
 
-    /// Decode f16 bits to f32 (for test verification).
-    fn f16_to_f32(bits: u16) -> f32 {
-        let sign = ((bits >> 15) & 1) as u32;
-        let exp = ((bits >> 10) & 0x1F) as i32;
-        let mant = (bits & 0x3FF) as u32;
-        if exp == 0 {
-            if mant == 0 {
-                return if sign == 1 { -0.0 } else { 0.0 };
-            }
-            // Subnormal
-            let val = mant as f32 / 1024.0 * 2.0f32.powi(-14);
-            return if sign == 1 { -val } else { val };
-        }
-        if exp == 31 {
-            return if mant == 0 {
-                if sign == 1 {
-                    f32::NEG_INFINITY
-                } else {
-                    f32::INFINITY
-                }
-            } else {
-                f32::NAN
-            };
-        }
-        let val = (1.0 + mant as f32 / 1024.0) * 2.0f32.powi(exp - 15);
-        if sign == 1 {
-            -val
-        } else {
-            val
-        }
-    }
-
     /// Test alias — dispatches to the canonical module-scope implementation.
     fn dequantize_q4_k_llama(data: &[u8], n_elements: usize) -> Vec<f32> {
         super::dequantize_q4_k(data, n_elements)
@@ -1493,6 +1530,59 @@ mod tests {
         assert!(
             result.iter().any(|v| v.abs() > 1e-4),
             "Q6_K matvec should produce nonzero output"
+        );
+    }
+
+    /// Strong round-trip oracle for `quantize_q6_k`: round through the
+    /// canonical `larql_models::quant::ggml::dequantize_q6_k` (which
+    /// mirrors llama.cpp's `dequantize_row_q6_K` wire format) and verify
+    /// element-wise reconstruction within Q6_K's expected quantisation
+    /// error. Q6_K's worst-case relative reconstruction error is
+    /// `1 / 31 ≈ 3.2 %` per element under the d = amax / (31·127) /
+    /// `sub_scale = sub_max / (31·d)` allocation; for smooth inputs the
+    /// effective error tracks the per-sub-block scale resolution and
+    /// stays well under that bound.
+    ///
+    /// This is the strongest defense against a regression in
+    /// `quantize_q6_k`'s wire-format layout — vindex calls this for
+    /// every Q6_K weight written, so any layout drift would silently
+    /// corrupt every vindex Q6_K matvec downstream.
+    #[test]
+    fn q6_k_quantize_dequantize_roundtrip_within_quant_eps() {
+        use larql_models::quant::ggml::dequantize_q6_k;
+        let n_blocks = 3usize;
+        let n = n_blocks * 256;
+        // Smooth, balanced input — no extreme outliers that would
+        // dominate the absmax allocation.
+        let x: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.013).sin() * 0.6).collect();
+        let q6 = quantize_q6_k(&x);
+        let x_rt = dequantize_q6_k(&q6, n).expect("dequant q6_k");
+        assert_eq!(x_rt.len(), n);
+
+        // Per-element relative tolerance: 5 % (well under Q6_K's
+        // theoretical 3.2 % per-sub-block bound + smooth-input slack).
+        // Absolute floor handles near-zero positions.
+        for i in 0..n {
+            let abs = (x_rt[i] - x[i]).abs();
+            let rel = abs / x[i].abs().max(1e-3);
+            assert!(
+                rel < 5e-2 || abs < 5e-3,
+                "x[{i}]={} round-tripped to {} (abs={abs}, rel={rel})",
+                x[i],
+                x_rt[i],
+            );
+        }
+
+        // Macro-level fidelity: cosine similarity ≥ 0.9999 confirms the
+        // round-tripped vector preserves direction (the property that
+        // matters for downstream dot products).
+        let dot: f32 = x.iter().zip(&x_rt).map(|(a, b)| a * b).sum();
+        let na = (x.iter().map(|v| v * v).sum::<f32>()).sqrt();
+        let nb = (x_rt.iter().map(|v| v * v).sum::<f32>()).sqrt();
+        let cos = dot / (na * nb);
+        assert!(
+            cos > 0.9999,
+            "Q6_K round-trip cosine {cos} should be > 0.9999"
         );
     }
 

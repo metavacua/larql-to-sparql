@@ -1,0 +1,812 @@
+//! Streaming vindex extraction — build from safetensors without loading the full model.
+//!
+//! Instead of loading all weights into ModelWeights (which requires the entire model
+//! in RAM), this module mmaps safetensors files and processes one layer at a time.
+//! Peak memory = 1 layer's tensors + embeddings, not the full model.
+//!
+//! For a 120B MoE model: ~120 GB as ModelWeights vs ~2 GB streaming.
+
+use crate::extract::stage_labels::*;
+use std::collections::HashMap;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
+
+use ndarray::Array2;
+
+use crate::config::dtype::StorageDtype;
+use crate::config::types::QuantFormat;
+use crate::config::{VindexConfig, VindexLayerInfo, VindexModelConfig};
+use crate::error::VindexError;
+use crate::extract::callbacks::IndexBuildCallbacks;
+use crate::format::filenames::*;
+
+/// Mmap'd safetensors file — kept alive for the duration of extraction.
+struct MmapShard {
+    _file: std::fs::File,
+    mmap: memmap2::Mmap,
+}
+
+/// Build a vindex by streaming from safetensors files (no full model load).
+///
+/// Peak memory: embeddings + 1 layer of gate/down weights at a time.
+#[allow(clippy::too_many_arguments)]
+pub fn build_vindex_streaming(
+    model_dir: &Path,
+    tokenizer: &tokenizers::Tokenizer,
+    model_name: &str,
+    output_dir: &Path,
+    down_top_k: usize,
+    extract_level: crate::ExtractLevel,
+    dtype: StorageDtype,
+    quant: QuantFormat,
+    weight_opts: crate::format::weights::WriteWeightsOptions,
+    q4k_opts: crate::format::weights::Q4kWriteOptions,
+    // Skip writing `gate_vectors.bin` entirely. Only valid when
+    // `quant == Q4K` — the loader synthesizes gate from Q4K at load
+    // time. Refused otherwise because without a Q4K interleaved file
+    // the gate would be unrecoverable.
+    drop_gate_vectors: bool,
+    callbacks: &mut dyn IndexBuildCallbacks,
+) -> Result<(), VindexError> {
+    if drop_gate_vectors && quant != QuantFormat::Q4K {
+        return Err(VindexError::Parse(
+            "--drop-gate-vectors requires --quant q4k (the loader rebuilds gate from Q4K)".into(),
+        ));
+    }
+    std::fs::create_dir_all(output_dir)?;
+
+    // Detect architecture
+    let arch = larql_models::detect_architecture_validated(model_dir)
+        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    let prefixes = arch.key_prefixes_to_strip();
+    let cfg = arch.config();
+
+    let num_layers = cfg.num_layers;
+    let hidden_size = cfg.hidden_size;
+    let intermediate_size = cfg.intermediate_size;
+    let embed_scale = arch.embed_scale();
+    let is_moe = arch.is_moe();
+    let n_experts = arch.num_experts();
+
+    // Mmap all safetensors files
+    let mut st_files: Vec<PathBuf> = std::fs::read_dir(model_dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "safetensors"))
+        .collect();
+    if st_files.is_empty() {
+        let weights_dir = model_dir.join("weights");
+        if weights_dir.is_dir() {
+            st_files = std::fs::read_dir(&weights_dir)?
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|ext| ext == "safetensors"))
+                .collect();
+        }
+    }
+    st_files.sort();
+
+    if st_files.is_empty() {
+        return Err(VindexError::NoSafetensors(model_dir.to_path_buf()));
+    }
+
+    callbacks.on_stage(STAGE_LOADING);
+    eprintln!(
+        "  Streaming mode: {} safetensors shards (mmap'd, not loaded)",
+        st_files.len()
+    );
+
+    // Checkpoint setup with auto-resume. A compatible checkpoint
+    // from a previous interrupted run is reused; phases it marked
+    // complete are skipped (their output files on disk are reused
+    // unchanged). An incompatible checkpoint (different model_dir /
+    // num_layers) is discarded.
+    let mut checkpoint = match super::checkpoint::Checkpoint::load(output_dir)? {
+        Some(prior) if prior.is_compatible_with(model_dir, model_name, num_layers) => {
+            eprintln!(
+                "  Resuming from checkpoint at {}/{} — phases already complete: {:?}",
+                output_dir.display(),
+                super::checkpoint::CHECKPOINT_FILE,
+                prior.completed,
+            );
+            prior
+        }
+        Some(_) => {
+            eprintln!(
+                "  Checkpoint at {}/{} is incompatible with this run \
+                 (different model / layer count) — discarding",
+                output_dir.display(),
+                super::checkpoint::CHECKPOINT_FILE,
+            );
+            super::checkpoint::Checkpoint::fresh(model_dir, model_name, num_layers)
+        }
+        None => super::checkpoint::Checkpoint::fresh(model_dir, model_name, num_layers),
+    };
+
+    // (shards vec was for an earlier design — tensor_index + shard_mmaps is the actual approach)
+
+    // SAFETY: We need to hold both the mmap and the SafeTensors that borrows from it.
+    // We use a two-phase approach: first mmap all files, then deserialize.
+    // The mmaps are kept alive in `shard_mmaps` for the lifetime of the function.
+    let shard_mmaps: Vec<MmapShard> = st_files
+        .iter()
+        .map(|path| {
+            let file = std::fs::File::open(path).unwrap();
+            let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+            MmapShard { _file: file, mmap }
+        })
+        .collect();
+
+    // Build a tensor index: key → (shard_idx, tensor_name)
+    // We need to find which shard contains each tensor.
+    let mut tensor_index: HashMap<String, (usize, String)> = HashMap::new();
+    for (shard_idx, shard) in shard_mmaps.iter().enumerate() {
+        let st = safetensors::SafeTensors::deserialize(&shard.mmap)
+            .map_err(|e| VindexError::Parse(e.to_string()))?;
+        for name in st.names() {
+            let key = normalize_key(name, prefixes);
+            tensor_index.insert(key.clone(), (shard_idx, name.to_string()));
+        }
+    }
+
+    callbacks.on_stage_done(STAGE_LOADING, 0.0);
+
+    // ── 1. Gate vectors (streaming, one layer at a time) ──
+    //
+    // If `drop_gate_vectors` is set we still walk every layer to build
+    // `layer_infos` (num_features per layer is part of `index.json`)
+    // but redirect writes to `/dev/null` (`io::sink`). The gate bytes
+    // are recoverable from `interleaved_q4k.bin` at load time.
+    callbacks.on_stage(STAGE_GATE_VECTORS);
+    let gate_path = output_dir.join(GATE_VECTORS_BIN);
+    enum GateSink {
+        File(BufWriter<std::fs::File>),
+        Discard(std::io::Sink),
+    }
+    impl std::io::Write for GateSink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            match self {
+                GateSink::File(f) => f.write(buf),
+                GateSink::Discard(s) => s.write(buf),
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            match self {
+                GateSink::File(f) => f.flush(),
+                GateSink::Discard(s) => s.flush(),
+            }
+        }
+    }
+
+    // Auto-resume: if a prior run finished the gate phase and saved
+    // `gate_layer_infos`, reuse it and skip the gate loop entirely.
+    let resumed_gate = checkpoint.is_complete(super::checkpoint::ExtractPhase::Gate)
+        && checkpoint.gate_layer_infos.is_some();
+    let mut layer_infos: Vec<VindexLayerInfo> = if resumed_gate {
+        eprintln!(
+            "  Skipping gate phase ({} layer infos restored from checkpoint; \
+             reusing existing {})",
+            checkpoint
+                .gate_layer_infos
+                .as_ref()
+                .map(|v| v.len())
+                .unwrap_or(0),
+            GATE_VECTORS_BIN,
+        );
+        callbacks.on_stage_done(STAGE_GATE_VECTORS, 0.0);
+        checkpoint.gate_layer_infos.clone().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    // Only allocate the writer + run the loop when the phase isn't
+    // already done.
+    let mut gate_file: GateSink = if resumed_gate || drop_gate_vectors {
+        GateSink::Discard(std::io::sink())
+    } else {
+        GateSink::File(BufWriter::new(std::fs::File::create(&gate_path)?))
+    };
+    let mut offset: u64 = 0;
+
+    // Check expert format from the architecture
+    let expert_format = arch.expert_format();
+
+    // Per-expert SVD-summary tier (opt-in). The CLI's
+    // `--summary-features-per-expert` flag threads K here as an env var
+    // (see `extract_index_cmd`) so this streaming gate path can read it
+    // without an API break. When set, each expert's gate matrix is
+    // compressed to its top-K right singular vectors instead of writing
+    // the full `[intermediate, hidden]` rows — `K × hidden` per expert.
+    let summary_k: Option<usize> = std::env::var("LARQL_SUMMARY_FEATURES_PER_EXPERT")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&k| k > 0);
+
+    // Skip the per-layer gate loop entirely on resume.
+    let layer_count_for_loop = if resumed_gate { 0 } else { num_layers };
+    for layer in 0..layer_count_for_loop {
+        callbacks.on_layer_start(COMP_GATE, layer, num_layers);
+        let start = std::time::Instant::now();
+
+        if expert_format == larql_models::ExpertFormat::PackedMxfp4 {
+            // MXFP4 packed experts: dequantize gate_up_proj_blocks per layer
+            // The fused tensor is [num_experts, 2*intermediate, groups, 16]
+            // First half of output features = gate, second half = up
+            let blocks_key = arch.packed_gate_up_blocks_key(layer).unwrap_or_default();
+            let scales_key = arch.packed_gate_up_scales_key(layer).unwrap_or_default();
+
+            if let (Some(blocks_info), Some(scales_info)) =
+                (tensor_index.get(&blocks_key), tensor_index.get(&scales_key))
+            {
+                let blocks_st =
+                    safetensors::SafeTensors::deserialize(&shard_mmaps[blocks_info.0].mmap)
+                        .map_err(|e| VindexError::Parse(e.to_string()))?;
+                let scales_st =
+                    safetensors::SafeTensors::deserialize(&shard_mmaps[scales_info.0].mmap)
+                        .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+                let blocks_view = blocks_st
+                    .tensor(&blocks_info.1)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+                let scales_view = scales_st
+                    .tensor(&scales_info.1)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+                let shape = blocks_view.shape();
+                let n_exp = shape[0];
+                let out_features = shape[1]; // 2 * intermediate (fused gate+up)
+                let groups = shape[2];
+                let in_features = groups * 32;
+                let half = out_features / 2; // gate portion
+
+                let experts = crate::format::quant::mxfp4::dequantize_all_experts(
+                    blocks_view.data(),
+                    scales_view.data(),
+                    n_exp,
+                    out_features,
+                    groups,
+                )?;
+
+                let mut total_features = 0usize;
+                let mut layer_bytes = 0u64;
+
+                for expert_data in &experts {
+                    // Extract gate portion (first half rows)
+                    let gate_data = &expert_data[..half * in_features];
+                    layer_bytes += write_floats(&mut gate_file, gate_data, dtype)?;
+                    total_features += half;
+                }
+
+                if total_features > 0 {
+                    layer_infos.push(VindexLayerInfo {
+                        layer,
+                        num_features: total_features,
+                        offset,
+                        length: layer_bytes,
+                        num_experts: Some(n_exp),
+                        num_features_per_expert: Some(half),
+                    });
+                    offset += layer_bytes;
+                }
+            }
+        } else if expert_format == larql_models::ExpertFormat::PackedBF16 && is_moe {
+            // Hybrid MoE (Gemma 4 26B A4B): packed experts stored separately.
+            // gate_vectors.bin uses the dense FFN gate for KNN walk routing.
+            let gate_key = normalize_key(&arch.ffn_gate_key(layer), prefixes);
+            if let Some(tensor) = get_tensor_f32(&shard_mmaps, &tensor_index, &gate_key)? {
+                let num_features = tensor.shape()[0];
+                let data = tensor.as_slice().unwrap();
+                let length = write_floats(&mut gate_file, data, dtype)?;
+                layer_infos.push(VindexLayerInfo {
+                    layer,
+                    num_features,
+                    offset,
+                    length,
+                    num_experts: None,
+                    num_features_per_expert: None,
+                });
+                offset += length;
+            }
+        } else if is_moe && n_experts > 0 {
+            // Standard MoE (Mixtral): per-expert gate tensors
+            let mut total_features = 0usize;
+            let mut layer_bytes = 0u64;
+            let mut features_per_expert = 0usize;
+
+            for expert in 0..n_experts {
+                let gate_key = match arch.expert_ffn_gate_key(layer, expert) {
+                    Some(k) => normalize_key(&k, prefixes),
+                    None => continue,
+                };
+
+                if let Some(tensor) = get_tensor_f32(&shard_mmaps, &tensor_index, &gate_key)? {
+                    let out_features = tensor.shape()[0];
+                    // Summary tier: replace the full gate matrix with its
+                    // top-K right singular vectors (`[K, hidden]`) when K
+                    // is set and actually reduces the row count.
+                    match summary_k {
+                        Some(k) if k < out_features => {
+                            let summary = crate::extract::moe_svd::top_k_right_singular_vectors(
+                                tensor.view(),
+                                k,
+                                4, // power-iteration rounds (see moe_svd docs)
+                                ((layer as u64) << 32) | expert as u64,
+                            );
+                            features_per_expert = k;
+                            total_features += k;
+                            let data = summary.as_slice().expect("svd output is contiguous");
+                            layer_bytes += write_floats(&mut gate_file, data, dtype)?;
+                        }
+                        _ => {
+                            features_per_expert = out_features;
+                            total_features += out_features;
+                            let data = tensor.as_slice().unwrap();
+                            layer_bytes += write_floats(&mut gate_file, data, dtype)?;
+                        }
+                    }
+                }
+            }
+
+            if total_features > 0 {
+                layer_infos.push(VindexLayerInfo {
+                    layer,
+                    num_features: total_features,
+                    offset,
+                    length: layer_bytes,
+                    num_experts: Some(n_experts),
+                    num_features_per_expert: Some(features_per_expert),
+                });
+                offset += layer_bytes;
+            }
+        } else {
+            // Dense: single gate matrix per layer
+            let gate_key = normalize_key(&arch.ffn_gate_key(layer), prefixes);
+            if let Some(tensor) = get_tensor_f32(&shard_mmaps, &tensor_index, &gate_key)? {
+                let num_features = tensor.shape()[0];
+                let data = tensor.as_slice().unwrap();
+                let length = write_floats(&mut gate_file, data, dtype)?;
+                layer_infos.push(VindexLayerInfo {
+                    layer,
+                    num_features,
+                    offset,
+                    length,
+                    num_experts: None,
+                    num_features_per_expert: None,
+                });
+                offset += length;
+            }
+        }
+
+        callbacks.on_layer_done(COMP_GATE, layer, start.elapsed().as_secs_f64() * 1000.0);
+    }
+    gate_file.flush()?;
+    // If we were only sinking bytes, don't leave a zero-byte
+    // gate_vectors.bin behind for the loader to trip over.
+    drop(gate_file);
+    if drop_gate_vectors && gate_path.exists() && !resumed_gate {
+        let _ = std::fs::remove_file(&gate_path);
+    }
+    if !resumed_gate {
+        callbacks.on_stage_done(STAGE_GATE_VECTORS, 0.0);
+        checkpoint.mark_gate_complete(layer_infos.clone(), output_dir)?;
+    }
+
+    // ── 1b. Router weights (MoE models only) ──
+    if is_moe {
+        callbacks.on_stage(STAGE_ROUTER_WEIGHTS);
+        let router_path = output_dir.join("router_weights.bin");
+        let mut router_file = BufWriter::new(std::fs::File::create(&router_path)?);
+
+        for layer in 0..num_layers {
+            let router_key = arch
+                .moe_router_key(layer)
+                .map(|k| normalize_key(&k, prefixes))
+                .unwrap_or_default();
+
+            if let Some(tensor) = get_tensor_f32(&shard_mmaps, &tensor_index, &router_key)? {
+                let data = tensor.as_slice().unwrap();
+                let bytes = crate::config::dtype::encode_floats(data, dtype);
+                router_file.write_all(&bytes)?;
+            }
+
+            // Also try router bias
+            let bias_key = router_key.replace(".weight", ".bias");
+            if let Some(tensor) = get_tensor_f32(&shard_mmaps, &tensor_index, &bias_key)? {
+                let data = tensor.as_slice().unwrap();
+                let bytes = crate::config::dtype::encode_floats(data, dtype);
+                // Write bias after weight for each layer
+                router_file.write_all(&bytes)?;
+            }
+        }
+        router_file.flush()?;
+        callbacks.on_stage_done(STAGE_ROUTER_WEIGHTS, 0.0);
+    }
+
+    // ── 2. Embeddings ──
+    callbacks.on_stage(STAGE_EMBEDDINGS);
+    let embed_key = normalize_key(arch.embed_key(), prefixes);
+    let embed = get_tensor_f32(&shard_mmaps, &tensor_index, &embed_key)?
+        .ok_or_else(|| VindexError::MissingTensor(embed_key.clone()))?;
+    let vocab_size = embed.shape()[0];
+    let embed_data = embed.as_slice().unwrap();
+    let embed_bytes = crate::config::dtype::encode_floats(embed_data, dtype);
+    std::fs::write(output_dir.join(EMBEDDINGS_BIN), &embed_bytes)?;
+    callbacks.on_stage_done(STAGE_EMBEDDINGS, 0.0);
+
+    // ── 3. Down meta (streaming) ──
+    //
+    // Auto-resume: skip the entire down-meta phase if the prior run
+    // already wrote `down_meta.bin`. The file is opaque to us here
+    // (we don't reload it), but the loader at the end uses it
+    // directly off disk via `mmap`, and the config-write doesn't
+    // need any per-layer state from this phase — so a clean skip is
+    // safe.
+    let resumed_down = checkpoint.is_complete(super::checkpoint::ExtractPhase::DownMeta);
+    callbacks.on_stage(STAGE_DOWN_META);
+    if resumed_down {
+        eprintln!(
+            "  Skipping down_meta phase (reusing existing {})",
+            DOWN_META_BIN,
+        );
+    }
+    let mut all_down_meta: Vec<Option<Vec<Option<crate::FeatureMeta>>>> = vec![None; num_layers];
+
+    // Build whole-word vocab once
+    let (_ww_ids, _ww_embed) =
+        super::build_helpers::build_whole_word_vocab(tokenizer, &embed, vocab_size, hidden_size);
+
+    let down_layer_count = if resumed_down { 0 } else { num_layers };
+    for (layer, layer_down_meta) in all_down_meta.iter_mut().enumerate().take(down_layer_count) {
+        callbacks.on_layer_start(COMP_DOWN, layer, num_layers);
+        let start = std::time::Instant::now();
+
+        // Get down matrices for this layer
+        let down_matrices: Vec<Array2<f32>> = if expert_format
+            == larql_models::ExpertFormat::PackedMxfp4
+        {
+            // MXFP4: dequantize down_proj_blocks
+            let blocks_key = arch.packed_down_blocks_key(layer).unwrap_or_default();
+            let scales_key = arch.packed_down_scales_key(layer).unwrap_or_default();
+            if let (Some(bi), Some(si)) =
+                (tensor_index.get(&blocks_key), tensor_index.get(&scales_key))
+            {
+                let bst = safetensors::SafeTensors::deserialize(&shard_mmaps[bi.0].mmap)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+                let sst = safetensors::SafeTensors::deserialize(&shard_mmaps[si.0].mmap)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+                let bv = bst
+                    .tensor(&bi.1)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+                let sv = sst
+                    .tensor(&si.1)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+                let shape = bv.shape();
+                let n_exp = shape[0];
+                let out_features = shape[1];
+                let groups = shape[2];
+                let in_features = groups * 32;
+                let experts = crate::format::quant::mxfp4::dequantize_all_experts(
+                    bv.data(),
+                    sv.data(),
+                    n_exp,
+                    out_features,
+                    groups,
+                )?;
+                experts
+                    .into_iter()
+                    .map(|data| Array2::from_shape_vec((out_features, in_features), data).unwrap())
+                    .collect()
+            } else {
+                callbacks.on_layer_done(COMP_DOWN, layer, 0.0);
+                continue;
+            }
+        } else if expert_format == larql_models::ExpertFormat::PackedBF16 && is_moe {
+            // Hybrid MoE (Gemma 4 26B A4B): use dense FFN down for down_meta.
+            // Expert down matrices live per-layer at `layers/layer_{L:02}.weights`
+            // (Q4_K), written by the q4k weight writer.
+            let down_key = normalize_key(&arch.ffn_down_key(layer), prefixes);
+            match get_tensor_f32(&shard_mmaps, &tensor_index, &down_key)? {
+                Some(t) => vec![t],
+                None => {
+                    callbacks.on_layer_done(COMP_DOWN, layer, 0.0);
+                    continue;
+                }
+            }
+        } else if is_moe && n_experts > 0 {
+            let mut mats = Vec::new();
+            for expert in 0..n_experts {
+                if let Some(key) = arch.expert_ffn_down_key(layer, expert) {
+                    let nk = normalize_key(&key, prefixes);
+                    if let Some(t) = get_tensor_f32(&shard_mmaps, &tensor_index, &nk)? {
+                        mats.push(t);
+                    }
+                }
+            }
+            mats
+        } else {
+            let down_key = normalize_key(&arch.ffn_down_key(layer), prefixes);
+            match get_tensor_f32(&shard_mmaps, &tensor_index, &down_key)? {
+                Some(t) => vec![t],
+                None => {
+                    callbacks.on_layer_done(COMP_DOWN, layer, 0.0);
+                    continue;
+                }
+            }
+        };
+
+        if down_matrices.is_empty() {
+            callbacks.on_layer_done(COMP_DOWN, layer, 0.0);
+            continue;
+        }
+
+        let mut feature_offset = 0usize;
+        for w_down in &down_matrices {
+            let num_features = w_down.shape()[1];
+            let batch_size = 1024;
+
+            for batch_start in (0..num_features).step_by(batch_size) {
+                let batch_end = (batch_start + batch_size).min(num_features);
+                callbacks.on_feature_progress(
+                    "down",
+                    layer,
+                    feature_offset + batch_start,
+                    down_matrices.iter().map(|m| m.shape()[1]).sum(),
+                );
+
+                let w_chunk = w_down
+                    .slice(ndarray::s![.., batch_start..batch_end])
+                    .to_owned();
+                let cpu = larql_compute::CpuBackend;
+                use larql_compute::MatMul;
+                let chunk_logits = cpu.matmul(embed.view(), w_chunk.view());
+
+                for feat in batch_start..batch_end {
+                    let col = chunk_logits.column(feat - batch_start);
+                    let mut scores: Vec<(usize, f32)> = col.iter().copied().enumerate().collect();
+                    let k = down_top_k.min(scores.len());
+                    if k > 0 && k < scores.len() {
+                        scores.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap());
+                    }
+                    scores.truncate(k);
+                    scores.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+                    let top_k_entries: Vec<larql_models::TopKEntry> = scores
+                        .into_iter()
+                        .filter_map(|(idx, logit)| {
+                            tokenizer
+                                .decode(&[idx as u32], true)
+                                .ok()
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .map(|token| larql_models::TopKEntry {
+                                    token,
+                                    token_id: idx as u32,
+                                    logit,
+                                })
+                        })
+                        .collect();
+
+                    let (top_token, top_token_id, c_score) =
+                        if let Some(first) = top_k_entries.first() {
+                            (first.token.clone(), first.token_id, first.logit)
+                        } else {
+                            (String::new(), 0, 0.0)
+                        };
+
+                    let feat_idx = feature_offset + feat;
+                    if layer_down_meta.is_none() {
+                        *layer_down_meta = Some(Vec::new());
+                    }
+                    if let Some(ref mut metas) = layer_down_meta {
+                        while metas.len() <= feat_idx {
+                            metas.push(None);
+                        }
+                        metas[feat_idx] = Some(crate::FeatureMeta {
+                            top_token,
+                            top_token_id,
+                            c_score,
+                            top_k: top_k_entries,
+                        });
+                    }
+                }
+            }
+            feature_offset += num_features;
+        }
+
+        callbacks.on_layer_done(COMP_DOWN, layer, start.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    if !resumed_down {
+        crate::format::down_meta::write_binary(output_dir, &all_down_meta, down_top_k)?;
+        callbacks.on_stage_done(STAGE_DOWN_META, 0.0);
+        checkpoint.mark(super::checkpoint::ExtractPhase::DownMeta, output_dir)?;
+    }
+
+    // ── 4. Tokenizer ──
+    callbacks.on_stage(STAGE_TOKENIZER);
+    let tokenizer_json = tokenizer
+        .to_string(true)
+        .map_err(|e| VindexError::Parse(format!("tokenizer serialize: {e}")))?;
+    std::fs::write(output_dir.join(TOKENIZER_JSON), tokenizer_json)?;
+    callbacks.on_stage_done(STAGE_TOKENIZER, 0.0);
+
+    // ── 5. Config ──
+    let family = arch.family().to_string();
+    let config = VindexConfig {
+        version: 2,
+        model: model_name.to_string(),
+        family: family.clone(),
+        num_layers,
+        hidden_size,
+        intermediate_size,
+        vocab_size,
+        embed_scale,
+        layers: layer_infos,
+        down_top_k,
+        has_model_weights: false,
+        source: Some(crate::VindexSource {
+            huggingface_repo: Some(model_name.to_string()),
+            huggingface_revision: None,
+            safetensors_sha256: None,
+            extracted_at: super::build_helpers::chrono_now(),
+            larql_version: env!("CARGO_PKG_VERSION").to_string(),
+        }),
+        checksums: None,
+        extract_level,
+        dtype,
+        quant,
+        layer_bands: crate::LayerBands::for_family(&family, num_layers),
+        model_config: Some(VindexModelConfig {
+            model_type: cfg.model_type.clone(),
+            head_dim: cfg.head_dim,
+            num_q_heads: cfg.num_q_heads,
+            num_kv_heads: cfg.num_kv_heads,
+            rope_base: cfg.rope_base,
+            sliding_window: cfg.sliding_window,
+            moe: if is_moe {
+                Some(crate::MoeConfig {
+                    num_experts: n_experts,
+                    top_k: arch.num_experts_per_token(),
+                    shared_expert: arch.num_shared_experts() > 0,
+                    router_type: arch.moe_router_type().to_string(),
+                    moe_intermediate_size: if arch.moe_intermediate_size() > 0 {
+                        Some(arch.moe_intermediate_size())
+                    } else {
+                        None
+                    },
+                    hybrid: arch.is_hybrid_moe(),
+                })
+            } else {
+                None
+            },
+            // Per-layer geometry (Gemma 4)
+            global_head_dim: cfg.global_head_dim,
+            num_global_kv_heads: cfg.num_global_kv_heads,
+            partial_rotary_factor: cfg.partial_rotary_factor,
+            sliding_window_pattern: cfg.sliding_window_pattern,
+            layer_types: cfg.layer_types.clone(),
+            attention_k_eq_v: cfg.attention_k_eq_v,
+            num_kv_shared_layers: cfg.num_kv_shared_layers,
+            per_layer_embed_dim: cfg.per_layer_embed_dim,
+            rope_local_base: cfg.rope_local_base,
+            query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+            final_logit_softcapping: cfg.final_logit_softcapping,
+            ..Default::default()
+        }),
+        fp4: None,
+        ffn_layout: None,
+    };
+
+    // Write preliminary index.json (needed by write_model_weights which reads dtype from it)
+    let config_json =
+        serde_json::to_string_pretty(&config).map_err(|e| VindexError::Parse(e.to_string()))?;
+    std::fs::write(output_dir.join(INDEX_JSON), config_json)?;
+
+    // ── 6. Model weights (if extract level requires them) ──
+    // With quant=q4k we always materialise weights regardless of the
+    // declared level — the Q4_K writer emits all of attn, FFN, norms, lm_head
+    // in one pass and makes `--level browse --quant q4k` incoherent, so
+    // q4k implicitly promotes to "all".
+    let needs_weights = extract_level.writes_attn() || quant != QuantFormat::None;
+    if needs_weights {
+        let shard_refs: Vec<&[u8]> = shard_mmaps.iter().map(|s| s.mmap.as_ref()).collect();
+        let streaming_source = crate::format::weights::StreamingWeights {
+            shard_mmaps: &shard_refs,
+            tensor_index: &tensor_index,
+            arch: &*arch,
+            num_layers,
+        };
+        // Thread the extract level into the write options so the
+        // writer can skip attn/FFN/lm_head sections per tier.
+        let mut level_opts = weight_opts;
+        level_opts.level = extract_level;
+        match quant {
+            QuantFormat::None => {
+                crate::format::weights::write_model_weights_with_opts(
+                    &streaming_source,
+                    output_dir,
+                    callbacks,
+                    level_opts,
+                )?;
+            }
+            QuantFormat::Q4K => {
+                // Q4K doesn't write `up_weights.bin` / `down_weights.bin`
+                // at all — the FFN weights live in `interleaved_q4k.bin`.
+                // `ffn_compact` is a no-op here by construction. Level
+                // gating for Q4K is a future refinement (today Q4K
+                // always writes the full set).
+                crate::format::weights::write_model_weights_q4k_with_opts(
+                    &streaming_source,
+                    output_dir,
+                    callbacks,
+                    q4k_opts,
+                )?;
+            }
+        }
+    }
+
+    // Final checksums
+    let config_text = std::fs::read_to_string(output_dir.join(INDEX_JSON))?;
+    let mut config: VindexConfig =
+        serde_json::from_str(&config_text).map_err(|e| VindexError::Parse(e.to_string()))?;
+    config.checksums = crate::format::checksums::compute_checksums(output_dir).ok();
+    let config_json =
+        serde_json::to_string_pretty(&config).map_err(|e| VindexError::Parse(e.to_string()))?;
+    std::fs::write(output_dir.join(INDEX_JSON), config_json)?;
+
+    // Whole extract succeeded — drop the checkpoint so the next
+    // visitor sees a clean output dir, not a half-finished one.
+    super::checkpoint::Checkpoint::clear(output_dir)?;
+
+    Ok(())
+}
+
+/// Get a 2D tensor from mmap'd safetensors, dequantizing to f32.
+fn get_tensor_f32(
+    shards: &[MmapShard],
+    index: &HashMap<String, (usize, String)>,
+    key: &str,
+) -> Result<Option<Array2<f32>>, VindexError> {
+    let (shard_idx, tensor_name) = match index.get(key) {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    let st = safetensors::SafeTensors::deserialize(&shards[*shard_idx].mmap)
+        .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+    let view = st
+        .tensor(tensor_name)
+        .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+    let shape = view.shape();
+    if shape.len() != 2 {
+        return Ok(None);
+    }
+
+    let data = match view.dtype() {
+        safetensors::Dtype::F32 => view
+            .data()
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect(),
+        safetensors::Dtype::F16 => crate::format::quant::half::decode_f16(view.data()),
+        safetensors::Dtype::BF16 => crate::format::quant::half::decode_bf16(view.data()),
+        _ => return Ok(None), // skip non-float
+    };
+
+    let arr = Array2::from_shape_vec((shape[0], shape[1]), data)
+        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    Ok(Some(arr))
+}
+
+fn normalize_key(key: &str, prefixes: &[&str]) -> String {
+    for prefix in prefixes {
+        if let Some(stripped) = key.strip_prefix(prefix) {
+            return stripped.to_string();
+        }
+    }
+    key.to_string()
+}
+
+use crate::config::dtype::write_floats;

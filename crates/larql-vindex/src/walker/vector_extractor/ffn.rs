@@ -33,7 +33,7 @@ impl VectorExtractor {
         let n_features = w_down.shape()[1];
         callbacks.on_layer_start(COMPONENT_FFN_DOWN, layer, n_features);
 
-        let logits = self.weights.embed.dot(w_down);
+        let logits = self.weights.embed.as_array().dot(w_down);
 
         let progress_interval = (n_features / 20).max(1);
         let mut count = 0;
@@ -98,7 +98,7 @@ impl VectorExtractor {
         let n_features = w_gate.shape()[0];
         callbacks.on_layer_start(COMPONENT_FFN_GATE, layer, n_features);
 
-        let logits = self.weights.embed.dot(&w_gate.t());
+        let logits = self.weights.embed.as_array().dot(&w_gate.t());
 
         let progress_interval = (n_features / 20).max(1);
         let mut count = 0;
@@ -163,7 +163,7 @@ impl VectorExtractor {
         let n_features = w_up.shape()[0];
         callbacks.on_layer_start(COMPONENT_FFN_UP, layer, n_features);
 
-        let logits = self.weights.embed.dot(&w_up.t());
+        let logits = self.weights.embed.as_array().dot(&w_up.t());
         let progress_interval = (n_features / 20).max(1);
         let mut count = 0;
 

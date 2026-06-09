@@ -24,8 +24,13 @@ pub use raw::{
 };
 
 pub use dense::{
+<<<<<<< HEAD
     logit_lens_top1, logits_to_predictions_pub, logits_to_predictions_q4_lm_head, predict,
     predict_from_hidden, predict_from_hidden_with_ffn, predict_with_ffn_trace,
+=======
+    full_vocab_probs, full_vocab_probs_batched, logit_lens_top1, logits_to_predictions_pub,
+    predict, predict_from_hidden, predict_from_hidden_with_ffn, predict_with_ffn_trace,
+>>>>>>> ianblenke/main
     predict_with_temperature,
 };
 

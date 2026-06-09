@@ -155,8 +155,8 @@ impl WeightWalker {
         callbacks.on_layer_start(layer, n_features);
 
         // BLAS-accelerated matmuls
-        let all_output = self.weights.embed.dot(w_down);
-        let all_input = self.weights.embed.dot(&w_gate.t());
+        let all_output = self.weights.embed.as_array().dot(w_down);
+        let all_input = self.weights.embed.as_array().dot(&w_gate.t());
 
         let k = config.top_k.min(self.weights.vocab_size);
         let progress_interval = (n_features / 20).max(1);
