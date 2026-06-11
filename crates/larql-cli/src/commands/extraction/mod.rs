@@ -4,6 +4,7 @@ pub mod attn_bottleneck_cmd;
 pub mod bfs_cmd;
 pub mod bottleneck_test_cmd;
 pub mod build_cmd;
+pub mod canonicalize_cmd;
 pub mod circuit_discover_cmd;
 pub mod compile_cmd;
 pub mod convert_cmd;
