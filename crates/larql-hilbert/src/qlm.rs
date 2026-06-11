@@ -22,6 +22,9 @@ impl SingleQubitLM {
     }
 
     /// State after observing token `t`: collapse to |t⟩, then apply gates[t].
+    ///
+    /// # Panics
+    /// Panics if `state_token` is ≥ 2 (the vocabulary is `{0, 1}`).
     pub fn step(&self, state_token: usize) -> Qubit {
         let collapsed = if state_token == 0 { Qubit::ket0() } else { Qubit::ket1() };
         collapsed.apply(&self.gates[state_token])
@@ -29,6 +32,9 @@ impl SingleQubitLM {
 
     /// Autoregressive log-likelihood (natural log) of a token sequence.
     /// A token with zero probability yields −∞.
+    ///
+    /// # Panics
+    /// Panics if any token in `tokens` is ≥ 2 (the vocabulary is `{0, 1}`).
     pub fn score(&self, tokens: &[usize]) -> f64 {
         let mut state = self.init;
         let mut ll = 0.0;
