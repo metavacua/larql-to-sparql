@@ -32,6 +32,7 @@ pub mod qlm;
 pub mod measurement;
 pub mod admissibility;
 pub mod two_qubit;
+pub mod gate2;
 
 pub use complex_structure::{
     antilinear_fraction, commutator_residual, complex_parts, realify, split_half_j,
@@ -43,3 +44,4 @@ pub use qlm::SingleQubitLM;
 pub use measurement::{project, LinearQubit};
 pub use admissibility::{exists_continuation, is_realizable, uniformly_stable, ArithFragment};
 pub use two_qubit::{is_product, marginal_probs, measure_qubit, tensor, TwoQubit};
+pub use gate2::Gate4;
