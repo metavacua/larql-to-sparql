@@ -43,10 +43,10 @@ pub fn dagger4(a: &Gate4) -> Gate4 {
 /// Whether a 4×4 gate is unitary: U U† ≈ I within 1e-10.
 pub fn is_unitary4(a: &Gate4) -> bool {
     let p = mat_mul4(a, &dagger4(a));
-    for i in 0..4 {
-        for j in 0..4 {
+    for (i, row) in p.iter().enumerate() {
+        for (j, &val) in row.iter().enumerate() {
             let expected = if i == j { c(1.0, 0.0) } else { c(0.0, 0.0) };
-            if (p[i][j] - expected).norm() > 1e-10 {
+            if (val - expected).norm() > 1e-10 {
                 return false;
             }
         }
@@ -57,10 +57,10 @@ pub fn is_unitary4(a: &Gate4) -> bool {
 /// Apply a 4×4 gate to a two-qubit state.
 pub fn apply4(g: &Gate4, s: &TwoQubit) -> TwoQubit {
     let mut amp = [c(0.0, 0.0); 4];
-    for (i, slot) in amp.iter_mut().enumerate() {
+    for (slot, row) in amp.iter_mut().zip(g.iter()) {
         let mut acc = c(0.0, 0.0);
-        for j in 0..4 {
-            acc += g[i][j] * s.amp[j];
+        for (gij, sj) in row.iter().zip(s.amp.iter()) {
+            acc += gij * sj;
         }
         *slot = acc;
     }
