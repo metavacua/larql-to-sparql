@@ -81,6 +81,12 @@ fn read_entry(bin: &[u8], e: &ManifestEntry) -> Result<Array2<f32>, VindexError>
     if n == 0 {
         return Err(VindexError::Parse(format!("entry {} is empty", e.key)));
     }
+    if !e.length.is_multiple_of(n) {
+        return Err(VindexError::Parse(format!(
+            "entry {} byte length {} is not a multiple of element count {n}",
+            e.key, e.length
+        )));
+    }
     let dtype = match e.length / n {
         4 => StorageDtype::F32,
         2 => StorageDtype::F16,
@@ -91,7 +97,9 @@ fn read_entry(bin: &[u8], e: &ManifestEntry) -> Result<Array2<f32>, VindexError>
             )))
         }
     };
-    let end = e.offset + e.length;
+    let end = e.offset.checked_add(e.length).ok_or_else(|| {
+        VindexError::Parse(format!("entry {} offset+length overflows usize", e.key))
+    })?;
     if end > bin.len() {
         return Err(VindexError::Parse(format!(
             "entry {} range {}..{end} exceeds {ATTN_WEIGHTS_BIN} ({} bytes)",

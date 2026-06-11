@@ -41,6 +41,17 @@ pub fn run(args: HilbertianArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut heads: Vec<HeadHilbertianInfo> = Vec::with_capacity(config.num_layers * num_q);
     for (layer, (wq, wk)) in qk.iter().enumerate() {
+        if wq.nrows() < num_q * head_dim || wk.nrows() < num_kv * head_dim {
+            return Err(format!(
+                "layer {layer}: attention weights too small (wq {} rows, wk {} rows; \
+                 need {} and {}) — config/weights mismatch",
+                wq.nrows(),
+                wk.nrows(),
+                num_q * head_dim,
+                num_kv * head_dim
+            )
+            .into());
+        }
         let wq64 = wq.mapv(|v| v as f64);
         let wk64 = wk.mapv(|v| v as f64);
         for h in 0..num_q {
