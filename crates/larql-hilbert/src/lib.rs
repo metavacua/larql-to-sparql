@@ -15,6 +15,11 @@
 //! becomes non-commutative and non-idempotent. GHZ / W states generalize this
 //! to 3+ qubits. Each is a separate plan built on these primitives.
 //!
+//! Two qubits (`two_qubit`, `gate2`, `qlm2`) add the tensor product, the Bell
+//! entangling operation, and partial measurement — where states stop factoring
+//! (`A⊗B ≠ A×B`) and the single-qubit Markov reduction breaks. Next: GHZ / W
+//! states for 3+ qubits (`ℂ^{2ⁿ}`), generalizing these primitives.
+//!
 //! # Measurement as elimination
 //!
 //! Measurement is not a new primitive but an elimination rule in the linear
@@ -45,3 +50,5 @@ pub use measurement::{project, LinearQubit};
 pub use admissibility::{exists_continuation, is_realizable, uniformly_stable, ArithFragment};
 pub use two_qubit::{is_product, marginal_probs, measure_qubit, tensor, TwoQubit};
 pub use gate2::{bell, cnot, Gate4};
+pub mod qlm2;
+pub use qlm2::TwoQubitLM;
