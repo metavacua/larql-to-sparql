@@ -6,6 +6,14 @@
 //! `commutator_residual(M, J) = 2 · antilinear_fraction(M)`. The qubit side
 //! (`unitary`, `qubit`, `born`, `qlm`) is the first concrete model built on the
 //! same formalism — a single qubit, ℂP¹ = the Bloch sphere.
+//!
+//! # Roadmap
+//!
+//! This crate is the single-qubit foundation. Next: a 2-qubit model (ℂ⁴ states,
+//! the tensor product) introduces the Bell entanglement operation — the point
+//! at which states no longer factor into single-qubit parts, so the algebra
+//! becomes non-commutative and non-idempotent. GHZ / W states generalize this
+//! to 3+ qubits. Each is a separate plan built on these primitives.
 
 pub mod complex_structure;
 pub mod unitary;
