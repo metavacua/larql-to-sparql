@@ -39,12 +39,13 @@ pub fn commutator_residual(m: &Array2<f64>, j: &Array2<f64>) -> f64 {
 /// Map a query-head index to its KV-head index under grouped-query attention.
 /// `num_q_heads` must be a multiple of `num_kv_heads`.
 pub fn kv_head_for_query(query_head: usize, num_q_heads: usize, num_kv_heads: usize) -> usize {
-    let group = num_q_heads / num_kv_heads;
-    query_head / group.max(1)
+    let group = (num_q_heads / num_kv_heads.max(1)).max(1);
+    query_head / group
 }
 
 /// Extract head `head`'s `[head_dim, hidden]` block from a stacked projection
 /// matrix `[n*head_dim, hidden]` (PyTorch `[out, in]` orientation).
+/// Panics if `(head + 1) * head_dim` exceeds the number of rows in `proj`.
 pub fn head_block(proj: &Array2<f64>, head: usize, head_dim: usize) -> Array2<f64> {
     proj.slice(s![head * head_dim..(head + 1) * head_dim, ..]).to_owned()
 }
@@ -138,6 +139,12 @@ mod tests {
         assert_eq!(kv_head_for_query(2, 4, 4), 2);
         // Single kv head: everything maps to 0.
         assert_eq!(kv_head_for_query(7, 8, 1), 0);
+    }
+
+    #[test]
+    fn kv_head_for_query_handles_zero_kv_heads_without_panic() {
+        // Defensive: num_kv_heads == 0 must not divide-by-zero.
+        assert_eq!(kv_head_for_query(3, 8, 0), 0);
     }
 
     #[test]
