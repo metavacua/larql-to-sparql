@@ -2,7 +2,7 @@
 //! coupling is to being complex-linear w.r.t. the split-half complex
 //! structure J (J² = −I) that RoPE uses. See the plan doc for the math.
 
-use ndarray::Array2;
+use ndarray::{s, Array2};
 
 /// Build the split-half complex structure J on R^n (n must be even):
 ///   J e_i        =  e_{i+half}     for i in [0, half)
@@ -34,6 +34,36 @@ pub fn commutator_residual(m: &Array2<f64>, j: &Array2<f64>) -> f64 {
     } else {
         frob_norm(&comm) / den
     }
+}
+
+/// Map a query-head index to its KV-head index under grouped-query attention.
+/// `num_q_heads` must be a multiple of `num_kv_heads`.
+pub fn kv_head_for_query(query_head: usize, num_q_heads: usize, num_kv_heads: usize) -> usize {
+    let group = num_q_heads / num_kv_heads;
+    query_head / group.max(1)
+}
+
+/// Extract head `head`'s `[head_dim, hidden]` block from a stacked projection
+/// matrix `[n*head_dim, hidden]` (PyTorch `[out, in]` orientation).
+pub fn head_block(proj: &Array2<f64>, head: usize, head_dim: usize) -> Array2<f64> {
+    proj.slice(s![head * head_dim..(head + 1) * head_dim, ..]).to_owned()
+}
+
+/// Per-head query/key coupling C = W_Q · W_Kᵀ, shape `[head_dim, head_dim]`.
+/// `wq_head` and `wk_head` are both `[head_dim, hidden]`.
+pub fn head_coupling(wq_head: &Array2<f64>, wk_head: &Array2<f64>) -> Array2<f64> {
+    wq_head.dot(&wk_head.t())
+}
+
+/// Hilbertian residual for one head: ‖[C, J]‖_F / ‖C‖_F where C = W_Q W_Kᵀ.
+/// `j` must be the split-half complex structure of dimension `head_dim`.
+pub fn head_hilbertian_residual(
+    wq_head: &Array2<f64>,
+    wk_head: &Array2<f64>,
+    j: &Array2<f64>,
+) -> f64 {
+    let c = head_coupling(wq_head, wk_head);
+    commutator_residual(&c, j)
 }
 
 #[cfg(test)]
@@ -95,5 +125,53 @@ mod tests {
     #[should_panic]
     fn odd_dimension_panics() {
         let _ = complex_structure_split_half(3);
+    }
+
+    #[test]
+    fn kv_head_for_query_maps_gqa_groups() {
+        // 15 query heads, 5 kv heads -> group size 3.
+        assert_eq!(kv_head_for_query(0, 15, 5), 0);
+        assert_eq!(kv_head_for_query(2, 15, 5), 0);
+        assert_eq!(kv_head_for_query(3, 15, 5), 1);
+        assert_eq!(kv_head_for_query(14, 15, 5), 4);
+        // No GQA (num_kv == num_q): identity.
+        assert_eq!(kv_head_for_query(2, 4, 4), 2);
+        // Single kv head: everything maps to 0.
+        assert_eq!(kv_head_for_query(7, 8, 1), 0);
+    }
+
+    #[test]
+    fn head_block_extracts_rows() {
+        // proj is [4, 3] = 2 heads of head_dim 2.
+        let proj = array![
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+            [10.0, 11.0, 12.0],
+        ];
+        let h0 = head_block(&proj, 0, 2);
+        let h1 = head_block(&proj, 1, 2);
+        assert_eq!(h0, array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+        assert_eq!(h1, array![[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]);
+    }
+
+    #[test]
+    fn head_coupling_is_wq_times_wk_transpose() {
+        // wq, wk are [d_head=2, hidden=3]; C = wq · wkᵀ is [2,2].
+        let wq = array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        let wk = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+        let c = head_coupling(&wq, &wk);
+        // row0·wkᵀ = [1,4]; row1·wkᵀ = [2,5]
+        assert_eq!(c, array![[1.0, 4.0], [2.0, 5.0]]);
+    }
+
+    #[test]
+    fn head_hilbertian_residual_matches_manual_composition() {
+        let wq = array![[1.0, 2.0, 0.0, 0.0], [0.0, 1.0, 1.0, 0.0]];
+        let wk = array![[0.0, 1.0, 2.0, 0.0], [1.0, 0.0, 0.0, 3.0]];
+        let j = complex_structure_split_half(2); // d_head = 2
+        let direct = head_hilbertian_residual(&wq, &wk, &j);
+        let manual = commutator_residual(&head_coupling(&wq, &wk), &j);
+        assert!((direct - manual).abs() < 1e-15);
     }
 }

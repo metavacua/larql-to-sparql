@@ -14,4 +14,7 @@ pub mod regime;
 pub use regime::classify_layer_regime;
 
 pub mod hilbertian;
-pub use hilbertian::{commutator_residual, complex_structure_split_half};
+pub use hilbertian::{
+    commutator_residual, complex_structure_split_half, head_block, head_coupling,
+    head_hilbertian_residual, kv_head_for_query,
+};
