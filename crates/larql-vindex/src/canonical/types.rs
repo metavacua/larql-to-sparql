@@ -48,15 +48,28 @@ pub struct CanonicalMeta {
 
 impl CanonicalMeta {
     /// Unpack the lower-triangular Cholesky factor into a dense d×d matrix.
-    pub fn unpack_cholesky_l(&self) -> ndarray::Array2<f64> {
+    ///
+    /// Returns `Err` if `cholesky_l_packed` is not exactly `d·(d+1)/2` long
+    /// (e.g. a truncated or mismatched `canonical_meta.json`), rather than
+    /// panicking on an out-of-bounds index.
+    pub fn unpack_cholesky_l(&self) -> Result<ndarray::Array2<f64>, String> {
         let d = self.hidden_size;
+        let expected = d * (d + 1) / 2;
+        if self.cholesky_l_packed.len() != expected {
+            return Err(format!(
+                "cholesky_l_packed length {} does not match hidden_size {} (expected {})",
+                self.cholesky_l_packed.len(),
+                d,
+                expected
+            ));
+        }
         let mut l = ndarray::Array2::<f64>::zeros((d, d));
         for i in 0..d {
             for j in 0..=i {
                 l[[i, j]] = self.cholesky_l_packed[i * (i + 1) / 2 + j];
             }
         }
-        l
+        Ok(l)
     }
 }
 
@@ -112,7 +125,7 @@ mod tests {
             cholesky_l_packed: vec![2.0, 1.0, 3.0, 4.0, 5.0, 6.0],
             layers: vec![],
         };
-        let l = meta.unpack_cholesky_l();
+        let l = meta.unpack_cholesky_l().unwrap();
         assert_eq!(l[[0, 0]], 2.0);
         assert_eq!(l[[1, 0]], 1.0);
         assert_eq!(l[[1, 1]], 3.0);
@@ -121,5 +134,19 @@ mod tests {
         assert_eq!(l[[2, 2]], 6.0);
         assert_eq!(l[[0, 1]], 0.0);
         assert_eq!(l[[0, 2]], 0.0);
+    }
+
+    #[test]
+    fn unpack_cholesky_l_rejects_malformed_packing() {
+        // hidden_size=3 expects 6 packed entries; supply only 5.
+        let meta = CanonicalMeta {
+            version: 1, model: "x".into(), family: "y".into(),
+            num_layers: 1, hidden_size: 3,
+            covariance_sample_size: 8, embed_scale: 1.0,
+            cholesky_l_packed: vec![2.0, 1.0, 3.0, 4.0, 5.0],
+            layers: vec![],
+        };
+        assert!(meta.unpack_cholesky_l().is_err(),
+            "truncated packing must Err, not panic");
     }
 }
