@@ -31,6 +31,7 @@ pub mod born;
 pub mod qlm;
 pub mod measurement;
 pub mod admissibility;
+pub mod two_qubit;
 
 pub use complex_structure::{
     antilinear_fraction, commutator_residual, complex_parts, realify, split_half_j,
@@ -41,3 +42,4 @@ pub use born::measure_probs;
 pub use qlm::SingleQubitLM;
 pub use measurement::{project, LinearQubit};
 pub use admissibility::{exists_continuation, is_realizable, uniformly_stable, ArithFragment};
+pub use two_qubit::TwoQubit;
