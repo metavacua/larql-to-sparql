@@ -35,6 +35,7 @@ pub fn exists_continuation<F: Fn(&[usize]) -> bool>(
     max_len: usize,
     pred: F,
 ) -> Option<Vec<usize>> {
+    debug_assert!(max_len < 63, "max_len must be < 63 (admissible finite bound)");
     for len in 0..=max_len {
         for code in 0..(1usize << len) {
             let mut seq = prefix.to_vec();
@@ -57,6 +58,7 @@ pub fn exists_continuation<F: Fn(&[usize]) -> bool>(
 /// collapse can never reach a state where both outcomes have probability 0), so
 /// this verifies that structural stability property within the bound.
 pub fn uniformly_stable(lm: &SingleQubitLM, max_len: usize) -> bool {
+    debug_assert!(max_len < 63, "max_len must be < 63 (admissible finite bound)");
     for len in 0..=max_len {
         for code in 0..(1usize << len) {
             let mut seq = Vec::with_capacity(len);
