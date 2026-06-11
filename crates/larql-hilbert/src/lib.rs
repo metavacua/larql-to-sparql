@@ -8,7 +8,9 @@
 //! same formalism — a single qubit, ℂP¹ = the Bloch sphere.
 
 pub mod complex_structure;
+pub mod unitary;
 
 pub use complex_structure::{
     antilinear_fraction, commutator_residual, complex_parts, realify, split_half_j,
 };
+pub use unitary::Gate;
