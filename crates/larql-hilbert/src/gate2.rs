@@ -83,10 +83,31 @@ pub fn tensor_gate(a: &Gate, b: &Gate) -> Gate4 {
     out
 }
 
+/// CNOT with control = qubit 0, target = qubit 1:
+/// |00⟩→|00⟩, |01⟩→|01⟩, |10⟩→|11⟩, |11⟩→|10⟩.
+pub fn cnot() -> Gate4 {
+    [
+        [c(1.0, 0.0), c(0.0, 0.0), c(0.0, 0.0), c(0.0, 0.0)],
+        [c(0.0, 0.0), c(1.0, 0.0), c(0.0, 0.0), c(0.0, 0.0)],
+        [c(0.0, 0.0), c(0.0, 0.0), c(0.0, 0.0), c(1.0, 0.0)],
+        [c(0.0, 0.0), c(0.0, 0.0), c(1.0, 0.0), c(0.0, 0.0)],
+    ]
+}
+
+/// The Bell state Φ⁺ = (|00⟩ + |11⟩)/√2 = CNOT·(H⊗I)·|00⟩. The canonical
+/// entangling operation: its output does not factor as |a⟩⊗|b⟩.
+pub fn bell() -> TwoQubit {
+    use crate::unitary::{hadamard, identity};
+    let h_i = tensor_gate(&hadamard(), &identity());
+    let prepared = apply4(&h_i, &TwoQubit::ket(0, 0));
+    apply4(&cnot(), &prepared)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::unitary::{hadamard, identity, pauli_x};
+    use crate::two_qubit::is_product;
 
     #[test]
     fn tensor_gate_identity_is_4x4_identity() {
@@ -118,5 +139,29 @@ mod tests {
     #[test]
     fn tensor_gate_is_unitary() {
         assert!(is_unitary4(&tensor_gate(&hadamard(), &pauli_x())));
+    }
+
+    #[test]
+    fn cnot_is_unitary_and_flips_target_when_control_set() {
+        assert!(is_unitary4(&cnot()));
+        // |10⟩ → |11⟩ (control=1 flips target)
+        assert_eq!(apply4(&cnot(), &TwoQubit::ket(1, 0)), TwoQubit::ket(1, 1));
+        // |00⟩ → |00⟩ (control=0 leaves target)
+        assert_eq!(apply4(&cnot(), &TwoQubit::ket(0, 0)), TwoQubit::ket(0, 0));
+    }
+
+    #[test]
+    fn bell_is_the_phi_plus_state() {
+        let b = bell();
+        let s = 1.0 / std::f64::consts::SQRT_2;
+        assert!((b.amp[0].re - s).abs() < 1e-12);
+        assert!((b.amp[3].re - s).abs() < 1e-12);
+        assert!(b.amp[1].norm() < 1e-12 && b.amp[2].norm() < 1e-12);
+        assert!((b.norm() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn bell_state_is_entangled() {
+        assert!(!is_product(&bell()));
     }
 }
