@@ -1,6 +1,7 @@
 //! File format I/O — vindex loading, saving, checksums, HuggingFace.
 //! Model loading (safetensors/GGUF) is in larql-models.
 
+pub mod attn_load;
 pub mod checksums;
 pub mod down_meta;
 pub mod filenames;
