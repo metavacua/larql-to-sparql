@@ -43,6 +43,36 @@ pub fn antilinear_fraction(m: &Array2<f64>, j: &Array2<f64>) -> f64 {
     if den == 0.0 { 0.0 } else { frob_norm(&antilinear_part(m, j)) / den }
 }
 
+/// Realify a complex m×m operator given as (real, imag) parts (A, B):
+/// returns the 2m×2m real matrix [[A, −B], [B, A]] (split-half convention),
+/// which commutes with `split_half_j(2m)` and represents A + iB.
+pub fn realify(a: &Array2<f64>, b: &Array2<f64>) -> Array2<f64> {
+    let m = a.shape()[0];
+    let n = 2 * m;
+    let mut out = Array2::<f64>::zeros((n, n));
+    for i in 0..m {
+        for j in 0..m {
+            out[[i, j]] = a[[i, j]];
+            out[[i, m + j]] = -b[[i, j]];
+            out[[m + i, j]] = b[[i, j]];
+            out[[m + i, m + j]] = a[[i, j]];
+        }
+    }
+    out
+}
+
+/// Read the complex (real, imag) parts (A, B) out of the top-left and
+/// bottom-left blocks of a 2m×2m real matrix. For a matrix produced by
+/// `realify` (i.e. one that commutes with J), this recovers the original
+/// (A, B). For a general matrix it returns the (A, B) of its ℂ-linear part's
+/// canonical block representative.
+pub fn complex_parts(m: &Array2<f64>) -> (Array2<f64>, Array2<f64>) {
+    let half = m.shape()[0] / 2;
+    let a = m.slice(ndarray::s![0..half, 0..half]).to_owned();
+    let b = m.slice(ndarray::s![half.., 0..half]).to_owned();
+    (a, b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +125,37 @@ mod tests {
         let z = Array2::<f64>::zeros((4, 4));
         assert_eq!(commutator_residual(&z, &j), 0.0);
         assert_eq!(antilinear_fraction(&z, &j), 0.0);
+    }
+
+    #[test]
+    fn realify_builds_block_form() {
+        // realify(A, B) = [[A, -B], [B, A]].
+        let a = array![[1.0, 2.0], [3.0, 4.0]];
+        let b = array![[5.0, 6.0], [7.0, 8.0]];
+        let m = realify(&a, &b);
+        assert_eq!(m.shape(), [4, 4]);
+        assert_eq!(m[[0, 0]], 1.0);
+        assert_eq!(m[[0, 2]], -5.0); // -B
+        assert_eq!(m[[2, 0]], 5.0);  //  B
+        assert_eq!(m[[2, 2]], 1.0);  //  A
+    }
+
+    #[test]
+    fn complex_parts_inverts_realify() {
+        let a = array![[1.0, 2.0], [3.0, 4.0]];
+        let b = array![[5.0, 6.0], [7.0, 8.0]];
+        let m = realify(&a, &b);
+        let (a2, b2) = complex_parts(&m);
+        assert_eq!(a2, a);
+        assert_eq!(b2, b);
+    }
+
+    #[test]
+    fn realified_matrix_commutes_with_j() {
+        let a = array![[1.0, 2.0], [3.0, 4.0]];
+        let b = array![[5.0, 6.0], [7.0, 8.0]];
+        let m = realify(&a, &b);
+        let j = split_half_j(4);
+        assert!(commutator_residual(&m, &j) < 1e-12);
     }
 }
