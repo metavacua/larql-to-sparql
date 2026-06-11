@@ -11,6 +11,7 @@ pub mod complex_structure;
 pub mod unitary;
 pub mod qubit;
 pub mod born;
+pub mod qlm;
 
 pub use complex_structure::{
     antilinear_fraction, commutator_residual, complex_parts, realify, split_half_j,
@@ -18,3 +19,4 @@ pub use complex_structure::{
 pub use unitary::Gate;
 pub use qubit::Qubit;
 pub use born::measure_probs;
+pub use qlm::SingleQubitLM;
