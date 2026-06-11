@@ -14,6 +14,15 @@
 //! at which states no longer factor into single-qubit parts, so the algebra
 //! becomes non-commutative and non-idempotent. GHZ / W states generalize this
 //! to 3+ qubits. Each is a separate plan built on these primitives.
+//!
+//! # Measurement as elimination
+//!
+//! Measurement is not a new primitive but an elimination rule in the linear
+//! (no-cloning) fragment: `measurement::project` consumes a state to a basis
+//! outcome or `None` (⊥ ≅ `SingleQubitLM::score` returning −∞). `LinearQubit`
+//! enforces no-cloning via Rust move semantics. `admissibility` bounds
+//! extraction to the finite, decidable fragment (Δ₀) with Σ⁰₁/Π⁰₂ query shapes
+//! — Rosko 2025, arXiv:2511.21296.
 
 pub mod complex_structure;
 pub mod unitary;
