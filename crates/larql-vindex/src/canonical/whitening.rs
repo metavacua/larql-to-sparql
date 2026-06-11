@@ -27,7 +27,17 @@ pub fn compute_whitening(g: &Array2<f64>) -> Result<WhiteningData, String> {
 }
 
 /// Unpack a lower-triangle-packed Cholesky factor to a dense d×d matrix.
+///
+/// Panics with a clear message (rather than a cryptic out-of-bounds index) if
+/// `packed.len()` is not exactly `d·(d+1)/2`.
 pub fn unpack_l(packed: &[f64], d: usize) -> Array2<f64> {
+    assert_eq!(
+        packed.len(),
+        d * (d + 1) / 2,
+        "unpack_l: packed length {} does not match d={d} (expected {})",
+        packed.len(),
+        d * (d + 1) / 2
+    );
     let mut l = Array2::<f64>::zeros((d, d));
     for i in 0..d {
         for j in 0..=i {

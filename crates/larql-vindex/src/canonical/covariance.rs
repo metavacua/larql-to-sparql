@@ -30,8 +30,12 @@ pub fn estimate_covariance(
         }
     }
 
-    let norm = n as f64;
-    g.mapv_inplace(|v| v / norm);
+    // Guard against an empty subsample: dividing by 0 would fill G with NaN.
+    // With no samples the (already-zero) accumulator is the right answer.
+    if n > 0 {
+        let norm = n as f64;
+        g.mapv_inplace(|v| v / norm);
+    }
     g
 }
 
