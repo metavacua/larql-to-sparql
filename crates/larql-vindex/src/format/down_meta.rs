@@ -195,6 +195,52 @@ pub fn read_binary(
     Ok((down_meta, total))
 }
 
+/// Read only c_scores from down_meta.bin — no tokenizer needed.
+/// Returns one Vec<f32> per layer; layers with no features yield an empty Vec.
+pub fn read_cscores_binary(dir: &Path) -> Result<Vec<Vec<f32>>, VindexError> {
+    let path = dir.join(DOWN_META_BIN);
+    let file = std::fs::File::open(&path)?;
+    let mut r = BufReader::new(file);
+
+    let magic = read_u32(&mut r)?;
+    if magic != MAGIC && magic != LEGACY_LITERAL_MAGIC {
+        return Err(VindexError::Parse(format!(
+            "invalid down_meta.bin magic: 0x{magic:08X}"
+        )));
+    }
+    let version = read_u32(&mut r)?;
+    if version != FORMAT_VERSION {
+        return Err(VindexError::Parse(format!(
+            "unsupported down_meta.bin version: {version}"
+        )));
+    }
+    let num_layers = read_u32(&mut r)? as usize;
+    let top_k_count = read_u32(&mut r)? as usize;
+    // Bytes to skip per feature after reading top_token_id + c_score:
+    // top_k_count × (u32 token_id + f32 logit) = top_k_count × 8 bytes
+    let skip_per_feature = top_k_count * (U32_BYTES + F32_BYTES);
+
+    let mut result = Vec::with_capacity(num_layers);
+    for _ in 0..num_layers {
+        let num_features = read_u32(&mut r)? as usize;
+        if num_features == 0 {
+            result.push(Vec::new());
+            continue;
+        }
+        let mut cscores = Vec::with_capacity(num_features);
+        for _ in 0..num_features {
+            let _top_token_id = read_u32(&mut r)?;
+            let c_score = read_f32(&mut r)?;
+            cscores.push(c_score);
+            // Skip the top_k entries
+            let mut skip_buf = vec![0u8; skip_per_feature];
+            r.read_exact(&mut skip_buf)?;
+        }
+        result.push(cscores);
+    }
+    Ok(result)
+}
+
 /// Check if a binary down_meta.bin exists in the directory.
 pub fn has_binary(dir: &Path) -> bool {
     dir.join(DOWN_META_BIN).exists()
@@ -285,4 +331,40 @@ fn read_f32<R: Read>(r: &mut R) -> Result<f32, VindexError> {
     let mut buf = [0u8; 4];
     r.read_exact(&mut buf)?;
     Ok(f32::from_le_bytes(buf))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_cscores_binary_matches_full_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta: Vec<Option<Vec<Option<FeatureMeta>>>> = vec![
+            Some(vec![
+                Some(FeatureMeta {
+                    top_token: "hello".into(),
+                    top_token_id: 1,
+                    c_score: 3.5,
+                    top_k: vec![larql_models::TopKEntry {
+                        token: "hello".into(), token_id: 1, logit: 3.5,
+                    }],
+                }),
+                Some(FeatureMeta {
+                    top_token: "world".into(),
+                    top_token_id: 2,
+                    c_score: 1.2,
+                    top_k: vec![larql_models::TopKEntry {
+                        token: "world".into(), token_id: 2, logit: 1.2,
+                    }],
+                }),
+            ]),
+            None,
+        ];
+        write_binary(dir.path(), &meta, 1).unwrap();
+        let cscores = read_cscores_binary(dir.path()).unwrap();
+        assert_eq!(cscores.len(), 2);
+        assert_eq!(cscores[0], vec![3.5f32, 1.2f32]);
+        assert!(cscores[1].is_empty(), "None layer should give empty vec");
+    }
 }
