@@ -129,7 +129,10 @@ pub mod prelude {
     };
 }
 
-pub use cpu::ops::linalg::{cholesky, cholesky_inverse, cholesky_solve, ridge_decomposition_solve};
+pub use cpu::ops::linalg::{
+    back_solve_lt, cholesky, cholesky_inverse, cholesky_solve,
+    compute_l_inv_t, ridge_decomposition_solve,
+};
 pub use cpu::ops::moe::{quantize_x_to_q8k, Q8KActivation};
 pub use cpu::ops::vector::{cosine, dot, norm};
 pub use cpu::CpuBackend;
