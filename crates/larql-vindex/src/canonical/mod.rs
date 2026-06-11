@@ -9,3 +9,6 @@ pub use whitening::{compute_whitening, unpack_l, WhiteningData};
 
 pub mod onshell;
 pub use onshell::{compute_onshell_mask, onshell_stats};
+
+pub mod regime;
+pub use regime::classify_layer_regime;
