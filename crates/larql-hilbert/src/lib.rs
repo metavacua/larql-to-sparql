@@ -31,4 +31,4 @@ pub use qubit::Qubit;
 pub use born::measure_probs;
 pub use qlm::SingleQubitLM;
 pub use measurement::{project, LinearQubit};
-pub use admissibility::{exists_continuation, is_realizable, ArithFragment};
+pub use admissibility::{exists_continuation, is_realizable, uniformly_stable, ArithFragment};
