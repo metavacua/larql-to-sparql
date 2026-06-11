@@ -2215,6 +2215,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "larql-hilbert"
+version = "0.1.0"
+dependencies = [
+ "ndarray",
+ "num-complex",
+]
+
+[[package]]
 name = "larql-inference"
 version = "0.1.0"
 dependencies = [
