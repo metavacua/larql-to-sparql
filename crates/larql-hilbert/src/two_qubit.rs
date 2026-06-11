@@ -61,6 +61,47 @@ pub fn is_product(s: &TwoQubit) -> bool {
     det.norm() < 1e-10
 }
 
+/// Marginal Born probabilities [P(q=0), P(q=1)] for measuring qubit `which`
+/// (0 or 1) of the normalized state.
+pub fn marginal_probs(s: &TwoQubit, which: usize) -> [f64; 2] {
+    let sn = s.normalized();
+    let mut p = [0.0, 0.0];
+    for q0 in 0..2 {
+        for q1 in 0..2 {
+            let bit = if which == 0 { q0 } else { q1 };
+            p[bit] += sn.amp[2 * q0 + q1].norm_sqr();
+        }
+    }
+    p
+}
+
+/// Partial measurement: project onto the subspace where qubit `which` equals
+/// `outcome`, then renormalize. Returns `None` if that outcome has probability
+/// 0 (⊥) — the two-qubit analogue of `measurement::project`'s ⊥.
+pub fn measure_qubit(s: &TwoQubit, which: usize, outcome: usize) -> Option<TwoQubit> {
+    let sn = s.normalized();
+    let mut amp = [c(0.0, 0.0); 4];
+    let mut norm_sq = 0.0;
+    for q0 in 0..2 {
+        for q1 in 0..2 {
+            let bit = if which == 0 { q0 } else { q1 };
+            if bit == outcome {
+                let a = sn.amp[2 * q0 + q1];
+                amp[2 * q0 + q1] = a;
+                norm_sq += a.norm_sqr();
+            }
+        }
+    }
+    if norm_sq < 1e-300 {
+        return None;
+    }
+    let nrm = norm_sq.sqrt();
+    for a in amp.iter_mut() {
+        *a /= nrm;
+    }
+    Some(TwoQubit { amp })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +145,36 @@ mod tests {
             amp: [c(s, 0.0), c(0.0, 0.0), c(0.0, 0.0), c(s, 0.0)],
         };
         assert!(!is_product(&entangled));
+    }
+
+    fn entangled_phi_plus() -> TwoQubit {
+        // (|00⟩ + |11⟩)/√2, built directly (gate construction lands in Task 5).
+        let s = 1.0 / std::f64::consts::SQRT_2;
+        TwoQubit { amp: [c(s, 0.0), c(0.0, 0.0), c(0.0, 0.0), c(s, 0.0)] }
+    }
+
+    #[test]
+    fn marginal_probs_of_phi_plus_are_fair() {
+        let p = marginal_probs(&entangled_phi_plus(), 0);
+        assert!((p[0] - 0.5).abs() < 1e-12 && (p[1] - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn measuring_one_qubit_forces_the_other() {
+        let b = entangled_phi_plus();
+        // measure qubit 0 = 0 → collapses to |00⟩ → qubit 1 is certainly 0.
+        let after0 = measure_qubit(&b, 0, 0).unwrap();
+        let m1 = marginal_probs(&after0, 1);
+        assert!((m1[0] - 1.0).abs() < 1e-12);
+        // measure qubit 0 = 1 → |11⟩ → qubit 1 certainly 1.
+        let after1 = measure_qubit(&b, 0, 1).unwrap();
+        let m1b = marginal_probs(&after1, 1);
+        assert!((m1b[1] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn impossible_partial_outcome_is_bottom() {
+        // |00⟩: measuring qubit 0 = 1 is impossible → None (⊥).
+        assert!(measure_qubit(&TwoQubit::ket(0, 0), 0, 1).is_none());
     }
 }

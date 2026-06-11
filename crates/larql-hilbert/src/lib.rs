@@ -42,4 +42,4 @@ pub use born::measure_probs;
 pub use qlm::SingleQubitLM;
 pub use measurement::{project, LinearQubit};
 pub use admissibility::{exists_continuation, is_realizable, uniformly_stable, ArithFragment};
-pub use two_qubit::{is_product, tensor, TwoQubit};
+pub use two_qubit::{is_product, marginal_probs, measure_qubit, tensor, TwoQubit};
