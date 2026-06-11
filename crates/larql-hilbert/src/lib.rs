@@ -7,10 +7,6 @@
 //! (`unitary`, `qubit`, `born`, `qlm`) is the first concrete model built on the
 //! same formalism — a single qubit, ℂP¹ = the Bloch sphere.
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_builds() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+pub mod complex_structure;
+
+pub use complex_structure::{antilinear_fraction, commutator_residual, split_half_j};
