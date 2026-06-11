@@ -6,3 +6,6 @@ pub use covariance::estimate_covariance;
 
 pub mod whitening;
 pub use whitening::{compute_whitening, unpack_l, WhiteningData};
+
+pub mod onshell;
+pub use onshell::{compute_onshell_mask, onshell_stats};
