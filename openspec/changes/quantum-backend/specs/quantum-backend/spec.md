@@ -121,7 +121,7 @@ classicalization-seam `LqlError`.
 `classical_view()` of a `dicke(4,2)` backend equals a `ClassicalRegister` whose
 distribution is the state's `born_probs()`.
 
-<!-- test: crates/larql-lql/tests/test_quantum_backend.rs::classical_view_is_dephased_born -->
+<!-- test: crates/larql-lql/src/executor/quantum.rs::tests::classical_view_is_dephased_born -->
 
 ---
 

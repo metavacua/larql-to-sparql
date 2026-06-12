@@ -58,12 +58,95 @@ pub(crate) fn reconstruct_state(spec: &QlmSpec) -> Result<NQubit, LqlError> {
     }
 }
 
+/// A loaded quantum language model, ready to serve INFER through the session.
+pub(crate) struct QuantumBackend {
+    pub lm: NQubitLM,
+    pub tokens: Vec<String>,
+    pub token_index: HashMap<String, usize>,
+    pub n: usize,
+}
+
+impl std::fmt::Debug for QuantumBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QuantumBackend")
+            .field("n", &self.n)
+            .field("tokens", &self.tokens)
+            .finish_non_exhaustive()
+    }
+}
+
+impl QuantumBackend {
+    /// Build from the quantum numbers: reconstruct |ψ⟩, attach identity
+    /// post-gates (naive L=1), and resolve the token vocabulary.
+    pub fn from_spec(spec: &QlmSpec) -> Result<QuantumBackend, LqlError> {
+        let init = reconstruct_state(spec)?;
+        let n = spec.n_qubits;
+        let dim = 1usize << n;
+        let tokens = match &spec.tokens {
+            Some(t) => {
+                if t.len() != dim {
+                    return Err(LqlError::Execution(format!(
+                        "qlm.json: {} token labels for {dim}-token vocabulary (2^{n})",
+                        t.len()
+                    )));
+                }
+                t.clone()
+            }
+            None => (0..dim).map(|i| format!("{i:0width$b}", width = n)).collect(),
+        };
+        let token_index = tokens
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.clone(), i))
+            .collect();
+        // Identity post-gates: after collapse to |t⟩, apply nothing (naive L=1).
+        let post = vec![Vec::new(); dim];
+        let lm = NQubitLM { post, init };
+        Ok(QuantumBackend { lm, tokens, token_index, n })
+    }
+
+    /// The dephased classical view — the `NQubit → born_probs` map. The seam
+    /// through which the classical vindex operations will be served by
+    /// measuring the quantum state (a later sub-project).
+    pub fn classical_view(&self) -> ClassicalRegister {
+        ClassicalRegister { probs: self.lm.init.born_probs() }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn spec(n: usize, state: StateSpec) -> QlmSpec {
         QlmSpec { n_qubits: n, state, tokens: None }
+    }
+
+    #[test]
+    fn backend_default_tokens_are_bit_strings() {
+        let qb = QuantumBackend::from_spec(&spec(2, StateSpec::Ghz)).unwrap();
+        assert_eq!(qb.tokens, vec!["00", "01", "10", "11"]);
+        assert_eq!(qb.token_index["11"], 3);
+        assert_eq!(qb.n, 2);
+    }
+
+    #[test]
+    fn classical_view_is_dephased_born() {
+        // classical_view == ClassicalRegister of the state's born_probs (the
+        // dephasing map the seam is built on).
+        let qb = QuantumBackend::from_spec(&spec(4, StateSpec::Dicke { k: 2 })).unwrap();
+        let cv = qb.classical_view();
+        let born = qb.lm.init.born_probs();
+        for (a, b) in cv.probs.iter().zip(born.iter()) {
+            assert!((a - b).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn from_spec_rejects_token_count_mismatch() {
+        let mut s = spec(2, StateSpec::Ghz);
+        s.tokens = Some(vec!["a".into(), "b".into()]); // only 2, need 4
+        let err = QuantumBackend::from_spec(&s).unwrap_err();
+        assert!(err.to_string().contains("token"), "{err}");
     }
 
     #[test]
