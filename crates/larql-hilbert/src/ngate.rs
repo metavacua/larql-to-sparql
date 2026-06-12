@@ -3,8 +3,6 @@
 //! matrix (which would be exponential in n). Big-endian qubit order: qubit k
 //! occupies bit (n−1−k) of the basis index.
 
-use num_complex::Complex64;
-
 use crate::nqubit::NQubit;
 use crate::unitary::Gate;
 
@@ -15,51 +13,58 @@ fn bit_of(n: usize, k: usize) -> usize {
     n - 1 - k
 }
 
-/// Apply a single-qubit 2×2 gate to qubit `target`, leaving all other wires
-/// untouched. O(2ⁿ): each disjoint amplitude pair (differing only in the target
-/// bit) is mixed by the gate.
-pub fn apply_1q(s: &NQubit, g: &Gate, target: usize) -> NQubit {
+/// Apply a single-qubit 2×2 gate to qubit `target` in place — no allocation.
+pub fn apply_1q_in_place(s: &mut NQubit, g: &Gate, target: usize) {
     let n = s.n();
     assert!(target < n, "target {target} out of range for {n} qubits");
     let bit = 1usize << bit_of(n, target);
-    // Every entry is written exactly once (each index is the low or high member
-    // of exactly one pair), so start from zeros rather than cloning the input.
-    let mut amp = vec![Complex64::new(0.0, 0.0); s.amp.len()];
-    for i in 0..amp.len() {
+    for i in 0..s.amp.len() {
         // Visit each pair once, from the member whose target bit is 0.
         if i & bit == 0 {
             let j = i | bit;
             let (a0, a1) = (s.amp[i], s.amp[j]);
-            amp[i] = g[0][0] * a0 + g[0][1] * a1;
-            amp[j] = g[1][0] * a0 + g[1][1] * a1;
+            s.amp[i] = g[0][0] * a0 + g[0][1] * a1;
+            s.amp[j] = g[1][0] * a0 + g[1][1] * a1;
         }
     }
-    NQubit { amp }
 }
 
-/// Apply CNOT with the given `control` and `target` wires: flip `target` iff
-/// `control` is set. O(2ⁿ).
-pub fn apply_cnot(s: &NQubit, control: usize, target: usize) -> NQubit {
+/// Apply a single-qubit 2×2 gate to qubit `target`, returning a new state.
+pub fn apply_1q(s: &NQubit, g: &Gate, target: usize) -> NQubit {
+    let mut out = s.clone();
+    apply_1q_in_place(&mut out, g, target);
+    out
+}
+
+/// Apply CNOT with the given `control` and `target` wires in place — flip
+/// `target` iff `control` is set. No allocation.
+pub fn apply_cnot_in_place(s: &mut NQubit, control: usize, target: usize) {
     let n = s.n();
     assert!(control < n && target < n, "wire out of range for {n} qubits");
     assert!(control != target, "control and target must differ");
     let cbit = 1usize << bit_of(n, control);
     let tbit = 1usize << bit_of(n, target);
-    let mut amp = s.amp.clone();
-    for i in 0..amp.len() {
-        // Move the amplitude of each control-set, target-clear index to its
-        // target-flipped partner; visit each swapped pair once.
+    for i in 0..s.amp.len() {
+        // Swap each control-set, target-clear index with its flipped partner;
+        // visit each swapped pair once.
         if i & cbit != 0 && i & tbit == 0 {
-            amp.swap(i, i | tbit);
+            s.amp.swap(i, i | tbit);
         }
     }
-    NQubit { amp }
+}
+
+/// Apply CNOT, returning a new state.
+pub fn apply_cnot(s: &NQubit, control: usize, target: usize) -> NQubit {
+    let mut out = s.clone();
+    apply_cnot_in_place(&mut out, control, target);
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::unitary::{hadamard, identity, pauli_x};
+    use num_complex::Complex64;
 
     #[inline]
     fn c(re: f64, im: f64) -> Complex64 {
@@ -115,6 +120,42 @@ mod tests {
         s = apply_cnot(&s, 0, 1);
         s = apply_cnot(&s, 1, 2);
         let g = NQubit::ghz(3);
+        for (a, b) in s.amp.iter().zip(g.amp.iter()) {
+            assert!((a - b).norm() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn in_place_1q_matches_allocating() {
+        let base = NQubit::w(3);
+        let allocated = apply_1q(&base, &hadamard(), 1);
+        let mut inplace = base.clone();
+        apply_1q_in_place(&mut inplace, &hadamard(), 1);
+        for (a, b) in allocated.amp.iter().zip(inplace.amp.iter()) {
+            assert!((a - b).norm() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn in_place_cnot_matches_allocating() {
+        let base = apply_1q(&NQubit::ket(&[0, 0, 0]), &hadamard(), 0);
+        let allocated = apply_cnot(&base, 0, 2);
+        let mut inplace = base.clone();
+        apply_cnot_in_place(&mut inplace, 0, 2);
+        for (a, b) in allocated.amp.iter().zip(inplace.amp.iter()) {
+            assert!((a - b).norm() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn in_place_ghz_ladder_builds_ghz() {
+        // Build GHZ_4 entirely in place — no per-gate allocation.
+        let mut s = NQubit::ket(&[0, 0, 0, 0]);
+        apply_1q_in_place(&mut s, &hadamard(), 0);
+        for k in 0..3 {
+            apply_cnot_in_place(&mut s, k, k + 1);
+        }
+        let g = NQubit::ghz(4);
         for (a, b) in s.amp.iter().zip(g.amp.iter()) {
             assert!((a - b).norm() < 1e-12);
         }
