@@ -55,3 +55,5 @@ pub use qlm2::TwoQubitLM;
 
 pub mod entropy;
 pub use entropy::spectral_entropy;
+pub mod eig;
+pub use eig::symmetric_eigenvalues;
