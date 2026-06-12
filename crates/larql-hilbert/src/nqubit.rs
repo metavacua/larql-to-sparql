@@ -2,6 +2,7 @@
 //! (n=2). Qubit indices are big-endian: qubit 0 is the most-significant bit,
 //! so the basis index of bit-string b is Σ bₖ·2^{n−1−k}.
 
+use ndarray::Array2;
 use num_complex::Complex64;
 
 #[inline]
@@ -93,6 +94,52 @@ impl NQubit {
         let sn = self.normalized();
         sn.amp.iter().map(|a| a.norm_sqr()).collect()
     }
+
+    /// Build an n-qubit state from a real amplitude vector, padded with zeros
+    /// up to the next power of two (≥ 2). Returned un-normalized — call
+    /// `normalized()` for a Born-valid state. The bridge from real weight
+    /// vectors to the n-qubit formalism.
+    pub fn from_real_amplitudes(values: &[f64]) -> NQubit {
+        assert!(!values.is_empty(), "need at least one amplitude");
+        let dim = values.len().next_power_of_two().max(2);
+        let mut amp = vec![c(0.0, 0.0); dim];
+        for (i, &v) in values.iter().enumerate() {
+            amp[i] = c(v, 0.0);
+        }
+        NQubit { amp }
+    }
+
+    /// Build a `log₂(rows)+log₂(cols)`-qubit state from a real matrix, flattened
+    /// row-major: the amplitude at basis index `r·cols + c` is `M[r, c]`. Both
+    /// dimensions must be powers of two. The first `log₂(rows)` qubits (the high
+    /// bits, big-endian) address the rows — see [`row_qubits`]. Returned
+    /// un-normalized.
+    ///
+    /// Bridges a real weight matrix to the n-qubit formalism: the entanglement
+    /// entropy across the row/column bipartition equals the matrix's
+    /// `entanglement_entropy` (spectral entropy of its squared singular values).
+    pub fn from_matrix(m: &Array2<f64>) -> NQubit {
+        let (rows, cols) = (m.shape()[0], m.shape()[1]);
+        assert!(
+            rows.is_power_of_two() && cols.is_power_of_two() && rows * cols >= 2,
+            "matrix dims {rows}×{cols} must be powers of two with ≥2 entries"
+        );
+        let mut amp = vec![c(0.0, 0.0); rows * cols];
+        for r in 0..rows {
+            for col in 0..cols {
+                amp[r * cols + col] = c(m[[r, col]], 0.0);
+            }
+        }
+        NQubit { amp }
+    }
+}
+
+/// The qubit indices addressing the rows of a state built by
+/// [`NQubit::from_matrix`] with `rows` rows: the high `log₂(rows)` qubits.
+/// Use as the bipartition subset to recover the matrix's entanglement entropy.
+pub fn row_qubits(rows: usize) -> Vec<usize> {
+    assert!(rows.is_power_of_two() && rows >= 2, "rows {rows} must be a power of two ≥ 2");
+    (0..rows.trailing_zeros() as usize).collect()
 }
 
 #[cfg(test)]
@@ -161,5 +208,42 @@ mod tests {
     #[should_panic(expected = "cannot normalize the zero state")]
     fn zero_state_cannot_normalize() {
         let _ = NQubit { amp: vec![c(0.0, 0.0); 4] }.normalized();
+    }
+
+    #[test]
+    fn from_real_amplitudes_pads_to_power_of_two() {
+        // length 3 → padded to 4, trailing zero.
+        let s = NQubit::from_real_amplitudes(&[1.0, 2.0, 3.0]);
+        assert_eq!(s.amp.len(), 4);
+        assert_eq!(s.amp[0], c(1.0, 0.0));
+        assert_eq!(s.amp[2], c(3.0, 0.0));
+        assert_eq!(s.amp[3], c(0.0, 0.0));
+    }
+
+    #[test]
+    fn from_matrix_flattens_row_major() {
+        use ndarray::array;
+        // 2x2 → 2-qubit state, amp[r*2+c] = M[r,c].
+        let m = array![[1.0, 2.0], [3.0, 4.0]];
+        let s = NQubit::from_matrix(&m);
+        assert_eq!(s.amp.len(), 4);
+        assert_eq!(s.amp[0], c(1.0, 0.0)); // [0,0]
+        assert_eq!(s.amp[1], c(2.0, 0.0)); // [0,1]
+        assert_eq!(s.amp[2], c(3.0, 0.0)); // [1,0]
+        assert_eq!(s.amp[3], c(4.0, 0.0)); // [1,1]
+    }
+
+    #[test]
+    fn row_qubits_are_the_high_bits() {
+        // 4 rows → 2 row-qubits {0,1}; 2 rows → {0}.
+        assert_eq!(row_qubits(4), vec![0, 1]);
+        assert_eq!(row_qubits(2), vec![0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "powers of two")]
+    fn from_matrix_rejects_non_power_of_two_dims() {
+        use ndarray::array;
+        let _ = NQubit::from_matrix(&array![[1.0, 2.0, 3.0]]); // 1x3
     }
 }

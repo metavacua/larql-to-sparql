@@ -226,4 +226,38 @@ mod tests {
         use crate::nqubit::NQubit;
         let _ = entanglement_entropy_bipartition(&NQubit::ghz(2), &[]);
     }
+
+    #[test]
+    fn bipartition_of_flattened_matrix_equals_matrix_entanglement_entropy() {
+        use crate::nqubit::{row_qubits, NQubit};
+        use ndarray::array;
+        // A non-trivial 4×4 real matrix: its row/col bipartition entropy (via the
+        // n-qubit path) must equal entanglement_entropy(M) (the real-matrix path).
+        let m = array![
+            [1.0, 2.0, 0.0, 0.5],
+            [0.0, 1.0, 3.0, 1.0],
+            [1.0, 0.0, 0.0, 2.0],
+            [0.0, 1.0, 1.0, 0.0],
+        ];
+        let q = NQubit::from_matrix(&m);
+        let via_nqubit = entanglement_entropy_bipartition(&q, &row_qubits(4));
+        let via_matrix = entanglement_entropy(&m);
+        assert!(
+            (via_nqubit - via_matrix).abs() < 1e-9,
+            "n-qubit bipartition {via_nqubit} must equal matrix entanglement {via_matrix}"
+        );
+    }
+
+    #[test]
+    fn rectangular_matrix_bipartition_equals_matrix_entanglement() {
+        use crate::nqubit::{row_qubits, NQubit};
+        use ndarray::array;
+        // 2×4 (rows<cols) — exercises the rows≠cols Gram-side selection on the
+        // real-weight bridge.
+        let m = array![[1.0, 0.0, 2.0, 1.0], [0.0, 1.0, 0.0, 3.0]];
+        let q = NQubit::from_matrix(&m);
+        let via_nqubit = entanglement_entropy_bipartition(&q, &row_qubits(2));
+        let via_matrix = entanglement_entropy(&m);
+        assert!((via_nqubit - via_matrix).abs() < 1e-9);
+    }
 }
