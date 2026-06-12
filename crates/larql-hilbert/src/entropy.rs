@@ -3,6 +3,12 @@
 //! entropy is the spectral entropy of its squared singular values: 0 = rank-1
 //! (fully compressible), log2(d) = flat spectrum (incompressible). One ebit
 //! (spectrum [½, ½]) is the superdense-coding unit.
+//!
+//! `entanglement_entropy(M)` is the quantum-compressibility meter: low entropy
+//! ⇒ few Schmidt terms ⇒ the matrix compresses to a small tensor-network bond
+//! dimension (`χ ≈ 2^S`); a flat spectrum is incompressible. Combined with the
+//! Hilbertian residual (complex/coherence structure), it quantifies the
+//! classical-vs-quantum compressibility gap of a vindex, denominated in ebits.
 
 use ndarray::Array2;
 
