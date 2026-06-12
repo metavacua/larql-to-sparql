@@ -117,15 +117,15 @@ fn main() {
         "INFER France (patch active)",
     );
 
-    let patch_atlantis_ok = patched_atlantis.contains("Pose");
-    let patch_france_ok = patched_france.contains("Paris");
+    let patch_atlantis_ok = top1_starts_with(&patched_atlantis, "Pose");
+    let patch_france_ok = top1_starts_with(&patched_france, "Paris");
     check(
         "patch active: Atlantis → Pose at #1",
         patch_atlantis_ok,
         &mut all_passed,
     );
     check(
-        "patch active: France → Paris preserved",
+        "patch active: France → Paris preserved (Paris at #1, not merely present)",
         patch_france_ok,
         &mut all_passed,
     );
@@ -174,8 +174,8 @@ fn main() {
         "INFER France (compiled, no patch)",
     );
 
-    let cold_atlantis_ok = cold_atlantis.contains("Pose");
-    let cold_france_ok = cold_france.contains("Paris");
+    let cold_atlantis_ok = top1_starts_with(&cold_atlantis, "Pose");
+    let cold_france_ok = top1_starts_with(&cold_france, "Paris");
     check(
         "compiled vindex: INFER Atlantis → Pose at #1 (proves COMPILE baked the fact in)",
         cold_atlantis_ok,
@@ -343,4 +343,54 @@ fn top_token(s: &str) -> String {
     let after_num = line.split_once('.').map(|x| x.1).unwrap_or("").trim();
     let token = after_num.split_whitespace().next().unwrap_or("");
     token.to_string()
+}
+
+/// True iff the model's **#1** prediction starts with `token` — strict about
+/// position (the top-1, not merely that `token` appears somewhere in the
+/// top-k) yet tolerant of tokenizer fragments (e.g. "Pose" matching the full
+/// "Poseidon"). Neighbour preservation means the correct answer stays at #1,
+/// so this is the right check — `contains` is satisfied by a hijacked #1 with
+/// the correct token demoted to #2.
+fn top1_starts_with(infer_output: &str, token: &str) -> bool {
+    top_token(infer_output).starts_with(token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A real INFER block where a KNN override hijacked #1 (Poseidon) and the
+    // correct answer (Paris) fell to #2. This is NOT neighbour preservation —
+    // but the old `.contains("Paris")` check wrongly passed because Paris is
+    // still present at #2.
+    const FRANCE_HIJACKED: &str = "Predictions (walk FFN):\n   1. Poseidon             (100.00%, source=knn_override/post_logits, cos=0.81, L24, model_top1= Paris (91.14%))\n   2.  Paris               (91.14%)";
+
+    const FRANCE_PRESERVED: &str =
+        "Predictions (walk FFN):\n   1.  Paris               (91.14%)\n   2.  located             (3.34%)";
+
+    #[test]
+    fn hijacked_top1_is_not_neighbour_preservation() {
+        // The old `.contains` check would wrongly pass here:
+        assert!(FRANCE_HIJACKED.contains("Paris"), "precondition: Paris present at #2");
+        // The correct check is position-strict: Paris must be #1, not just present.
+        assert!(
+            !top1_starts_with(FRANCE_HIJACKED, "Paris"),
+            "Paris at #2 behind a hijacked #1 must NOT count as neighbour preservation"
+        );
+    }
+
+    #[test]
+    fn correct_top1_is_neighbour_preservation() {
+        assert!(top1_starts_with(FRANCE_PRESERVED, "Paris"));
+    }
+
+    #[test]
+    fn top1_tolerates_tokenizer_fragments() {
+        // Gemma renders the top token as the fragment "Pose"; SmolLM2 as "Poseidon".
+        // Both must count as the Atlantis → Poseidon insert landing at #1.
+        let gemma = "   1. Pose                (56.91%)";
+        let smol = "   1. Poseidon            (100.00%, source=knn_override)";
+        assert!(top1_starts_with(gemma, "Pose"));
+        assert!(top1_starts_with(smol, "Pose"));
+    }
 }
