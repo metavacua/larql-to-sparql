@@ -13,29 +13,25 @@ pub fn estimate_covariance(
     let indices: Vec<usize> = (0..vocab).step_by(stride).collect();
     let n = indices.len();
 
-    let mut g = Array2::<f64>::zeros((d, d));
-    let scale = embed_scale as f64;
-
-    for &v in &indices {
-        let row = embed.slice(s![v, ..]);
-        for i in 0..d {
-            let xi = row[i] as f64 * scale;
-            for j in 0..=i {
-                let xj = row[j] as f64 * scale;
-                g[[i, j]] += xi * xj;
-                if i != j {
-                    g[[j, i]] += xi * xj;
-                }
-            }
-        }
-    }
-
     // Guard against an empty subsample: dividing by 0 would fill G with NaN.
     // With no samples the (already-zero) accumulator is the right answer.
-    if n > 0 {
-        let norm = n as f64;
-        g.mapv_inplace(|v| v / norm);
+    if n == 0 {
+        return Array2::<f64>::zeros((d, d));
     }
+
+    // G = (1/N) · Sᵀ S, where S is the [n, d] matrix of subsampled, scaled rows.
+    // The single matrix multiply (ndarray's pure-Rust `matrixmultiply`, no BLAS)
+    // replaces the n·d²/2 scalar accumulation loop.
+    let scale = embed_scale as f64;
+    let mut sub = Array2::<f64>::zeros((n, d));
+    for (r, &v) in indices.iter().enumerate() {
+        let row = embed.slice(s![v, ..]);
+        for j in 0..d {
+            sub[[r, j]] = row[j] as f64 * scale;
+        }
+    }
+    let mut g = sub.t().dot(&sub);
+    g.mapv_inplace(|x| x / n as f64);
     g
 }
 
