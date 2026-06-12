@@ -25,6 +25,7 @@ impl Session {
             VindexRef::Current => {
                 let vindex_path = match &self.backend {
                     Backend::Vindex { path, .. } => path.clone(),
+                    Backend::Quantum(_) => return Err(LqlError::QuantumClassicalization),
                     _ => return Err(LqlError::NoBackend),
                 };
                 match target {

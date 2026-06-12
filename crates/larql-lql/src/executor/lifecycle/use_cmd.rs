@@ -41,6 +41,13 @@ impl Session {
                         serde_json::from_slice(&qlm_bytes)
                             .map_err(|e| LqlError::exec("failed to parse qlm.json", e))?;
                     let qb = crate::executor::quantum::QuantumBackend::from_spec(&spec)?;
+                    let expected_vocab = 1usize << qb.n;
+                    if config.vocab_size != expected_vocab {
+                        return Err(LqlError::Execution(format!(
+                            "quantum vindex: vocab_size = {} but 2^n_qubits = {expected_vocab} (n = {})",
+                            config.vocab_size, qb.n
+                        )));
+                    }
                     let out = vec![format!(
                         "Using quantum vindex: {} ({} qubits, {} tokens, model: {})",
                         path.display(),

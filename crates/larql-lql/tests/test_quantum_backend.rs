@@ -124,3 +124,44 @@ fn quantum_numbers_round_trip() {
         }
     }
 }
+
+#[test]
+fn compile_hits_classicalization_seam() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 2, r#"{ "class": "ghz" }"#);
+    let err = use_and_run(tmp.path(), r#"COMPILE CURRENT INTO VINDEX "/tmp/qb_out.vindex";"#).unwrap_err();
+    assert!(err.to_string().contains("classicalization"), "COMPILE should hit the seam, got: {err}");
+}
+
+#[test]
+fn merge_no_target_hits_classicalization_seam() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 2, r#"{ "class": "ghz" }"#);
+    let err = use_and_run(tmp.path(), &format!(r#"MERGE "{}";"#, tmp.path().display())).unwrap_err();
+    assert!(err.to_string().contains("classicalization"), "MERGE no-target should hit the seam, got: {err}");
+}
+
+#[test]
+fn show_layers_reports_quantum_numbers() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 4, r#"{ "class": "dicke", "k": 2 }"#);
+    let out = use_and_run(tmp.path(), "SHOW LAYERS;").unwrap();
+    let text = out.join("\n");
+    assert!(text.contains("quantum") || text.contains("qubit"), "SHOW LAYERS should report quantum info: {text}");
+}
+
+#[test]
+fn vocab_size_mismatch_errors_at_use() {
+    // n=2 → 2^n = 4, but write vocab_size = 99 deliberately.
+    let index = serde_json::json!({
+        "version": 2, "model": "qlm-test", "family": "quantum",
+        "num_layers": 1, "hidden_size": 2, "intermediate_size": 2,
+        "vocab_size": 99, "embed_scale": 1.0, "layers": [], "down_top_k": 1
+    });
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("index.json"), serde_json::to_vec_pretty(&index).unwrap()).unwrap();
+    std::fs::write(tmp.path().join("qlm.json"), r#"{ "n_qubits": 2, "state": { "class": "ghz" } }"#).unwrap();
+    let mut s = Session::new();
+    let err = s.execute(&parse(&format!(r#"USE "{}";"#, tmp.path().display())).unwrap()).unwrap_err();
+    assert!(err.to_string().contains("vocab"), "expected vocab_size mismatch error: {err}");
+}

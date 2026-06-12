@@ -34,6 +34,7 @@ impl Session {
         } else {
             match &self.backend {
                 Backend::Vindex { path, .. } => path.clone(),
+                Backend::Quantum(_) => return Err(LqlError::QuantumClassicalization),
                 _ => return Err(LqlError::NoBackend),
             }
         };

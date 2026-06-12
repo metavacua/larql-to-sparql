@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use super::helpers::{dir_size, format_bytes, format_number, is_content_token};
-use super::Session;
+use super::{Backend, Session};
 use crate::ast::*;
 use crate::error::LqlError;
 use larql_vindex::format::filenames::INDEX_JSON;
@@ -232,6 +232,12 @@ impl Session {
     }
 
     pub(crate) fn exec_show_layers(&self, range: Option<&Range>) -> Result<Vec<String>, LqlError> {
+        if let Backend::Quantum(qb) = &self.backend {
+            return Ok(vec![format!(
+                "Quantum LM: 1 layer (naive L=1), {} qubits, {} tokens, class {}",
+                qb.n, qb.tokens.len(), qb.class_label()
+            )]);
+        }
         let (_path, _config, patched) = self.require_vindex()?;
 
         let all_layers = patched.loaded_layers();
@@ -446,6 +452,12 @@ impl Session {
     }
 
     pub(crate) fn exec_show_models(&self) -> Result<Vec<String>, LqlError> {
+        if let Backend::Quantum(qb) = &self.backend {
+            return Ok(vec![format!(
+                "Active quantum model: {} qubits, {} tokens, class {}",
+                qb.n, qb.tokens.len(), qb.class_label()
+            )]);
+        }
         let mut out = Vec::new();
         out.push(format!(
             "{:<35} {:>10} {:>8} {:>12}",
