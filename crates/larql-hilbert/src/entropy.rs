@@ -13,14 +13,14 @@ pub fn spectral_entropy(weights: &[f64]) -> f64 {
     if total <= 0.0 {
         return 0.0;
     }
-    let mut s = 0.0;
-    for &w in weights {
-        if w > 0.0 {
+    weights
+        .iter()
+        .filter(|&&w| w > 0.0)
+        .map(|&w| {
             let p = w / total;
-            s -= p * p.log2();
-        }
-    }
-    s
+            -p * p.log2()
+        })
+        .sum()
 }
 
 #[cfg(test)]
