@@ -26,6 +26,7 @@ impl SingleQubitLM {
     /// # Panics
     /// Panics if `state_token` is ≥ 2 (the vocabulary is `{0, 1}`).
     pub fn step(&self, state_token: usize) -> Qubit {
+        assert!(state_token < 2, "token {state_token} out of vocabulary {{0,1}}");
         let collapsed = if state_token == 0 { Qubit::ket0() } else { Qubit::ket1() };
         collapsed.apply(&self.gates[state_token])
     }
@@ -39,6 +40,7 @@ impl SingleQubitLM {
         let mut state = self.init;
         let mut ll = 0.0;
         for &t in tokens {
+            assert!(t < 2, "token {t} out of vocabulary {{0,1}}");
             let p = self.next_distribution(&state);
             ll += p[t].ln();
             state = self.step(t);
@@ -134,5 +136,19 @@ mod tests {
             init: Qubit::ket0().apply(&hadamard()),
         };
         assert_eq!(lm.generate(8, 12345), lm.generate(8, 12345));
+    }
+
+    #[test]
+    #[should_panic(expected = "out of vocabulary")]
+    fn score_rejects_out_of_vocabulary_token() {
+        let lm = lm_identity_from_zero();
+        let _ = lm.score(&[2]);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of vocabulary")]
+    fn step_rejects_out_of_vocabulary_token() {
+        let lm = lm_identity_from_zero();
+        let _ = lm.step(2);
     }
 }
