@@ -57,3 +57,5 @@ pub mod entropy;
 pub use entropy::{entanglement_entropy, spectral_entropy};
 pub mod eig;
 pub use eig::symmetric_eigenvalues;
+pub mod nqubit;
+pub use nqubit::NQubit;
