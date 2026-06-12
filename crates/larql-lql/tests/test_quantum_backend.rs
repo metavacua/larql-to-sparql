@@ -45,3 +45,45 @@ fn use_rejects_bad_quantum_numbers() {
         .unwrap_err();
     assert!(err.to_string().contains("k"), "error should name k: {err}");
 }
+
+#[test]
+fn infer_ghz_ranks_correlated_tokens() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 3, r#"{ "class": "ghz" }"#);
+    let out = use_and_run(tmp.path(), r#"INFER "" TOP 4;"#).unwrap();
+    let text = out.join("\n");
+    // GHZ_3: only 000 and 111 carry mass, at 50% each.
+    assert!(text.contains("000") && text.contains("50.00%"), "{text}");
+    assert!(text.contains("111"), "{text}");
+    // An anti-correlated token must not appear among the nonzero ranks.
+    let nonzero_010 = out.iter().any(|l| l.contains("010") && !l.contains("0.00%"));
+    assert!(!nonzero_010, "010 should be 0% (forbidden): {text}");
+}
+
+#[test]
+fn infer_matches_next_distribution() {
+    use larql_hilbert::{NQubit, NQubitLM};
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 2, r#"{ "class": "dicke", "k": 1 }"#);
+    let out = use_and_run(tmp.path(), r#"INFER "" TOP 4;"#).unwrap();
+    // Analytic: W_2 = (|01⟩+|10⟩)/√2 → tokens 01,10 at 50%.
+    let lm = NQubitLM { post: vec![Vec::new(); 4], init: NQubit::dicke(2, 1) };
+    let dist = lm.next_distribution(&lm.init);
+    for (tok, &p) in ["00", "01", "10", "11"].iter().zip(dist.iter()) {
+        if p > 1e-9 {
+            let pct = format!("{:.2}%", p * 100.0);
+            assert!(
+                out.iter().any(|l| l.contains(tok) && l.contains(&pct)),
+                "expected {tok} at {pct} in {out:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn infer_unknown_token_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 2, r#"{ "class": "ghz" }"#);
+    let err = use_and_run(tmp.path(), r#"INFER "qux" TOP 2;"#).unwrap_err();
+    assert!(err.to_string().contains("qux"), "error should name qux: {err}");
+}
