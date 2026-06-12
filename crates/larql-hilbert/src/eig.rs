@@ -84,7 +84,7 @@ pub fn hermitian_eigenvalues(g: &Array2<Complex64>) -> Vec<f64> {
         }
     }
     let mut all = symmetric_eigenvalues(&real);
-    all.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    all.sort_by(f64::total_cmp);
     // The 2d eigenvalues come in equal pairs; keep one from each.
     all.into_iter().step_by(2).collect()
 }

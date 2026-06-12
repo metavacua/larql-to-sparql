@@ -105,20 +105,20 @@ pub fn entanglement_entropy_bipartition(state: &NQubit, subset: &[usize]) -> f64
 
     // Gram on the smaller side: G = M M† (rows ≤ cols) or M† M.
     let (gd, small_rows) = if rows <= cols { (rows, true) } else { (cols, false) };
+    // G is Hermitian: build the upper triangle and mirror the lower by
+    // conjugation — halves the complex multiplies versus filling all gd² cells.
     let mut g = Array2::<Complex64>::zeros((gd, gd));
     for i in 0..gd {
-        for j in 0..gd {
-            let mut acc = Complex64::new(0.0, 0.0);
-            if small_rows {
-                for k in 0..cols {
-                    acc += m[i * cols + k] * m[j * cols + k].conj();
-                }
+        for j in i..gd {
+            let acc: Complex64 = if small_rows {
+                (0..cols).map(|k| m[i * cols + k] * m[j * cols + k].conj()).sum()
             } else {
-                for k in 0..rows {
-                    acc += m[k * cols + i].conj() * m[k * cols + j];
-                }
-            }
+                (0..rows).map(|k| m[k * cols + i].conj() * m[k * cols + j]).sum()
+            };
             g[[i, j]] = acc;
+            if i != j {
+                g[[j, i]] = acc.conj();
+            }
         }
     }
     let weights: Vec<f64> =

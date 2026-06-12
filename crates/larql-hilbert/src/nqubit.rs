@@ -44,7 +44,11 @@ impl NQubit {
 
     /// Computational basis state from an explicit big-endian bit-string.
     pub fn ket(bits: &[usize]) -> NQubit {
-        assert!(!bits.is_empty(), "need at least one qubit");
+        assert!(
+            (1..64).contains(&bits.len()),
+            "qubit count {} must be in 1..64 (the shift must fit usize)",
+            bits.len()
+        );
         let mut index = 0usize;
         for &b in bits {
             assert!(b < 2, "bit {b} is not 0 or 1");
@@ -93,10 +97,13 @@ impl NQubit {
         NQubit { amp: self.amp.iter().map(|a| a / n).collect() }
     }
 
-    /// Born probabilities |amp_i|² of the normalized state (length 2ⁿ).
+    /// Born probabilities |amp_i|² of the normalized state (length 2ⁿ). Computed
+    /// without an intermediate normalized copy: divide each squared magnitude by
+    /// the total (no complex division, no `sqrt`, no allocation beyond the result).
     pub fn born_probs(&self) -> Vec<f64> {
-        let sn = self.normalized();
-        sn.amp.iter().map(|a| a.norm_sqr()).collect()
+        let norm_sq: f64 = self.amp.iter().map(|a| a.norm_sqr()).sum();
+        assert!(norm_sq > 0.0, "cannot compute Born probabilities of the zero state");
+        self.amp.iter().map(|a| a.norm_sqr() / norm_sq).collect()
     }
 
     /// Build an n-qubit state from a real amplitude vector, padded with zeros

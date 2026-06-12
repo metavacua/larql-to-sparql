@@ -51,7 +51,13 @@ impl NRegister for ClassicalRegister {
     fn distribution(&self) -> Vec<f64> {
         let total: f64 = self.probs.iter().sum();
         assert!(total > 0.0, "classical register has zero total probability");
-        self.probs.iter().map(|p| p / total).collect()
+        self.probs
+            .iter()
+            .map(|&p| {
+                assert!(p >= 0.0, "probability cannot be negative, got {p}");
+                p / total
+            })
+            .collect()
     }
 }
 
