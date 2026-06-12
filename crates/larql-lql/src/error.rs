@@ -10,6 +10,9 @@ pub enum LqlError {
 
     #[error("Mutation requires a vindex. Run EXTRACT first.")]
     MutationRequiresVindex,
+
+    #[error("This operation is served by the classicalization layer (measure/dephase the quantum model), which is not yet wired on the quantum backend.")]
+    QuantumClassicalization,
 }
 
 impl LqlError {

@@ -105,9 +105,9 @@ impl QuantumBackend {
         Ok(QuantumBackend { lm, tokens, token_index, n })
     }
 
-    /// The dephased classical view — the `NQubit → born_probs` map. The seam
-    /// through which the classical vindex operations will be served by
-    /// measuring the quantum state (a later sub-project).
+    /// Extension point for the classicalization layer (a later sub-project):
+    /// the dephased `NQubit → born_probs` map the classical ops will measure.
+    #[allow(dead_code)]
     pub fn classical_view(&self) -> ClassicalRegister {
         ClassicalRegister { probs: self.lm.init.born_probs() }
     }

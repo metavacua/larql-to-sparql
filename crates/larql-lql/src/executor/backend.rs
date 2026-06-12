@@ -92,6 +92,7 @@ impl Session {
                 model_id,
                 model_id.split('/').next_back().unwrap_or(model_id),
             ))),
+            Backend::Quantum(_) => Err(LqlError::QuantumClassicalization),
             _ => Err(LqlError::NoBackend),
         }
     }
@@ -120,6 +121,7 @@ impl Session {
                 model_id,
                 model_id.split('/').next_back().unwrap_or(model_id),
             ))),
+            Backend::Quantum(_) => Err(LqlError::QuantumClassicalization),
             _ => Err(LqlError::NoBackend),
         }
     }
@@ -148,6 +150,7 @@ impl Session {
                 model_id,
                 model_id.split('/').next_back().unwrap_or(model_id),
             ))),
+            Backend::Quantum(_) => Err(LqlError::QuantumClassicalization),
             _ => Err(LqlError::NoBackend),
         }
     }

@@ -87,3 +87,14 @@ fn infer_unknown_token_errors() {
     let err = use_and_run(tmp.path(), r#"INFER "qux" TOP 2;"#).unwrap_err();
     assert!(err.to_string().contains("qux"), "error should name qux: {err}");
 }
+
+#[test]
+fn unsupported_statement_hits_classicalization_seam() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 2, r#"{ "class": "ghz" }"#);
+    let err = use_and_run(tmp.path(), "SELECT * FROM EDGES LIMIT 5;").unwrap_err();
+    assert!(
+        err.to_string().contains("classicalization"),
+        "expected the classicalization-seam error, got: {err}"
+    );
+}
