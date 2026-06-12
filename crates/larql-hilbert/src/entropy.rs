@@ -11,8 +11,11 @@
 //! classical-vs-quantum compressibility gap of a vindex, denominated in ebits.
 
 use ndarray::Array2;
+use num_complex::Complex64;
 
 use crate::eig::symmetric_eigenvalues;
+use crate::eig::hermitian_eigenvalues;
+use crate::nqubit::NQubit;
 
 /// Spectral entropy of a non-negative weight spectrum, in bits (ebits):
 /// `S = −Σ pᵢ log₂ pᵢ` with `pᵢ = wᵢ / Σⱼ wⱼ`. Zero weights are skipped; an
@@ -51,6 +54,75 @@ pub fn entanglement_entropy(m: &Array2<f64>) -> f64 {
         .into_iter()
         .map(|e| e.max(0.0))
         .collect();
+    spectral_entropy(&weights)
+}
+
+/// Entanglement entropy (ebits) of an n-qubit pure state across the bipartition
+/// (`subset`, complement): the spectral entropy of the reduced density matrix's
+/// eigenvalues. `0` for a product state across the cut, `1` for a Bell-like
+/// maximally-entangled cut, up to `min(|subset|, n−|subset|)`.
+///
+/// The amplitude vector is reshaped into the Schmidt matrix `M` (rows indexed
+/// by the subset's bits, columns by the complement's, each scattered back to
+/// its original big-endian position), and `S = spectral_entropy(eig(M M†))`.
+///
+/// # Panics
+/// Panics if `subset` is empty, contains the whole register, or names an
+/// out-of-range / duplicate qubit.
+pub fn entanglement_entropy_bipartition(state: &NQubit, subset: &[usize]) -> f64 {
+    let n = state.n();
+    assert!(
+        !subset.is_empty() && subset.len() < n,
+        "subset must be a proper non-empty subset of the {n} qubits"
+    );
+    let mut seen = vec![false; n];
+    for &q in subset {
+        assert!(q < n, "qubit {q} out of range for {n} qubits");
+        assert!(!seen[q], "qubit {q} appears twice in subset");
+        seen[q] = true;
+    }
+    // Big-endian bit position of each qubit.
+    let bit = |q: usize| 1usize << (n - 1 - q);
+    let comp: Vec<usize> = (0..n).filter(|q| !seen[*q]).collect();
+    let (ra, rb) = (subset.len(), comp.len());
+    let (rows, cols) = (1usize << ra, 1usize << rb);
+
+    let sn = state.normalized();
+    let mut m = vec![Complex64::new(0.0, 0.0); rows * cols];
+    for (idx, &a) in sn.amp.iter().enumerate() {
+        // Decompose basis index `idx` into a row (subset bits) and column
+        // (complement bits), MSB-first within each group.
+        let mut r = 0usize;
+        for &q in subset {
+            r = (r << 1) | usize::from(idx & bit(q) != 0);
+        }
+        let mut c = 0usize;
+        for &q in &comp {
+            c = (c << 1) | usize::from(idx & bit(q) != 0);
+        }
+        m[r * cols + c] = a;
+    }
+
+    // Gram on the smaller side: G = M M† (rows ≤ cols) or M† M.
+    let (gd, small_rows) = if rows <= cols { (rows, true) } else { (cols, false) };
+    let mut g = Array2::<Complex64>::zeros((gd, gd));
+    for i in 0..gd {
+        for j in 0..gd {
+            let mut acc = Complex64::new(0.0, 0.0);
+            if small_rows {
+                for k in 0..cols {
+                    acc += m[i * cols + k] * m[j * cols + k].conj();
+                }
+            } else {
+                for k in 0..rows {
+                    acc += m[k * cols + i].conj() * m[k * cols + j];
+                }
+            }
+            g[[i, j]] = acc;
+        }
+    }
+    let weights: Vec<f64> =
+        hermitian_eigenvalues(&g).into_iter().map(|e| e.max(0.0)).collect();
     spectral_entropy(&weights)
 }
 
@@ -104,5 +176,54 @@ mod tests {
         // 2×3 with two orthonormal rows → M Mᵀ = I₂ → 1 ebit.
         let m = array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
         assert!((entanglement_entropy(&m) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn product_state_across_a_cut_is_zero_ebits() {
+        use crate::nqubit::NQubit;
+        // |000> is a product state → 0 across any cut (CANARY: doubling bug → 1).
+        let s = NQubit::ket(&[0, 0, 0]);
+        assert!(entanglement_entropy_bipartition(&s, &[0]).abs() < 1e-9);
+        assert!(entanglement_entropy_bipartition(&s, &[1]).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bell_pair_is_one_ebit() {
+        use crate::nqubit::NQubit;
+        let s = 1.0 / 2.0_f64.sqrt();
+        let bell = NQubit { amp: vec![
+            num_complex::Complex64::new(s, 0.0),
+            num_complex::Complex64::new(0.0, 0.0),
+            num_complex::Complex64::new(0.0, 0.0),
+            num_complex::Complex64::new(s, 0.0),
+        ]};
+        assert!((entanglement_entropy_bipartition(&bell, &[0]) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ghz_across_noncontiguous_single_qubit_cut_is_one_ebit() {
+        use crate::nqubit::NQubit;
+        // GHZ_3 is 1 ebit across EVERY single-qubit cut, including the middle
+        // wire (CANARY: a contiguous-only reshape fails this).
+        let g = NQubit::ghz(3);
+        assert!((entanglement_entropy_bipartition(&g, &[1]) - 1.0).abs() < 1e-9);
+        assert!((entanglement_entropy_bipartition(&g, &[0]) - 1.0).abs() < 1e-9);
+        assert!((entanglement_entropy_bipartition(&g, &[2]) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn w_state_three_way_symmetric_entropy() {
+        use crate::nqubit::NQubit;
+        // W_3 across a single-qubit cut: reduced state has weights {2/3, 1/3}.
+        let w = NQubit::w(3);
+        let expected = -(2.0 / 3.0) * (2.0_f64 / 3.0).log2() - (1.0 / 3.0) * (1.0_f64 / 3.0).log2();
+        assert!((entanglement_entropy_bipartition(&w, &[0]) - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    #[should_panic(expected = "subset")]
+    fn empty_or_full_subset_panics() {
+        use crate::nqubit::NQubit;
+        let _ = entanglement_entropy_bipartition(&NQubit::ghz(2), &[]);
     }
 }
