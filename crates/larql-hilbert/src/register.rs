@@ -64,6 +64,35 @@ impl NRegister for NQubit {
     }
 }
 
+/// Classical storage cost (measurement / Shannon entropy, in bits) of any
+/// register — generic over [`NRegister`], so it applies uniformly to the
+/// classical and quantum kinds. This is the function that makes the trait
+/// load-bearing: the same code measures a quantum `NQubit` reading of real
+/// weights and the dephased `ClassicalRegister` of the same Born distribution.
+pub fn classical_bits<R: NRegister + ?Sized>(reg: &R) -> f64 {
+    reg.entropy_bits()
+}
+
+/// The classical-vs-quantum compressibility of a bipartite pure state, in bits:
+/// `classical_bits` is the full measurement (Shannon) entropy `H`, and
+/// `quantum_ebits` is the entanglement entropy `S` across a chosen cut. The
+/// gap `H − S` is non-negative (marginal ≤ joint entropy ⇒ reduced von Neumann
+/// ≤ diagonal Shannon) and is the superdense-coding intuition made numeric:
+/// how many more bits the classical description costs than the quantum
+/// entanglement across the cut.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CompressibilityGap {
+    pub classical_bits: f64,
+    pub quantum_ebits: f64,
+}
+
+impl CompressibilityGap {
+    /// `classical_bits − quantum_ebits` (≥ 0 up to round-off).
+    pub fn gap(&self) -> f64 {
+        self.classical_bits - self.quantum_ebits
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +135,51 @@ mod tests {
         let q = NQubit::w(3);
         let classical = ClassicalRegister { probs: q.born_probs() };
         assert!((q.entropy_bits() - classical.entropy_bits()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn classical_bits_is_generic_over_register_kind() {
+        use crate::nqubit::NQubit;
+        // Same Born distribution, two register kinds → same classical bits.
+        let q = NQubit::w(3);
+        let classical = ClassicalRegister { probs: q.born_probs() };
+        let bq = classical_bits(&q);
+        let bc = classical_bits(&classical);
+        assert!((bq - bc).abs() < 1e-12, "quantum {bq} vs classical {bc}");
+        assert!(bq > 0.0);
+    }
+
+    #[test]
+    fn compressibility_gap_is_nonnegative_for_a_product_state() {
+        use crate::entropy::entanglement_entropy_bipartition;
+        use crate::nqubit::NQubit;
+        // |+>|+>|+> (product): classical H = 3 bits, quantum S(cut) = 0 → gap = 3.
+        let plus = 1.0 / 2.0_f64.sqrt();
+        let q = NQubit { amp: vec![num_complex::Complex64::new(plus * plus * plus, 0.0); 8] };
+        let h = classical_bits(&q);
+        let s = entanglement_entropy_bipartition(&q, &[0]);
+        let cg = CompressibilityGap { classical_bits: h, quantum_ebits: s };
+        assert!((h - 3.0).abs() < 1e-9, "uniform 8-state H = 3 bits, got {h}");
+        assert!(s.abs() < 1e-9, "product state cut S = 0, got {s}");
+        assert!(cg.gap() >= -1e-12 && (cg.gap() - 3.0).abs() < 1e-9, "gap = {}", cg.gap());
+    }
+
+    #[test]
+    fn compressibility_gap_is_zero_for_a_bell_pair() {
+        use crate::entropy::entanglement_entropy_bipartition;
+        use crate::nqubit::NQubit;
+        // Bell: H = 1 bit (two outcomes), S(cut) = 1 ebit → gap = 0.
+        let s2 = 1.0 / 2.0_f64.sqrt();
+        let bell = NQubit { amp: vec![
+            num_complex::Complex64::new(s2, 0.0),
+            num_complex::Complex64::new(0.0, 0.0),
+            num_complex::Complex64::new(0.0, 0.0),
+            num_complex::Complex64::new(s2, 0.0),
+        ]};
+        let cg = CompressibilityGap {
+            classical_bits: classical_bits(&bell),
+            quantum_ebits: entanglement_entropy_bipartition(&bell, &[0]),
+        };
+        assert!(cg.gap().abs() < 1e-9, "Bell gap should be 0, got {}", cg.gap());
     }
 }
