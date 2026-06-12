@@ -54,6 +54,10 @@ pub(crate) enum Backend {
         local_patches: Vec<larql_vindex::VindexPatch>,
         session_id: String,
     },
+    /// Quantum language model loaded from a `family: "quantum"` vindex.
+    /// Serves INFER (Born) + metadata; classical ops route through the
+    /// classicalization seam in `require_vindex`/`require_patched`.
+    Quantum(crate::executor::quantum::QuantumBackend),
     None,
 }
 
