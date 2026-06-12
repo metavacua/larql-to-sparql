@@ -63,3 +63,5 @@ pub mod ngate;
 pub use ngate::{apply_1q, apply_cnot};
 pub mod nqlm;
 pub use nqlm::NQubitLM;
+pub mod register;
+pub use register::{ClassicalRegister, NRegister};
