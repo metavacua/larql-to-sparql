@@ -20,6 +20,13 @@
 //! (`A⊗B ≠ A×B`) and the single-qubit Markov reduction breaks. Next: GHZ / W
 //! states for 3+ qubits (`ℂ^{2ⁿ}`), generalizing these primitives.
 //!
+//! The n-qubit generalization is now realized: `nqubit::NQubit` (`ℂ^{2ⁿ}`,
+//! GHZ/W constructors), `ngate` (local gate application by index — `apply_1q`,
+//! CNOT — never a dense 2ⁿ×2ⁿ matrix), `entropy::entanglement_entropy_bipartition`
+//! (Schmidt entropy across an arbitrary qubit subset, via a realified-Hermitian
+//! Gram), `nqlm::NQubitLM` (2ⁿ-token joint-Born LM), and `register::NRegister`
+//! (the trait unifying classical n-bit and quantum n-qubit vindexes).
+//!
 //! # Measurement as elimination
 //!
 //! Measurement is not a new primitive but an elimination rule in the linear
