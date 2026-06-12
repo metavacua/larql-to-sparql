@@ -31,6 +31,7 @@ impl TwoQubitLM {
     /// # Panics
     /// Panics if `t` ≥ 4 (the vocabulary is {0,1,2,3}).
     pub fn step(&self, t: usize) -> TwoQubit {
+        assert!(t < 4, "token {t} out of vocabulary {{0,1,2,3}}");
         let collapsed = TwoQubit::ket(t / 2, t % 2);
         apply4(&self.gates[t], &collapsed)
     }
@@ -43,6 +44,7 @@ impl TwoQubitLM {
         let mut state = self.init;
         let mut ll = 0.0;
         for &t in tokens {
+            assert!(t < 4, "token {t} out of vocabulary {{0,1,2,3}}");
             let p = self.next_distribution(&state);
             ll += p[t].ln();
             state = self.step(t);
@@ -88,5 +90,19 @@ mod tests {
         let lm = TwoQubitLM { gates: identity_gates(), init: bell() };
         let p = lm.next_distribution(&TwoQubit::ket(0, 1));
         assert!((p.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of vocabulary")]
+    fn score_rejects_out_of_vocabulary_token() {
+        let lm = TwoQubitLM { gates: identity_gates(), init: bell() };
+        let _ = lm.score(&[4]);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of vocabulary")]
+    fn step_rejects_out_of_vocabulary_token() {
+        let lm = TwoQubitLM { gates: identity_gates(), init: bell() };
+        let _ = lm.step(4);
     }
 }
