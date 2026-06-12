@@ -220,6 +220,8 @@ pub fn read_cscores_binary(dir: &Path) -> Result<Vec<Vec<f32>>, VindexError> {
     // top_k_count × (u32 token_id + f32 logit) = top_k_count × 8 bytes
     let skip_per_feature = top_k_count * (U32_BYTES + F32_BYTES);
 
+    // Reused across every feature; `skip_per_feature` is constant.
+    let mut skip_buf = vec![0u8; skip_per_feature];
     let mut result = Vec::with_capacity(num_layers);
     for _ in 0..num_layers {
         let num_features = read_u32(&mut r)? as usize;
@@ -233,7 +235,6 @@ pub fn read_cscores_binary(dir: &Path) -> Result<Vec<Vec<f32>>, VindexError> {
             let c_score = read_f32(&mut r)?;
             cscores.push(c_score);
             // Skip the top_k entries
-            let mut skip_buf = vec![0u8; skip_per_feature];
             r.read_exact(&mut skip_buf)?;
         }
         result.push(cscores);
