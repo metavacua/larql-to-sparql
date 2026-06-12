@@ -20,6 +20,31 @@
 //! (`A⊗B ≠ A×B`) and the single-qubit Markov reduction breaks. Next: GHZ / W
 //! states for 3+ qubits (`ℂ^{2ⁿ}`), generalizing these primitives.
 //!
+//! The n-qubit generalization is now realized: `nqubit::NQubit` (`ℂ^{2ⁿ}`,
+//! GHZ/W constructors), `ngate` (local gate application by index — `apply_1q`,
+//! CNOT — never a dense 2ⁿ×2ⁿ matrix), `entropy::entanglement_entropy_bipartition`
+//! (Schmidt entropy across an arbitrary qubit subset, via a realified-Hermitian
+//! Gram), `nqlm::NQubitLM` (2ⁿ-token joint-Born LM), and `register::NRegister`
+//! (the trait unifying classical n-bit and quantum n-qubit vindexes).
+//!
+//! # Conventions and limits
+//!
+//! **Qubit ordering is big-endian:** qubit 0 is the *most-significant* bit of
+//! the basis index, matching `TwoQubit` (`|q0 q1⟩` at index `2·q0+q1`). This is
+//! the opposite of the Qiskit/physics little-endian convention (qubit 0 = LSB);
+//! cross-checking against that tooling requires reversing qubit indices. The
+//! `from_matrix` row/column cross-check and the `ngate` tests pin this
+//! behaviorally (the `w()` constructor cannot — the W state is
+//! permutation-symmetric, so the ordering is invisible there).
+//!
+//! **Practical size limit:** dense state ops (`apply_1q`, `apply_cnot`,
+//! `entanglement_entropy_bipartition`) are `O(2ⁿ)` in memory and the bipartition
+//! eigensolver is `O(d³)` for `d = 2^min(|A|,|B|)`. The hard guard is `n < 64`
+//! (so `2ⁿ` fits `usize`), but the practical ceiling is ~12–15 qubits; beyond
+//! that, prefer a sparse/tensor-network representation. Gate ops have in-place
+//! variants (`apply_1q_in_place`, `apply_cnot_in_place`) to avoid per-gate
+//! allocation when building circuits.
+//!
 //! # Measurement as elimination
 //!
 //! Measurement is not a new primitive but an elimination rule in the linear
@@ -54,6 +79,14 @@ pub mod qlm2;
 pub use qlm2::TwoQubitLM;
 
 pub mod entropy;
-pub use entropy::{entanglement_entropy, spectral_entropy};
+pub use entropy::{entanglement_entropy, entanglement_entropy_bipartition, spectral_entropy};
 pub mod eig;
 pub use eig::symmetric_eigenvalues;
+pub mod nqubit;
+pub use nqubit::{row_qubits, NQubit};
+pub mod ngate;
+pub use ngate::{apply_1q, apply_1q_in_place, apply_cnot, apply_cnot_in_place};
+pub mod nqlm;
+pub use nqlm::NQubitLM;
+pub mod register;
+pub use register::{classical_bits, ClassicalRegister, CompressibilityGap, NRegister};
