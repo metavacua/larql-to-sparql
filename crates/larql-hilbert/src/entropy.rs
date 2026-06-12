@@ -63,8 +63,8 @@ pub fn entanglement_entropy(m: &Array2<f64>) -> f64 {
 /// maximally-entangled cut, up to `min(|subset|, n−|subset|)`.
 ///
 /// The amplitude vector is reshaped into the Schmidt matrix `M` (rows indexed
-/// by the subset's bits, columns by the complement's, each scattered back to
-/// its original big-endian position), and `S = spectral_entropy(eig(M M†))`.
+/// by the subset's bits, columns by the complement's, each in subset-/
+/// complement-vector order), and `S = spectral_entropy(eig(M M†))`.
 ///
 /// # Panics
 /// Panics if `subset` is empty, contains the whole register, or names an

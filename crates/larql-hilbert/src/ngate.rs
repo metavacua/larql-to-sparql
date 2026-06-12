@@ -3,6 +3,8 @@
 //! matrix (which would be exponential in n). Big-endian qubit order: qubit k
 //! occupies bit (n−1−k) of the basis index.
 
+use num_complex::Complex64;
+
 use crate::nqubit::NQubit;
 use crate::unitary::Gate;
 
@@ -20,7 +22,9 @@ pub fn apply_1q(s: &NQubit, g: &Gate, target: usize) -> NQubit {
     let n = s.n();
     assert!(target < n, "target {target} out of range for {n} qubits");
     let bit = 1usize << bit_of(n, target);
-    let mut amp = s.amp.clone();
+    // Every entry is written exactly once (each index is the low or high member
+    // of exactly one pair), so start from zeros rather than cloning the input.
+    let mut amp = vec![Complex64::new(0.0, 0.0); s.amp.len()];
     for i in 0..amp.len() {
         // Visit each pair once, from the member whose target bit is 0.
         if i & bit == 0 {
@@ -56,7 +60,6 @@ pub fn apply_cnot(s: &NQubit, control: usize, target: usize) -> NQubit {
 mod tests {
     use super::*;
     use crate::unitary::{hadamard, identity, pauli_x};
-    use num_complex::Complex64;
 
     #[inline]
     fn c(re: f64, im: f64) -> Complex64 {

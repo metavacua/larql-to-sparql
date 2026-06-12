@@ -33,7 +33,7 @@ impl NQubit {
 
     /// Computational basis state |index⟩ on `n` qubits (big-endian).
     pub fn basis(n: usize, index: usize) -> NQubit {
-        assert!(n >= 1, "need at least one qubit");
+        assert!((1..64).contains(&n), "qubit count {n} must be in 1..64 (2ⁿ must fit usize)");
         let dim = 1usize << n;
         assert!(index < dim, "basis index {index} out of range for {n} qubits");
         let mut amp = vec![c(0.0, 0.0); dim];
@@ -55,7 +55,7 @@ impl NQubit {
     /// GHZ state (|0…0⟩ + |1…1⟩)/√2 on `n` qubits — maximally entangled across
     /// every bipartition (1 ebit each).
     pub fn ghz(n: usize) -> NQubit {
-        assert!(n >= 1, "need at least one qubit");
+        assert!((1..64).contains(&n), "qubit count {n} must be in 1..64 (2ⁿ must fit usize)");
         let dim = 1usize << n;
         let mut amp = vec![c(0.0, 0.0); dim];
         let s = 1.0 / 2.0_f64.sqrt();
@@ -66,7 +66,7 @@ impl NQubit {
 
     /// W state (Σ single-excitation basis states)/√n on `n` qubits.
     pub fn w(n: usize) -> NQubit {
-        assert!(n >= 1, "need at least one qubit");
+        assert!((1..64).contains(&n), "qubit count {n} must be in 1..64 (2ⁿ must fit usize)");
         let dim = 1usize << n;
         let mut amp = vec![c(0.0, 0.0); dim];
         let a = 1.0 / (n as f64).sqrt();
