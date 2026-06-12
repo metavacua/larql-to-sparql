@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn classical_cost_pairs_with_matrix_entropy_for_a_nonnegative_gap() {
-        use larql_hilbert::{entanglement_entropy_bipartition, row_qubits, NQubit};
+        use larql_hilbert::{entanglement_entropy_bipartition, row_qubits};
         // A real-ish 4×4 coupling. Cross-check (in the test only): the n-qubit
         // bipartition equals entanglement_entropy(C). Then H ≥ S, so gap ≥ 0.
         let coupling = array![

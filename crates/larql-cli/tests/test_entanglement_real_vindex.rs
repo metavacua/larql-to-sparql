@@ -141,6 +141,8 @@ fn entanglement_on_the_real_model_when_present() {
         return;
     };
     let dir = Path::new(&path);
+    // Side effect: this writes entanglement_meta.json into the real vindex dir
+    // (the command's normal, idempotent output location) — not a temp copy.
     run_entanglement(dir);
     let meta = read_meta(dir);
     assert!(!meta.heads.is_empty());
