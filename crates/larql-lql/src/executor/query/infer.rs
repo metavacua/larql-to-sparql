@@ -13,6 +13,34 @@ impl Session {
         route: Option<&crate::ast::InferRoute>,
     ) -> Result<Vec<String>, LqlError> {
         let top_k = top.unwrap_or(5) as usize;
+        // Quantum backend: render the Born next-token distribution.
+        if let Backend::Quantum(qb) = &self.backend {
+            // Condition the state on the prompt tokens (naive L=1: each token
+            // collapses to that basis state; empty prompt → the init state).
+            let mut state = qb.lm.init.clone();
+            for word in prompt.split_whitespace() {
+                let id = *qb.token_index.get(word).ok_or_else(|| {
+                    LqlError::Execution(format!(
+                        "unknown token '{word}' (vocabulary has {} tokens)",
+                        qb.tokens.len()
+                    ))
+                })?;
+                state = qb.lm.step(id);
+            }
+            let dist = qb.lm.next_distribution(&state);
+            let mut order: Vec<usize> = (0..dist.len()).collect();
+            order.sort_by(|&a, &b| dist[b].partial_cmp(&dist[a]).unwrap());
+            let mut out = vec!["Predictions (quantum — Born rule):".into()];
+            for (rank, &i) in order.iter().take(top_k).enumerate() {
+                out.push(format!(
+                    "  {:2}. {:20} ({:.2}%)",
+                    rank + 1,
+                    qb.tokens[i],
+                    dist[i] * 100.0
+                ));
+            }
+            return Ok(out);
+        }
         // Resolve the KnnStore router: an explicit `ROUTE VERIFY [FALLBACK]
         // [TOPK n]` clause wins; otherwise inherit the `LARQL_KNN_*` env default
         // (so unclaused INFER stays byte-identical to the Python binding —

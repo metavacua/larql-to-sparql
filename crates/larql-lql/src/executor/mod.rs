@@ -5,6 +5,7 @@
 
 mod backend;
 mod compact;
+pub(crate) mod quantum;
 mod helpers;
 mod introspection;
 mod lifecycle;

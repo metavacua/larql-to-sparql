@@ -85,6 +85,23 @@ impl NQubit {
         NQubit { amp }
     }
 
+    /// Dicke state |D^n_k⟩ — the normalized equal superposition of all
+    /// computational-basis states of Hamming weight `k`. `w(n)` is `dicke(n, 1)`.
+    pub fn dicke(n: usize, k: usize) -> NQubit {
+        assert!((1..64).contains(&n), "qubit count {n} must be in 1..64");
+        assert!(k <= n, "excitation k={k} must satisfy k ≤ n={n}");
+        let dim = 1usize << n;
+        let mut amp = vec![c(0.0, 0.0); dim];
+        let count = (0..dim).filter(|i| (*i as u32).count_ones() as usize == k).count();
+        let a = 1.0 / (count as f64).sqrt();
+        for (i, slot) in amp.iter_mut().enumerate() {
+            if (i as u32).count_ones() as usize == k {
+                *slot = c(a, 0.0);
+            }
+        }
+        NQubit { amp }
+    }
+
     /// L2 norm.
     pub fn norm(&self) -> f64 {
         self.amp.iter().map(|a| a.norm_sqr()).sum::<f64>().sqrt()
@@ -260,5 +277,35 @@ mod tests {
     fn from_matrix_rejects_non_power_of_two_dims() {
         use ndarray::array;
         let _ = NQubit::from_matrix(&array![[1.0, 2.0, 3.0]]); // 1x3
+    }
+
+    #[test]
+    fn dicke_one_excitation_is_w() {
+        // |D^3_1⟩ == W_3 (uniform amplitude on 001, 010, 100).
+        let d = NQubit::dicke(3, 1);
+        let w = NQubit::w(3);
+        for (a, b) in d.amp.iter().zip(w.amp.iter()) {
+            assert!((a - b).norm() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn dicke_two_excitations_uniform_weight2() {
+        // |D^4_2⟩: equal Born mass 1/6 on the six weight-2 states, 0 elsewhere.
+        let p = NQubit::dicke(4, 2).born_probs();
+        for (idx, prob) in p.iter().enumerate() {
+            let weight = (idx as u32).count_ones();
+            if weight == 2 {
+                assert!((prob - 1.0 / 6.0).abs() < 1e-12, "idx {idx} should be 1/6");
+            } else {
+                assert!(prob.abs() < 1e-12, "idx {idx} (weight {weight}) should be 0");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "k")]
+    fn dicke_rejects_k_above_n() {
+        let _ = NQubit::dicke(2, 3);
     }
 }

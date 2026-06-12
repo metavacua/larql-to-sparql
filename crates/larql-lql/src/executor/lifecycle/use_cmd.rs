@@ -32,6 +32,35 @@ impl Session {
                 let config = larql_vindex::load_vindex_config(&path)
                     .map_err(|e| LqlError::exec("failed to load vindex config", e))?;
 
+                // Quantum vindex: reconstruct the QLM from its quantum numbers
+                // and serve it through Backend::Quantum (no gate_vectors / FFN).
+                if config.family == "quantum" {
+                    let qlm_bytes = std::fs::read(path.join("qlm.json"))
+                        .map_err(|e| LqlError::exec("failed to read qlm.json", e))?;
+                    let spec: crate::executor::quantum::QlmSpec =
+                        serde_json::from_slice(&qlm_bytes)
+                            .map_err(|e| LqlError::exec("failed to parse qlm.json", e))?;
+                    let qb = crate::executor::quantum::QuantumBackend::from_spec(&spec)?;
+                    let expected_vocab = 1usize << qb.n;
+                    if config.vocab_size != expected_vocab {
+                        return Err(LqlError::Execution(format!(
+                            "quantum vindex: vocab_size = {} but 2^n_qubits = {expected_vocab} (n = {})",
+                            config.vocab_size, qb.n
+                        )));
+                    }
+                    let out = vec![format!(
+                        "Using quantum vindex: {} ({} qubits, {} tokens, model: {})",
+                        path.display(),
+                        qb.n,
+                        qb.tokens.len(),
+                        config.model,
+                    )];
+                    self.backend = Backend::Quantum(qb);
+                    self.patch_recording = None;
+                    self.auto_patch = false;
+                    return Ok(out);
+                }
+
                 let mut cb = larql_vindex::SilentLoadCallbacks;
                 let index = larql_vindex::VectorIndex::load_vindex(&path, &mut cb)
                     .map_err(|e| LqlError::exec("failed to load vindex", e))?;
