@@ -98,3 +98,29 @@ fn unsupported_statement_hits_classicalization_seam() {
         "expected the classicalization-seam error, got: {err}"
     );
 }
+
+#[test]
+fn describe_reports_quantum_numbers() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 4, r#"{ "class": "dicke", "k": 2 }"#);
+    let out = use_and_run(tmp.path(), r#"DESCRIBE "state";"#).unwrap();
+    let text = out.join("\n");
+    assert!(text.contains("dicke") && text.contains('4') && text.contains('2'), "{text}");
+}
+
+#[test]
+fn quantum_numbers_round_trip() {
+    use larql_hilbert::NQubit;
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 4, r#"{ "class": "dicke", "k": 2 }"#);
+    // INFER reproduces the analytic Dicke(4,2) distribution (1/6 on weight-2).
+    let out = use_and_run(tmp.path(), r#"INFER "" TOP 16;"#).unwrap();
+    let analytic = NQubit::dicke(4, 2).born_probs();
+    for (idx, &p) in analytic.iter().enumerate() {
+        if p > 1e-9 {
+            let tok = format!("{idx:04b}");
+            let pct = format!("{:.2}%", p * 100.0);
+            assert!(out.iter().any(|l| l.contains(&tok) && l.contains(&pct)), "{tok} {pct}: {out:?}");
+        }
+    }
+}

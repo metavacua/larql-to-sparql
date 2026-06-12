@@ -37,6 +37,19 @@ impl Session {
     ) -> Result<Vec<String>, LqlError> {
         let verbose = mode != DescribeMode::Brief;
 
+        if let crate::executor::Backend::Quantum(qb) = &self.backend {
+            let entropy = if qb.n >= 2 {
+                larql_hilbert::entanglement_entropy_bipartition(&qb.lm.init, &[0])
+            } else {
+                0.0
+            };
+            return Ok(vec![
+                format!("Quantum model: {} qubits, {} tokens", qb.n, qb.tokens.len()),
+                format!("  state class: {}", qb.class_label()),
+                format!("  entanglement entropy (qubit-0 cut): {entropy:.4} ebits"),
+            ]);
+        }
+
         // MoE router-based DESCRIBE if available.
         if let Some(router_result) = self.try_moe_describe(entity, band, layer, verbose)? {
             return Ok(router_result);

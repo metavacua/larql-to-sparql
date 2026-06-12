@@ -191,15 +191,12 @@ impl Session {
                 Ok(out)
             }
             Backend::Remote { .. } => self.remote_stats(),
-            Backend::Quantum(qb) => {
-                let mut out = Vec::new();
-                out.push("Backend:         quantum".into());
-                out.push(format!("Qubits:          {}", qb.n));
-                out.push(format!("Tokens:          {}", qb.tokens.len()));
-                out.push(String::new());
-                out.push("Supported:       INFER (Born measurement). Classical ops require classicalization.".into());
-                Ok(out)
-            }
+            Backend::Quantum(qb) => Ok(vec![format!(
+                "Quantum LM — {} qubits, {} tokens, class {}",
+                qb.n,
+                qb.tokens.len(),
+                qb.class_label()
+            )]),
             Backend::None => Err(LqlError::NoBackend),
         }
     }

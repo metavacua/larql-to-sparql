@@ -64,6 +64,7 @@ pub(crate) struct QuantumBackend {
     pub tokens: Vec<String>,
     pub token_index: HashMap<String, usize>,
     pub n: usize,
+    pub class: String,
 }
 
 impl std::fmt::Debug for QuantumBackend {
@@ -102,7 +103,12 @@ impl QuantumBackend {
         // Identity post-gates: after collapse to |t⟩, apply nothing (naive L=1).
         let post = vec![Vec::new(); dim];
         let lm = NQubitLM { post, init };
-        Ok(QuantumBackend { lm, tokens, token_index, n })
+        let class = match &spec.state {
+            StateSpec::Dicke { k } => format!("dicke(k={k})"),
+            StateSpec::Ghz => "ghz".to_string(),
+            StateSpec::Basis { index } => format!("basis(index={index})"),
+        };
+        Ok(QuantumBackend { lm, tokens, token_index, n, class })
     }
 
     /// Extension point for the classicalization layer (a later sub-project):
@@ -110,6 +116,10 @@ impl QuantumBackend {
     #[allow(dead_code)]
     pub fn classical_view(&self) -> ClassicalRegister {
         ClassicalRegister { probs: self.lm.init.born_probs() }
+    }
+
+    pub fn class_label(&self) -> &str {
+        &self.class
     }
 }
 
@@ -119,6 +129,12 @@ mod tests {
 
     fn spec(n: usize, state: StateSpec) -> QlmSpec {
         QlmSpec { n_qubits: n, state, tokens: None }
+    }
+
+    #[test]
+    fn class_label_describes_the_state() {
+        assert_eq!(QuantumBackend::from_spec(&spec(4, StateSpec::Dicke { k: 2 })).unwrap().class_label(), "dicke(k=2)");
+        assert_eq!(QuantumBackend::from_spec(&spec(3, StateSpec::Ghz)).unwrap().class_label(), "ghz");
     }
 
     #[test]
