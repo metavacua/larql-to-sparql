@@ -52,3 +52,6 @@ pub use two_qubit::{is_product, marginal_probs, measure_qubit, tensor, TwoQubit}
 pub use gate2::{bell, cnot, Gate4};
 pub mod qlm2;
 pub use qlm2::TwoQubitLM;
+
+pub mod entropy;
+pub use entropy::spectral_entropy;
