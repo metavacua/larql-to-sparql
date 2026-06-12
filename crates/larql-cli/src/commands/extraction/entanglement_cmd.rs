@@ -5,7 +5,7 @@ use clap::Args;
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 
-use larql_hilbert::entanglement_entropy;
+use larql_hilbert::{classical_bits, entanglement_entropy, NQubit};
 use larql_vindex::canonical::{
     commutator_residual, complex_structure_split_half, head_block, head_coupling, kv_head_for_query,
 };
@@ -21,6 +21,11 @@ pub struct HeadEntanglementInfo {
     pub residual: f64,
     /// Entanglement entropy of C, in ebits ∈ [0, log2(head_dim)].
     pub entropy: f64,
+    /// Classical storage cost: Shannon entropy of the flattened |C|², in bits.
+    pub classical_bits: f64,
+    /// Compressibility gap `classical_bits − entropy` (≥ 0): how much more the
+    /// classical description costs than the quantum entanglement across the cut.
+    pub gap: f64,
 }
 
 /// Root metadata written to `entanglement_meta.json`.
@@ -46,6 +51,27 @@ fn coupling_metrics(coupling: &Array2<f64>, j: &Array2<f64>) -> (f64, f64) {
     let residual = commutator_residual(coupling, j);
     let entropy = entanglement_entropy(coupling);
     (residual, entropy)
+}
+
+/// Classical storage cost `H` of a coupling matrix `C` (Shannon entropy of the
+/// flattened, normalized |C|², in bits) via the n-qubit reading. Pairs with the
+/// existing `entanglement_entropy(C)` (the quantum ebits `S`); the
+/// compressibility gap is `H − S ≥ 0`. Cheap — no eigensolver. Zero-safe (an
+/// all-zero / pruned head returns 0) and zero-pads non-power-of-two dims.
+fn classical_cost(coupling: &Array2<f64>) -> f64 {
+    let fro2: f64 = coupling.iter().map(|&v| v * v).sum();
+    if fro2 < 1e-300 {
+        return 0.0; // degenerate head: no measurement entropy, no panic.
+    }
+    let (rows, cols) = (coupling.shape()[0], coupling.shape()[1]);
+    let (pr, pc) = (rows.next_power_of_two(), cols.next_power_of_two());
+    let mut flat = Vec::with_capacity(pr * pc);
+    for r in 0..pr {
+        for c in 0..pc {
+            flat.push(if r < rows && c < cols { coupling[[r, c]] } else { 0.0 });
+        }
+    }
+    classical_bits(&NQubit::from_real_amplitudes(&flat))
 }
 
 pub fn run(args: EntanglementArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -90,18 +116,21 @@ pub fn run(args: EntanglementArgs) -> Result<(), Box<dyn std::error::Error>> {
             let wk_g = head_block(&wk64, g, head_dim);
             let coupling = head_coupling(&wq_h, &wk_g);
             let (residual, entropy) = coupling_metrics(&coupling, &j);
+            let classical = classical_cost(&coupling);
             heads.push(HeadEntanglementInfo {
                 layer,
                 query_head: h,
                 kv_head: g,
                 residual,
                 entropy,
+                classical_bits: classical,
+                gap: (classical - entropy).max(0.0),
             });
         }
     }
 
     let meta = EntanglementMeta {
-        version: 1,
+        version: 2,
         model: config.model.clone(),
         head_dim,
         num_q_heads: num_q,
@@ -131,6 +160,14 @@ pub fn run(args: EntanglementArgs) -> Result<(), Box<dyn std::error::Error>> {
         mean(&residuals),
         min(&residuals),
         max(&residuals)
+    );
+    let gaps: Vec<f64> = meta.heads.iter().map(|h| h.gap).collect();
+    println!(
+        "  classical−quantum gap (bits) over {} heads: mean {:.3}, min {:.3}, max {:.3}",
+        gaps.len(),
+        mean(&gaps),
+        min(&gaps),
+        max(&gaps)
     );
     println!("  wrote {}", out.display());
     println!("  total: {:.1}ms", t0.elapsed().as_secs_f64() * 1000.0);
@@ -164,5 +201,50 @@ mod tests {
         let j = complex_structure_split_half(4);
         let (_r, s) = coupling_metrics(&c, &j);
         assert!(s.abs() < 1e-9, "rank-1 coupling → 0 ebits, got {s}");
+    }
+
+    #[test]
+    fn classical_cost_pairs_with_matrix_entropy_for_a_nonnegative_gap() {
+        use larql_hilbert::{entanglement_entropy_bipartition, row_qubits, NQubit};
+        // A real-ish 4×4 coupling. Cross-check (in the test only): the n-qubit
+        // bipartition equals entanglement_entropy(C). Then H ≥ S, so gap ≥ 0.
+        let coupling = array![
+            [1.0, 0.3, 0.0, 0.2],
+            [0.3, 1.0, 0.1, 0.0],
+            [0.0, 0.1, 1.0, 0.4],
+            [0.2, 0.0, 0.4, 1.0],
+        ];
+        let quantum = entanglement_entropy(&coupling);
+        let q = NQubit::from_matrix(&coupling);
+        let bipart = entanglement_entropy_bipartition(&q, &row_qubits(4));
+        assert!((quantum - bipart).abs() < 1e-9, "bipartition {bipart} vs matrix entropy {quantum}");
+        let classical = classical_cost(&coupling);
+        assert!(classical - quantum >= -1e-9, "gap must be ≥ 0: H={classical} S={quantum}");
+    }
+
+    #[test]
+    fn product_coupling_has_a_positive_gap() {
+        // Rank-1 (product) coupling: quantum S = 0, classical H > 0 → strictly positive gap.
+        let coupling = array![
+            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+        ];
+        let quantum = entanglement_entropy(&coupling);
+        let classical = classical_cost(&coupling);
+        assert!(quantum.abs() < 1e-9, "rank-1 → 0 ebits, got {quantum}");
+        assert!(classical - quantum > 0.5, "uniform coupling has a large classical cost");
+    }
+
+    #[test]
+    fn classical_cost_is_zero_safe_and_pads_non_power_of_two() {
+        // Degenerate all-zero coupling → 0 (no panic from normalizing a zero state).
+        let zero = Array2::<f64>::zeros((4, 4));
+        assert_eq!(classical_cost(&zero), 0.0);
+        // Non-power-of-two dims (e.g. a 3×3 head block) must not panic — zero-padded.
+        let odd = array![[1.0, 0.0, 2.0], [0.0, 1.0, 0.0], [3.0, 0.0, 1.0]];
+        let h = classical_cost(&odd);
+        assert!(h > 0.0 && h.is_finite());
     }
 }
