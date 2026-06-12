@@ -94,9 +94,9 @@ impl NQubit {
         let mut amp = vec![c(0.0, 0.0); dim];
         let count = (0..dim).filter(|i| (*i as u32).count_ones() as usize == k).count();
         let a = 1.0 / (count as f64).sqrt();
-        for i in 0..dim {
+        for (i, slot) in amp.iter_mut().enumerate() {
             if (i as u32).count_ones() as usize == k {
-                amp[i] = c(a, 0.0);
+                *slot = c(a, 0.0);
             }
         }
         NQubit { amp }
