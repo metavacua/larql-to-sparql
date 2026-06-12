@@ -3,8 +3,6 @@
 //! matrix (which would be exponential in n). Big-endian qubit order: qubit k
 //! occupies bit (n−1−k) of the basis index.
 
-use num_complex::Complex64;
-
 use crate::nqubit::NQubit;
 use crate::unitary::Gate;
 
@@ -58,6 +56,7 @@ pub fn apply_cnot(s: &NQubit, control: usize, target: usize) -> NQubit {
 mod tests {
     use super::*;
     use crate::unitary::{hadamard, identity, pauli_x};
+    use num_complex::Complex64;
 
     #[inline]
     fn c(re: f64, im: f64) -> Complex64 {
