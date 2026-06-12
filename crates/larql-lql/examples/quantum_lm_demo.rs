@@ -13,7 +13,8 @@ fn main() {
 
     let mut all_passed = true;
     // (name, n, qlm state json, expected nonzero tokens with their %)
-    let cases: &[(&str, usize, &str, &[(&str, f64)])] = &[
+    type Case<'a> = (&'a str, usize, &'a str, &'a [(&'a str, f64)]);
+    let cases: &[Case] = &[
         ("GHZ_3", 3, r#"{ "class": "ghz" }"#, &[("000", 50.0), ("111", 50.0)]),
         ("W_3 (Dicke k=1)", 3, r#"{ "class": "dicke", "k": 1 }"#,
             &[("001", 33.33), ("010", 33.33), ("100", 33.33)]),

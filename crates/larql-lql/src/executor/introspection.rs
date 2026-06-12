@@ -233,8 +233,13 @@ impl Session {
 
     pub(crate) fn exec_show_layers(&self, range: Option<&Range>) -> Result<Vec<String>, LqlError> {
         if let Backend::Quantum(qb) = &self.backend {
+            let entropy = if qb.n >= 2 {
+                larql_hilbert::entanglement_entropy_bipartition(&qb.lm.init, &[0])
+            } else {
+                0.0
+            };
             return Ok(vec![format!(
-                "Quantum LM: 1 layer (naive L=1), {} qubits, {} tokens, class {}",
+                "Quantum LM: 1 layer (naive L=1), {} qubits, {} tokens, class {}, entropy {entropy:.4} ebits",
                 qb.n, qb.tokens.len(), qb.class_label()
             )]);
         }
@@ -453,8 +458,13 @@ impl Session {
 
     pub(crate) fn exec_show_models(&self) -> Result<Vec<String>, LqlError> {
         if let Backend::Quantum(qb) = &self.backend {
+            let entropy = if qb.n >= 2 {
+                larql_hilbert::entanglement_entropy_bipartition(&qb.lm.init, &[0])
+            } else {
+                0.0
+            };
             return Ok(vec![format!(
-                "Active quantum model: {} qubits, {} tokens, class {}",
+                "Active quantum model: {} qubits, {} tokens, class {}, entropy {entropy:.4} ebits",
                 qb.n, qb.tokens.len(), qb.class_label()
             )]);
         }

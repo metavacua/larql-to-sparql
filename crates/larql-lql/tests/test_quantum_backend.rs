@@ -148,6 +148,17 @@ fn show_layers_reports_quantum_numbers() {
     let out = use_and_run(tmp.path(), "SHOW LAYERS;").unwrap();
     let text = out.join("\n");
     assert!(text.contains("quantum") || text.contains("qubit"), "SHOW LAYERS should report quantum info: {text}");
+    assert!(text.contains("ebits"), "SHOW LAYERS should report the entanglement entropy: {text}");
+}
+
+#[test]
+fn stats_reports_quantum_numbers_and_entropy() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_quantum_vindex(tmp.path(), 4, r#"{ "class": "dicke", "k": 2 }"#);
+    let out = use_and_run(tmp.path(), "STATS;").unwrap();
+    let text = out.join("\n");
+    // REQ-QB-004: n, class (with k), vocab (tokens), and entropy in ebits.
+    assert!(text.contains('4') && text.contains("dicke") && text.contains("ebits"), "{text}");
 }
 
 #[test]

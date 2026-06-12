@@ -97,6 +97,14 @@ derived entanglement entropy in ebits).
 
 <!-- test: crates/larql-lql/tests/test_quantum_backend.rs::describe_reports_quantum_numbers -->
 
+#### Scenario: STATS / SHOW LAYERS report the quantum numbers and entropy
+
+`STATS` and `SHOW LAYERS` on a `dicke(4,2)` quantum vindex report the qubit
+count, class, vocabulary, and the derived entanglement entropy in ebits.
+
+<!-- test: crates/larql-lql/tests/test_quantum_backend.rs::stats_reports_quantum_numbers_and_entropy -->
+<!-- test: crates/larql-lql/tests/test_quantum_backend.rs::show_layers_reports_quantum_numbers -->
+
 ---
 
 ### REQ-QB-005: Classicalization seam for non-native statements

@@ -191,12 +191,19 @@ impl Session {
                 Ok(out)
             }
             Backend::Remote { .. } => self.remote_stats(),
-            Backend::Quantum(qb) => Ok(vec![format!(
-                "Quantum LM — {} qubits, {} tokens, class {}",
-                qb.n,
-                qb.tokens.len(),
-                qb.class_label()
-            )]),
+            Backend::Quantum(qb) => {
+                let entropy = if qb.n >= 2 {
+                    larql_hilbert::entanglement_entropy_bipartition(&qb.lm.init, &[0])
+                } else {
+                    0.0
+                };
+                Ok(vec![format!(
+                    "Quantum LM — {} qubits, {} tokens, class {}, entropy {entropy:.4} ebits",
+                    qb.n,
+                    qb.tokens.len(),
+                    qb.class_label()
+                )])
+            }
             Backend::None => Err(LqlError::NoBackend),
         }
     }
