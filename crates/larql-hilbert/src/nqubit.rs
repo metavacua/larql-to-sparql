@@ -71,8 +71,12 @@ impl NQubit {
         let dim = 1usize << n;
         let mut amp = vec![c(0.0, 0.0); dim];
         let a = 1.0 / (n as f64).sqrt();
+        // Qubit k is excited in the k-th W term; big-endian ⇒ bit (n−1−k).
+        // (The single-excitation index set is the same either way since W is
+        // permutation-symmetric — this spelling just reads consistently with
+        // the documented convention.)
         for k in 0..n {
-            amp[1usize << k] = c(a, 0.0);
+            amp[1usize << (n - 1 - k)] = c(a, 0.0);
         }
         NQubit { amp }
     }
@@ -172,15 +176,19 @@ mod tests {
 
     #[test]
     fn w_state_has_equal_weight_on_single_excitations() {
-        // W_3 = (|100>+|010>+|001>)/√3 → indices 4, 2, 1.
+        // W_3 = (|100>+|010>+|001>)/√3. Big-endian: qubit k excited ⇒ bit (n−1−k)
+        // set ⇒ |100> = index 4 (qubit 0), |010> = index 2 (qubit 1),
+        // |001> = index 1 (qubit 2).
         let w = NQubit::w(3);
         let amp = 1.0 / 3.0_f64.sqrt();
-        for idx in [1usize, 2, 4] {
-            assert!((w.amp[idx].re - amp).abs() < 1e-12);
+        for idx in [4usize, 2, 1] {
+            assert!((w.amp[idx].re - amp).abs() < 1e-12, "idx {idx}");
         }
         for idx in [0usize, 3, 5, 6, 7] {
-            assert!(w.amp[idx].norm() < 1e-12);
+            assert!(w.amp[idx].norm() < 1e-12, "idx {idx} should be empty");
         }
+        // Explicit convention check: qubit 0 excited ⇒ |100> ⇒ index 4.
+        assert!((w.amp[1usize << (3 - 1 - 0)].re - amp).abs() < 1e-12);
     }
 
     #[test]
