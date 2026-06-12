@@ -79,14 +79,14 @@ pub mod qlm2;
 pub use qlm2::TwoQubitLM;
 
 pub mod entropy;
-pub use entropy::{entanglement_entropy, spectral_entropy};
+pub use entropy::{entanglement_entropy, entanglement_entropy_bipartition, spectral_entropy};
 pub mod eig;
 pub use eig::symmetric_eigenvalues;
 pub mod nqubit;
-pub use nqubit::NQubit;
+pub use nqubit::{row_qubits, NQubit};
 pub mod ngate;
-pub use ngate::{apply_1q, apply_cnot};
+pub use ngate::{apply_1q, apply_1q_in_place, apply_cnot, apply_cnot_in_place};
 pub mod nqlm;
 pub use nqlm::NQubitLM;
 pub mod register;
-pub use register::{ClassicalRegister, NRegister};
+pub use register::{classical_bits, ClassicalRegister, CompressibilityGap, NRegister};
