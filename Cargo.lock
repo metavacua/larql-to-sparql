@@ -2149,6 +2149,7 @@ dependencies = [
  "larql-compute",
  "larql-compute-metal",
  "larql-core",
+ "larql-hilbert",
  "larql-inference",
  "larql-kv",
  "larql-lql",
