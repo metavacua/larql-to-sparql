@@ -93,6 +93,6 @@ pub use register::{classical_bits, ClassicalRegister, CompressibilityGap, NRegis
 pub mod density;
 pub use density::{density_matrix, partial_trace, von_neumann_entropy};
 pub mod witness;
-pub use witness::{bell_rho2, chsh_max, lattice_check, lattice_consistent, mutual_information, negativity, peres_mermin_noncontextual_bound, peres_mermin_quantum_value, product_rho2, werner_state};
+pub use witness::{bell_rho2, chsh_max, lattice_check, lattice_consistent, mutual_information, negativity, peres_mermin_noncontextual_bound, peres_mermin_quantum_value, product_rho2, werner_state, Witnesses};
 pub mod sheaf;
 pub use sheaf::{bell_empirical_model, EmpiricalModel};

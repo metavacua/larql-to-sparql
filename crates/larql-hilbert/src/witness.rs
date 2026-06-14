@@ -5,7 +5,11 @@
 use ndarray::Array2;
 use num_complex::Complex64;
 
-use crate::density::{partial_trace, von_neumann_entropy};
+use crate::complex_structure::{commutator_residual, split_half_j};
+use crate::density::{density_matrix, partial_trace, von_neumann_entropy};
+use crate::entropy::entanglement_entropy_bipartition;
+use crate::nqubit::{row_qubits, NQubit};
+use crate::register::classical_bits;
 use crate::eig::hermitian_eigenvalues;
 use crate::eig::symmetric_eigenvalues;
 
@@ -221,6 +225,55 @@ pub fn peres_mermin_noncontextual_bound() -> f64 {
     best
 }
 
+/// The structural witness battery (W1–W6) for one coupling matrix `C`.
+#[derive(Debug, Clone, Copy)]
+pub struct Witnesses {
+    pub mutual_information: f64,   // W1
+    pub negativity: f64,          // W2
+    pub chsh: f64,                // W3
+    pub entanglement_entropy: f64, // W4 (full-state row/col bipartition)
+    pub gap: f64,                 // W5 (classical bits − W4)
+    pub hilbertian_residual: f64, // W6
+    pub lattice_ok: bool,
+}
+
+impl Witnesses {
+    /// Evaluate W1–W6 on a square coupling `C`. State = `from_matrix(C)` (the Choi
+    /// embedding); ρ₂ = partial trace onto the pre-registered pair {0, n/2} (one
+    /// row qubit + one column qubit) for W1–W3; W4/W5 use the full row-vs-column
+    /// bipartition; W6 is the Hilbertian residual on `C` directly.
+    pub fn from_coupling(coupling: &Array2<f64>) -> Witnesses {
+        assert_eq!(
+            coupling.shape()[0],
+            coupling.shape()[1],
+            "coupling must be square (head_dim×head_dim)"
+        );
+        let rows = coupling.shape()[0];
+        let state = NQubit::from_matrix(coupling);
+        let n = state.n();
+        // Pre-registered reduction: one row qubit (0) + one column qubit (n/2).
+        // (For a 2×2 coupling, n=2 ⇒ {0,1} = the full bipartite state.)
+        let keep: Vec<usize> = vec![0, n / 2];
+        let rho2 = partial_trace(&density_matrix(&state), n, &keep);
+        let mi = mutual_information(&rho2);
+        let neg = negativity(&rho2);
+        let chsh = chsh_max(&rho2);
+        let ent = entanglement_entropy_bipartition(&state, &row_qubits(rows));
+        let h = classical_bits(&state);
+        let j = split_half_j(rows); // C is square head_dim×head_dim (even)
+        let resid = commutator_residual(coupling, &j);
+        Witnesses {
+            mutual_information: mi,
+            negativity: neg,
+            chsh,
+            entanglement_entropy: ent,
+            gap: (h - ent).max(0.0),
+            hilbertian_residual: resid,
+            lattice_ok: lattice_check(mi, neg, chsh),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,6 +343,28 @@ mod tests {
         assert!(!lattice_check(0.0 /*MI*/, 0.0 /*N*/, 2.83 /*CHSH>2*/));
         // a consistent triple (correlated, entangled, nonlocal) holds.
         assert!(lattice_check(2.0, 0.5, 2.83));
+    }
+
+    #[test]
+    fn battery_on_identity_coupling_is_entangled_quantum() {
+        use ndarray::array;
+        // C = I₂ → Choi state = Bell → entangled, nonlocal, correlated.
+        let cmat = array![[1.0, 0.0], [0.0, 1.0]];
+        let w = Witnesses::from_coupling(&cmat);
+        assert!(w.negativity > 1e-6);          // entangled
+        assert!(w.chsh > 2.0);                  // nonlocal-structure
+        assert!(w.mutual_information > 1e-6);   // correlated
+        assert!(w.lattice_ok);
+    }
+
+    #[test]
+    fn battery_on_rank_one_coupling_is_separable() {
+        use ndarray::array;
+        let cmat = array![[1.0, 2.0], [2.0, 4.0]]; // rank 1
+        let w = Witnesses::from_coupling(&cmat);
+        assert!(w.negativity.abs() < 1e-6);     // provably separable (conclusive)
+        assert!(w.chsh <= 2.0 + 1e-6);
+        assert!(w.lattice_ok);
     }
 
     #[test]
