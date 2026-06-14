@@ -225,6 +225,17 @@ pub fn peres_mermin_noncontextual_bound() -> f64 {
     best
 }
 
+/// The pre-registered 2-qubit reduction ρ₂ used by W1–W3 and the sheaf cover:
+/// embed `C` via the Choi map (`from_matrix`), then partial-trace onto the
+/// pre-registered pair {0, n/2} (one row qubit + one column qubit). Exposed so the
+/// contextual-fraction cover uses the *identical* reduction as the scalar
+/// witnesses (predicativity).
+pub fn reduced_rho2(coupling: &Array2<f64>) -> Array2<Complex64> {
+    let state = NQubit::from_matrix(coupling);
+    let n = state.n();
+    partial_trace(&density_matrix(&state), n, &[0, n / 2])
+}
+
 /// The structural witness battery (W1–W6) for one coupling matrix `C`.
 #[derive(Debug, Clone, Copy)]
 pub struct Witnesses {
@@ -250,11 +261,7 @@ impl Witnesses {
         );
         let rows = coupling.shape()[0];
         let state = NQubit::from_matrix(coupling);
-        let n = state.n();
-        // Pre-registered reduction: one row qubit (0) + one column qubit (n/2).
-        // (For a 2×2 coupling, n=2 ⇒ {0,1} = the full bipartite state.)
-        let keep: Vec<usize> = vec![0, n / 2];
-        let rho2 = partial_trace(&density_matrix(&state), n, &keep);
+        let rho2 = reduced_rho2(coupling);
         let mi = mutual_information(&rho2);
         let neg = negativity(&rho2);
         let chsh = chsh_max(&rho2);
@@ -277,6 +284,17 @@ impl Witnesses {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reduced_rho2_matches_the_internal_reduction() {
+        let c = Array2::from_shape_vec((4, 4), (0..16).map(|i| (i as f64 * 0.5).cos()).collect()).unwrap();
+        let rho = reduced_rho2(&c);
+        assert_eq!(rho.shape(), &[4, 4]);
+        let tr: Complex64 = (0..4).map(|i| rho[[i, i]]).sum();
+        assert!((tr.re - 1.0).abs() < 1e-9 && tr.im.abs() < 1e-9, "trace must be 1, got {tr}");
+        // It is the SAME ρ₂ W1 uses inside from_coupling (predicativity).
+        assert!((mutual_information(&rho) - Witnesses::from_coupling(&c).mutual_information).abs() < 1e-9);
+    }
 
     #[test]
     fn peres_mermin_quantum_exceeds_noncontextual_bound() {
