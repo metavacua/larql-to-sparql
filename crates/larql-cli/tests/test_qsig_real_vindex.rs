@@ -25,8 +25,19 @@ struct MetricSummary {
     metric: String,
     heads: usize,
     real: WitnessMeans,
-    null: WitnessMeans,
-    signal: WitnessMeans,
+    #[allow(dead_code)]
+    gaussian: WitnessMeans,
+    #[allow(dead_code)]
+    sv_matched: WitnessMeans,
+    #[allow(dead_code)]
+    sign_randomized: WitnessMeans,
+    signal_vs_gaussian: WitnessMeans,
+    #[allow(dead_code)]
+    signal_vs_sv_matched: WitnessMeans,
+    #[allow(dead_code)]
+    signal_vs_sign_randomized: WitnessMeans,
+    #[allow(dead_code)]
+    signal_vs_worst: WitnessMeans,
 }
 #[derive(Deserialize)]
 struct QsigReport {
@@ -177,11 +188,9 @@ fn quantum_signature_on_a_real_on_disk_vindex() {
     let raw = report.metrics.iter().find(|m| m.metric == "raw").expect("raw metric present");
     assert_eq!(raw.heads, 2 * 4, "2 layers × 4 query heads");
     assert_witness_sane(&raw.real, "raw.real");
-    assert_witness_sane(&raw.null, "raw.null");
-    // Predicative signal arithmetic: signal == real − null (exact gate).
-    assert!((raw.signal.negativity - (raw.real.negativity - raw.null.negativity)).abs() < 1e-9);
-    assert!((raw.signal.chsh - (raw.real.chsh - raw.null.chsh)).abs() < 1e-9);
-    assert!((raw.signal.mutual_information - (raw.real.mutual_information - raw.null.mutual_information)).abs() < 1e-9);
+    assert_witness_sane(&raw.gaussian, "raw.gaussian");
+    assert!((raw.signal_vs_gaussian.negativity - (raw.real.negativity - raw.gaussian.negativity)).abs() < 1e-9);
+    assert!((raw.signal_vs_gaussian.chsh - (raw.real.chsh - raw.gaussian.chsh)).abs() < 1e-9);
 }
 
 #[test]
@@ -214,7 +223,7 @@ fn quantum_signature_canonical_arm_when_canonicalized() {
         .expect("canonical metric present when canonical_meta.json exists");
     assert_eq!(canon.heads, 2 * 4);
     assert_witness_sane(&canon.real, "canonical.real");
-    assert_witness_sane(&canon.null, "canonical.null");
+    assert_witness_sane(&canon.gaussian, "canonical.gaussian");
 }
 
 #[test]
@@ -233,9 +242,9 @@ fn quantum_signature_on_the_real_model_when_present() {
     let raw = report.metrics.iter().find(|m| m.metric == "raw").expect("raw metric");
     assert!(raw.heads > 0);
     assert_witness_sane(&raw.real, "real-model raw.real");
-    assert_witness_sane(&raw.null, "real-model raw.null");
+    assert_witness_sane(&raw.gaussian, "real-model raw.gaussian");
     eprintln!(
         "real model {}: {} heads | raw signal: neg {:+.4} chsh {:+.4} CF {:+.4} | (verdict requires full apparatus)",
-        report.model, raw.heads, raw.signal.negativity, raw.signal.chsh, raw.signal.contextual_fraction
+        report.model, raw.heads, raw.signal_vs_worst.negativity, raw.signal_vs_worst.chsh, raw.signal_vs_worst.contextual_fraction
     );
 }

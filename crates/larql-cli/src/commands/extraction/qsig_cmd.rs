@@ -106,6 +106,21 @@ fn mean_of(n: usize, f: impl Fn(usize) -> WitnessMeans) -> WitnessMeans {
     acc
 }
 
+/// Componentwise maximum of two `WitnessMeans` (for the conservative
+/// "real exceeds EVERY null" over-constraint signal).
+fn cwise_max(a: &WitnessMeans, b: &WitnessMeans) -> WitnessMeans {
+    WitnessMeans {
+        mutual_information: a.mutual_information.max(b.mutual_information),
+        negativity: a.negativity.max(b.negativity),
+        chsh: a.chsh.max(b.chsh),
+        entanglement_entropy: a.entanglement_entropy.max(b.entanglement_entropy),
+        gap: a.gap.max(b.gap),
+        hilbertian_residual: a.hilbertian_residual.max(b.hilbertian_residual),
+        contextual_fraction: a.contextual_fraction.max(b.contextual_fraction),
+        lattice_ok: a.lattice_ok.max(b.lattice_ok),
+    }
+}
+
 /// One head, one metric: the real battery and each null kind (each averaged over
 /// `draws` independent seeds to suppress single-sample null variance).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,17 +131,22 @@ pub struct HeadArm {
     pub sign_randomized: WitnessMeans,
 }
 
-/// Evaluate the battery on `real_c` and the three nulls derived from it via the
-/// IDENTICAL pipe. `draws` = null replicates per kind (averaged). `seed_base`
-/// makes the whole head reproducible (W7 self-consistency).
-pub fn analyze_coupling(real_c: &Array2<f64>, seed_base: u64, draws: usize) -> HeadArm {
-    let d = real_c.shape()[0];
+/// Evaluate the battery on `real_c` and the three nulls via the IDENTICAL pipe.
+/// `gaussian(i)` yields the i-th gaussian null ALREADY in this arm's metric
+/// (random-weight head through the same coupling+metric pipe as `real_c`) — this
+/// keeps the gaussian null metric-consistent with the real arm (predicativity).
+/// `sv_matched`/`sign_randomized` are derived from `real_c` and so are
+/// metric-consistent automatically. `draws` = null replicates per kind (averaged).
+pub fn analyze_coupling(
+    real_c: &Array2<f64>,
+    gaussian: impl Fn(usize) -> Array2<f64>,
+    seed_base: u64,
+    draws: usize,
+) -> HeadArm {
     let draws = draws.max(1);
     HeadArm {
         real: WitnessMeans::from_coupling(real_c),
-        gaussian: mean_of(draws, |i| {
-            WitnessMeans::from_coupling(&gaussian_null(d, d, seed_base ^ (0x1000 + i as u64)))
-        }),
+        gaussian: mean_of(draws, |i| WitnessMeans::from_coupling(&gaussian(i))),
         sv_matched: mean_of(draws, |i| {
             WitnessMeans::from_coupling(&sv_matched_null(real_c, seed_base ^ (0x2000 + i as u64)))
         }),
@@ -136,29 +156,41 @@ pub fn analyze_coupling(real_c: &Array2<f64>, seed_base: u64, draws: usize) -> H
     }
 }
 
-/// Population summary for one metric: head-mean real, head-mean null (mean of the
-/// three kinds), and the predicative signal `real − null`.
+/// Population summary for one metric: head-mean real and each null kind, the
+/// per-kind signals `real − null`, and the conservative `real − max(null)` signal
+/// (positive only where real exceeds EVERY null — the spec's over-constraint).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricSummary {
     pub metric: String,
     pub heads: usize,
     pub real: WitnessMeans,
-    pub null: WitnessMeans,
-    pub signal: WitnessMeans,
+    pub gaussian: WitnessMeans,
+    pub sv_matched: WitnessMeans,
+    pub sign_randomized: WitnessMeans,
+    pub signal_vs_gaussian: WitnessMeans,
+    pub signal_vs_sv_matched: WitnessMeans,
+    pub signal_vs_sign_randomized: WitnessMeans,
+    pub signal_vs_worst: WitnessMeans,
 }
 
 pub fn summarize(metric: &str, arms: &[HeadArm]) -> MetricSummary {
-    let n = arms.len().max(1);
     let real = mean_of(arms.len(), |i| arms[i].real.clone());
-    let null = mean_of(arms.len(), |i| {
-        let mut m = arms[i].gaussian.clone();
-        m.add(&arms[i].sv_matched);
-        m.add(&arms[i].sign_randomized);
-        m.scale(1.0 / 3.0);
-        m
-    });
-    let signal = real.sub(&null);
-    MetricSummary { metric: metric.to_string(), heads: n, real, null, signal }
+    let gaussian = mean_of(arms.len(), |i| arms[i].gaussian.clone());
+    let sv_matched = mean_of(arms.len(), |i| arms[i].sv_matched.clone());
+    let sign_randomized = mean_of(arms.len(), |i| arms[i].sign_randomized.clone());
+    let worst = cwise_max(&cwise_max(&gaussian, &sv_matched), &sign_randomized);
+    MetricSummary {
+        metric: metric.to_string(),
+        heads: arms.len(),
+        signal_vs_gaussian: real.sub(&gaussian),
+        signal_vs_sv_matched: real.sub(&sv_matched),
+        signal_vs_sign_randomized: real.sub(&sign_randomized),
+        signal_vs_worst: real.sub(&worst),
+        real,
+        gaussian,
+        sv_matched,
+        sign_randomized,
+    }
 }
 
 /// Root report written to `quantum_signature_meta.json`.
@@ -183,17 +215,19 @@ pub struct QsigArgs {
 
 fn print_metric(s: &MetricSummary) {
     println!("  ── metric: {} ({} heads) ──", s.metric, s.heads);
-    let row = |name: &str, r: f64, nu: f64, sig: f64| {
-        println!("    {name:<22} real {r:+.4}  null {nu:+.4}  signal(real−null) {sig:+.4}");
+    println!("    signal = real − null, per null kind; vs_worst = real − max(null) (>0 ⟺ real exceeds EVERY null):");
+    let row = |name: &str, r: f64, g: f64, sv: f64, sg: f64, worst: f64| {
+        println!("    {name:<20} real {r:+.4} | vs_gauss {g:+.4}  vs_sv {sv:+.4}  vs_sign {sg:+.4}  vs_worst {worst:+.4}");
     };
-    row("W1 mutual_info", s.real.mutual_information, s.null.mutual_information, s.signal.mutual_information);
-    row("W2 negativity", s.real.negativity, s.null.negativity, s.signal.negativity);
-    row("W3 chsh", s.real.chsh, s.null.chsh, s.signal.chsh);
-    row("W4 entangle_entropy", s.real.entanglement_entropy, s.null.entanglement_entropy, s.signal.entanglement_entropy);
-    row("W5 gap", s.real.gap, s.null.gap, s.signal.gap);
-    row("W6 hilbertian_resid", s.real.hilbertian_residual, s.null.hilbertian_residual, s.signal.hilbertian_residual);
-    row("W3/W8 contextual_frac", s.real.contextual_fraction, s.null.contextual_fraction, s.signal.contextual_fraction);
-    println!("    lattice_ok fraction   real {:.3}  null {:.3}", s.real.lattice_ok, s.null.lattice_ok);
+    row("W1 mutual_info", s.real.mutual_information, s.signal_vs_gaussian.mutual_information, s.signal_vs_sv_matched.mutual_information, s.signal_vs_sign_randomized.mutual_information, s.signal_vs_worst.mutual_information);
+    row("W2 negativity", s.real.negativity, s.signal_vs_gaussian.negativity, s.signal_vs_sv_matched.negativity, s.signal_vs_sign_randomized.negativity, s.signal_vs_worst.negativity);
+    row("W3 chsh", s.real.chsh, s.signal_vs_gaussian.chsh, s.signal_vs_sv_matched.chsh, s.signal_vs_sign_randomized.chsh, s.signal_vs_worst.chsh);
+    row("W4 entangle_entropy", s.real.entanglement_entropy, s.signal_vs_gaussian.entanglement_entropy, s.signal_vs_sv_matched.entanglement_entropy, s.signal_vs_sign_randomized.entanglement_entropy, s.signal_vs_worst.entanglement_entropy);
+    row("W5 gap", s.real.gap, s.signal_vs_gaussian.gap, s.signal_vs_sv_matched.gap, s.signal_vs_sign_randomized.gap, s.signal_vs_worst.gap);
+    row("W6 hilbert_resid", s.real.hilbertian_residual, s.signal_vs_gaussian.hilbertian_residual, s.signal_vs_sv_matched.hilbertian_residual, s.signal_vs_sign_randomized.hilbertian_residual, s.signal_vs_worst.hilbertian_residual);
+    row("W3 contextual_frac", s.real.contextual_fraction, s.signal_vs_gaussian.contextual_fraction, s.signal_vs_sv_matched.contextual_fraction, s.signal_vs_sign_randomized.contextual_fraction, s.signal_vs_worst.contextual_fraction);
+    println!("    (note: W4 vs_sv ≈ 0 BY CONSTRUCTION — sv_matched preserves the singular spectrum that W4 measures; not a finding.)");
+    println!("    lattice_ok fraction  real {:.3}  gauss {:.3}  sv {:.3}  sign {:.3}", s.real.lattice_ok, s.gaussian.lattice_ok, s.sv_matched.lattice_ok, s.sign_randomized.lattice_ok);
 }
 
 pub fn run(args: QsigArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -208,6 +242,7 @@ pub fn run(args: QsigArgs) -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .ok_or("quantum-signature: index.json has no model_config (need head_dim / head counts)")?;
     let (num_q, num_kv, head_dim) = (mc.num_q_heads, mc.num_kv_heads, mc.head_dim);
+    let hidden = config.hidden_size;
     println!(
         "  model: {} ({}), {} layers, q_heads={num_q}, kv_heads={num_kv}, head_dim={head_dim}, nulls/head={draws}",
         config.model, config.family, config.num_layers
@@ -247,10 +282,28 @@ pub fn run(args: QsigArgs) -> Result<(), Box<dyn std::error::Error>> {
             let wk_g = head_block(&wk64, g, head_dim);
             let seed = (layer as u64) << 32 | h as u64;
             let raw_c = head_coupling(&wq_h, &wk_g);
-            raw_arms.push(analyze_coupling(&raw_c, seed, draws));
+            raw_arms.push(analyze_coupling(
+                &raw_c,
+                |i| {
+                    let gwq = gaussian_null(head_dim, hidden, seed ^ (0xA000 + i as u64));
+                    let gwk = gaussian_null(head_dim, hidden, seed ^ (0xB000 + i as u64));
+                    head_coupling(&gwq, &gwk)
+                },
+                seed,
+                draws,
+            ));
             if let Some(l) = &l_opt {
                 let canon_c = canonical_coupling(&wq_h, &wk_g, l);
-                canon_arms.push(analyze_coupling(&canon_c, seed, draws));
+                canon_arms.push(analyze_coupling(
+                    &canon_c,
+                    |i| {
+                        let gwq = gaussian_null(head_dim, hidden, seed ^ (0xA000 + i as u64));
+                        let gwk = gaussian_null(head_dim, hidden, seed ^ (0xB000 + i as u64));
+                        canonical_coupling(&gwq, &gwk, l)
+                    },
+                    seed,
+                    draws,
+                ));
             }
         }
     }
@@ -295,7 +348,7 @@ mod tests {
 
     #[test]
     fn analyze_runs_real_and_three_nulls_through_the_identical_pipe() {
-        let arm = analyze_coupling(&sample_coupling(), 7, 4);
+        let arm = analyze_coupling(&sample_coupling(), |_i| Array2::<f64>::eye(4), 7, 4);
         for w in [&arm.real, &arm.gaussian, &arm.sv_matched, &arm.sign_randomized] {
             assert!(w.mutual_information.is_finite() && w.mutual_information >= -1e-9);
             assert!(w.negativity.is_finite() && w.negativity >= -1e-9);
@@ -309,22 +362,26 @@ mod tests {
     fn nulls_are_reproducible_under_fixed_seed() {
         // W7 in the apparatus itself: same seed ⇒ identical null (classical reflexivity).
         let c = sample_coupling();
-        let a = analyze_coupling(&c, 7, 4);
-        let b = analyze_coupling(&c, 7, 4);
+        let a = analyze_coupling(&c, |_i| Array2::<f64>::eye(4), 7, 4);
+        let b = analyze_coupling(&c, |_i| Array2::<f64>::eye(4), 7, 4);
         assert_eq!(a.gaussian.negativity, b.gaussian.negativity);
         assert_eq!(a.sv_matched.chsh, b.sv_matched.chsh);
     }
 
     #[test]
-    fn signal_is_real_minus_mean_null() {
+    fn signal_is_real_minus_each_null_and_worst() {
         let arms = vec![
-            analyze_coupling(&sample_coupling(), 1, 2),
-            analyze_coupling(&Array2::<f64>::eye(4), 2, 2),
+            analyze_coupling(&sample_coupling(), |_i| Array2::<f64>::eye(4), 1, 2),
+            analyze_coupling(&Array2::<f64>::eye(4), |_i| Array2::<f64>::eye(4), 2, 2),
         ];
         let s = summarize("raw", &arms);
         assert_eq!(s.heads, 2);
-        // signal.negativity == real.negativity − null.negativity (exact arithmetic gate)
-        assert!((s.signal.negativity - (s.real.negativity - s.null.negativity)).abs() < 1e-12);
-        assert!((s.signal.chsh - (s.real.chsh - s.null.chsh)).abs() < 1e-12);
+        // per-kind signal arithmetic (exact gates)
+        assert!((s.signal_vs_gaussian.negativity - (s.real.negativity - s.gaussian.negativity)).abs() < 1e-12);
+        assert!((s.signal_vs_sv_matched.chsh - (s.real.chsh - s.sv_matched.chsh)).abs() < 1e-12);
+        assert!((s.signal_vs_sign_randomized.gap - (s.real.gap - s.sign_randomized.gap)).abs() < 1e-12);
+        // worst-case = real − max over the three nulls (conservative over-constraint)
+        let worst_neg = s.gaussian.negativity.max(s.sv_matched.negativity).max(s.sign_randomized.negativity);
+        assert!((s.signal_vs_worst.negativity - (s.real.negativity - worst_neg)).abs() < 1e-12);
     }
 }
