@@ -8,7 +8,6 @@ use minilp::{ComparisonOp, OptimizationDirection, Problem};
 /// Contextual fraction of an empirical model via LP. CF = 1 − λ*, where λ* is the
 /// max total weight of a noncontextual (global-section-supported) subdistribution
 /// consistent with every context marginal. CF=0 ⟺ a global section exists.
-#[allow(dead_code)]
 pub fn contextual_fraction(model: &EmpiricalModel) -> f64 {
     let mut prob = Problem::new(OptimizationDirection::Maximize);
     // 16 global assignments g over measurements {0,1,2,3}; bit k = outcome of meas k.

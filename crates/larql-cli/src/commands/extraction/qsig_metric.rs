@@ -7,7 +7,6 @@ use larql_vindex::ndarray::Array2;
 
 /// Apply the whitening M = L⁻ᵀ to the hidden (column) axis of a weight matrix:
 /// returns W·M, i.e. each row r of W solved against Lᵀ. `l` is lower-triangular.
-#[allow(dead_code)]
 fn whiten_rows(w: &Array2<f64>, l: &Array2<f64>) -> Array2<f64> {
     let (rows, d) = (w.shape()[0], w.shape()[1]);
     // Want (W·M)[r,:] = w_row · L⁻ᵀ. As a column: out_rowᵀ = L⁻¹ w_rowᵀ, i.e.
@@ -30,7 +29,6 @@ fn whiten_rows(w: &Array2<f64>, l: &Array2<f64>) -> Array2<f64> {
 }
 
 /// Canonical (metric-corrected) head coupling: C_canon = (W_Q M)(W_K M)ᵀ, M=L⁻ᵀ.
-#[allow(dead_code)]
 pub fn canonical_coupling(wq: &Array2<f64>, wk: &Array2<f64>, l: &Array2<f64>) -> Array2<f64> {
     let wqm = whiten_rows(wq, l);
     let wkm = whiten_rows(wk, l);

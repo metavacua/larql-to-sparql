@@ -8,7 +8,6 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 /// N0 — Gaussian random coupling of the given shape (shape/scale-matched control).
-#[allow(dead_code)] // wired by the qsig runner (Task 8)
 pub fn gaussian_null(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
     let mut rng = StdRng::seed_from_u64(seed);
     // Box–Muller standard normal.
@@ -20,14 +19,12 @@ pub fn gaussian_null(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
 }
 
 /// N2 — real coupling with randomized entry signs (magnitudes preserved).
-#[allow(dead_code)] // wired by the qsig runner (Task 8)
 pub fn sign_randomized_null(real: &Array2<f64>, seed: u64) -> Array2<f64> {
     let mut rng = StdRng::seed_from_u64(seed);
     real.mapv(|v| if rng.gen::<bool>() { v.abs() } else { -v.abs() })
 }
 
 /// Gram–Schmidt orthonormalization of the columns of a square matrix → orthogonal Q.
-#[allow(dead_code)] // wired by the qsig runner (Task 8b)
 #[allow(clippy::needless_range_loop)]
 fn gram_schmidt(mut m: Array2<f64>) -> Array2<f64> {
     let d = m.shape()[0];
@@ -47,7 +44,6 @@ fn gram_schmidt(mut m: Array2<f64>) -> Array2<f64> {
 }
 
 /// A seeded Haar-ish random orthogonal `d×d` matrix (Gram–Schmidt on Gaussian).
-#[allow(dead_code)] // wired by the qsig runner (Task 8b)
 fn random_orthogonal(d: usize, seed: u64) -> Array2<f64> {
     let g = gaussian_null(d, d, seed);
     gram_schmidt(g)
@@ -56,7 +52,6 @@ fn random_orthogonal(d: usize, seed: u64) -> Array2<f64> {
 /// N1 — singular-value-matched null: same singular spectrum as `real`, with
 /// independent Haar-random singular vectors (controls for the spectrum, isolating
 /// any structure beyond it). C_null = U · diag(σ) · Vᵀ.
-#[allow(dead_code)] // wired by the qsig runner (Task 8)
 pub fn sv_matched_null(real: &Array2<f64>, seed: u64) -> Array2<f64> {
     let (rows, cols) = (real.shape()[0], real.shape()[1]);
     // singular values σ = sqrt(eigenvalues of CᵀC), descending, length = min(rows,cols).

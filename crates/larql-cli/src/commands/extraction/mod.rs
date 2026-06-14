@@ -23,6 +23,7 @@ pub mod ov_gate_cmd;
 pub mod predict_cmd;
 pub mod projection_test_cmd;
 pub mod qk_modes_cmd;
+pub mod qsig_cmd;
 pub mod qsig_metric;
 pub mod qsig_nulls;
 pub mod qsig_sheaf;

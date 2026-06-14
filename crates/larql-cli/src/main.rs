@@ -163,6 +163,10 @@ enum Commands {
     /// Per-head entanglement entropy + Hilbertian residual (compressibility); writes entanglement_meta.json.
     Entanglement(entanglement_cmd::EntanglementArgs),
 
+    #[command(next_help_heading = "Build")]
+    /// SP2 falsification apparatus: per-head quantum-signature witnesses vs nulls (writes quantum_signature_meta.json).
+    QuantumSignature(qsig_cmd::QsigArgs),
+
     // ── Query (legacy, pre-LQL graph-file surface) ──────────────────
     #[command(next_help_heading = "Query")]
     /// Query a graph file for facts.
@@ -578,6 +582,7 @@ fn real_main() -> i32 {
         Commands::Canonicalize(args) => canonicalize_cmd::run(args),
         Commands::Hilbertian(args) => hilbertian_cmd::run(args),
         Commands::Entanglement(args) => entanglement_cmd::run(args),
+        Commands::QuantumSignature(args) => qsig_cmd::run(args),
         Commands::Convert(args) => convert_cmd::run(args),
         Commands::Hf(args) => hf_cmd::run(args),
         Commands::Verify(args) => verify_cmd::run(args),
