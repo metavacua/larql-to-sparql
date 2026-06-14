@@ -637,8 +637,12 @@ impl Witnesses {
         let rows = coupling.shape()[0];
         let state = NQubit::from_matrix(coupling);
         let n = state.n();
-        // Pre-registered reduction: the first two qubits (top row bits).
-        let keep: Vec<usize> = (0..2.min(n)).collect();
+        // Pre-registered reduction: ONE row qubit (0) + ONE column qubit (n/2) —
+        // the top row and top column bits of the Choi state. (For a 2×2 coupling,
+        // n=2 ⇒ {0,1} = the full bipartite state.) Keeping two ROW qubits would
+        // trace out the whole column and leave a separable block — the witnesses
+        // must straddle the row|column cut to see the coupling's entanglement.
+        let keep: Vec<usize> = vec![0, n / 2];
         let rho2 = partial_trace(&density_matrix(&state), n, &keep);
         let mi = mutual_information(&rho2);
         let neg = negativity(&rho2);

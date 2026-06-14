@@ -78,7 +78,7 @@ For the verdict to be well-posed, each DOF is pinned and cross-checked:
 | DOF | Unconstrained failure | Constraint |
 |---|---|---|
 | Embedding (row/col→qubit grouping) | artifactual entanglement | multiple nulls through the *same* embedding |
-| Reduction (which 2-qubit pair) | hidden max-over-pairs, multiple comparisons | **pre-registered** pair (qubits {0,1}, top-2 row bits); a pair-sweep, if run, is reported as the full null-calibrated distribution, never the max |
+| Reduction (which 2-qubit pair) | hidden max-over-pairs, multiple comparisons | **pre-registered** pair `{0, n/2}` — **one row qubit + one column qubit** (top row & column bits of the Choi state; for 2×2 ⇒ the full state). Must straddle the row\|column cut (two row qubits trace out the column → separable). No max-over-pairs; a sweep, if run, reports the full null-calibrated distribution, never the max |
 | Null model | one null hides confounds it doesn't control | **multiple independent nulls** (below) |
 | Semantics axis (classical/quantum) | one witness is under-determined | **independent witness battery** (below) + implication lattice |
 
