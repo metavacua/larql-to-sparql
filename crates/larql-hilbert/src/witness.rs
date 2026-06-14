@@ -231,6 +231,12 @@ pub fn peres_mermin_noncontextual_bound() -> f64 {
 /// contextual-fraction cover uses the *identical* reduction as the scalar
 /// witnesses (predicativity).
 pub fn reduced_rho2(coupling: &Array2<f64>) -> Array2<Complex64> {
+    // Pruned/all-zero head: no correlation ⇒ maximally-mixed I/4 (valid, trace 1,
+    // non-contextual) instead of normalizing the zero state (which panics).
+    let fro2: f64 = coupling.iter().map(|&v| v * v).sum();
+    if fro2 < 1e-300 {
+        return Array2::from_diag_elem(4, Complex64::new(0.25, 0.0));
+    }
     let state = NQubit::from_matrix(coupling);
     let n = state.n();
     partial_trace(&density_matrix(&state), n, &[0, n / 2])
@@ -259,6 +265,19 @@ impl Witnesses {
             coupling.shape()[1],
             "coupling must be square (head_dim×head_dim)"
         );
+        // Pruned/all-zero head: provably separable, local, non-contextual.
+        let fro2: f64 = coupling.iter().map(|&v| v * v).sum();
+        if fro2 < 1e-300 {
+            return Witnesses {
+                mutual_information: 0.0,
+                negativity: 0.0,
+                chsh: 0.0,
+                entanglement_entropy: 0.0,
+                gap: 0.0,
+                hilbertian_residual: 0.0,
+                lattice_ok: lattice_check(0.0, 0.0, 0.0),
+            };
+        }
         let rows = coupling.shape()[0];
         let state = NQubit::from_matrix(coupling);
         let rho2 = reduced_rho2(coupling);
@@ -407,5 +426,33 @@ mod tests {
             s > 1e-6,
             "generic coupling reads as entangled via the Choi embedding (S={s} ebits)"
         );
+    }
+
+    #[test]
+    fn from_coupling_on_zero_head_does_not_panic() {
+        // A pruned/all-zero head is provably separable/local/non-contextual.
+        let z = Array2::<f64>::zeros((4, 4));
+        let w = Witnesses::from_coupling(&z);
+        assert_eq!(w.mutual_information, 0.0);
+        assert_eq!(w.negativity, 0.0);
+        assert_eq!(w.chsh, 0.0);
+        assert_eq!(w.entanglement_entropy, 0.0);
+        assert_eq!(w.gap, 0.0);
+        assert_eq!(w.hilbertian_residual, 0.0);
+        assert!(w.lattice_ok, "0/0/0 is a consistent (separable, local) triple");
+    }
+
+    #[test]
+    fn reduced_rho2_on_zero_head_is_maximally_mixed() {
+        // No coupling ⇒ no correlation ⇒ the I/4 maximally-mixed reduction (trace 1),
+        // so the contextual-fraction cover sees a valid, non-contextual model.
+        let z = Array2::<f64>::zeros((4, 4));
+        let rho = reduced_rho2(&z);
+        assert_eq!(rho.shape(), &[4, 4]);
+        let tr: Complex64 = (0..4).map(|i| rho[[i, i]]).sum();
+        assert!((tr.re - 1.0).abs() < 1e-12 && tr.im.abs() < 1e-12);
+        for i in 0..4 {
+            assert!((rho[[i, i]].re - 0.25).abs() < 1e-12);
+        }
     }
 }
