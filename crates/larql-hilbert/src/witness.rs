@@ -7,6 +7,7 @@ use num_complex::Complex64;
 
 use crate::density::{partial_trace, von_neumann_entropy};
 use crate::eig::hermitian_eigenvalues;
+use crate::eig::symmetric_eigenvalues;
 
 #[inline]
 fn c(re: f64, im: f64) -> Complex64 {
@@ -72,6 +73,52 @@ pub fn negativity(rho2: &Array2<Complex64>) -> f64 {
         .sum()
 }
 
+/// The three single-qubit Pauli matrices X, Y, Z (index 0,1,2).
+fn pauli(i: usize) -> [[Complex64; 2]; 2] {
+    match i {
+        0 => [[c(0.0, 0.0), c(1.0, 0.0)], [c(1.0, 0.0), c(0.0, 0.0)]], // X
+        1 => [[c(0.0, 0.0), c(0.0, -1.0)], [c(0.0, 1.0), c(0.0, 0.0)]], // Y
+        _ => [[c(1.0, 0.0), c(0.0, 0.0)], [c(0.0, 0.0), c(-1.0, 0.0)]], // Z
+    }
+}
+
+/// Tr[ρ₂ · (σ_i ⊗ σ_j)] with σ at Pauli indices i, j. Real for Hermitian ρ.
+fn pauli_expectation(rho2: &Array2<Complex64>, i: usize, j: usize) -> f64 {
+    let (si, sj) = (pauli(i), pauli(j));
+    let mut acc = Complex64::new(0.0, 0.0);
+    // (σ_i⊗σ_j)[2a+b, 2a'+b'] = si[a][a'] * sj[b][b']; Tr(ρ·M) = Σ ρ[r,s] M[s,r].
+    for a in 0..2 {
+        for b in 0..2 {
+            for ap in 0..2 {
+                for bp in 0..2 {
+                    let r = 2 * a + b;
+                    let s = 2 * ap + bp;
+                    let m_sr = si[ap][a] * sj[bp][b]; // M[s, r]
+                    acc += rho2[[r, s]] * m_sr;
+                }
+            }
+        }
+    }
+    acc.re
+}
+
+/// W3 — maximal CHSH value via the Horodecki criterion: `2√M`, where `M` is the
+/// sum of the two largest eigenvalues of `TᵀT`, `T_ij = Tr[ρ₂ σ_i⊗σ_j]`.
+/// Violates the classical bound iff `M > 1` (Tsirelson caps `M ≤ 2` → CHSH ≤ 2√2).
+pub fn chsh_max(rho2: &Array2<Complex64>) -> f64 {
+    let mut t = Array2::<f64>::zeros((3, 3));
+    for i in 0..3 {
+        for j in 0..3 {
+            t[[i, j]] = pauli_expectation(rho2, i, j);
+        }
+    }
+    let tt = t.t().dot(&t);
+    let mut ev = symmetric_eigenvalues(&tt);
+    ev.sort_by(|x, y| y.partial_cmp(x).unwrap()); // descending
+    let m = ev[0].max(0.0) + ev[1].max(0.0);
+    2.0 * m.sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +147,24 @@ mod tests {
     fn negativity_werner_entangled_above_one_third() {
         assert!(negativity(&werner_state(0.6)) > 1e-6, "p=0.6 Werner is entangled");
         assert!(negativity(&werner_state(0.2)).abs() < 1e-9, "p=0.2 Werner is separable");
+    }
+
+    #[test]
+    fn chsh_bell_saturates_tsirelson() {
+        assert!((chsh_max(&bell_rho2()) - 2.0 * 2.0_f64.sqrt()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn chsh_product_does_not_violate() {
+        assert!(chsh_max(&product_rho2()) <= 2.0 + 1e-9);
+    }
+
+    #[test]
+    fn chsh_werner_entangled_but_local_cell() {
+        // p=0.6: entangled (negativity>0) yet CHSH ≤ 2 — the Werner cell proving
+        // negativity (W2) and CHSH (W3) are independent witnesses.
+        assert!(negativity(&werner_state(0.6)) > 1e-6);
+        assert!(chsh_max(&werner_state(0.6)) <= 2.0 + 1e-9);
     }
 
     #[test]

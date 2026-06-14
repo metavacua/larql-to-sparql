@@ -93,4 +93,4 @@ pub use register::{classical_bits, ClassicalRegister, CompressibilityGap, NRegis
 pub mod density;
 pub use density::{density_matrix, partial_trace, von_neumann_entropy};
 pub mod witness;
-pub use witness::{bell_rho2, mutual_information, negativity, product_rho2, werner_state};
+pub use witness::{bell_rho2, chsh_max, mutual_information, negativity, product_rho2, werner_state};
