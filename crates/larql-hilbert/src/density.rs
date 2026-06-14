@@ -8,11 +8,6 @@ use crate::eig::hermitian_eigenvalues;
 use crate::entropy::spectral_entropy;
 use crate::nqubit::NQubit;
 
-#[inline]
-fn c(re: f64, im: f64) -> Complex64 {
-    Complex64::new(re, im)
-}
-
 /// Pure-state density matrix ρ = |ψ⟩⟨ψ| of a (normalized) state.
 pub fn density_matrix(state: &NQubit) -> Array2<Complex64> {
     let sn = state.normalized();
@@ -76,6 +71,11 @@ pub fn von_neumann_entropy(rho: &Array2<Complex64>) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[inline]
+    fn c(re: f64, im: f64) -> Complex64 {
+        Complex64::new(re, im)
+    }
 
     fn bell() -> NQubit {
         let s = 1.0 / 2.0_f64.sqrt();
