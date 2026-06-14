@@ -119,6 +119,29 @@ pub fn chsh_max(rho2: &Array2<Complex64>) -> f64 {
     2.0 * m.sqrt()
 }
 
+const LATTICE_TOL: f64 = 1e-6;
+
+/// Check the witness implication lattice from raw values: nonlocal ⟹ entangled
+/// ⟹ correlated (and the dual product ⟹ separable ⟹ local). Returns false if
+/// any implication is violated — which would indict the apparatus, not the data.
+pub fn lattice_check(mutual_info: f64, neg: f64, chsh: f64) -> bool {
+    let correlated = mutual_info > LATTICE_TOL;
+    let entangled = neg > LATTICE_TOL;
+    let nonlocal = chsh > 2.0 + LATTICE_TOL;
+    if nonlocal && !entangled {
+        return false; // nonlocal ⟹ entangled
+    }
+    if entangled && !correlated {
+        return false; // entangled ⟹ correlated
+    }
+    true
+}
+
+/// Evaluate W1–W3 on ρ₂ and check the lattice.
+pub fn lattice_consistent(rho2: &Array2<Complex64>) -> bool {
+    lattice_check(mutual_information(rho2), negativity(rho2), chsh_max(rho2))
+}
+
 /// Two-qubit Pauli product σ_p ⊗ σ_q as a 4×4 matrix; p,q ∈ {0=I,1=X,2=Y,3=Z}.
 fn pauli2(p: usize, q: usize) -> Array2<Complex64> {
     let s = |k: usize| -> [[Complex64; 2]; 2] {
@@ -251,6 +274,21 @@ mod tests {
         // negativity (W2) and CHSH (W3) are independent witnesses.
         assert!(negativity(&werner_state(0.6)) > 1e-6);
         assert!(chsh_max(&werner_state(0.6)) <= 2.0 + 1e-9);
+    }
+
+    #[test]
+    fn lattice_holds_on_poles_and_werner() {
+        for rho in [bell_rho2(), product_rho2(), werner_state(0.6), werner_state(0.2)] {
+            assert!(lattice_consistent(&rho), "implication lattice must hold");
+        }
+    }
+
+    #[test]
+    fn lattice_detects_an_inconsistent_triple() {
+        // nonlocal but separable is impossible → inconsistent (indicts the apparatus).
+        assert!(!lattice_check(0.0 /*MI*/, 0.0 /*N*/, 2.83 /*CHSH>2*/));
+        // a consistent triple (correlated, entangled, nonlocal) holds.
+        assert!(lattice_check(2.0, 0.5, 2.83));
     }
 
     #[test]
