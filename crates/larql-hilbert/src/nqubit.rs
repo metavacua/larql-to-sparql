@@ -211,8 +211,8 @@ mod tests {
         for idx in [0usize, 3, 5, 6, 7] {
             assert!(w.amp[idx].norm() < 1e-12, "idx {idx} should be empty");
         }
-        // Explicit convention check: qubit 0 excited ⇒ |100> ⇒ index 4.
-        assert!((w.amp[1usize << (3 - 1 - 0)].re - amp).abs() < 1e-12);
+        // Explicit convention check: qubit 0 excited ⇒ bit (n−1−0)=2 ⇒ |100> ⇒ index 4.
+        assert!((w.amp[1usize << (3 - 1)].re - amp).abs() < 1e-12);
     }
 
     #[test]

@@ -83,6 +83,7 @@ fn pauli(i: usize) -> [[Complex64; 2]; 2] {
 }
 
 /// Tr[ρ₂ · (σ_i ⊗ σ_j)] with σ at Pauli indices i, j. Real for Hermitian ρ.
+#[allow(clippy::needless_range_loop)] // explicit 2×2 tensor index arithmetic
 fn pauli_expectation(rho2: &Array2<Complex64>, i: usize, j: usize) -> f64 {
     let (si, sj) = (pauli(i), pauli(j));
     let mut acc = Complex64::new(0.0, 0.0);

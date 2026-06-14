@@ -20,6 +20,7 @@ pub struct EmpiricalModel {
 }
 
 /// Build the standard CHSH/Bell empirical model from a 2-qubit density matrix.
+#[allow(clippy::needless_range_loop)] // explicit 2×2 tensor index arithmetic
 pub fn bell_empirical_model(rho2: &Array2<Complex64>) -> EmpiricalModel {
     // measurement directions on the Bloch sphere (x,y,z)
     let s2 = 1.0 / 2.0_f64.sqrt();
