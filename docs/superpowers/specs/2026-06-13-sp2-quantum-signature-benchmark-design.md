@@ -1,4 +1,4 @@
-# SP2 — Predicative Falsification Benchmark for Quantum Signatures in LMs — Design Spec
+# SP2 — Predicative, Over-Constrained Falsification Apparatus for Quantum Signatures in LMs — Design Spec
 
 **Status:** design, pending implementation plan
 **Date:** 2026-06-13
@@ -6,76 +6,92 @@
 
 ## Objective
 
-Experimentally test — **by attempting to falsify** — whether trained LLM attention heads carry quantum structure *beyond what a generic random matrix already exhibits*. The benchmark does **not** seek to confirm "LLMs are quantum"; it seeks **conclusive negatives** (ruling hypotheses out, having ruled out experimental error). It also re-adjudicates the earlier, null-free "raw SmolLM2 attention is not quantum-compressible" claim, which this design shows was under-determined.
+Experimentally test — **by attempting to falsify** — whether trained LLM attention heads carry quantum structure *beyond what a generic random matrix already exhibits*, with an apparatus that is **formally well-posed**: enough independent constraints that the classical/quantum verdict is uniquely (over-)determined rather than inconclusive, inconsistent, under-determined, over-determined, or incomplete. It re-adjudicates the earlier, null-free "raw SmolLM2 attention is not quantum-compressible" claim, which this design shows was under-determined.
 
-## Methodological principles (these govern the whole design)
+## Governing principles (non-negotiable, in priority order)
 
-1. **Predicativity.** No comparison may be circular. Every empirical source is pushed through the *identical* `coupling → from_matrix → partial-trace → witness` pipe; controls are constructed *independently* of the property being tested. The signal is **real − null**, not "real vs a baseline defined by the absence of the effect."
+0. **Formal correctness over engineering.** Where formal correctness of the theoretical/experimental apparatus conflicts with software-engineering optimization, scope narrowing, or convenience, we side **unambiguously with formal correctness.** Scope is determined by what makes the experiment well-posed, not by build cost. (Implementation may be *staged*; conclusions may not be drawn from a partial apparatus.)
+1. **Predicativity.** No circular comparisons. Every empirical source flows through the *identical* `coupling → embed → reduce → witness` pipe; controls are constructed *independently* of the property tested. The signal is **real − null**, never "vs a baseline defined by the effect's absence."
+2. **Dual testing of dualizable criteria.** Neither pole of any dualizable axis is assumed; two *analytic* poles bracket the axis and every empirical source is *placed by measurement*. The random null is an *unknown to be placed*, not the classical anchor.
+3. **Falsification-first; conclusive negatives are the product.** Positive results are confirmation-bias-prone and (under the embedding confound) cheap → reported only as "not ruled out." Valued outputs are **conclusive negatives**, each **licensed by positive controls** that prove the witness detects the effect and does not false-positive.
+4. **Over-constraint via multi-dimensional independent checks.** A non-trivial classical/quantum experiment needs *multiple constraints on its degrees of freedom* to be statable and solvable with a unique/robust answer. We therefore require a **battery of independent witnesses** and **multiple independent nulls**, plus the **logical-implication lattice among witnesses** as apparatus self-checks. Maximizing the number of independent refutation surfaces is the design goal; a single elementary test is rejected as inconclusive by construction.
 
-2. **Dual testing of dualizable criteria.** For each dualizable axis (classical↔quantum, independent↔dependent, separable↔entangled, …) neither pole is assumed. Two **analytically-known poles** bracket the axis; every empirical source is *placed on the axis by measurement*. If you assume one pole you must run the test that detects its dual — so the assumption is falsifiable.
+## The confound this apparatus defeats
 
-3. **Falsification-first; conclusive negatives are the product.** Positive results (a real head "violating" a bound) are confirmation-bias-prone and, given the embedding confound, cheap — reported only as *"not ruled out; needs a stronger null."* The valued outputs are **conclusive negatives** (e.g. "this reduction is provably separable," or "real is statistically indistinguishable from the random null"), each **licensed by positive controls** that prove the witness can detect the effect and does not false-positive.
+`from_matrix(C)` normalizes any real matrix and reads it as a bipartite pure state; a *generic* matrix so read is highly entangled. So a real coupling will *generically* "look entangled / violate CHSH" — not from training but from the embedding. And `entanglement_entropy_bipartition(from_matrix(C))` equals the spectral entropy of `C`'s singular values, which is near-maximal for a Gaussian (Marchenko–Pastur) matrix → the prior "not quantum-compressible" finding **had no null and does not distinguish SmolLM2 from a random matrix.** The apparatus below removes this by passing independently-constructed nulls through the identical pipe and cross-checking multiple witnesses.
 
-## The confound this design exists to defeat
+## The degrees of freedom that must be constrained
 
-`from_matrix(C)` normalizes any real matrix and reads it as a bipartite pure state; a *generic* matrix so read is highly entangled (for 2-qubit pure states max-CHSH and negativity are monotone in concurrence). Consequences:
-- A real attention coupling read this way will *generically* "look entangled / violate CHSH" — **not** because of training, but because non-degenerate matrices are generically entangled under the embedding.
-- The earlier `entanglement_entropy_bipartition(from_matrix(C))` equals the spectral entropy of `C`'s singular values; a Gaussian `C` has a near-maximal (Marchenko–Pastur) singular spectrum → also reads "not quantum-compressible." **The prior finding had no null and almost certainly does not distinguish SmolLM2 from a random matrix.**
+For the verdict to be well-posed, each DOF is pinned and cross-checked:
+| DOF | Unconstrained failure | Constraint |
+|---|---|---|
+| Embedding (row/col→qubit grouping) | artifactual entanglement | multiple nulls through the *same* embedding |
+| Reduction (which 2-qubit pair) | hidden max-over-pairs, multiple comparisons | **pre-registered** pair (qubits {0,1}, top-2 row bits); a pair-sweep, if run, is reported as the full null-calibrated distribution, never the max |
+| Null model | one null hides confounds it doesn't control | **multiple independent nulls** (below) |
+| Semantics axis (classical/quantum) | one witness is under-determined | **independent witness battery** (below) + implication lattice |
 
-The fix is principle 1: the random-matrix null passes through the identical pipe, and the analytic poles (principle 2) calibrate the witnesses.
+## Witness battery (independent probes — full set required)
 
-## Architecture
+All operate on the 2-qubit reduced state ρ₂ (and the full pure state where noted); all are exact, deterministic functions of a density matrix (no sampling noise). All reuse `larql_hilbert::eig::hermitian_eigenvalues`.
 
-A battery of **exact, deterministic witnesses** (functions of a density matrix — no sampling noise) on a shared pipe, evaluated over **two analytic poles** (positive-control gates) and **two empirical sources** (placed by measurement).
+| # | Witness | Axis | Conclusive direction | Range / bound |
+|---|---|---|---|---|
+| W1 | **Mutual information** `I(A:B)=S(ρ_A)+S(ρ_B)−S(ρ₂)` | independent ↔ dependent | `I=0` ⟺ **product/independent** (conclusive) | 0 … 2 bits |
+| W2 | **Negativity** (PPT / Peres–Horodecki) | separable ↔ entangled | `N=0` ⟺ **provably separable** (nec.&suff. for 2-qubit; conclusive) | 0 … 0.5 |
+| W3 | **CHSH via Horodecki** `2√M` | local ↔ nonlocal | non-violation inconclusive; violation confound-prone | 2 … 2√2 |
+| W4 | **Entanglement entropy** `S(ρ_A)` of the full pure state across the cut | low-Schmidt ↔ high-Schmidt | bipartite entanglement of the whole state | 0 … log₂(min dim) |
+| W5 | **Compressibility gap** `H−S` (Shannon of flattened \|C\|² minus W4) | compressible ↔ incompressible | the prior metric, now null-controlled | ≥ 0 |
+| W6 | **Hilbertian residual** `‖[C,J]‖/‖C‖` (split-half J) | real-linear ↔ complex-linear | *independent of correlation* — does the coupling admit a unitary/coherent (quantum) reading | 0 … 2 |
 
-### Shared pipe
-`source → C (head_dim×head_dim, or a synthesized state) → from_matrix → partial trace to a pre-registered 2-qubit pair → ρ₂ (4×4 Hermitian) → witnesses`.
+These are **not equivalent**: correlation (W1) ⊋ entanglement (W2,W4) ⊋ nonlocality (W3) is a strict hierarchy for mixed states, and coherence/complex-structure (W6) is an orthogonal axis to correlation entirely. Measuring all six **over-constrains** the verdict and *locates* each source within the hierarchy (e.g. "real heads: correlated but separable, local, and not complex-linear" is a specific, well-determined classical placement).
 
-### Witnesses (v1)
-| Axis | Witness | Conclusive direction | Bounds |
-|---|---|---|---|
-| separable ↔ entangled | **Negativity** (PPT / Peres–Horodecki) — *the lead* | negativity = 0 ⟺ **provably separable** (necessary & sufficient for 2-qubit) — a conclusive negative | 0 (separable) … 0.5 (max) |
-| classical ↔ quantum | **CHSH via Horodecki** `2√M`, `M` = sum of top-2 eigenvalues of `TᵀT`, `T_ij = Tr[ρ₂ σ_i⊗σ_j]` | non-violation inconclusive; violation confound-prone (reported, not claimed) | 2 (classical) … 2√2 |
-| independent ↔ dependent | **Mutual information** `S(ρ_A)+S(ρ_B)−S(ρ₂)` | MI = 0 ⟺ **product / independent** — a conclusive negative | 0 … 2 bits |
+## Implication lattice (apparatus self-checks — refutation surfaces for the experiment itself)
 
-All three reuse `larql_hilbert::eig::hermitian_eigenvalues` (partial transpose eigenvalues for negativity; subsystem entropies for MI).
+The witnesses satisfy logical implications that **must** hold; checking them on every source (and exactly on the analytic poles) is a multi-dimensional consistency constraint. A violation indicts the *apparatus*, not the hypothesis:
+- nonlocal ⟹ entangled ⟹ correlated: `M>1 ⟹ N>0 ⟹ I>0`.
+- product ⟹ separable ⟹ local: `I=0 ⟹ N=0 ⟹ M≤1`.
+- Werner-type gap: states with `N>0, M≤1` (entangled, not nonlocal) must be representable — confirms W2 and W3 are genuinely independent, not redundant.
 
-### Positive-control gates (analytic poles — must pass or the witness is void)
-- **Classical/independent/separable pole:** product & dephased QLM states → negativity 0, MI 0, CHSH ≤ 2.
-- **Quantum/dependent/entangled pole:** Bell/GHZ/Dicke QLM states → negativity > 0, MI > 0, CHSH = 2√2 (Bell).
+These checks are first-class tests, not afterthoughts: they are how we rule out experimental error in the apparatus.
 
-These rule out experimental error: they prove each witness detects the effect when present and does not false-positive. A negative on real data is interpretable only after its witness passes these gates.
+## Multiple independent nulls (each removes a different confound)
 
-### Empirical sources (placed by measurement — neither assumed)
-- **Random-matrix null:** shape/scale-matched Gaussian `W_Q,W_K → C`, same pipe. An *unknown* (the advisor's point: it likely lands on the quantum side via the embedding — that is data, not a flaw).
-- **Real SmolLM2 heads:** the 480 per-head couplings.
+Real data must exceed **every applicable null** on a witness to claim structure on that axis (over-constraint across nulls):
+- **N0 Gaussian** — shape/scale-matched `W_Q,W_K → C`; controls matrix dimensions/scale (MP spectrum).
+- **N1 singular-value-matched** — real `C`'s singular spectrum with Haar-random singular vectors; controls *for the spectrum*, isolating singular-vector/structural content.
+- **N2 sign/phase-randomized** — real `C` with randomized entry signs (magnitudes preserved); controls sign structure.
 
-### Pre-registration (rules out a hidden second maximization)
-The 2-qubit reduction is **fixed before looking at data**: partial-trace the `from_matrix` state down to **qubits {0, 1}** (the two most-significant row bits, big-endian) — one deterministic pair, applied identically to poles, null, and real heads. **No max-over-pairs** (that would stack a maximization on Horodecki's own and inflate violation rates / create multiple-comparison bias). A sensitivity sweep over *all* pairs, if ever run, is reported as the full null-calibrated distribution over pairs, never as the most-violating pair.
+## Analytic poles (positive-control validity gates — exact)
 
-## What the benchmark reports
+- **Classical pole** — product & dephased QLM states → `I=0, N=0, M≤2, W6` real-linear (residual 0 for the appropriate real coupling).
+- **Quantum pole** — Bell/GHZ/Dicke QLM states → Bell: `I=2, N=0.5, M=2 (CHSH 2√2)`; complex-structured couplings → high W6.
+Each witness must reproduce its pole values exactly, or it is void.
 
-Per witness, over the head population: the **real − null** distribution and where real and null fall relative to **both** analytic poles. The headline outputs are the **conclusive negatives**:
-- *"Real heads are statistically indistinguishable from the random null on witness W"* (real − null ≈ 0, with a stated effect-size/power floor and the random ensemble as the null distribution) → falsifies "training induces quantum structure beyond generic-matrix-ness" for W.
-- *"Real head h's 2-qubit reduction is provably separable"* (negativity 0) → conclusive non-entanglement for that head.
+## Well-posedness criterion (when a verdict may be stated)
 
-A real-≠-null result leaning quantum is reported as **"not ruled out — requires the singular-value-matched null and replication before any confirmation,"** never as a positive finding.
+A classical/quantum verdict for a source is admissible **only** when: (a) all six witnesses pass their analytic-pole gates; (b) the implication lattice holds on that source; (c) the source is compared against **all** applicable nulls; and (d) the witnesses **agree** (over-determined) — or, where they disagree, the disagreement is itself located in the hierarchy (e.g. entangled-but-local) and reported as the verdict. A result from a partial apparatus (missing witnesses or nulls) is **inconclusive by construction** and may not be reported as a finding.
 
-This directly re-adjudicates "not quantum-compressible": the same entanglement/gap quantities, now with the random null, answer *is SmolLM2 distinguishable from random?* rather than assuming the bare number is meaningful.
+## Reporting
+
+Per source, the full witness×null table, the pole placements, and the implication-lattice check. Headline outputs are **conclusive negatives** ("real is statistically indistinguishable from null Nk on witness Wj, with effect-size/power floor"; "head h's reduction is provably separable, N=0"). A real-≠-null result leaning quantum is reported as "not ruled out — survives nulls N0/N1/N2? needs replication," never as a positive finding. This re-adjudicates "not quantum-compressible" by construction.
 
 ## Components
 
-- **larql-hilbert (pure, additive):** `partial_trace_2q(state, pair) -> Array2<Complex64>` (4×4 ρ₂); `negativity(rho2) -> f64` (PPT via partial transpose + `hermitian_eigenvalues`); `correlation_matrix(rho2) -> Array2<f64>` + `chsh_max(rho2) -> f64` (Horodecki); `mutual_information(rho2) -> f64`. Positive-control unit tests (Bell / product / GHZ exact values).
-- **larql-cli (bridges + real weights):** a benchmark runner — for each head, compute the battery on real `C` and a shape-matched random null; aggregate real−null over the head population; emit a report (JSON + summary). Pre-registered reduction. Optionally a `larql quantum-signature <vindex>` command mirroring `larql entanglement`.
-- **Harness:** demo (the analytic poles + a small synthetic real-vs-null illustration, CI-safe) + integration tests (positive-control gates; real-vs-null on the SmolLM2 vindex when present, gated like the existing real-vindex tests).
+- **larql-hilbert (pure, additive):** `partial_trace_2q`; `mutual_information`; `negativity` (partial transpose + `hermitian_eigenvalues`); `correlation_matrix` + `chsh_max` (Horodecki); reuse `entanglement_entropy`, the gap, and `commutator_residual`/`split_half_j` (W6). Density-matrix utilities as needed.
+- **Implication-lattice + pole tests:** exact unit tests asserting pole values *and* the lattice implications (incl. a Werner state for the N>0,M≤1 cell).
+- **Null generators (larql-cli or a test-support module):** N0/N1/N2 through the identical pipe.
+- **Runner (larql-cli):** per head, the full witness×null battery on real `C`; aggregate over the head population; emit the report. Pre-registered reduction. Optionally `larql quantum-signature <vindex>`.
+- **Harness:** demo (poles + lattice + a small real-vs-null illustration, CI-safe) + integration tests (pole gates, lattice, real-vs-null on the SmolLM2 vindex when present).
 
-## Out of scope (v1)
+## Implementation staging (engineering only — does not narrow the apparatus)
 
-- The compressible↔incompressible axis as a *fourth* dual witness (the re-adjudication reuses the existing entanglement/gap, so the axis-4 formalization is a follow-on).
-- The **singular-value-matched null** (controls for the spectrum, isolating structure beyond it) — a stronger null, added once v1's Gaussian-null result is in hand.
-- Any physical-nonlocality *claim*. This is a structural/spectral comparison of weight matrices read as states; "CHSH violation" here is a property of the embedded coupling, calibrated against poles and the null — never a certification that the transformer is a quantum device.
+The build may proceed witness-by-witness and null-by-null, but **no experimental verdict is claimed until the full apparatus (all six witnesses, all three nulls, the lattice, the poles) is in place** — because a partial apparatus is under-determined. First checkpoint: run the verification that a Gaussian-random `C` violates via the embedding; if it does (expected), the random nulls are mandatory and the diagonal baseline is formally disqualified.
+
+## Out of scope
+
+- Physical-nonlocality *claims*: this is a structural/spectral comparison of weight matrices read as states, calibrated against poles and nulls — never a certification that a transformer is a quantum device.
 - SP3 (QLM⇄vindex compiler/distiller).
 
 ## Testing strategy
 
-TDD. The witnesses are exact, so unit tests assert against analytic values (Bell negativity = 0.5, CHSH = 2√2, MI = 2 bits; product/dephased → 0, 0, ≤2). The first implementation checkpoint runs **the advisor's verification**: confirm a Gaussian-random `C` violates via the embedding — if it does (expected), the random null is *mandatory* and the diagonal-classical baseline is formally disqualified, validating the whole predicative design. Real-vindex tests are `LARQL_TEST_VINDEX`-gated; the synthetic poles + null run always in CI.
+TDD. Witnesses are exact → unit tests assert analytic values (Bell N=0.5, CHSH 2√2, I=2; product → 0,0,≤2) and the implication lattice (including a Werner-state cell). Real-vindex tests are `LARQL_TEST_VINDEX`-gated; poles, lattice, and nulls run always in CI.
