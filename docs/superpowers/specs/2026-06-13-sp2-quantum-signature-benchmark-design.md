@@ -103,6 +103,65 @@ quantum-faithful successor would lift the *metalanguage itself* to Zizzi's QML
 (complex assertion-degrees, quantum connectives) — recorded here as future scope
 (cf. SP3) so the semi-classical commitment is never mistaken for the whole truth.
 
+## The generalized T-schema, operationally: the T-schema / T-norm / Zizzi trichotomy
+
+Zizzi's liar result gives the **operational** form of the generalized T-schema.
+In Sambin's Basic logic, self-reference is carried by an **entanglement connective**
+(a *multiplicative* / substructural connective), and the metatheorem is its
+**non-idempotence**: a *self-entangled* sentence **loses its own identity**
+(`A ⊗ A ≠ A`), so the liar fixed point `X ⟺ ¬X` no longer detonates — it is a
+provable statement *about* the metalanguage, not a paradox. The operational
+criterion follows: **an operation is NOT subject to the classical (paradoxical,
+reflexive) self-reference schema exactly when its self-composition is
+non-idempotent** — when it cannot be contracted/duplicated. This is the same
+resource-sensitivity as linear logic's multiplicative `⊗` and as quantum
+**no-cloning** (cf. the constructive-measurement / `LinearQubit: !Copy` line):
+no-cloning = non-idempotence = the regime where the liar dissolves.
+
+Three truth-degree schemata then sit in a strict hierarchy — and the apparatus
+measures a *shadow* of the top one:
+
+| Schema | Degrees | Self-composition | Self-identity | Liar |
+|---|---|---|---|---|
+| **T-schema** (classical, cartesian) | units `{0,1}` | `∧` **idempotent** (contraction) | reflexive `x=x` axiom | paradox |
+| **T-norm** (fuzzy) | real `[0,1]` | a continuous t-norm; no phase/interference | t-norm-dependent | — |
+| **Zizzi schema** (quantum) | complex `λ`, Born `|λ|²` | entanglement `⊗` **non-idempotent**; interference | superposed reflexive/irreflexive | **metatheorem** |
+
+with two formalizable limits: **dephase** the Zizzi schema (drop phases → real
+non-negative degrees) and it degenerates to the **t-norm / real-weight** level;
+**measure** it (Born collapse to `{0,1}`) and it degenerates to the **T-schema**,
+where unit-degree-1 reflexivity forces irreflexivity to 0 — the paraconsistent
+`A ∧ ¬A` carried by conjugate degrees `λ, λ*` collapses to classical `A ⊕ ¬A`,
+one horn taking all the value. (The t-norm level is itself the `{0,1}`-limit of
+the T-schema.) The Zizzi schema is thus **neither** a T-schema **nor** a t-norm,
+but has each as a specific limit.
+
+**Bridge to what the apparatus measures.** A complex assertion-degree `λ ∈ ℂ` is
+the generalization of a real-valued model weight `w ∈ ℝ`; where `λ` is real the
+two agree *mutatis mutandis*. SP2 only ever sees the **real weights = the dephased
+(t-norm-level) shadow** — which is exactly why its identity layer is semi-classical.
+Three witnesses operationalize *how far an operation has collapsed* from the complex
+Zizzi-degree structure toward the real shadow (the "certain properties" of the
+criterion above):
+- **W6 Hilbertian residual = 2·(ℂ-antilinear fraction)** — departure from
+  complex-linearity; the antilinear part *is* the dephasing. Low residual ⟹ the
+  complex-degree structure survives the real-weight readout.
+- **Contextual fraction** — a classical global section (T-schema collapse,
+  non-contextual / extensional) vs irreducible contextuality (the intensional,
+  non-idempotent regime).
+- **W7 reproducibility** — idempotent unit-degree-1 reflexivity (collapsed to the
+  classical schema) vs the non-reproducible / non-idempotent entanglement schema.
+
+So SP2 measures the shadow *and the residue* of the would-be complex structure;
+**SP3** (the QLM⇄vindex compiler/distiller) is the reflection/lift itself —
+synthesis = real weights → complex assertion-degrees via the generalized
+T-schema's reflection principle; distillation = the measurement collapse back.
+The fully-quantum QML metalanguage is realized there, not here.
+
+Sources: [non-idempotent entanglement connective for self-reference](https://www.academia.edu/109030363/Yablo_s_Paradox_the_Liar_and_Referential_Contradictions_from_a_Graph_Theory_Point_of_View);
+[Tarski T-schema baseline](https://arxiv.org/pdf/2011.01608);
+[From Quantum Metalanguage to the Logic of Qubits](https://arxiv.org/abs/1003.5976).
+
 ## The confound this apparatus defeats
 
 `from_matrix(C)` normalizes any real matrix and reads it as a bipartite pure state; a *generic* matrix so read is highly entangled. So a real coupling will *generically* "look entangled / violate CHSH" — not from training but from the embedding. And `entanglement_entropy_bipartition(from_matrix(C))` equals the spectral entropy of `C`'s singular values, which is near-maximal for a Gaussian (Marchenko–Pastur) matrix → the prior "not quantum-compressible" finding **had no null and does not distinguish SmolLM2 from a random matrix.** The apparatus below removes this by passing independently-constructed nulls through the identical pipe and cross-checking multiple witnesses.
