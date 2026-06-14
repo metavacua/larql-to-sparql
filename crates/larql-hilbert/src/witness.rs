@@ -119,9 +119,95 @@ pub fn chsh_max(rho2: &Array2<Complex64>) -> f64 {
     2.0 * m.sqrt()
 }
 
+/// Two-qubit Pauli product σ_p ⊗ σ_q as a 4×4 matrix; p,q ∈ {0=I,1=X,2=Y,3=Z}.
+fn pauli2(p: usize, q: usize) -> Array2<Complex64> {
+    let s = |k: usize| -> [[Complex64; 2]; 2] {
+        match k {
+            0 => [[c(1.0, 0.0), c(0.0, 0.0)], [c(0.0, 0.0), c(1.0, 0.0)]],
+            1 => [[c(0.0, 0.0), c(1.0, 0.0)], [c(1.0, 0.0), c(0.0, 0.0)]],
+            2 => [[c(0.0, 0.0), c(0.0, -1.0)], [c(0.0, 1.0), c(0.0, 0.0)]],
+            _ => [[c(1.0, 0.0), c(0.0, 0.0)], [c(0.0, 0.0), c(-1.0, 0.0)]],
+        }
+    };
+    let (a, b) = (s(p), s(q));
+    let mut m = Array2::<Complex64>::zeros((4, 4));
+    for i0 in 0..2 { for i1 in 0..2 { for j0 in 0..2 { for j1 in 0..2 {
+        m[[2 * i0 + i1, 2 * j0 + j1]] = a[i0][j0] * b[i1][j1];
+    }}}}
+    m
+}
+
+/// The 9 Peres–Mermin observables (I=0,X=1,Y=2,Z=3), row-major 3×3:
+///  X⊗I  I⊗X  X⊗X
+///  I⊗Z  Z⊗I  Z⊗Z
+///  X⊗Z  Z⊗X  Y⊗Y
+fn pm_observables() -> [(usize, usize); 9] {
+    [(1,0),(0,1),(1,1), (0,3),(3,0),(3,3), (1,3),(3,1),(2,2)]
+}
+
+/// The 6 contexts (3 rows then 3 columns) as index-triples into pm_observables().
+fn pm_contexts() -> [[usize; 3]; 6] {
+    [[0,1,2],[3,4,5],[6,7,8], [0,3,6],[1,4,7],[2,5,8]]
+}
+
+/// The sign s_c ∈ {+1,−1} such that the product of a context's observables = s_c·I.
+/// Self-checks that the product really is proportional to identity.
+fn pm_context_sign(ctx: &[usize; 3], obs: &[(usize, usize); 9]) -> f64 {
+    let mut prod = Array2::<Complex64>::eye(4);
+    for &k in ctx {
+        let (p, q) = obs[k];
+        prod = prod.dot(&pauli2(p, q));
+    }
+    let s = prod[[0, 0]].re;
+    // assert prod == s·I (the PM algebra guarantees this).
+    for i in 0..4 {
+        for j in 0..4 {
+            let expected = if i == j { s } else { 0.0 };
+            debug_assert!((prod[[i, j]] - c(expected, 0.0)).norm() < 1e-9,
+                "PM context product must be ±I");
+        }
+    }
+    s.signum()
+}
+
+/// W8 quantum value: Σ_c χ_c·⟨∏ context⟩ with χ_c = s_c (the ±I sign). Each term
+/// is s_c·s_c = +1 (state-independent) ⇒ total 6.
+pub fn peres_mermin_quantum_value() -> f64 {
+    let obs = pm_observables();
+    pm_contexts().iter().map(|ctx| {
+        let s = pm_context_sign(ctx, &obs);
+        s * s // χ_c · ⟨B_c⟩ = +1
+    }).sum()
+}
+
+/// W8 noncontextual bound: max over the 2⁹ deterministic ±1 value-assignments of
+/// Σ_c χ_c · ∏_{k∈c} v(k). Kochen–Specker forces this to 4 < 6.
+pub fn peres_mermin_noncontextual_bound() -> f64 {
+    let obs = pm_observables();
+    let contexts = pm_contexts();
+    let signs: Vec<f64> = contexts.iter().map(|ctx| pm_context_sign(ctx, &obs)).collect();
+    let mut best = f64::NEG_INFINITY;
+    for assign in 0..(1u32 << 9) {
+        let v = |k: usize| if (assign >> k) & 1 == 1 { 1.0 } else { -1.0 };
+        let val: f64 = contexts.iter().zip(&signs)
+            .map(|(ctx, &chi)| chi * v(ctx[0]) * v(ctx[1]) * v(ctx[2]))
+            .sum();
+        best = best.max(val);
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peres_mermin_quantum_exceeds_noncontextual_bound() {
+        // State-independent KS contextuality: quantum 6 > noncontextual 4.
+        assert!((peres_mermin_quantum_value() - 6.0).abs() < 1e-9);
+        assert!((peres_mermin_noncontextual_bound() - 4.0).abs() < 1e-9);
+        assert!(peres_mermin_quantum_value() > peres_mermin_noncontextual_bound());
+    }
 
     #[test]
     fn mutual_information_bell_is_two_bits() {
