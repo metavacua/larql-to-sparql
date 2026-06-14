@@ -132,11 +132,16 @@ distribution is the state's `born_probs()`.
 
 ---
 
-### Requirement: REQ-QB-006 — Quantum numbers completely specify the vindex (round-trip)
+### Requirement: REQ-QB-006 — Quantum numbers specify the vindex on the symmetric stratum (round-trip)
 
-The artifact SHALL persist only the quantum numbers; the state reconstructed at
-load SHALL reproduce the analytic Dicke Born distribution, so the round-trip
-(write quantum numbers → load → measure) is exact.
+The artifact SHALL persist only the quantum numbers, and for the supported
+symmetric state classes (`Ghz`, `Dicke{k}`, `Basis`) the state reconstructed at
+load SHALL reproduce the analytic Born distribution, so the round-trip
+(write quantum numbers → load → measure) is exact. This completeness is **scoped
+to that symmetric, pure, real-amplitude stratum**: general (arbitrary-phase or
+mixed) quantum states are not representable in this format — see
+`docs/findings.md` §8 (the representability obstruction = the compressibility
+boundary).
 
 #### Scenario: (n, class, k) round-trips exactly
 
