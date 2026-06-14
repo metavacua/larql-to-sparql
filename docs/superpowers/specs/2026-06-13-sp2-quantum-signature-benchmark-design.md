@@ -20,6 +20,17 @@ Experimentally test — **by attempting to falsify** — whether trained LLM att
 
 `from_matrix(C)` normalizes any real matrix and reads it as a bipartite pure state; a *generic* matrix so read is highly entangled. So a real coupling will *generically* "look entangled / violate CHSH" — not from training but from the embedding. And `entanglement_entropy_bipartition(from_matrix(C))` equals the spectral entropy of `C`'s singular values, which is near-maximal for a Gaussian (Marchenko–Pastur) matrix → the prior "not quantum-compressible" finding **had no null and does not distinguish SmolLM2 from a random matrix.** The apparatus below removes this by passing independently-constructed nulls through the identical pipe and cross-checking multiple witnesses.
 
+## Randomness regime (formalization): the determinative refutation
+
+Genuine quantum randomness is certifiable **only device-independently**, via a loophole-free Bell violation, which certifies the outputs are *not pre-determined* ([Nature DIQRNG, 2018](https://www.nature.com/articles/s41586-018-0559-3)). Algorithmically, genuine randomness is Kolmogorov-**incompressible**; pseudo-randomness is **compressible** — a deterministic function of a short seed (the seed is the hidden variable) ([Randomness: quantum vs classical](https://arxiv.org/pdf/1512.08852)). And under **efficiently-computable measures, quantum randomness and pseudo-randomness are indistinguishable** ([arXiv:2309.11117](https://arxiv.org/pdf/2309.11117)); classical simulation reproduces Born statistics exactly.
+
+**Determinative consequences (these bound every other witness):**
+1. The LLM **and our simulated `NQubitLM`** are *both* pseudo-random — reproducible under fixed seed, Kolmogorov-compressible, classically computed. On the randomness axis, **genuine quantum randomness is determinatively refuted for the entire apparatus, including the QLM "quantum" pole.** (Refuting quantum randomness is the determinative test; reproducibility refutes it.)
+2. Therefore the CHSH/Horodecki witness is **not** a Bell/nonlocality/randomness certification — there is no spacelike separation, no free measurement choice, no loophole-free experiment, only one classical computation of a density matrix. Per Principle 0 it is labeled exactly what it is: a **structural** test (does the correlation matrix exceed the classical bound). The same caveat applies to all witnesses: they test *structure of pseudo-random outputs*, never randomness-as-such.
+3. The apparatus can confirm **structural** quantum signatures (Bell-violating correlation *structure*, entanglement *structure*) and can **conclusively refute genuine quantum randomness** (a real negative) — it cannot positively certify quantum randomness (impossible by device-independence + the indistinguishability bound).
+
+This is recorded as a first-class **determinative axis W7** (below), whose conclusive negative — "reproducible ⟹ pseudo-random ⟹ not quantum-random" — holds for every computable source (LLM, QLM-sim, all nulls) and frames the interpretation of W1–W6.
+
 ## The degrees of freedom that must be constrained
 
 For the verdict to be well-posed, each DOF is pinned and cross-checked:
@@ -42,8 +53,11 @@ All operate on the 2-qubit reduced state ρ₂ (and the full pure state where no
 | W4 | **Entanglement entropy** `S(ρ_A)` of the full pure state across the cut | low-Schmidt ↔ high-Schmidt | bipartite entanglement of the whole state | 0 … log₂(min dim) |
 | W5 | **Compressibility gap** `H−S` (Shannon of flattened \|C\|² minus W4) | compressible ↔ incompressible | the prior metric, now null-controlled | ≥ 0 |
 | W6 | **Hilbertian residual** `‖[C,J]‖/‖C‖` (split-half J) | real-linear ↔ complex-linear | *independent of correlation* — does the coupling admit a unitary/coherent (quantum) reading | 0 … 2 |
+| W7 | **Reproducibility / compressibility** of the generative output stream (fixed-seed determinism + a lossless-compression proxy for Kolmogorov complexity) | pseudo-random ↔ quantum-random | **reproducible/compressible ⟹ pseudo-random ⟹ not quantum-random** (conclusive, determinative) — see Randomness regime | n/a (boolean + ratio) |
 
-These are **not equivalent**: correlation (W1) ⊋ entanglement (W2,W4) ⊋ nonlocality (W3) is a strict hierarchy for mixed states, and coherence/complex-structure (W6) is an orthogonal axis to correlation entirely. Measuring all six **over-constrains** the verdict and *locates* each source within the hierarchy (e.g. "real heads: correlated but separable, local, and not complex-linear" is a specific, well-determined classical placement).
+W1–W6 operate on the state/coupling (structure); **W7 operates on the generative process** (the output stream), and is **determinative**: per the Randomness regime, *every* computable source (LLM, QLM-sim, all nulls) is reproducible/compressible and so conclusively pseudo-random. W7 does not discriminate LLM from QLM-sim (both fail it) — its role is the meta-level conclusive negative that **bounds the interpretation of W1–W6 to structural signatures only**, never randomness-as-such.
+
+W1–W6 are **not equivalent**: correlation (W1) ⊋ entanglement (W2,W4) ⊋ nonlocality-*structure* (W3) is a strict hierarchy for mixed states, and coherence/complex-structure (W6) is an orthogonal axis to correlation entirely. Measuring all of them **over-constrains** the verdict and *locates* each source within the hierarchy (e.g. "real heads: correlated but separable, local-structure, not complex-linear, and pseudo-random" is a specific, well-determined classical placement).
 
 ## Implication lattice (apparatus self-checks — refutation surfaces for the experiment itself)
 
@@ -69,7 +83,7 @@ Each witness must reproduce its pole values exactly, or it is void.
 
 ## Well-posedness criterion (when a verdict may be stated)
 
-A classical/quantum verdict for a source is admissible **only** when: (a) all six witnesses pass their analytic-pole gates; (b) the implication lattice holds on that source; (c) the source is compared against **all** applicable nulls; and (d) the witnesses **agree** (over-determined) — or, where they disagree, the disagreement is itself located in the hierarchy (e.g. entangled-but-local) and reported as the verdict. A result from a partial apparatus (missing witnesses or nulls) is **inconclusive by construction** and may not be reported as a finding.
+A classical/quantum verdict for a source is admissible **only** when: (a) all structural witnesses (W1–W6) pass their analytic-pole gates and the determinative randomness axis (W7) is recorded; (b) the implication lattice holds on that source; (c) the source is compared against **all** applicable nulls; and (d) the witnesses **agree** (over-determined) — or, where they disagree, the disagreement is itself located in the hierarchy (e.g. entangled-but-local) and reported as the verdict. A result from a partial apparatus (missing witnesses or nulls) is **inconclusive by construction** and may not be reported as a finding.
 
 ## Reporting
 
@@ -85,7 +99,7 @@ Per source, the full witness×null table, the pole placements, and the implicati
 
 ## Implementation staging (engineering only — does not narrow the apparatus)
 
-The build may proceed witness-by-witness and null-by-null, but **no experimental verdict is claimed until the full apparatus (all six witnesses, all three nulls, the lattice, the poles) is in place** — because a partial apparatus is under-determined. First checkpoint: run the verification that a Gaussian-random `C` violates via the embedding; if it does (expected), the random nulls are mandatory and the diagonal baseline is formally disqualified.
+The build may proceed witness-by-witness and null-by-null, but **no experimental verdict is claimed until the full apparatus (all seven witnesses W1–W7, all three nulls, the lattice, the poles) is in place** — because a partial apparatus is under-determined. First checkpoint: run the verification that a Gaussian-random `C` violates via the embedding; if it does (expected), the random nulls are mandatory and the diagonal baseline is formally disqualified.
 
 ## Out of scope
 
