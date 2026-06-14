@@ -34,6 +34,7 @@ thiserror = { workspace = true }
 minijinja = "2"
 libc = "0.2"
 rayon = "1.10"
+minilp = "0.2"
 # Multi-modal Phase 1d: image decode + bicubic resize for the `--image` flag.
 # Pruned features — we only need JPEG/PNG/WebP. Skipping TIFF/AVIF/HDR/etc
 # avoids dragging in libavif, libtiff, openexr, and a 2 MB binary tax.

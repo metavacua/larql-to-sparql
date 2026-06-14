@@ -528,7 +528,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
 dependencies = [
  "iana-time-zone",
- "num-traits",
+ "num-traits 0.2.19",
  "windows-link",
 ]
 
@@ -885,7 +885,7 @@ dependencies = [
  "criterion-plot",
  "is-terminal",
  "itertools 0.10.5",
- "num-traits",
+ "num-traits 0.2.19",
  "once_cell",
  "oorandom",
  "plotters",
@@ -1961,7 +1961,7 @@ dependencies = [
  "byteorder-lite",
  "image-webp",
  "moxcms",
- "num-traits",
+ "num-traits 0.2.19",
  "png",
  "zune-core",
  "zune-jpeg",
@@ -2158,7 +2158,8 @@ dependencies = [
  "libc",
  "memmap2",
  "minijinja",
- "ndarray",
+ "minilp",
+ "ndarray 0.16.1",
  "rayon",
  "reqwest",
  "safetensors",
@@ -2179,7 +2180,7 @@ dependencies = [
  "larql-models",
  "libc",
  "memmap2",
- "ndarray",
+ "ndarray 0.16.1",
  "openblas-src",
  "rayon",
  "serde_json",
@@ -2196,7 +2197,7 @@ dependencies = [
  "libc",
  "memmap2",
  "metal",
- "ndarray",
+ "ndarray 0.16.1",
  "objc",
  "rayon",
  "serde_json",
@@ -2219,8 +2220,8 @@ dependencies = [
 name = "larql-hilbert"
 version = "0.1.0"
 dependencies = [
- "ndarray",
- "num-complex",
+ "ndarray 0.16.1",
+ "num-complex 0.4.6",
 ]
 
 [[package]]
@@ -2245,7 +2246,7 @@ dependencies = [
  "memmap2",
  "minijinja",
  "minijinja-contrib",
- "ndarray",
+ "ndarray 0.16.1",
  "openblas-src",
  "prost",
  "rand 0.8.6",
@@ -2276,7 +2277,7 @@ dependencies = [
  "larql-compute-metal",
  "larql-inference",
  "larql-vindex",
- "ndarray",
+ "ndarray 0.16.1",
  "openblas-src",
  "rand 0.8.6",
  "rand_distr",
@@ -2300,7 +2301,7 @@ dependencies = [
  "larql-models",
  "larql-vindex",
  "mockito",
- "ndarray",
+ "ndarray 0.16.1",
  "reqwest",
  "rustyline",
  "serde",
@@ -2315,7 +2316,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "memmap2",
- "ndarray",
+ "ndarray 0.16.1",
  "safetensors",
  "serde",
  "serde_json",
@@ -2334,7 +2335,7 @@ dependencies = [
  "larql-models",
  "larql-vindex",
  "memmap2",
- "ndarray",
+ "ndarray 0.16.1",
  "numpy",
  "pyo3",
  "serde",
@@ -2461,7 +2462,7 @@ dependencies = [
  "libc",
  "memmap2",
  "mockito",
- "ndarray",
+ "ndarray 0.16.1",
  "rand 0.8.6",
  "rayon",
  "reqwest",
@@ -2622,6 +2623,15 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "matrixmultiply"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "916806ba0031cd542105d916a97c8572e1fa6dd79c9c51e7eb43a09ec2dd84c1"
+dependencies = [
+ "rawpointer",
+]
+
+[[package]]
+name = "matrixmultiply"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a06de3016e9fae57a36fd14dba131fccf49f74b40b7fbdb472f96e361ec71a08"
@@ -2727,6 +2737,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "minilp"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82a7750a9e5076c660b7bec5e6457b4dbff402b9863c8d112891434e18fd5385"
+dependencies = [
+ "log",
+ "sprs",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2818,7 +2838,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
- "num-traits",
+ "num-traits 0.2.19",
  "pxfm",
 ]
 
@@ -2847,16 +2867,29 @@ dependencies = [
 
 [[package]]
 name = "ndarray"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac06db03ec2f46ee0ecdca1a1c34a99c0d188a0d83439b84bf0cb4b386e4ab09"
+dependencies = [
+ "matrixmultiply 0.2.4",
+ "num-complex 0.2.4",
+ "num-integer",
+ "num-traits 0.2.19",
+ "rawpointer",
+]
+
+[[package]]
+name = "ndarray"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
 dependencies = [
  "cblas-sys",
  "libc",
- "matrixmultiply",
- "num-complex",
+ "matrixmultiply 0.3.10",
+ "num-complex 0.4.6",
  "num-integer",
- "num-traits",
+ "num-traits 0.2.19",
  "portable-atomic",
  "portable-atomic-util",
  "rawpointer",
@@ -2904,11 +2937,21 @@ dependencies = [
 
 [[package]]
 name = "num-complex"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6b19411a9719e753aff12e5187b74d60d3dc449ec3f4dc21e3989c3f554bc95"
+dependencies = [
+ "autocfg",
+ "num-traits 0.2.19",
+]
+
+[[package]]
+name = "num-complex"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
- "num-traits",
+ "num-traits 0.2.19",
 ]
 
 [[package]]
@@ -2923,7 +2966,16 @@ version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
 dependencies = [
- "num-traits",
+ "num-traits 0.2.19",
+]
+
+[[package]]
+name = "num-traits"
+version = "0.1.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92e5113e9fd4cc14ded8e499429f396a20f98c772a47cc8622a736e1ec843c31"
+dependencies = [
+ "num-traits 0.2.19",
 ]
 
 [[package]]
@@ -2949,10 +3001,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7cfbf3f0feededcaa4d289fe3079b03659e85c5b5a177f4ba6fb01ab4fb3e39"
 dependencies = [
  "libc",
- "ndarray",
- "num-complex",
+ "ndarray 0.16.1",
+ "num-complex 0.4.6",
  "num-integer",
- "num-traits",
+ "num-traits 0.2.19",
  "pyo3",
  "pyo3-build-config",
  "rustc-hash",
@@ -3212,7 +3264,7 @@ version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5aeb6f403d7a4911efb1e33402027fc44f29b5bf6def3effcc22d7bb75f2b747"
 dependencies = [
- "num-traits",
+ "num-traits 0.2.19",
  "plotters-backend",
  "plotters-svg",
  "wasm-bindgen",
@@ -3641,7 +3693,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
 dependencies = [
- "num-traits",
+ "num-traits 0.2.19",
  "rand 0.8.6",
 ]
 
@@ -3844,7 +3896,7 @@ version = "0.8.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
 dependencies = [
- "num-traits",
+ "num-traits 0.2.19",
 ]
 
 [[package]]
@@ -4313,6 +4365,17 @@ dependencies = [
  "nom",
  "serde",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "sprs"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec63571489873d4506683915840eeb1bb16b3198ee4894cc6f2fe3013d505e56"
+dependencies = [
+ "ndarray 0.13.1",
+ "num-complex 0.2.4",
+ "num-traits 0.1.43",
 ]
 
 [[package]]
