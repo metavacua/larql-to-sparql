@@ -62,8 +62,8 @@ fn write_real_vindex(
         for (proj, rows) in [("q_proj", q_rows), ("k_proj", k_rows)] {
             let n = rows * hidden;
             for idx in 0..n {
-                let v = ((idx as f32 * 0.013 + layer as f32 * 0.7).sin()
-                    + if proj == "q_proj" { 0.1 } else { -0.1 }) as f32;
+                let v = (idx as f32 * 0.013 + layer as f32 * 0.7).sin()
+                    + if proj == "q_proj" { 0.1 } else { -0.1 };
                 bin.extend_from_slice(&v.to_le_bytes());
             }
             let length = n * 4;
