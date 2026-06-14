@@ -90,3 +90,5 @@ pub mod nqlm;
 pub use nqlm::NQubitLM;
 pub mod register;
 pub use register::{classical_bits, ClassicalRegister, CompressibilityGap, NRegister};
+pub mod density;
+pub use density::{density_matrix, partial_trace, von_neumann_entropy};
