@@ -44,6 +44,34 @@ impl NQubitLM {
         s
     }
 
+    /// Sample `len` tokens autoregressively from the seeded PRNG. Deterministic
+    /// in `seed` — the seed is the hidden variable, so the stream is
+    /// pseudo-random (Kolmogorov-compressible to ~|seed|), never quantum-random.
+    pub fn generate(&self, len: usize, seed: u64) -> Vec<usize> {
+        let dim = 1usize << self.n();
+        let mut state = self.init.clone();
+        let mut rng = seed;
+        let mut out = Vec::with_capacity(len);
+        for _ in 0..len {
+            // LCG → uniform in [0,1).
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let u = (rng >> 11) as f64 / (1u64 << 53) as f64;
+            let p = self.next_distribution(&state);
+            let mut acc = 0.0;
+            let mut t = dim - 1;
+            for (i, &pi) in p.iter().enumerate() {
+                acc += pi;
+                if u < acc {
+                    t = i;
+                    break;
+                }
+            }
+            out.push(t);
+            state = self.step(t);
+        }
+        out
+    }
+
     /// Autoregressive log-likelihood; an impossible token yields −∞.
     ///
     /// # Panics
@@ -111,5 +139,22 @@ mod tests {
     fn out_of_vocabulary_token_panics() {
         let lm = NQubitLM { post: vec![identities(1); 2], init: NQubit::ket(&[0]) };
         let _ = lm.step(2);
+    }
+
+    #[test]
+    fn generate_is_reproducible_under_fixed_seed() {
+        // Determinism = pseudo-randomness (W7): same seed ⟹ identical stream.
+        let lm = NQubitLM { post: vec![Vec::new(); 4], init: NQubit::ghz(2) };
+        let a = lm.generate(20, 42);
+        let b = lm.generate(20, 42);
+        assert_eq!(a, b, "fixed seed must be reproducible (pseudo-random)");
+        assert_eq!(a.len(), 20);
+        assert!(a.iter().all(|&t| t < 4));
+    }
+
+    #[test]
+    fn generate_differs_across_seeds() {
+        let lm = NQubitLM { post: vec![Vec::new(); 4], init: NQubit::ghz(2) };
+        assert_ne!(lm.generate(50, 1), lm.generate(50, 2));
     }
 }
