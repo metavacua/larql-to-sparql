@@ -44,9 +44,12 @@ mod tests {
     }
 
     #[test]
-    fn bell_is_contextual() {
+    fn bell_is_contextual_at_the_analytic_value() {
+        // Analytic pole gate: on this CHSH cover the contextual fraction is the
+        // normalized CHSH violation (2√2 − 2)/2 = √2 − 1 ≈ 0.4142.
         let cf = contextual_fraction(&bell_empirical_model(&bell_rho2()));
-        assert!(cf > 1e-3, "Bell on the CHSH cover is contextual ⇒ CF>0, got {cf}");
+        let expected = 2.0_f64.sqrt() - 1.0;
+        assert!((cf - expected).abs() < 1e-6, "Bell CF should be √2−1 ≈ {expected}, got {cf}");
     }
 
     #[test]

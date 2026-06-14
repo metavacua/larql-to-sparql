@@ -10,19 +10,20 @@ use larql_vindex::ndarray::Array2;
 #[allow(dead_code)]
 fn whiten_rows(w: &Array2<f64>, l: &Array2<f64>) -> Array2<f64> {
     let (rows, d) = (w.shape()[0], w.shape()[1]);
-    // M = L⁻ᵀ. (W·M)[r,:] solves Lᵀ·y = w_rowᵀ (Lᵀ upper-triangular ⇒ back-substitution).
+    // Want (W·M)[r,:] = w_row · L⁻ᵀ. As a column: out_rowᵀ = L⁻¹ w_rowᵀ, i.e.
+    // solve L · z = w_rowᵀ — forward substitution (L lower-triangular) — and store z.
     let mut out = Array2::<f64>::zeros((rows, d));
     for r in 0..rows {
-        let mut y = vec![0.0; d];
-        for i in (0..d).rev() {
+        let mut z = vec![0.0; d];
+        for i in 0..d {
             let mut acc = w[[r, i]];
-            for j in (i + 1)..d {
-                acc -= l[[j, i]] * y[j]; // (Lᵀ)[i,j] = l[j,i]
+            for j in 0..i {
+                acc -= l[[i, j]] * z[j];
             }
-            y[i] = acc / l[[i, i]];
+            z[i] = acc / l[[i, i]];
         }
         for i in 0..d {
-            out[[r, i]] = y[i];
+            out[[r, i]] = z[i];
         }
     }
     out
@@ -54,12 +55,18 @@ mod tests {
     }
 
     #[test]
-    fn whitening_changes_the_coupling_for_nontrivial_l() {
-        let wq = Array2::from_shape_vec((2, 2), vec![1.0, 1.0, 0.0, 1.0]).unwrap();
-        let wk = wq.clone();
+    fn canonical_coupling_of_identity_is_inverse_gram_exact() {
+        // canonical_coupling(I, I, L) = M Mᵀ = L⁻ᵀL⁻¹ = (L Lᵀ)⁻¹ = Σ⁻¹ (exact gate
+        // — catches the L⁻¹-vs-L⁻ᵀ transpose bug the ≠-raw test cannot).
         let l = Array2::from_shape_vec((2, 2), vec![2.0, 0.0, 1.0, 3.0]).unwrap(); // lower-tri
-        let canon = canonical_coupling(&wq, &wk, &l);
-        let raw = wq.dot(&wk.t());
-        assert!(canon.iter().zip(raw.iter()).any(|(a, b)| (a - b).abs() > 1e-6));
+        let i2 = Array2::<f64>::eye(2);
+        let canon = canonical_coupling(&i2, &i2, &l);
+        // Σ = L Lᵀ = [[4,2],[2,10]] ⇒ Σ⁻¹ = (1/36)[[10,−2],[−2,4]].
+        let expected = Array2::from_shape_vec((2, 2), vec![10.0 / 36.0, -2.0 / 36.0, -2.0 / 36.0, 4.0 / 36.0]).unwrap();
+        for (a, b) in canon.iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-9, "canon {a} vs Σ⁻¹ {b}");
+        }
+        // And it genuinely differs from the raw coupling (= I here).
+        assert!((canon[[0, 1]]).abs() > 1e-6);
     }
 }
