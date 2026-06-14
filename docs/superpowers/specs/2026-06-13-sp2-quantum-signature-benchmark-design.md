@@ -57,6 +57,52 @@ Sources: [Sheaf structure of non-locality & contextuality](https://arxiv.org/abs
 [extensional/intensional categorical models](https://arxiv.org/abs/2408.07058);
 [semantic unification (sheaf NLP)](https://link.springer.com/chapter/10.1007/978-3-642-54789-8_1).
 
+## Logical foundations: the non-Tarskian caveat (the apparatus's identity layer is semi-classical)
+
+Every witness collapses a quantum object to a real number and then applies a
+**classical comparison** (`==`, `≤`, a tolerance, the boolean implication
+lattice). That comparison layer is a **Tarskian metalanguage**: a two-valued,
+context-free truth predicate with reflexive identity `x = x` taken as an axiom.
+This is not incidental — it is the **extensional + objectivity horns made
+operational** (the global-section/denotational reading), and it is exactly the
+**semi-classical commitment** the user has flagged throughout. Per Principle 0
+it must be named, not hidden.
+
+Zizzi's logic of qubits is the dual: a **non-Tarskian** metalanguage whose atomic
+assertions carry *complex assertion-degrees* (probability amplitudes), where the
+reflection principle generates the quantum connectives (quantum superposition,
+quantum entanglement), reflexive self-identity `x = x` is a **quantum pseudoaxiom
+superposable with irreflexivity** `x ≠ x`, and the liar's self-reference becomes a
+**metatheorem** (a superposed truth-value, a Hadamard-prepared truth-qubit) rather
+than a paradox ([From Quantum Metalanguage to the Logic of Qubits](https://arxiv.org/abs/1003.5976);
+[Basic Logic and Quantum Entanglement](https://www.arxiv.org/pdf/quant-ph/0611119v1)).
+
+**Correctness rules this imposes (formal-correctness, Principle 0):**
+- Exact classical (Tarskian) identity is legitimate **only for the analytic
+  scaffolding** — the poles (fixed classical density matrices), the null seeds,
+  and the assertion metalanguage in which verdicts are *recorded*. It must **not**
+  be assumed of the **quantum objects under test** (real head couplings, QLM
+  outputs); a naive `T`-schema/identity check there would impose classical
+  self-identity on an object that may be genuinely superposed.
+- **W7 *is* the reflexivity test.** Reproducibility = classical self-identity
+  (`x = x` under re-seeding) holds; a genuinely quantum source has no
+  pre-determined value, so re-running does **not** reproduce — it violates
+  reflexive self-identity. Thus W7's conclusive negative "reproducible ⟹
+  pseudo-random ⟹ not quantum-random" is *precisely* "classical reflexivity
+  holds ⟹ semi-classical identity ⟹ not quantum." Zizzi's superposition of
+  reflexivity/irreflexivity is the logical content of the determinative axis.
+- A **lattice inconsistency on an object under test is information, not apparatus
+  failure.** In the Tarskian layer it would read as contradiction; in the quantum
+  metalanguage it is the liar-as-metatheorem (a superposition), so it is *located
+  in the hierarchy and reported*, never silently discarded — consistent with the
+  well-posedness clause (d) (disagreement is placed, not suppressed).
+
+The apparatus is therefore **deliberately semi-classical in its truth/identity
+layer**: a Tarskian metalanguage over extensional witnesses. A fully
+quantum-faithful successor would lift the *metalanguage itself* to Zizzi's QML
+(complex assertion-degrees, quantum connectives) — recorded here as future scope
+(cf. SP3) so the semi-classical commitment is never mistaken for the whole truth.
+
 ## The confound this apparatus defeats
 
 `from_matrix(C)` normalizes any real matrix and reads it as a bipartite pure state; a *generic* matrix so read is highly entangled. So a real coupling will *generically* "look entangled / violate CHSH" — not from training but from the embedding. And `entanglement_entropy_bipartition(from_matrix(C))` equals the spectral entropy of `C`'s singular values, which is near-maximal for a Gaussian (Marchenko–Pastur) matrix → the prior "not quantum-compressible" finding **had no null and does not distinguish SmolLM2 from a random matrix.** The apparatus below removes this by passing independently-constructed nulls through the identical pipe and cross-checking multiple witnesses.
@@ -96,7 +142,7 @@ All operate on the 2-qubit reduced state ρ₂ (and the full pure state where no
 | W6 | **Hilbertian residual** `‖[C,J]‖/‖C‖` (split-half J) | real-linear ↔ complex-linear | *independent of correlation* — does the coupling admit a unitary/coherent (quantum) reading | 0 … 2 |
 | W7 | **Reproducibility / compressibility** of the generative output stream (fixed-seed determinism + a lossless-compression proxy for Kolmogorov complexity) | pseudo-random ↔ quantum-random | **reproducible/compressible ⟹ pseudo-random ⟹ not quantum-random** (conclusive, determinative) — see Randomness regime | n/a (boolean + ratio) |
 
-W1–W6 operate on the state/coupling (structure); **W7 operates on the generative process** (the output stream), and is **determinative**: per the Randomness regime, *every* computable source (LLM, QLM-sim, all nulls) is reproducible/compressible and so conclusively pseudo-random. W7 does not discriminate LLM from QLM-sim (both fail it) — its role is the meta-level conclusive negative that **bounds the interpretation of W1–W6 to structural signatures only**, never randomness-as-such.
+W1–W6 operate on the state/coupling (structure); **W7 operates on the generative process** (the output stream), and is **determinative**: per the Randomness regime, *every* computable source (LLM, QLM-sim, all nulls) is reproducible/compressible and so conclusively pseudo-random. W7 does not discriminate LLM from QLM-sim (both fail it) — its role is the meta-level conclusive negative that **bounds the interpretation of W1–W6 to structural signatures only**, never randomness-as-such. W7 is the operational form of the **reflexivity test** (classical self-identity `x = x` under re-seeding) — see *Logical foundations: the non-Tarskian caveat*.
 
 W1–W6 are **not equivalent**: correlation (W1) ⊋ entanglement (W2,W4) ⊋ nonlocality-*structure* (W3) is a strict hierarchy for mixed states, and coherence/complex-structure (W6) is an orthogonal axis to correlation entirely. Measuring all of them **over-constrains** the verdict and *locates* each source within the hierarchy (e.g. "real heads: correlated but separable, local-structure, not complex-linear, and pseudo-random" is a specific, well-determined classical placement).
 
