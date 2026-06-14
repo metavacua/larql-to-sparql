@@ -1,6 +1,6 @@
-## ADDED Requirements: quantum-backend
+## ADDED Requirements
 
-### REQ-QB-001: Dicke state constructor
+### Requirement: REQ-QB-001 — Dicke state constructor
 
 `larql-hilbert` SHALL provide `NQubit::dicke(n, k)` — the normalized equal
 superposition of all `n`-qubit computational-basis states of Hamming weight `k`,
@@ -28,7 +28,7 @@ states and zero elsewhere.
 
 ---
 
-### REQ-QB-002: Quantum vindex artifact and loader
+### Requirement: REQ-QB-002 — Quantum vindex artifact and loader
 
 The system SHALL load a vindex directory whose `index.json` has
 `family == "quantum"` together with a `qlm.json` carrying only the quantum
@@ -53,7 +53,7 @@ constraint.
 
 ---
 
-### REQ-QB-003: INFER returns the Born next-token distribution
+### Requirement: REQ-QB-003 — INFER returns the Born next-token distribution
 
 `INFER "<prompt>" TOP k` on the quantum backend SHALL tokenize the prompt
 against the vocabulary, condition the state on the prompt tokens, and return the
@@ -84,11 +84,11 @@ The INFER probabilities equal `NQubitLM::next_distribution(init)` within `1e-9`.
 
 ---
 
-### REQ-QB-004: Quantum-number metadata operations
+### Requirement: REQ-QB-004 — Quantum-number metadata operations
 
-`STATS`, `SHOW MODELS`, `SHOW LAYERS`, and `DESCRIBE` on the quantum backend
-SHALL report the quantum numbers (`n`, state class, `k`, vocabulary size, and a
-derived entanglement entropy in ebits).
+The quantum backend SHALL report its quantum numbers on `STATS`, `SHOW MODELS`,
+`SHOW LAYERS`, and `DESCRIBE`: `n`, state class, `k`, vocabulary size, and a
+derived entanglement entropy in ebits.
 
 #### Scenario: DESCRIBE reports the quantum numbers
 
@@ -107,15 +107,14 @@ count, class, vocabulary, and the derived entanglement entropy in ebits.
 
 ---
 
-### REQ-QB-005: Classicalization seam for non-native statements
+### Requirement: REQ-QB-005 — Classicalization seam for non-native statements
 
-Statements not natively supported on the quantum backend (`WALK`, `SELECT`,
-`INSERT`/`DELETE`/`UPDATE`/`MERGE`, `COMPILE`, `TRACE`, `COMPACT`) SHALL be
-routed through a single classicalization extension point and return one uniform
-`LqlError` indicating the operation is served by the (not-yet-wired)
-classicalization layer. The backend SHALL expose `classical_view()` returning
-the dephased `ClassicalRegister` (the `NQubit → born_probs` map) that the seam is
-built on.
+The quantum backend SHALL route every non-native statement (`WALK`, `SELECT`,
+`INSERT`/`DELETE`/`UPDATE`/`MERGE`, `COMPILE`, `TRACE`, `COMPACT`) through a
+single classicalization extension point that returns one uniform `LqlError`
+(the operation is served by the not-yet-wired classicalization layer), and SHALL
+expose `classical_view()` returning the dephased `ClassicalRegister`
+(the `NQubit → born_probs` map) the seam is built on.
 
 #### Scenario: an unsupported statement returns the seam error
 
@@ -133,7 +132,7 @@ distribution is the state's `born_probs()`.
 
 ---
 
-### REQ-QB-006: Quantum numbers completely specify the vindex (round-trip)
+### Requirement: REQ-QB-006 — Quantum numbers completely specify the vindex (round-trip)
 
 The artifact SHALL persist only the quantum numbers; the state reconstructed at
 load SHALL reproduce the analytic Dicke Born distribution, so the round-trip

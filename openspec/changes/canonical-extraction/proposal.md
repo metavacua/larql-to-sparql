@@ -15,7 +15,7 @@ canonical vindex: it requires only data already present in a browse-level
 vindex (`embeddings.bin`, `gate_vectors.bin`, `down_meta.bin`) and produces a
 `canonical_meta.json` sidecar that is a pure function of the model weights.
 
-## What
+## What Changes
 
 Add `larql canonicalize <vindex-path>` that writes `canonical_meta.json` into
 an existing vindex directory. The command:

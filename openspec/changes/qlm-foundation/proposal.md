@@ -11,7 +11,7 @@ the `larql-hilbert` crate (PRs #137–#140 + the entanglement-entropy work). Thi
 change captures its requirements as testable contracts, mirroring the
 `canonical-extraction` change.
 
-## What
+## What Changes
 
 Specify the `quantum-language-model` capability provided by `larql-hilbert`:
 

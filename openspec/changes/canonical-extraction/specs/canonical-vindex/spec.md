@@ -1,6 +1,6 @@
-## ADDED Requirements: canonical-vindex
+## ADDED Requirements
 
-### REQ-CANON-001: Covariance estimation
+### Requirement: REQ-CANON-001 — Covariance estimation
 
 The system SHALL estimate the activation covariance matrix G of shape
 [hidden_size, hidden_size] from the token embedding matrix W_E using a
@@ -37,7 +37,7 @@ then G[i,j] = G[j,i] for all i,j and G[i,j]² ≤ G[i,i]·G[j,j] (Cauchy-Schwarz
 
 ---
 
-### REQ-CANON-002: Cholesky whitening factor
+### Requirement: REQ-CANON-002 — Cholesky whitening factor
 
 The system SHALL compute the lower-triangular Cholesky factor L of G such that
 L L^T = G + ε·I (with ε = 1e-5 ridge for numerical stability).
@@ -78,7 +78,7 @@ Then g̃·h̃ = g^T G^{-1} h (Mahalanobis inner product).
 
 ---
 
-### REQ-CANON-003: Back-substitution for L^T
+### Requirement: REQ-CANON-003 — Back-substitution for L^T
 
 The system SHALL provide `back_solve_lt(L, B)` that solves L^T X = B via
 back-substitution, where L is lower-triangular. This is the primitive used to
@@ -102,7 +102,7 @@ Given L, when M = compute_l_inv_t(L), then M @ L^T = I within 1e-10.
 
 ---
 
-### REQ-CANON-004: On-shell feature filter
+### Requirement: REQ-CANON-004 — On-shell feature filter
 
 The system SHALL compute a boolean on-shell mask for each layer by ranking
 features by their c_score (logit of top down-projected token from down_meta)
@@ -128,7 +128,7 @@ so all features are on-shell.
 
 ---
 
-### REQ-CANON-005: Layer regime classifier
+### Requirement: REQ-CANON-005 — Layer regime classifier
 
 The system SHALL classify each layer as Wave, Particle, or Wavelet based on
 activation density = (features with c_score > 0.1) / total_features:
@@ -159,7 +159,7 @@ Given 20% of features active, regime = Wavelet.
 
 ---
 
-### REQ-CANON-006: Canonical metadata serialization
+### Requirement: REQ-CANON-006 — Canonical metadata serialization
 
 The system SHALL write `canonical_meta.json` to the vindex directory containing:
 - version (u32 = 1)
@@ -185,7 +185,7 @@ reproduces the original value.
 
 ---
 
-### REQ-CANON-007: c_score-only down_meta reader
+### Requirement: REQ-CANON-007 — c_score-only down_meta reader
 
 The system SHALL provide `read_cscores_binary(dir)` that reads c_score values
 from `down_meta.bin` without constructing token strings (no tokenizer
@@ -201,7 +201,7 @@ values as the full read_binary function.
 
 ---
 
-### REQ-CANON-008: CLI command `larql canonicalize`
+### Requirement: REQ-CANON-008 — CLI command `larql canonicalize`
 
 The system SHALL provide a `larql canonicalize <vindex-path>` subcommand
 that loads a vindex directory, runs the canonical pipeline, and writes

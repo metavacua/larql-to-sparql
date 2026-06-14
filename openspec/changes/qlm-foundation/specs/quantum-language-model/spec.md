@@ -1,6 +1,6 @@
-## ADDED Requirements: quantum-language-model
+## ADDED Requirements
 
-### REQ-QLM-001: Complex structure and the antilinear-fraction equivalence
+### Requirement: REQ-QLM-001 — Complex structure and the antilinear-fraction equivalence
 
 The system SHALL provide the split-half complex structure `J` on `ℝⁿ` (n even)
 with `J² = −I`, the relative commutator residual `‖MJ − JM‖_F / ‖M‖_F`, and the
@@ -21,7 +21,7 @@ Given any real matrix M, `commutator_residual(M, J) = 2 · antilinear_fraction(M
 
 ---
 
-### REQ-QLM-002: Real↔complex bridge
+### Requirement: REQ-QLM-002 — Real↔complex bridge
 
 The system SHALL provide `realify(A, B) = [[A, −B], [B, A]]` and `complex_parts`
 that recovers `(A, B)`, with `complex_parts ∘ realify = identity`.
@@ -34,7 +34,7 @@ Given real m×m blocks A, B, `complex_parts(realify(A, B)) = (A, B)`.
 
 ---
 
-### REQ-QLM-003: Single-qubit state, Bloch sphere, and SU(2) gates
+### Requirement: REQ-QLM-003 — Single-qubit state, Bloch sphere, and SU(2) gates
 
 The system SHALL provide a `Qubit` (`ℂ²`) with Bloch-sphere coordinates and a
 set of unitary gates (Pauli X/Y/Z, Hadamard, rotations) that are unitary and
@@ -54,7 +54,7 @@ square to identity (for the involutory ones).
 
 ---
 
-### REQ-QLM-004: Born-rule measurement
+### Requirement: REQ-QLM-004 — Born-rule measurement
 
 The system SHALL provide `measure_probs(&Qubit) -> [f64; 2]` = `[|α|², |β|²]` of
 the normalized state, summing to 1.
@@ -67,7 +67,7 @@ the normalized state, summing to 1.
 
 ---
 
-### REQ-QLM-005: Single-qubit autoregressive language model
+### Requirement: REQ-QLM-005 — Single-qubit autoregressive language model
 
 The system SHALL provide `SingleQubitLM` (2-token vocabulary) with Born-rule
 `next_distribution`, collapse-then-unitary `step`, autoregressive `score`
@@ -87,7 +87,7 @@ From `|0⟩` with identity gates, `score([1])` is −∞.
 
 ---
 
-### REQ-QLM-006: Measurement as elimination with no-cloning
+### Requirement: REQ-QLM-006 — Measurement as elimination with no-cloning
 
 The system SHALL provide `project(&Qubit, outcome) -> Option<Qubit>` (the
 elimination rule; `None` = ⊥ for a zero-amplitude outcome) and a `LinearQubit`
@@ -109,7 +109,7 @@ move semantics).
 
 ---
 
-### REQ-QLM-007: Bounded-extraction admissibility (Δ₀ / Σ⁰₁ / Π⁰₂)
+### Requirement: REQ-QLM-007 — Bounded-extraction admissibility (Δ₀ / Σ⁰₁ / Π⁰₂)
 
 The system SHALL classify bounded extraction over the LM by arithmetical
 fragment: `is_realizable` (Δ₀), `exists_continuation` (Σ⁰₁ bounded witness
@@ -131,7 +131,7 @@ exists.
 
 ---
 
-### REQ-QLM-008: Two-qubit state, tensor product, and entanglement
+### Requirement: REQ-QLM-008 — Two-qubit state, tensor product, and entanglement
 
 The system SHALL provide `TwoQubit` (`ℂ⁴`), the tensor product, and
 `is_product` (an entanglement non-factorization test: true iff the 2×2
@@ -151,7 +151,7 @@ amplitude determinant is zero).
 
 ---
 
-### REQ-QLM-009: Bell operation, partial measurement, and the two-qubit LM
+### Requirement: REQ-QLM-009 — Bell operation, partial measurement, and the two-qubit LM
 
 The system SHALL provide CNOT, the Bell operation `Φ⁺ = CNOT·(H⊗I)·|00⟩`
 (entangled), partial single-qubit measurement showing perfect correlation, and a
@@ -178,7 +178,7 @@ With a Bell initial state, joint tokens 01 and 10 score −∞.
 
 ---
 
-### REQ-QLM-010: Entanglement-entropy meter (quantum compressibility)
+### Requirement: REQ-QLM-010 — Entanglement-entropy meter (quantum compressibility)
 
 The system SHALL provide `spectral_entropy(&[f64])` = `−Σ pᵢ log₂ pᵢ` of a
 normalized non-negative spectrum (in ebits), with `0` for a rank-1 / single

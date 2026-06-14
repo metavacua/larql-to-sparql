@@ -14,7 +14,7 @@ benchmark; SP3 = QLM⇄vindex compiler/distiller).
 
 Design: `docs/superpowers/specs/2026-06-12-quantum-backend-design.md`.
 
-## What
+## What Changes
 
 1. `NQubit::dicke(n, k)` — the missing Dicke (angular-momentum `(n,k)`) state
    constructor (`w` = `dicke(n,1)`).
