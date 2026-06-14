@@ -16,6 +16,47 @@ Experimentally test — **by attempting to falsify** — whether trained LLM att
 3. **Falsification-first; conclusive negatives are the product.** Positive results are confirmation-bias-prone and (under the embedding confound) cheap → reported only as "not ruled out." Valued outputs are **conclusive negatives**, each **licensed by positive controls** that prove the witness detects the effect and does not false-positive.
 4. **Over-constraint via multi-dimensional independent checks.** A non-trivial classical/quantum experiment needs *multiple constraints on its degrees of freedom* to be statable and solvable with a unique/robust answer. We therefore require a **battery of independent witnesses** and **multiple independent nulls**, plus the **logical-implication lattice among witnesses** as apparatus self-checks. Maximizing the number of independent refutation surfaces is the design goal; a single elementary test is rejected as inconclusive by construction.
 
+## Formal foundations: the trilemma ≅ fire-triangle ≅ sheaf global-section
+
+The classical/quantum no-go is one ternary incompatibility expressed three ways:
+the **quantum trilemma** {locality, tractability, objectivity}; the type-theoretic
+**fire triangle** {effects, substitution, dependent elimination} (Pédrot–Tabareau,
+POPL 2020 — you can't consistently combine all three); and the **sheaf-theoretic
+structure** of Abramsky–Brandenburger ([arXiv:1102.0264](https://arxiv.org/abs/1102.0264)),
+where **contextuality = obstruction to a global section** and **Bell-nonlocality
+is the special case**, with a strength hierarchy (Bell < Hardy < GHZ).
+
+| Quantum trilemma | Fire triangle | Sheaf / semantics | LM / WASM |
+|---|---|---|---|
+| Locality | drop **Effects** (pure ⟹ closed) | empirical model on a closed cover | closed call-graph (no I/O) |
+| Objectivity / non-contextual | **Dependent elimination** | **global section exists (extensional)** ↔ gluing obstruction (intensional) | extensional vindex-as-function ↔ intensional process |
+| Tractability | **Substitution** (β = substitutivity) | **compositional** gluing local→global (DisCoCat) | context-free ↔ context-sensitive |
+
+**Consequences for the witnesses (a consolidation, not an expansion):**
+- The **objectivity axis is the sheaf global-section test**: a source's empirical
+  model (measurement cover + outcome distributions) either admits a **global
+  section** — a context-independent deterministic value-assignment marginalizing
+  to the observed statistics (= non-contextual = objective = *extensional* =
+  *compositional*) — or has a **gluing obstruction** (= contextual = *intensional*).
+  This is computable by the Abramsky–Brandenburger linear-algebra method (and a
+  Čech-cohomological obstruction for the logical/possibilistic case).
+- **W3 (CHSH/Horodecki) and W8 (Peres–Mermin/KS) are facets of this one witness**
+  — different measurement *covers* (Bell cover vs KS cover) in the strength
+  hierarchy. They remain as named, exactly-calibrated special cases; the
+  sheaf-theoretic global-section/obstruction is their common generalization.
+- **Intensional/extensional** is the measurement↔computation correspondence:
+  extensional = the global section (denotation/I-O function, the vindex-as-table);
+  intensional = the irreducibly context-dependent process (the dependent-elimination
+  vertex). Contextuality = no extensional reduction.
+- **Effects ↔ non-locality**: monadic interaction with an environment = calls
+  outside the closed graph = the WASM/operational non-locality. Pure = local.
+
+Sources: [Sheaf structure of non-locality & contextuality](https://arxiv.org/abs/1102.0264);
+[Peres–Mermin noncontextuality inequalities](https://arxiv.org/abs/1704.01153);
+[Fire Triangle](https://dl.acm.org/doi/10.1145/3371126);
+[extensional/intensional categorical models](https://arxiv.org/abs/2408.07058);
+[semantic unification (sheaf NLP)](https://link.springer.com/chapter/10.1007/978-3-642-54789-8_1).
+
 ## The confound this apparatus defeats
 
 `from_matrix(C)` normalizes any real matrix and reads it as a bipartite pure state; a *generic* matrix so read is highly entangled. So a real coupling will *generically* "look entangled / violate CHSH" — not from training but from the embedding. And `entanglement_entropy_bipartition(from_matrix(C))` equals the spectral entropy of `C`'s singular values, which is near-maximal for a Gaussian (Marchenko–Pastur) matrix → the prior "not quantum-compressible" finding **had no null and does not distinguish SmolLM2 from a random matrix.** The apparatus below removes this by passing independently-constructed nulls through the identical pipe and cross-checking multiple witnesses.
