@@ -2160,6 +2160,7 @@ dependencies = [
  "minijinja",
  "minilp",
  "ndarray 0.16.1",
+ "rand 0.8.6",
  "rayon",
  "reqwest",
  "safetensors",

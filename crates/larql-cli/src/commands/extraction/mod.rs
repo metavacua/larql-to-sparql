@@ -24,6 +24,7 @@ pub mod predict_cmd;
 pub mod projection_test_cmd;
 pub mod qk_modes_cmd;
 pub mod qsig_metric;
+pub mod qsig_nulls;
 pub mod qsig_sheaf;
 pub mod qk_rank_cmd;
 pub mod qk_templates_cmd;
