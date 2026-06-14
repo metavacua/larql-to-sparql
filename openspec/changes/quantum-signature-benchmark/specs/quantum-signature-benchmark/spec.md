@@ -1,6 +1,6 @@
-## ADDED Requirements: quantum-signature-benchmark
+## ADDED Requirements
 
-### REQ-QSIG-001: Witness battery calibrated to exact analytic poles
+### Requirement: REQ-QSIG-001 — Witness battery calibrated to exact analytic poles
 
 `larql-hilbert` SHALL provide a witness battery (`Witnesses::from_coupling`) computing
 W1 mutual information, W2 negativity, W3 CHSH (Horodecki `2√M`), W4 entanglement
@@ -47,7 +47,7 @@ The identity coupling reads as maximally entangled; a rank-one coupling reads as
 
 ---
 
-### REQ-QSIG-002: Sheaf contextual fraction generalizing CHSH and Peres–Mermin
+### Requirement: REQ-QSIG-002 — Sheaf contextual fraction generalizing CHSH and Peres–Mermin
 
 The system SHALL compute the contextual fraction of an empirical model by linear
 programming, with CF=0 iff a global section exists (non-contextual), and SHALL
@@ -75,7 +75,7 @@ The Peres–Mermin quantum value 6 exceeds the noncontextual bound 4.
 
 ---
 
-### REQ-QSIG-003: The embedding confound and the shared reduction
+### Requirement: REQ-QSIG-003 — The embedding confound and the shared reduction
 
 `larql-hilbert` SHALL expose `reduced_rho2`, the single Choi-embed-and-partial-trace
 reduction shared by the scalar witnesses and the contextual-fraction cover
@@ -96,7 +96,7 @@ A Gaussian-random coupling read through `from_matrix` is generically entangled.
 
 ---
 
-### REQ-QSIG-004: Three independent nulls through the identical pipe
+### Requirement: REQ-QSIG-004 — Three independent nulls through the identical pipe
 
 `larql-cli` SHALL provide three independently-constructed nulls — Gaussian,
 singular-value-matched, and sign-randomized — each reproducible under a fixed seed
@@ -122,7 +122,7 @@ and each pushed through the same witness pipe as the real coupling.
 
 ---
 
-### REQ-QSIG-005: The canonical (whitened) metric dual
+### Requirement: REQ-QSIG-005 — The canonical (whitened) metric dual
 
 `larql-cli` SHALL provide the canonical coupling `C_canon = (W_Q M)(W_K M)ᵀ` with
 `M = L⁻ᵀ` from the Cholesky factor of the embedding covariance, collapsing to the
@@ -142,7 +142,7 @@ With `L = I`, the canonical coupling equals the raw coupling.
 
 ---
 
-### REQ-QSIG-006: Determinative reproducibility (W7 = reflexivity test)
+### Requirement: REQ-QSIG-006 — Determinative reproducibility (W7 = reflexivity test)
 
 The system SHALL treat reproducibility as the determinative axis: a source
 reproducible under a fixed seed is pseudo-random (classical self-identity holds)
@@ -163,7 +163,7 @@ and therefore not quantum-random. This holds for the simulated QLM and every nul
 
 ---
 
-### REQ-QSIG-007: The quantum-signature runner and predicative report
+### Requirement: REQ-QSIG-007 — The quantum-signature runner and predicative report
 
 `larql-cli` SHALL provide a `quantum-signature <vindex>` command that, per head,
 evaluates the witness battery and contextual fraction on the real coupling and the

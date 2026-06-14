@@ -17,7 +17,7 @@ SP3 = QLM⇄vindex compiler/distiller).
 
 Design: `docs/superpowers/specs/2026-06-13-sp2-quantum-signature-benchmark-design.md`.
 
-## What
+## What Changes
 
 1. A **witness battery** on the 2-qubit reduced density matrix and the coupling:
    W1 mutual information, W2 negativity (PPT), W3 CHSH (Horodecki), W4
