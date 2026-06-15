@@ -36,7 +36,7 @@ pub(super) struct MmapShard {
 /// The MXFP4 raw-pair path (packed expert gate_up/down in DeepSeek-V4)
 /// is safetensors-only — GGUF stores the same expert tensors as standard
 /// blockwise quants (Q4_0/Q4_K/…) handled by `get_tensor_f32` directly.
-pub(super) enum TensorSource {
+pub(crate) enum TensorSource {
     Safetensors {
         shards: Vec<MmapShard>,
         /// hf_key → (shard_idx, safetensors-internal name)
@@ -55,11 +55,11 @@ pub(super) enum TensorSource {
 /// of the HF Linear convention — without correction, `tensor.shape()[0]`
 /// is `hidden_size` instead of `intermediate_size` and downstream
 /// matmul produces NaN).
-pub(super) struct GgufTensorSource {
-    pub(super) gguf: larql_models::loading::gguf::GgufFile,
-    pub(super) shard_mmaps: Vec<memmap2::Mmap>,
+pub(crate) struct GgufTensorSource {
+    pub(crate) gguf: larql_models::loading::gguf::GgufFile,
+    pub(crate) shard_mmaps: Vec<memmap2::Mmap>,
     /// hf_key (after `normalize_gguf_key`) → index into `gguf.tensor_infos`.
-    pub(super) index: HashMap<String, usize>,
+    pub(crate) index: HashMap<String, usize>,
     /// Canonical hidden_size — used to orient ffn tensors to HF Linear shape.
     hidden_size: usize,
     /// Canonical intermediate_size (dense FFN). Some MoE architectures
@@ -112,6 +112,15 @@ impl TensorSource {
         match self {
             TensorSource::Safetensors { index, .. } => Some(index),
             TensorSource::Gguf(_) => None,
+        }
+    }
+
+    /// Borrow the GGUF backend for 1-D tensor access (norm/bias weights
+    /// via `get_vector_f32`). Returns `None` for the safetensors variant.
+    pub(crate) fn gguf_source(&self) -> Option<&GgufTensorSource> {
+        match self {
+            TensorSource::Gguf(g) => Some(g),
+            _ => None,
         }
     }
 }
@@ -209,7 +218,70 @@ impl GgufTensorSource {
         arr
     }
 
-    fn get_tensor_f32(&self, key: &str) -> Result<Option<Array2<f32>>, VindexError> {
+    /// Dequantize a 1-D GGUF tensor (norms, biases) to f32. Returns `Ok(None)`
+    /// if the key is absent or the tensor is not 1-D. Peak memory: one tensor.
+    pub(crate) fn get_vector_f32(&self, key: &str) -> Result<Option<Vec<f32>>, VindexError> {
+        let info_idx = match self.index.get(key) {
+            Some(&i) => i,
+            None => return Ok(None),
+        };
+        let info = &self.gguf.tensor_infos[info_idx];
+        if info.n_dims() != 1 {
+            return Ok(None);
+        }
+
+        let shard_idx = info.shard_idx();
+        let mmap = &self.shard_mmaps[shard_idx];
+        let data_offset = self.gguf.shards[shard_idx].data_offset;
+        let abs_offset = data_offset.checked_add(info.offset()).ok_or_else(|| {
+            VindexError::Parse(format!(
+                "gguf tensor {}: data_offset {data_offset} + offset {} overflows",
+                info.name(),
+                info.offset(),
+            ))
+        })?;
+
+        let dims = info.dims();
+        let n_elements: u64 = dims.iter().product();
+        let n_elements_usize = usize::try_from(n_elements).map_err(|_| {
+            VindexError::Parse(format!(
+                "gguf tensor {}: n_elements {n_elements} exceeds usize",
+                info.name(),
+            ))
+        })?;
+
+        let data_size =
+            larql_models::quant::ggml::tensor_data_size(info.tensor_type(), n_elements_usize)
+                .map_err(|e| VindexError::Parse(e.to_string()))?;
+        let abs_offset_usize = usize::try_from(abs_offset).map_err(|_| {
+            VindexError::Parse(format!(
+                "gguf tensor {}: abs_offset {abs_offset} exceeds usize",
+                info.name(),
+            ))
+        })?;
+        let end = abs_offset_usize.checked_add(data_size).ok_or_else(|| {
+            VindexError::Parse(format!(
+                "gguf tensor {}: offset+size overflows",
+                info.name(),
+            ))
+        })?;
+        if end > mmap.len() {
+            return Err(VindexError::Parse(format!(
+                "gguf tensor {} out of bounds: end {end} > shard len {}",
+                info.name(),
+                mmap.len(),
+            )));
+        }
+
+        let raw = &mmap[abs_offset_usize..end];
+        let floats =
+            larql_models::quant::ggml::dequantize(raw, info.tensor_type(), n_elements_usize)
+                .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+        Ok(Some(floats))
+    }
+
+    pub(crate) fn get_tensor_f32(&self, key: &str) -> Result<Option<Array2<f32>>, VindexError> {
         let info_idx = match self.index.get(key) {
             Some(&i) => i,
             None => return Ok(None),
@@ -283,6 +355,15 @@ impl GgufTensorSource {
             None => arr,
         };
         Ok(Some(arr))
+    }
+
+    /// Normalized keys of all 1-D tensors (norm/bias weights).
+    pub(crate) fn vector_names(&self) -> Vec<String> {
+        self.index
+            .iter()
+            .filter(|(_, &i)| self.gguf.tensor_infos[i].n_dims() == 1)
+            .map(|(k, _)| k.clone())
+            .collect()
     }
 }
 
@@ -767,5 +848,34 @@ mod tests {
     fn normalize_handles_empty_input() {
         let prefixes = ["model."];
         assert_eq!(normalize_key("", &prefixes), "");
+    }
+
+    #[test]
+    fn gguf_get_vector_f32_reads_1d_tensor() {
+        use larql_models::loading::gguf::{GgufFile, GgufTensor, GgufValue, GgufWriter};
+        let vals = [1.0f32, 2.0, 3.0, 4.0];
+        let mut data = Vec::new();
+        for v in vals {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut w = GgufWriter::new();
+        w.meta("general.architecture", GgufValue::String("llama".into()));
+        w.tensor(GgufTensor {
+            name: "blk.0.attn_norm.weight".into(),
+            dims: vec![4],
+            ggml_type: 0,
+            data,
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tiny.gguf");
+        w.write_to_file(&path).unwrap();
+        let gguf = GgufFile::open(&path).unwrap();
+        let mut src = GgufTensorSource::from_gguf(gguf, 0, 0).unwrap();
+        src.index = std::collections::HashMap::from([("attn_norm.weight".to_string(), 0usize)]);
+        assert_eq!(
+            src.get_vector_f32("attn_norm.weight").unwrap(),
+            Some(vec![1.0, 2.0, 3.0, 4.0])
+        );
+        assert_eq!(src.get_vector_f32("missing").unwrap(), None);
     }
 }
