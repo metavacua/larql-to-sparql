@@ -268,4 +268,147 @@ mod tests {
             "data must be the row-major flatten of the oriented (2,3) array"
         );
     }
+
+    /// Fast gated test: prove that real per-layer weight keys (attn q/k/v/o,
+    /// ffn up/down, layer norms) resolve through `GgufWeightSource` on an
+    /// actual dense GGUF file.
+    ///
+    /// Gate: `LARQL_TEST_GGUF=/path/to/dense.gguf`. Skipped otherwise.
+    ///
+    /// Construction path (mirrors `StreamingContext::new` + `maybe_write_model_weights`):
+    ///   1. `GgufFile::open` on the path.
+    ///   2. `gguf.to_config_json()` → `detect_from_json_validated` → arch + hidden/intermediate.
+    ///   3. `GgufTensorSource::from_gguf(gguf, hidden_size, intermediate_size)` — real index.
+    ///   4. `GgufWeightSource { gguf: &src, arch: &*arch, num_layers }`.
+    ///   5. Check layer 0 keys for attn q/k/v/o, ffn up/down, norms.
+    #[test]
+    fn gguf_weight_source_resolves_real_dense_keys() {
+        let Some(gguf_path) = std::env::var_os("LARQL_TEST_GGUF") else {
+            eprintln!("skip: set LARQL_TEST_GGUF to a dense GGUF");
+            return;
+        };
+
+        // Step 1: open the GGUF file.
+        let gguf = GgufFile::open(std::path::Path::new(&gguf_path))
+            .expect("GgufFile::open must succeed for LARQL_TEST_GGUF");
+
+        // Step 2: detect architecture from GGUF metadata.
+        let cfg_json = gguf.to_config_json();
+        let arch = larql_models::detect_from_json_validated(&cfg_json)
+            .expect("architecture detection must succeed for LARQL_TEST_GGUF");
+        let cfg = arch.config();
+        let hidden_size = cfg.hidden_size;
+        let intermediate_size = cfg.intermediate_size;
+        let num_layers = cfg.num_layers;
+
+        eprintln!(
+            "  arch={} hidden={} intermediate={} layers={}",
+            cfg.model_type, hidden_size, intermediate_size, num_layers,
+        );
+        assert!(num_layers > 0, "model must have at least one layer");
+        assert!(hidden_size > 0, "hidden_size must be > 0");
+        assert!(intermediate_size > 0, "intermediate_size must be > 0");
+
+        // Step 3: build GgufTensorSource with real index (no override).
+        let src = GgufTensorSource::from_gguf(gguf, hidden_size, intermediate_size)
+            .expect("GgufTensorSource::from_gguf must succeed");
+
+        // Step 4: construct GgufWeightSource.
+        let ws = GgufWeightSource {
+            gguf: &src,
+            arch: &*arch,
+            num_layers,
+        };
+
+        // Step 5: verify per-layer keys for layer 0.
+        let mut resolved: Vec<(&str, usize, usize)> = Vec::new();
+        let mut missed: Vec<&str> = Vec::new();
+
+        // Attn q/k/v/o
+        for (label, key) in [
+            ("attn_q", arch.attn_q_key(0)),
+            ("attn_k", arch.attn_k_key(0)),
+            ("attn_v", arch.attn_v_key(0)),
+            ("attn_o", arch.attn_o_key(0)),
+        ] {
+            match ws.get_tensor(&key) {
+                Some((_, rows, cols)) => {
+                    eprintln!("  RESOLVED {label} key={key} shape=({rows},{cols})");
+                    resolved.push((label, rows, cols));
+                }
+                None => {
+                    eprintln!("  MISSED   {label} key={key}");
+                    missed.push(label);
+                }
+            }
+        }
+
+        // FFN up/down (dense path — BitNet is llama-shaped, not MoE)
+        if !arch.is_moe() {
+            for (label, key) in [
+                ("ffn_up", arch.ffn_up_key(0)),
+                ("ffn_down", arch.ffn_down_key(0)),
+            ] {
+                match ws.get_tensor(&key) {
+                    Some((_, rows, cols)) => {
+                        eprintln!("  RESOLVED {label} key={key} shape=({rows},{cols})");
+                        resolved.push((label, rows, cols));
+                    }
+                    None => {
+                        eprintln!("  MISSED   {label} key={key}");
+                        missed.push(label);
+                    }
+                }
+            }
+        } else {
+            eprintln!("  NOTE: arch is MoE — skipping dense ffn_up/ffn_down assertion");
+        }
+
+        // Layer norms (get_vector path)
+        let norm_key_input = arch.input_layernorm_key(0);
+        let norm_key_post_attn = arch.post_attention_layernorm_key(0);
+        let mut norm_resolved = 0usize;
+        for (label, key) in [
+            ("input_layernorm", norm_key_input.as_str()),
+            ("post_attn_layernorm", norm_key_post_attn.as_str()),
+        ] {
+            match ws.get_vector(key) {
+                Some(v) if !v.is_empty() => {
+                    eprintln!("  RESOLVED {label} key={key} len={}", v.len());
+                    norm_resolved += 1;
+                }
+                Some(_) => {
+                    eprintln!("  MISSED   {label} key={key} (empty vec)");
+                }
+                None => {
+                    eprintln!("  MISSED   {label} key={key}");
+                }
+            }
+        }
+
+        // Assertions
+        assert!(
+            missed.is_empty(),
+            "These per-layer keys did NOT resolve through GgufWeightSource: {missed:?}\n\
+             This means GgufTensorSource::index does not contain the normalized HF keys \
+             the weight writer requests. Check normalize_gguf_key output vs arch.*_key(0)."
+        );
+        for (label, rows, cols) in &resolved {
+            assert!(
+                *rows > 0 && *cols > 0,
+                "{label} resolved but has zero dimension: shape=({rows},{cols})"
+            );
+        }
+        assert!(
+            norm_resolved >= 1,
+            "At least one layer norm must resolve via get_vector; got 0. \
+             Check that the GGUF has 1-D norm tensors and normalize_gguf_key maps them."
+        );
+
+        eprintln!(
+            "  PASS: {}/{} 2-D keys resolved; {norm_resolved}/2 norm vectors resolved",
+            resolved.len(),
+            resolved.len() + missed.len(),
+        );
+    }
 }
