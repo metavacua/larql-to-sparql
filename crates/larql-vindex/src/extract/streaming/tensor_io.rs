@@ -218,126 +218,103 @@ impl GgufTensorSource {
         arr
     }
 
+    /// Validate + locate the raw bytes for `key`, requiring exactly `n_dims`
+    /// dimensions. Returns `Ok(None)` if the key is absent or the rank differs.
+    /// Centralizes the byte-addressing + overflow/bounds guards shared by the
+    /// 1-D and 2-D accessors.
+    fn raw_slice_for(
+        &self,
+        key: &str,
+        n_dims: usize,
+    ) -> Result<
+        Option<(
+            &[u8],
+            usize,
+            &larql_models::loading::gguf::GgufTensorInfo,
+        )>,
+        VindexError,
+    > {
+        let info_idx = match self.index.get(key) {
+            Some(&i) => i,
+            None => return Ok(None),
+        };
+        let info = &self.gguf.tensor_infos[info_idx];
+        if info.n_dims() as usize != n_dims {
+            return Ok(None);
+        }
+
+        let shard_idx = info.shard_idx();
+        let mmap = &self.shard_mmaps[shard_idx];
+        let data_offset = self.gguf.shards[shard_idx].data_offset;
+        let abs_offset = data_offset.checked_add(info.offset()).ok_or_else(|| {
+            VindexError::Parse(format!(
+                "gguf tensor {}: data_offset {data_offset} + offset {} overflows",
+                info.name(),
+                info.offset(),
+            ))
+        })?;
+
+        let dims = info.dims();
+        let n_elements: u64 = dims.iter().product();
+        let n_elements_usize = usize::try_from(n_elements).map_err(|_| {
+            VindexError::Parse(format!(
+                "gguf tensor {}: n_elements {n_elements} exceeds usize",
+                info.name(),
+            ))
+        })?;
+
+        let data_size =
+            larql_models::quant::ggml::tensor_data_size(info.tensor_type(), n_elements_usize)
+                .map_err(|e| VindexError::Parse(e.to_string()))?;
+        let abs_offset_usize = usize::try_from(abs_offset).map_err(|_| {
+            VindexError::Parse(format!(
+                "gguf tensor {}: abs_offset {abs_offset} exceeds usize",
+                info.name(),
+            ))
+        })?;
+        let end = abs_offset_usize.checked_add(data_size).ok_or_else(|| {
+            VindexError::Parse(format!(
+                "gguf tensor {}: offset+size overflows",
+                info.name(),
+            ))
+        })?;
+        if end > mmap.len() {
+            return Err(VindexError::Parse(format!(
+                "gguf tensor {} out of bounds: end {end} > shard len {}",
+                info.name(),
+                mmap.len(),
+            )));
+        }
+
+        let raw = &mmap[abs_offset_usize..end];
+        Ok(Some((raw, n_elements_usize, info)))
+    }
+
     /// Dequantize a 1-D GGUF tensor (norms, biases) to f32. Returns `Ok(None)`
     /// if the key is absent or the tensor is not 1-D. Peak memory: one tensor.
     pub(crate) fn get_vector_f32(&self, key: &str) -> Result<Option<Vec<f32>>, VindexError> {
-        let info_idx = match self.index.get(key) {
-            Some(&i) => i,
-            None => return Ok(None),
-        };
-        let info = &self.gguf.tensor_infos[info_idx];
-        if info.n_dims() != 1 {
-            return Ok(None);
+        match self.raw_slice_for(key, 1)? {
+            None => Ok(None),
+            Some((raw, n_elements_usize, info)) => {
+                let floats =
+                    larql_models::quant::ggml::dequantize(raw, info.tensor_type(), n_elements_usize)
+                        .map_err(|e| VindexError::Parse(e.to_string()))?;
+                Ok(Some(floats))
+            }
         }
-
-        let shard_idx = info.shard_idx();
-        let mmap = &self.shard_mmaps[shard_idx];
-        let data_offset = self.gguf.shards[shard_idx].data_offset;
-        let abs_offset = data_offset.checked_add(info.offset()).ok_or_else(|| {
-            VindexError::Parse(format!(
-                "gguf tensor {}: data_offset {data_offset} + offset {} overflows",
-                info.name(),
-                info.offset(),
-            ))
-        })?;
-
-        let dims = info.dims();
-        let n_elements: u64 = dims.iter().product();
-        let n_elements_usize = usize::try_from(n_elements).map_err(|_| {
-            VindexError::Parse(format!(
-                "gguf tensor {}: n_elements {n_elements} exceeds usize",
-                info.name(),
-            ))
-        })?;
-
-        let data_size =
-            larql_models::quant::ggml::tensor_data_size(info.tensor_type(), n_elements_usize)
-                .map_err(|e| VindexError::Parse(e.to_string()))?;
-        let abs_offset_usize = usize::try_from(abs_offset).map_err(|_| {
-            VindexError::Parse(format!(
-                "gguf tensor {}: abs_offset {abs_offset} exceeds usize",
-                info.name(),
-            ))
-        })?;
-        let end = abs_offset_usize.checked_add(data_size).ok_or_else(|| {
-            VindexError::Parse(format!(
-                "gguf tensor {}: offset+size overflows",
-                info.name(),
-            ))
-        })?;
-        if end > mmap.len() {
-            return Err(VindexError::Parse(format!(
-                "gguf tensor {} out of bounds: end {end} > shard len {}",
-                info.name(),
-                mmap.len(),
-            )));
-        }
-
-        let raw = &mmap[abs_offset_usize..end];
-        let floats =
-            larql_models::quant::ggml::dequantize(raw, info.tensor_type(), n_elements_usize)
-                .map_err(|e| VindexError::Parse(e.to_string()))?;
-
-        Ok(Some(floats))
     }
 
     pub(crate) fn get_tensor_f32(&self, key: &str) -> Result<Option<Array2<f32>>, VindexError> {
-        let info_idx = match self.index.get(key) {
-            Some(&i) => i,
+        let (raw, n_elements_usize, info) = match self.raw_slice_for(key, 2)? {
             None => return Ok(None),
+            Some(v) => v,
         };
-        let info = &self.gguf.tensor_infos[info_idx];
-        if info.n_dims() != 2 {
-            return Ok(None);
-        }
 
-        let shard_idx = info.shard_idx();
-        let mmap = &self.shard_mmaps[shard_idx];
-        let data_offset = self.gguf.shards[shard_idx].data_offset;
-        let abs_offset = data_offset.checked_add(info.offset()).ok_or_else(|| {
-            VindexError::Parse(format!(
-                "gguf tensor {}: data_offset {data_offset} + offset {} overflows",
-                info.name(),
-                info.offset(),
-            ))
-        })?;
-
-        let dims = info.dims();
-        let n_elements: u64 = dims.iter().product();
-        let n_elements_usize = usize::try_from(n_elements).map_err(|_| {
-            VindexError::Parse(format!(
-                "gguf tensor {}: n_elements {n_elements} exceeds usize",
-                info.name(),
-            ))
-        })?;
-
-        let data_size =
-            larql_models::quant::ggml::tensor_data_size(info.tensor_type(), n_elements_usize)
-                .map_err(|e| VindexError::Parse(e.to_string()))?;
-        let abs_offset_usize = usize::try_from(abs_offset).map_err(|_| {
-            VindexError::Parse(format!(
-                "gguf tensor {}: abs_offset {abs_offset} exceeds usize",
-                info.name(),
-            ))
-        })?;
-        let end = abs_offset_usize.checked_add(data_size).ok_or_else(|| {
-            VindexError::Parse(format!(
-                "gguf tensor {}: offset+size overflows",
-                info.name(),
-            ))
-        })?;
-        if end > mmap.len() {
-            return Err(VindexError::Parse(format!(
-                "gguf tensor {} out of bounds: end {end} > shard len {}",
-                info.name(),
-                mmap.len(),
-            )));
-        }
-
-        let raw = &mmap[abs_offset_usize..end];
         let floats =
             larql_models::quant::ggml::dequantize(raw, info.tensor_type(), n_elements_usize)
                 .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+        let dims = info.dims();
 
         // GGUF dim ordering: dims[0] = columns (innermost/fastest),
         // dims[1] = rows (outermost). Raw bytes are contiguous along
@@ -877,5 +854,37 @@ mod tests {
             Some(vec![1.0, 2.0, 3.0, 4.0])
         );
         assert_eq!(src.get_vector_f32("missing").unwrap(), None);
+    }
+
+    #[test]
+    fn gguf_get_vector_f32_returns_none_for_2d_tensor() {
+        // A 2-D tensor must return Ok(None) from get_vector_f32 —
+        // the n_dims guard in raw_slice_for must reject rank != 1.
+        use larql_models::loading::gguf::{GgufFile, GgufTensor, GgufValue, GgufWriter};
+        let vals = [1.0f32, 2.0, 3.0, 4.0];
+        let mut data = Vec::new();
+        for v in vals {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut w = GgufWriter::new();
+        w.meta("general.architecture", GgufValue::String("llama".into()));
+        w.tensor(GgufTensor {
+            name: "blk.0.ffn_gate.weight".into(),
+            dims: vec![2, 2],
+            ggml_type: 0,
+            data,
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tiny2d.gguf");
+        w.write_to_file(&path).unwrap();
+        let gguf = GgufFile::open(&path).unwrap();
+        let mut src = GgufTensorSource::from_gguf(gguf, 0, 0).unwrap();
+        src.index =
+            std::collections::HashMap::from([("ffn_gate.weight".to_string(), 0usize)]);
+        assert_eq!(
+            src.get_vector_f32("ffn_gate.weight").unwrap(),
+            None,
+            "2-D tensor must return Ok(None) from get_vector_f32"
+        );
     }
 }
