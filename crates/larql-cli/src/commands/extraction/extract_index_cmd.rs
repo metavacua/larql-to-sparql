@@ -376,15 +376,17 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         // Dispatch:
         //
-        //  - Safetensors (always) and GGUF at browse level go through the
-        //    streaming pipeline — no full model in RAM.
-        //  - GGUF at inference / attention / all levels (or any level
-        //    with `--quant q4k`) still hits the in-memory loader: the
-        //    `StreamingWeights` writer subsystem is safetensors-only,
-        //    and porting it to GGUF is a follow-on PR.
-        let route_gguf_through_streaming = is_gguf_source
-            && matches!(level, larql_vindex::ExtractLevel::Browse)
-            && args.quant == larql_vindex::QuantFormat::None;
+        //  - Safetensors (always) and GGUF + `--quant none` (at ANY level)
+        //    go through the streaming pipeline — no full model in RAM.
+        //    `GgufWeightSource` now writes weights per-tensor at every
+        //    extraction level (bounded RAM, #167).
+        //  - GGUF + `--quant q4k` still hits the in-memory loader: a
+        //    streaming Q4K writer for GGUF is a tracked follow-on.
+        // GGUF streams at ANY level when quant=none — `GgufWeightSource` now writes
+        // weights per-tensor (bounded RAM, #167). q4k GGUF still uses the in-memory
+        // loader (a streaming q4k writer for GGUF is a tracked follow-on).
+        let route_gguf_through_streaming =
+            is_gguf_source && args.quant == larql_vindex::QuantFormat::None;
 
         if is_gguf_source && !route_gguf_through_streaming {
             // GGUF + attention/inference/all (or any level with q4k) →
@@ -438,7 +440,7 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         } else {
-            // Safetensors path (any level) OR GGUF at browse level —
+            // Safetensors path (any level) OR GGUF + quant=none (any level) —
             // streaming mmap, no full model load. For GGUF, point the
             // pipeline at the shard-1 file (or the directory; the
             // pipeline picks the right shard internally).
