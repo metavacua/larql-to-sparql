@@ -36,6 +36,10 @@ pub(crate) struct MmapShard {
 /// The MXFP4 raw-pair path (packed expert gate_up/down in DeepSeek-V4)
 /// is safetensors-only — GGUF stores the same expert tensors as standard
 /// blockwise quants (Q4_0/Q4_K/…) handled by `get_tensor_f32` directly.
+/// Validated raw bytes + element count + tensor info for one GGUF tensor,
+/// as returned by `GgufTensorSource::raw_slice_for`.
+type GgufRawSlice<'a> = (&'a [u8], usize, &'a larql_models::loading::gguf::GgufTensorInfo);
+
 pub(crate) enum TensorSource {
     Safetensors {
         shards: Vec<MmapShard>,
@@ -228,14 +232,7 @@ impl GgufTensorSource {
         &self,
         key: &str,
         n_dims: usize,
-    ) -> Result<
-        Option<(
-            &[u8],
-            usize,
-            &larql_models::loading::gguf::GgufTensorInfo,
-        )>,
-        VindexError,
-    > {
+    ) -> Result<Option<GgufRawSlice<'_>>, VindexError> {
         let info_idx = match self.index.get(key) {
             Some(&i) => i,
             None => return Ok(None),
