@@ -38,7 +38,11 @@ pub(crate) struct MmapShard {
 /// blockwise quants (Q4_0/Q4_K/…) handled by `get_tensor_f32` directly.
 /// Validated raw bytes + element count + tensor info for one GGUF tensor,
 /// as returned by `GgufTensorSource::raw_slice_for`.
-type GgufRawSlice<'a> = (&'a [u8], usize, &'a larql_models::loading::gguf::GgufTensorInfo);
+type GgufRawSlice<'a> = (
+    &'a [u8],
+    usize,
+    &'a larql_models::loading::gguf::GgufTensorInfo,
+);
 
 pub(crate) enum TensorSource {
     Safetensors {
@@ -293,9 +297,12 @@ impl GgufTensorSource {
         match self.raw_slice_for(key, 1)? {
             None => Ok(None),
             Some((raw, n_elements_usize, info)) => {
-                let floats =
-                    larql_models::quant::ggml::dequantize(raw, info.tensor_type(), n_elements_usize)
-                        .map_err(|e| VindexError::Parse(e.to_string()))?;
+                let floats = larql_models::quant::ggml::dequantize(
+                    raw,
+                    info.tensor_type(),
+                    n_elements_usize,
+                )
+                .map_err(|e| VindexError::Parse(e.to_string()))?;
                 Ok(Some(floats))
             }
         }
@@ -876,8 +883,7 @@ mod tests {
         w.write_to_file(&path).unwrap();
         let gguf = GgufFile::open(&path).unwrap();
         let mut src = GgufTensorSource::from_gguf(gguf, 0, 0).unwrap();
-        src.index =
-            std::collections::HashMap::from([("ffn_gate.weight".to_string(), 0usize)]);
+        src.index = std::collections::HashMap::from([("ffn_gate.weight".to_string(), 0usize)]);
         assert_eq!(
             src.get_vector_f32("ffn_gate.weight").unwrap(),
             None,

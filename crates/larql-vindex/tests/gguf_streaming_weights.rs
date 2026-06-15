@@ -39,7 +39,12 @@ fn gguf_inference_extract_populates_weight_files() {
     )
     .expect("GGUF streaming extract must succeed");
 
-    for f in ["attn_weights.bin", "up_weights.bin", "down_weights.bin", "norms.bin"] {
+    for f in [
+        "attn_weights.bin",
+        "up_weights.bin",
+        "down_weights.bin",
+        "norms.bin",
+    ] {
         let len = std::fs::metadata(out.path().join(f))
             .map(|m| m.len())
             .unwrap_or(0);

@@ -23,7 +23,8 @@ impl<'a> StreamingContext<'a> {
             if self.quant != QuantFormat::None {
                 return Err(VindexError::Parse(
                     "GGUF + --quant q4k weight streaming is not yet implemented; \
-                     re-run with --quant none (q4k GGUF is a tracked follow-on)".to_string(),
+                     re-run with --quant none (q4k GGUF is a tracked follow-on)"
+                        .to_string(),
                 ));
             }
             let src = crate::format::weights::GgufWeightSource {
@@ -34,7 +35,10 @@ impl<'a> StreamingContext<'a> {
             let mut level_opts = self.weight_opts;
             level_opts.level = self.extract_level;
             crate::format::weights::write_model_weights_with_opts(
-                &src, self.output_dir, self.callbacks, level_opts,
+                &src,
+                self.output_dir,
+                self.callbacks,
+                level_opts,
             )?;
             return Ok(());
         }
@@ -45,9 +49,9 @@ impl<'a> StreamingContext<'a> {
             (Some(m), Some(i)) => (m, i),
             _ => {
                 return Err(VindexError::Parse(
-                    "GGUF input + extract-level requiring attention/FFN weights is not yet \
-                     implemented (browse-level GGUF works; inference/Q4K GGUF requires \
-                     per-tensor streaming through ggml::dequantize)"
+                    "weights stage reached with neither GGUF nor safetensors weight \
+                     backing (GGUF quant=none streams above; q4k GGUF errors above) — \
+                     unsupported or inconsistent extraction source"
                         .to_string(),
                 ));
             }
