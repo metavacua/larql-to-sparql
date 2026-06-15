@@ -5,9 +5,9 @@ use crate::extract::streaming::tensor_io::GgufTensorSource;
 use crate::format::weights::write_f32::WeightSource;
 
 pub struct GgufWeightSource<'a> {
-    pub gguf: &'a GgufTensorSource,
-    pub arch: &'a dyn larql_models::ModelArchitecture,
-    pub num_layers: usize,
+    pub(crate) gguf: &'a GgufTensorSource,
+    pub(crate) arch: &'a dyn larql_models::ModelArchitecture,
+    pub(crate) num_layers: usize,
 }
 
 impl<'a> WeightSource for GgufWeightSource<'a> {
@@ -197,5 +197,75 @@ mod tests {
         let names = ws.vector_names();
         assert!(names.contains(&"n1d".to_string()), "vector_names must contain 'n1d'; got: {names:?}");
         assert!(!names.contains(&"w2d".to_string()), "vector_names must NOT contain 2-D key 'w2d'");
+    }
+
+    /// Fix D: verify that `get_tensor` correctly row-major-flattens a transposed FFN tensor.
+    ///
+    /// `blk.0.ffn_up.weight` normalises to `layers.0.mlp.up_proj.weight`.
+    /// `expected_shape` returns `(intermediate_size=2, hidden_size=3)` = `(rows=2, cols=3)`.
+    /// The GGUF file stores dims=[2, 3] meaning cols=2, rows=3, so the raw array
+    /// has shape (3, 2) — the transpose of the HF convention — and `orient` must
+    /// swap it to (2, 3) before `GgufWeightSource::get_tensor` flattens row-major.
+    #[test]
+    fn gguf_weight_source_get_tensor_orient_transpose_flatten() {
+        // hidden_size=3, intermediate_size=2 so expected up_proj shape = (2, 3).
+        let arch = larql_models::detect_from_json(&serde_json::json!({
+            "model_type": "llama",
+            "hidden_size": 3,
+            "num_hidden_layers": 1,
+            "intermediate_size": 2,
+            "num_attention_heads": 1,
+            "num_key_value_heads": 1,
+            "vocab_size": 32,
+        }));
+
+        // Build GGUF with blk.0.ffn_up.weight stored as dims=[2, 3]
+        // (cols=2=intermediate_size, rows=3=hidden_size) — the PyTorch-transposed layout.
+        // Raw bytes are contiguous along dims[0], so the values fill
+        //   row0: [1.0, 2.0], row1: [3.0, 4.0], row2: [5.0, 6.0]
+        // (shape (3,2) array).  After orient-transpose to (2,3):
+        //   row0: [1.0, 3.0, 5.0], row1: [2.0, 4.0, 6.0]
+        // Row-major flatten: [1.0, 3.0, 5.0, 2.0, 4.0, 6.0].
+        let vals = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let mut data = Vec::new();
+        for v in vals {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+
+        let mut w = GgufWriter::new();
+        w.meta("general.architecture", GgufValue::String("llama".into()));
+        // dims=[2,3]: dims[0]=2 (cols=intermediate), dims[1]=3 (rows=hidden)
+        w.tensor(GgufTensor {
+            name: "blk.0.ffn_up.weight".into(),
+            dims: vec![2, 3],
+            ggml_type: 0, // F32
+            data,
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("orient.gguf");
+        w.write_to_file(&path).unwrap();
+        let gguf = larql_models::loading::gguf::GgufFile::open(&path).unwrap();
+        // hidden_size=3, intermediate_size=2 drive expected_shape / orient.
+        let src = GgufTensorSource::from_gguf(gguf, 3, 2).unwrap();
+
+        let ws = GgufWeightSource {
+            gguf: &src,
+            arch: &*arch,
+            num_layers: 1,
+        };
+
+        // The normalized key for blk.0.ffn_up.weight is layers.0.mlp.up_proj.weight.
+        let result = ws.get_tensor("layers.0.mlp.up_proj.weight");
+        assert!(result.is_some(), "get_tensor must return Some for the FFN key");
+        let (data_out, rows, cols) = result.unwrap();
+        assert_eq!(rows, 2, "rows must equal intermediate_size after orient");
+        assert_eq!(cols, 3, "cols must equal hidden_size after orient");
+        // Row-major flatten of transposed (2,3) array.
+        assert_eq!(
+            data_out,
+            vec![1.0f32, 3.0, 5.0, 2.0, 4.0, 6.0],
+            "data must be the row-major flatten of the oriented (2,3) array"
+        );
     }
 }

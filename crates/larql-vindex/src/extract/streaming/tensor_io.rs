@@ -25,9 +25,9 @@ use ndarray::Array2;
 use crate::error::VindexError;
 
 /// Mmap'd safetensors file — kept alive for the duration of extraction.
-pub(super) struct MmapShard {
-    pub(super) _file: std::fs::File,
-    pub(super) mmap: memmap2::Mmap,
+pub(crate) struct MmapShard {
+    pub(crate) _file: std::fs::File,
+    pub(crate) mmap: memmap2::Mmap,
 }
 
 /// Tensor source for the streaming pipeline. Dispatches `get_tensor_f32`
@@ -117,6 +117,8 @@ impl TensorSource {
 
     /// Borrow the GGUF backend for 1-D tensor access (norm/bias weights
     /// via `get_vector_f32`). Returns `None` for the safetensors variant.
+    // consumed by maybe_write_model_weights GGUF dispatch (next commit, #167)
+    #[allow(dead_code)]
     pub(crate) fn gguf_source(&self) -> Option<&GgufTensorSource> {
         match self {
             TensorSource::Gguf(g) => Some(g),
