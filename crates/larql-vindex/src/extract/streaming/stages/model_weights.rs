@@ -18,13 +18,26 @@ impl<'a> StreamingContext<'a> {
         if !needs_weights {
             return Ok(());
         }
-        // `StreamingWeights` is a safetensors-only writer subsystem
-        // (Q4_K + f32 weight writers walk safetensors crate views
-        // directly). GGUF input is supported at browse level (where
-        // `needs_weights == false`) and below only; inference / Q4K
-        // levels for GGUF need a separate writer pass that streams
-        // per-tensor through `larql_models::quant::ggml::dequantize` —
-        // tracked as a follow-on PR.
+        // GGUF: stream weights per-tensor via GgufWeightSource (bounded RAM, #167).
+        if let Some(gguf) = self.tensor_source.gguf_source() {
+            if self.quant != QuantFormat::None {
+                return Err(VindexError::Parse(
+                    "GGUF + --quant q4k weight streaming is not yet implemented; \
+                     re-run with --quant none (q4k GGUF is a tracked follow-on)".to_string(),
+                ));
+            }
+            let src = crate::format::weights::GgufWeightSource {
+                gguf,
+                arch: &*self.arch,
+                num_layers: self.num_layers,
+            };
+            let mut level_opts = self.weight_opts;
+            level_opts.level = self.extract_level;
+            crate::format::weights::write_model_weights_with_opts(
+                &src, self.output_dir, self.callbacks, level_opts,
+            )?;
+            return Ok(());
+        }
         let (shard_mmaps, tensor_index) = match (
             self.tensor_source.safetensors_mmap_refs(),
             self.tensor_source.safetensors_index(),

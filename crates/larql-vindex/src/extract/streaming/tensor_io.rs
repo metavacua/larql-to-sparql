@@ -121,8 +121,6 @@ impl TensorSource {
 
     /// Borrow the GGUF backend for 1-D tensor access (norm/bias weights
     /// via `get_vector_f32`). Returns `None` for the safetensors variant.
-    // consumed by maybe_write_model_weights GGUF dispatch (next commit, #167)
-    #[allow(dead_code)]
     pub(crate) fn gguf_source(&self) -> Option<&GgufTensorSource> {
         match self {
             TensorSource::Gguf(g) => Some(g),
