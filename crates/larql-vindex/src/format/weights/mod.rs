@@ -16,6 +16,7 @@
 //!                (`load_model_weights`, `find_tokenizer_path`).
 
 mod capabilities;
+mod gguf_source;
 pub mod load;
 pub mod manifest;
 pub mod mla_absorb;
@@ -25,6 +26,7 @@ pub mod write_kquant;
 pub mod write_layers;
 
 pub(crate) use capabilities::ensure_extract_level_supported;
+pub use gguf_source::GgufWeightSource;
 
 pub use load::{
     find_tokenizer_path, load_model_weights, load_model_weights_kquant,

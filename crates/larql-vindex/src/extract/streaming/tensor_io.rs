@@ -135,7 +135,7 @@ impl GgufTensorSource {
     /// architecture and drive the canonical FFN orientation applied
     /// inside `get_tensor_f32` (mirrors `orient_in_place` in the
     /// in-memory loader).
-    pub(super) fn from_gguf(
+    pub(crate) fn from_gguf(
         gguf: larql_models::loading::gguf::GgufFile,
         hidden_size: usize,
         intermediate_size: usize,
