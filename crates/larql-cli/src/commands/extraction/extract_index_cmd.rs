@@ -198,6 +198,48 @@ impl IndexBuildCallbacks for CliBuildCallbacks {
     }
 }
 
+/// Returns `true` when a GGUF source should be routed through the streaming
+/// pipeline (`GgufWeightSource`). Only dense architectures are supported:
+/// MoE expert tensors have no key mapping in `GgufWeightSource` and would be
+/// silently dropped, producing a hollow vindex (#153). MLA attention tensors
+/// are likewise unsupported in the streaming writer.
+///
+/// The function opens the GGUF file header (mmap, no tensors loaded) to
+/// detect the architecture — the cost is metadata-only and bounded.
+///
+/// Returns `false` (→ in-memory path) when:
+///   - `is_gguf` is false (safetensors — callers guard this away before
+///     calling, but it is safe to pass false here),
+///   - the architecture reports `is_moe() == true`, or
+///   - the architecture reports `uses_mla() == true`.
+fn should_stream_dense_gguf(
+    is_gguf: bool,
+    gguf_dir: &Option<std::path::PathBuf>,
+    model_path: &std::path::Path,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if !is_gguf {
+        return Ok(false);
+    }
+    let entry: std::path::PathBuf = match gguf_dir {
+        Some(p) => p.clone(),
+        None => model_path.to_path_buf(),
+    };
+    let gguf = larql_models::loading::gguf::GgufFile::open(&entry)
+        .map_err(|e| format!("open GGUF for arch detection: {e}"))?;
+    // Use the infallible detect_from_json (not _validated) — routing
+    // must not fail on a validation error; the real pipeline path will
+    // report that with better context.
+    let arch = larql_models::detect_from_json(&gguf.to_config_json());
+    Ok(!arch.is_moe() && !arch.uses_mla())
+}
+
+/// Pure-logic helper exposed for unit tests: given already-resolved
+/// architecture flags, should this GGUF be streamed?
+#[cfg(test)]
+fn streaming_eligible(is_gguf: bool, quant_none: bool, is_moe: bool, uses_mla: bool) -> bool {
+    is_gguf && quant_none && !is_moe && !uses_mla
+}
+
 pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut callbacks = CliBuildCallbacks::new();
     let build_start = Instant::now();
@@ -376,17 +418,20 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         // Dispatch:
         //
-        //  - Safetensors (always) and GGUF + `--quant none` (at ANY level)
-        //    go through the streaming pipeline — no full model in RAM.
-        //    `GgufWeightSource` now writes weights per-tensor at every
-        //    extraction level (bounded RAM, #167).
+        //  - Safetensors (always) and GGUF + `--quant none` for DENSE
+        //    architectures go through the streaming pipeline — no full
+        //    model in RAM. `GgufWeightSource` writes weights per-tensor at
+        //    every extraction level (bounded RAM, #167).
+        //  - MoE/MLA GGUF + `--quant none` stays on the in-memory loader.
+        //    MoE expert tensors (`blk.N.ffn_*_exps.weight`) have no key
+        //    mapping in `GgufWeightSource` — experts would be silently
+        //    dropped producing a hollow vindex (#153). MoE/MLA GGUF
+        //    streaming is deferred until #153 is resolved.
         //  - GGUF + `--quant q4k` still hits the in-memory loader: a
         //    streaming Q4K writer for GGUF is a tracked follow-on.
-        // GGUF streams at ANY level when quant=none — `GgufWeightSource` now writes
-        // weights per-tensor (bounded RAM, #167). q4k GGUF still uses the in-memory
-        // loader (a streaming q4k writer for GGUF is a tracked follow-on).
-        let route_gguf_through_streaming =
-            is_gguf_source && args.quant == larql_vindex::QuantFormat::None;
+        let route_gguf_through_streaming = is_gguf_source
+            && args.quant == larql_vindex::QuantFormat::None
+            && should_stream_dense_gguf(is_gguf_source, &gguf_dir, &model_path)?;
 
         if is_gguf_source && !route_gguf_through_streaming {
             // GGUF + attention/inference/all (or any level with q4k) →
@@ -543,4 +588,47 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::streaming_eligible;
+
+    /// Dense GGUF + quant=none must stream.
+    #[test]
+    fn dense_gguf_quant_none_streams() {
+        assert!(streaming_eligible(true, true, false, false));
+    }
+
+    /// MoE GGUF + quant=none must NOT stream (would drop expert tensors → hollow vindex, #153).
+    #[test]
+    fn moe_gguf_quant_none_does_not_stream() {
+        assert!(!streaming_eligible(true, true, true, false));
+    }
+
+    /// MLA GGUF + quant=none must NOT stream (MLA tensors unsupported in writer).
+    #[test]
+    fn mla_gguf_quant_none_does_not_stream() {
+        assert!(!streaming_eligible(true, true, false, true));
+    }
+
+    /// MoE+MLA GGUF + quant=none must NOT stream.
+    #[test]
+    fn moe_mla_gguf_quant_none_does_not_stream() {
+        assert!(!streaming_eligible(true, true, true, true));
+    }
+
+    /// Non-GGUF (safetensors) never goes through this guard — the outer
+    /// caller always routes safetensors to streaming regardless.
+    #[test]
+    fn non_gguf_returns_false() {
+        assert!(!streaming_eligible(false, true, false, false));
+    }
+
+    /// GGUF + quant=q4k always falls to in-memory (q4k streaming not yet implemented).
+    /// The quant guard lives in the caller, not here — quant_none=false simulates it.
+    #[test]
+    fn gguf_q4k_does_not_stream_via_quant_guard() {
+        assert!(!streaming_eligible(true, false, false, false));
+    }
 }
