@@ -105,6 +105,7 @@ pub fn build_vindex_streaming(
     ctx.write_router_weights()?;
     ctx.write_embeddings()?;
     ctx.write_down_meta()?;
+    ctx.run_clustering()?;
     ctx.write_tokenizer()?;
     ctx.write_index_json()?;
     ctx.maybe_write_model_weights()?;

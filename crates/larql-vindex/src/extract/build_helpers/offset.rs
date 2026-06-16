@@ -1,16 +1,20 @@
 //! Offset direction — normalised `embed[output] - embed[input]`,
 //! the relation vector for clustering.
 
-use larql_models::ModelWeights;
-
 use crate::extract::constants::FIRST_CONTENT_TOKEN_ID;
 
 /// Compute the offset direction for a gate→down feature pair.
 /// Returns normalized(output_embed − input_embed) or None if invalid.
+///
+/// Takes a view of the embedding table directly (rather than a full
+/// `ModelWeights`) so both the in-memory and the streaming extract
+/// paths can call it — streaming never materializes a `ModelWeights`.
+/// A view lets the in-memory path pass its `ArcArray2` and streaming
+/// its owned `Array2` with no copy.
 pub(crate) fn compute_offset_direction(
     gate_token: &str,
     output_token_id: usize,
-    weights: &ModelWeights,
+    embed: ndarray::ArrayView2<f32>,
     tokenizer: &tokenizers::Tokenizer,
     hidden_size: usize,
     vocab_size: usize,
@@ -36,7 +40,7 @@ pub(crate) fn compute_offset_direction(
 
     let mut input_avg = vec![0.0f32; hidden_size];
     for &id in &valid {
-        for (j, &v) in weights.embed.row(id).iter().enumerate() {
+        for (j, &v) in embed.row(id).iter().enumerate() {
             input_avg[j] += v;
         }
     }
@@ -45,7 +49,7 @@ pub(crate) fn compute_offset_direction(
         *v /= n;
     }
 
-    let output_embed = weights.embed.row(output_token_id);
+    let output_embed = embed.row(output_token_id);
     let offset: Vec<f32> = output_embed
         .iter()
         .zip(input_avg.iter())
@@ -88,8 +92,8 @@ mod tests {
             .assign(&ndarray::array![0.0, 1.0, 0.0, 0.0]);
         let weights = weights_with_embed(embed, 5);
 
-        let dir =
-            compute_offset_direction("France", 3, &weights, &toks, 4, 5).expect("offset computed");
+        let dir = compute_offset_direction("France", 3, weights.embed.view(), &toks, 4, 5)
+            .expect("offset computed");
         let expected_neg = -1.0_f32 / 2.0_f32.sqrt();
         let expected_pos = 1.0_f32 / 2.0_f32.sqrt();
         assert!((dir[0] - expected_neg).abs() < 1e-6);
@@ -103,7 +107,7 @@ mod tests {
         let toks = vocab_tokenizer(&["x"]);
         let embed = ndarray::Array2::<f32>::zeros((2, 4));
         let weights = weights_with_embed(embed, 2);
-        assert!(compute_offset_direction("", 3, &weights, &toks, 4, 5).is_none());
+        assert!(compute_offset_direction("", 3, weights.embed.view(), &toks, 4, 5).is_none());
     }
 
     #[test]
@@ -113,7 +117,8 @@ mod tests {
         let weights = weights_with_embed(embed, 5);
         for special_id in 0..3 {
             assert!(
-                compute_offset_direction("hello", special_id, &weights, &toks, 4, 5).is_none(),
+                compute_offset_direction("hello", special_id, weights.embed.view(), &toks, 4, 5)
+                    .is_none(),
                 "id {special_id} must be rejected"
             );
         }
@@ -124,7 +129,7 @@ mod tests {
         let toks = vocab_tokenizer(&["hello"]);
         let embed = ndarray::Array2::<f32>::zeros((5, 4));
         let weights = weights_with_embed(embed, 5);
-        assert!(compute_offset_direction("hello", 99, &weights, &toks, 4, 5).is_none());
+        assert!(compute_offset_direction("hello", 99, weights.embed.view(), &toks, 4, 5).is_none());
     }
 
     #[test]
@@ -132,7 +137,10 @@ mod tests {
         let toks = vocab_tokenizer(&["hello"]);
         let embed = ndarray::Array2::<f32>::zeros((5, 4));
         let weights = weights_with_embed(embed, 5);
-        assert!(compute_offset_direction("unknown_word", 3, &weights, &toks, 4, 5).is_none());
+        assert!(
+            compute_offset_direction("unknown_word", 3, weights.embed.view(), &toks, 4, 5)
+                .is_none()
+        );
     }
 
     #[test]
@@ -146,6 +154,6 @@ mod tests {
             .row_mut(4)
             .assign(&ndarray::array![1.0, 0.0, 0.0, 0.0]);
         let weights = weights_with_embed(embed, 5);
-        assert!(compute_offset_direction("hello", 3, &weights, &toks, 4, 5).is_none());
+        assert!(compute_offset_direction("hello", 3, weights.embed.view(), &toks, 4, 5).is_none());
     }
 }

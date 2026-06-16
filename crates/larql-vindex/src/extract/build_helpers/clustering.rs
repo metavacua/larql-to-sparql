@@ -4,15 +4,20 @@
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use larql_models::ModelWeights;
-
 use crate::error::VindexError;
 use crate::extract::callbacks::IndexBuildCallbacks;
-use crate::extract::constants::{MAX_RELATION_CLUSTERS, RELATION_KMEANS_ITERS};
+use crate::extract::constants::{
+    FIRST_CONTENT_TOKEN_ID, MAX_RELATION_CLUSTERS, RELATION_KMEANS_ITERS,
+};
 use crate::extract::stage_labels::STAGE_RELATION_CLUSTERS;
 use crate::format::filenames::{FEATURE_CLUSTERS_JSONL, RELATION_CLUSTERS_JSON};
 
 /// Collected data for relation clustering.
+///
+/// Both extract paths hold one of these in their context and append to
+/// it per knowledge-band feature via [`ClusterData::collect`]; the
+/// orchestrator then drains it into [`run_clustering_pipeline`].
+#[derive(Default)]
 pub(crate) struct ClusterData {
     pub directions: Vec<f32>,
     pub features: Vec<(usize, usize)>,
@@ -22,12 +27,57 @@ pub(crate) struct ClusterData {
     pub output_tokens: Vec<String>,
 }
 
+impl ClusterData {
+    /// Collect the gate→down offset direction for one knowledge-band
+    /// feature. Shared by the in-memory and streaming down-meta stages
+    /// so the relation-clustering input is byte-identical across paths.
+    ///
+    /// `offset = normalize(target_embed - input_embed)` captures the
+    /// RELATION between what activates the feature (entity) and what it
+    /// outputs (target). France→Paris and Germany→Berlin share the same
+    /// offset = "capital-of". No-op when `top_token_id` is a special
+    /// token or `compute_offset_direction` rejects the pair.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn collect(
+        &mut self,
+        layer: usize,
+        feat: usize,
+        gate_token: &str,
+        top_token_id: u32,
+        top_token: &str,
+        top_k_entries: &[larql_models::TopKEntry],
+        embed: ndarray::ArrayView2<f32>,
+        tokenizer: &tokenizers::Tokenizer,
+        hidden_size: usize,
+        vocab_size: usize,
+    ) {
+        if (top_token_id as usize) < FIRST_CONTENT_TOKEN_ID {
+            return;
+        }
+        if let Some(offset) = super::compute_offset_direction(
+            gate_token,
+            top_token_id as usize,
+            embed,
+            tokenizer,
+            hidden_size,
+            vocab_size,
+        ) {
+            self.directions.extend_from_slice(&offset);
+            self.features.push((layer, feat));
+            let all_tokens: Vec<String> = top_k_entries.iter().map(|e| e.token.clone()).collect();
+            self.top_tokens.push(all_tokens.join("|"));
+            self.input_tokens.push(gate_token.to_string());
+            self.output_tokens.push(top_token.to_string());
+        }
+    }
+}
+
 /// Run the clustering and labeling pipeline on collected cluster data.
 /// Writes `relation_clusters.json` and `feature_clusters.jsonl`.
 pub(crate) fn run_clustering_pipeline(
     data: ClusterData,
     hidden_size: usize,
-    weights: &ModelWeights,
+    embed: ndarray::ArrayView2<f32>,
     tokenizer: &tokenizers::Tokenizer,
     output_dir: &Path,
     callbacks: &mut dyn IndexBuildCallbacks,
@@ -75,7 +125,7 @@ pub(crate) fn run_clustering_pipeline(
     let (embed_labels, top_tokens_per_cluster) =
         crate::clustering::auto_label_clusters_from_embeddings(
             &centres,
-            &weights.embed,
+            &embed,
             tokenizer,
             &assignments,
             &data.top_tokens,
@@ -152,7 +202,7 @@ mod tests {
                 output_tokens: Vec::new(),
             },
             4,
-            &weights,
+            weights.embed.view(),
             &toks,
             tmp.path(),
             &mut cb,
@@ -206,7 +256,7 @@ mod tests {
                 output_tokens,
             },
             hidden,
-            &weights,
+            weights.embed.view(),
             &toks,
             tmp.path(),
             &mut cb,
@@ -252,7 +302,7 @@ mod tests {
                 output_tokens: vec!["a".into(), "b".into(), "c".into()],
             },
             4,
-            &weights,
+            weights.embed.view(),
             &toks,
             tmp.path(),
             &mut cb,
