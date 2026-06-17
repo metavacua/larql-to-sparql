@@ -7,7 +7,7 @@
 
 use ndarray::{Array1, Array2, ArrayView2};
 
-use super::top_k_by_abs;
+use super::top_k_signed;
 use crate::index::core::VectorIndex;
 use crate::index::storage::gate_store::{gate_matmul, gemv};
 use crate::index::storage::vindex_storage::VindexStorage;
@@ -288,7 +288,7 @@ impl VectorIndex {
             (0..seq_len)
                 .into_par_iter()
                 .map(|s| {
-                    top_k_by_abs(scores_2d.column(s).iter().copied(), k)
+                    top_k_signed(scores_2d.column(s).iter().copied(), k)
                         .into_iter()
                         .map(|(idx, _)| idx)
                         .collect()
@@ -297,7 +297,7 @@ impl VectorIndex {
         } else {
             (0..seq_len)
                 .map(|s| {
-                    top_k_by_abs(scores_2d.column(s).iter().copied(), k)
+                    top_k_signed(scores_2d.column(s).iter().copied(), k)
                         .into_iter()
                         .map(|(idx, _)| idx)
                         .collect()
