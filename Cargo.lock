@@ -2257,6 +2257,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "larql-knowledge"
+version = "0.1.0"
+dependencies = [
+ "larql-vindex",
+ "serde_json",
+]
+
+[[package]]
 name = "larql-kv"
 version = "0.1.0"
 dependencies = [
