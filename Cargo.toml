@@ -20,6 +20,8 @@ members = [
     "crates/larql-boundary",
     # portable (extract to sibling repos later, names stable)
     "crates/model-compute",
+    # knowledge catalog (Wikidata)
+    "crates/larql-knowledge",
 ]
 default-members = [
     "crates/larql-models",
