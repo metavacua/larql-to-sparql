@@ -6,3 +6,6 @@ license = "Apache-2.0"
 
 [dependencies]
 serde_json = { workspace = true }
+
+[dev-dependencies]
+larql-vindex = { path = "../larql-vindex" }
