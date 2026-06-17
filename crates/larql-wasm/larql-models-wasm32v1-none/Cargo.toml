@@ -1,0 +1,28 @@
+[package]
+name = "larql-models-wasm32v1-none"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Model architecture definitions for LARQL — traits, config parsing, tensor key mappings"
+keywords = ["transformer", "model-config", "llm", "architecture"]
+categories = ["data-structures"]
+
+[dependencies]
+
+# Model weight loading
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+ndarray = "0.16"
+safetensors = "0.7"
+memmap2 = "0.9"
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }

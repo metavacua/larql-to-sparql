@@ -1,0 +1,21 @@
+[package]
+name = "larql-vindex-mvv-cdylib"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Certification harness: exports the MVV pure kernel as a standalone wasm32v1-none cdylib for the wasm-safe certifier. NOT part of the portable kernel."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none", default-features = false }
+
+# The cdylib is the final wasm artifact, so it must supply the no_std runtime
+# items (global allocator + panic handler) that rlib kernels inherit from their
+# consumer. These are explicitly NOT wasm32v1-none-pure-kernel code — they are
+# the leaf-artifact runtime, accounted for here and excluded from the kernel's
+# wasm-safe surface by the certifier (dlmalloc is import-free + call_indirect-free).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = { version = "0.2", features = ["global"] }

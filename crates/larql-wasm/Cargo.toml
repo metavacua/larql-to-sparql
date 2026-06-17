@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "larql-bridge",
+    "larql-bridge-native",
+    "larql-bridge-browser",
+    "larql-wasm-math",
+    "larql-boundary-wasm32v1-none",
+    "larql-boundary-interface",
+    "larql-models-wasm32v1-none",
+    "larql-models-interface",
+    "larql-core-wasm32v1-none",
+    "larql-core-interface",
+    "larql-compute-wasm32v1-none",
+    "larql-compute-interface",
+    "larql-vindex-wasm32v1-none",
+    "larql-vindex-interface",
+    "larql-inference-wasm32v1-none",
+    "larql-inference-interface",
+    "larql-kv-wasm32v1-none",
+    "larql-kv-interface",
+    "larql-lql-wasm32v1-none",
+    "larql-lql-interface",
+    "larql-server-wasm32v1-none",
+    "larql-server-interface",
+    "larql-router-wasm32v1-none",
+    "larql-router-interface",
+    "larql-router-protocol-wasm32v1-none",
+    "larql-router-protocol-interface",
+    "larql-cli-wasm32v1-none",
+    "larql-cli-interface",
+    "larql-python-wasm32v1-none",
+    "larql-python-interface",
+    "model-compute-wasm32v1-none",
+    "model-compute-interface",
+    "kv-cache-benchmark-wasm32v1-none",
+    "kv-cache-benchmark-interface",
+    # Verification harness (NOT pure-kernel): MVV certification scaffolding.
+    "larql-vindex-mvv-cdylib",
+    "larql-wasm-certify",
+]
+
+[workspace.package]
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.88"
+authors      = ["Chris Hay", "Ian Douglas Lawrence Norman McLean"]
+license      = "Apache-2.0"
+repository   = "https://github.com/metavacua/larql-to-sparql"
+
+[workspace.dependencies]
+larql-bridge = { path = "larql-bridge" }
+larql-wasm-math = { path = "larql-wasm-math" }
+serde        = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_core   = { version = "1", default-features = false, features = ["alloc"] }
+serde_json   = { version = "1", default-features = false, features = ["alloc"] }
+thiserror    = { version = "2", default-features = false }
+hashbrown    = { version = "0.15", default-features = false, features = ["default-hasher", "inline-more", "serde"] }
+libm         = { version = "0.2", default-features = false }
+
+[profile.release]
+opt-level       = "s"
+lto             = true
+codegen-units   = 1
+strip           = true
+panic           = "abort"

@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+version: v2
+lint:
+  use:
+    - STANDARD
+  except:
+    # vindex.proto lives flat in proto/ rather than proto/vindex/vindex.proto;
+    # relocating it would break generated-code import paths.
+    - PACKAGE_DIRECTORY_MATCH
+    # Package is intentionally unversioned ("vindex" not "vindex.v1") to keep
+    # the gRPC service URL stable across iterations.
+    - PACKAGE_VERSION_SUFFIX
+    # DescribeRequest is shared by both Describe and StreamDescribe RPCs by
+    # design — streaming uses the identical request shape.
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    # GetRelations / GetStats / StreamDescribe use non-standard request/response
+    # message names that are part of the existing public API surface.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
