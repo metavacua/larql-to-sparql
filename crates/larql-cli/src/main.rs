@@ -132,6 +132,10 @@ enum Commands {
     Label(label_cmd::LabelArgs),
 
     #[command(next_help_heading = "Build")]
+    /// Fetch CC0 Wikidata label pairs and produce catalog.json.
+    Catalog(catalog_cmd::CatalogArgs),
+
+    #[command(next_help_heading = "Build")]
     /// Compile vindex patches into model weights (AOT compilation).
     Compile(compile_cmd::CompileArgs),
 
@@ -567,6 +571,7 @@ fn real_main() -> i32 {
         Commands::ExtractIndex(args) => extract_index_cmd::run(args),
         Commands::Build(args) => build_cmd::run(args),
         Commands::Label(args) => label_cmd::run(args),
+        Commands::Catalog(args) => catalog_cmd::run(args),
         Commands::Compile(args) => compile_cmd::run(args),
         Commands::Convert(args) => convert_cmd::run(args),
         Commands::Hf(args) => hf_cmd::run(args),

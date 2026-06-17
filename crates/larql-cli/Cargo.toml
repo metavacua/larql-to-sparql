@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 larql-core = { path = "../larql-core" }
+larql-knowledge = { path = "../larql-knowledge" }
 larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-inference = { path = "../larql-inference" }
