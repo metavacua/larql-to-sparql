@@ -917,6 +917,35 @@ fn make_rich_test_vindex_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+/// True end-to-end round-trip: the label producer's writer
+/// (`larql_vindex::label::writer::write_feature_labels`) emits
+/// `feature_labels.json`, and the REAL DESCRIBE/STATS consumer
+/// (`larql_lql::relations::RelationClassifier::from_vindex`) reads it back.
+///
+/// This is the proof that the writer's on-disk format is the one the
+/// classifier parses. `from_vindex` parses the whole file as a single JSON
+/// object keyed `"L{layer}_F{feat}"`; a multi-line JSONL file is not a single
+/// JSON value, so `serde_json::from_str::<Value>` would `Err` → 0 probe labels
+/// → DESCRIBE shows nothing. This test fixes the writer's object output to the
+/// classifier's object reader.
+#[test]
+fn writer_output_is_read_by_relation_classifier() {
+    let dir = tempfile::tempdir().unwrap();
+    let labels = vec![
+        ((5usize, 1usize), "capital".to_string()),
+        ((7usize, 3usize), "official language".to_string()),
+    ];
+    larql_vindex::label::writer::write_feature_labels(dir.path(), &labels).unwrap();
+
+    let rc = crate::relations::RelationClassifier::from_vindex(dir.path())
+        .expect("RelationClassifier::from_vindex reads the writer's feature_labels.json");
+
+    // The written relations come back as probe-confirmed labels.
+    assert_eq!(rc.num_probe_labels(), 2);
+    assert_eq!(rc.label_for_feature(5, 1), Some("capital"));
+    assert_eq!(rc.label_for_feature(7, 3), Some("official language"));
+}
+
 /// Spin up a session and `USE` the rich test vindex.
 fn rich_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_rich_test_vindex_dir(tag);
