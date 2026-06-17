@@ -1,5 +1,24 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::index::VectorIndex;
+use ndarray::Array1;
+
+/// Signed top-k `(layer, feature)` a subject routes to, across all provided layers,
+/// reusing the engine's signed `gate_knn` (the single canonical ranking).
+pub fn routed_features(
+    index: &VectorIndex,
+    residual_by_layer: &HashMap<usize, Array1<f32>>,
+    per_layer_k: usize,
+) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    for (&layer, resid) in residual_by_layer {
+        for (feat, _score) in index.gate_knn(layer, resid, per_layer_k) {
+            out.push((layer, feat));
+        }
+    }
+    out
+}
+
 /// Label features for one relation using frame-subtraction.
 /// `routed`: per subject, the (layer,feat) it routes to (signed top-k across all layers — computed by the caller).
 /// `down`: (layer,feat) -> its down_meta top token. `pairs`: (subject, object).
@@ -41,6 +60,31 @@ pub fn label_relation_from_routed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn synth_index() -> crate::index::VectorIndex {
+        let num_layers = 2;
+        let hidden = 4;
+        let mut gate0 = ndarray::Array2::<f32>::zeros((8, hidden));
+        for f in 0..8 {
+            gate0[[f, f % 4]] = 1.0;
+        }
+        let gate1 = gate0.clone();
+        let gate = vec![Some(gate0), Some(gate1)];
+        let down = vec![None, None];
+        crate::index::VectorIndex::new(gate, down, num_layers, hidden)
+    }
+
+    #[test]
+    fn routed_features_uses_signed_gate_knn_across_layers() {
+        let index = synth_index();
+        let q = ndarray::Array1::from_vec(vec![0.0f32, 0.0, 1.0, 0.0]); // e_2
+        let resid: std::collections::HashMap<usize, ndarray::Array1<f32>> =
+            [(0usize, q.clone()), (1usize, q.clone())].into_iter().collect();
+        let routed = routed_features(&index, &resid, 2);
+        // e_2 dot-products to 1.0 with features 2 and 6 (f % 4 == 2) in each layer; signed top-2 returns them.
+        assert!(routed.contains(&(0, 2)) && routed.contains(&(0, 6)), "layer 0 routes to 2 and 6: {:?}", routed);
+        assert!(routed.contains(&(1, 2)) && routed.contains(&(1, 6)), "layer 1 routes to 2 and 6: {:?}", routed);
+    }
 
     #[test]
     fn labels_subject_specific_feature_after_frame_subtraction() {
