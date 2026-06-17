@@ -79,8 +79,11 @@ pub fn run(args: LabelArgs) -> Result<(), Box<dyn std::error::Error>> {
     let model = InferenceModel::load(&args.model)?;
     let layers: Vec<usize> = (0..model.num_layers()).collect();
 
-    // 5. Capture residuals one relation at a time (bounded memory — each
-    //    relation's temp dir is dropped after its residuals are loaded).
+    // 5. Capture residuals one relation at a time. Each relation's temp FILE
+    //    is dropped after its residuals are loaded, so on-disk capture never
+    //    accumulates; the in-RAM `residuals` map, however, retains every
+    //    relation's vectors (bounded by catalog size, not by # of relations
+    //    held on disk at once).
     //    Residuals are keyed by (relation, subject): a subject's last-token
     //    residual is relation-prompt-specific, so a subject shared across
     //    relations must keep one residual per relation (not be overwritten).
@@ -117,6 +120,12 @@ pub fn run(args: LabelArgs) -> Result<(), Box<dyn std::error::Error>> {
     let labels = label_catalog(&index, &catalog, &residuals, args.per_layer_k, args.frame_frac);
 
     // 7. Write.
+    if labels.is_empty() {
+        eprintln!(
+            "warning: 0 feature labels produced — catalog had no matches; \
+             feature_labels.json will be empty"
+        );
+    }
     let output_dir = args.output.unwrap_or(args.vindex);
     write_feature_labels(&output_dir, &labels)?;
     println!(
@@ -128,16 +137,28 @@ pub fn run(args: LabelArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Sample a few (layer, feature) slots and report whether any carries a
-/// non-empty `down_meta` top token — the guard against the hollow-vindex
+/// Sample (layer, feature) slots and report whether any carries a non-empty
+/// `down_meta` top token — the guard against the hollow-vindex
 /// (silent-incomplete-extract) case where matching could never fire.
+///
+/// The per-layer bound is `index.num_features(layer)`, not a hardcoded width:
+/// a sparse vindex whose populated features sit above a fixed sample window
+/// would otherwise be falsely refused. Sampling stops at the first non-empty
+/// token (the common, valid case is cheap) and at a total cap, so a genuinely
+/// hollow wide index does not churn unbounded `feature_meta` allocations.
 fn has_any_down_meta_token(index: &VectorIndex) -> bool {
+    const MAX_SAMPLED: usize = 4096;
+    let mut sampled = 0usize;
     for layer in 0..index.num_layers {
-        for feat in 0..64 {
+        for feat in 0..index.num_features(layer) {
             if let Some(meta) = index.feature_meta(layer, feat) {
                 if !meta.top_token.is_empty() {
                     return true;
                 }
+            }
+            sampled += 1;
+            if sampled >= MAX_SAMPLED {
+                return false;
             }
         }
     }
