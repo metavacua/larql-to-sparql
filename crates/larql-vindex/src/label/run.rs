@@ -117,9 +117,16 @@ pub fn load_subject_residuals(
 
 /// Label every relation in `catalog`, composing the tested routing +
 /// frame-subtraction pieces. For each relation, build the per-subject routed
-/// features (only for subjects that have residuals), the `down_meta` token map
-/// for the routed features, then run frame-subtraction + object-match. Returns
-/// the union of labels across relations, de-duplicated.
+/// features (only for subjects that have residuals), the `down_meta` top-K
+/// token-ID set for the routed features and each object's token-ID set (via the
+/// injected `tokenize`), then run frame-subtraction + token-ID-set match.
+/// Returns the union of labels across relations, de-duplicated.
+///
+/// `tokenize` maps an object string to its token-ID set; the caller supplies the
+/// model's tokenizer (encode(o) ∪ encode(" " + o)) so this crate stays
+/// model-independent. Matching is at the token-ID-set level (a feature's down
+/// top-K ids intersected with the object's ids), because a single down-meta
+/// top-token string can never equal a multi-token object.
 ///
 /// `residuals` is keyed by `(relation_name, subject)` because a subject's
 /// last-token residual is relation-prompt-specific (the residual of
@@ -132,7 +139,10 @@ pub fn label_catalog(
     residuals: &HashMap<(String, String), HashMap<usize, Array1<f32>>>,
     per_layer_k: usize,
     frame_frac: f32,
+    tokenize: &dyn Fn(&str) -> std::collections::HashSet<u32>,
 ) -> Vec<((usize, usize), String)> {
+    use std::collections::HashSet;
+
     let mut labels: Vec<((usize, usize), String)> = Vec::new();
     for (rel_name, relation) in catalog.iter() {
         // Routed (layer,feat) per subject that has residuals for THIS relation.
@@ -143,24 +153,41 @@ pub fn label_catalog(
             }
         }
 
-        // down_meta top tokens for every routed (layer,feat).
-        let mut down: HashMap<(usize, usize), String> = HashMap::new();
+        // Down-meta top-K token-id set for every routed (layer,feat): the union
+        // of the feature's top_token_id and every top_k entry's token_id.
+        // Matching keys off these ids (not the top-token string), reproducing
+        // the validated Phase-0 mechanism. Features with no feature_meta are
+        // skipped (they contribute no down ids).
+        let mut down_ids: HashMap<(usize, usize), HashSet<u32>> = HashMap::new();
         for (_, feats) in &routed {
             for &(layer, feat) in feats {
-                if down.contains_key(&(layer, feat)) {
+                if down_ids.contains_key(&(layer, feat)) {
                     continue;
                 }
                 if let Some(meta) = index.feature_meta(layer, feat) {
-                    if !meta.top_token.is_empty() {
-                        down.insert((layer, feat), meta.top_token);
+                    let mut set: HashSet<u32> = HashSet::new();
+                    set.insert(meta.top_token_id);
+                    for entry in &meta.top_k {
+                        set.insert(entry.token_id);
                     }
+                    down_ids.insert((layer, feat), set);
                 }
             }
         }
 
+        // Token-id set for each distinct object in this relation (caller's
+        // tokenizer supplies encode(o) ∪ encode(" " + o)).
+        let mut obj_ids: HashMap<String, HashSet<u32>> = HashMap::new();
+        for (_subject, obj) in &relation.pairs {
+            obj_ids
+                .entry(obj.clone())
+                .or_insert_with(|| tokenize(obj));
+        }
+
         labels.extend(label_relation_from_routed(
             &routed,
-            &down,
+            &down_ids,
+            &obj_ids,
             &relation.pairs,
             rel_name,
             frame_frac,
@@ -176,6 +203,8 @@ pub fn label_catalog(
 mod tests {
     use super::*;
     use crate::index::types::FeatureMeta;
+    use larql_models::TopKEntry;
+    use std::collections::HashSet;
     use std::io::Write;
 
     #[test]
@@ -281,12 +310,21 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
-    fn meta(token: &str) -> FeatureMeta {
+    /// A `FeatureMeta` whose down-meta token-id set (the thing matching now
+    /// keys off) is `top_k`. `top_token`/`top_token_id` are deliberately set
+    /// to values that do NOT carry the matching id, so the match must come
+    /// through the previously-ignored `top_k` path — reproducing the real bug
+    /// (top-token string differs, but a top-K token-id equals an object id).
+    fn meta(token: &str, top_k_id: u32) -> FeatureMeta {
         FeatureMeta {
             top_token: token.into(),
-            top_token_id: 0,
+            top_token_id: 9, // non-matching: never an object id in these tests
             c_score: 0.0,
-            top_k: Vec::new(),
+            top_k: vec![TopKEntry {
+                token: token.into(),
+                token_id: top_k_id,
+                logit: 0.0,
+            }],
         }
     }
 
@@ -300,8 +338,24 @@ mod tests {
         for f in 0..4 {
             gate0[[f, f % 4]] = 1.0;
         }
-        let down0 = vec![None, Some(meta("Paris")), Some(meta("Tokyo")), None];
+        let down0 = vec![
+            None,
+            Some(meta("Paris", 101)),
+            Some(meta("Tokyo", 202)),
+            None,
+        ];
         VectorIndex::new(vec![Some(gate0)], vec![Some(down0)], 1, hidden)
+    }
+
+    /// Object string → token-id set, as the CLI's tokenizer closure supplies.
+    fn tokenize_objs(s: &str) -> HashSet<u32> {
+        match s {
+            "Paris" => [101].into_iter().collect(),
+            "Tokyo" => [202].into_iter().collect(),
+            "French" => [303].into_iter().collect(),
+            "German" => [404].into_iter().collect(),
+            _ => HashSet::new(),
+        }
     }
 
     #[test]
@@ -324,7 +378,7 @@ mod tests {
         let json = r#"{"capital":{"pid":"P36","template":"The capital of {entity} is","pairs":[["France","Paris"],["Japan","Tokyo"]]}}"#;
         let catalog = Catalog::from_json_str(json).unwrap();
 
-        let labels = label_catalog(&index, &catalog, &residuals, 1, 0.5);
+        let labels = label_catalog(&index, &catalog, &residuals, 1, 0.5, &tokenize_objs);
         assert!(
             labels.contains(&((0, 1), "capital".to_string())),
             "France's Paris feature labeled: {labels:?}"
@@ -345,10 +399,10 @@ mod tests {
             gate0[[f, f]] = 1.0;
         }
         let down0 = vec![
-            Some(meta("Paris")),
-            Some(meta("Tokyo")),
-            Some(meta("French")),
-            Some(meta("German")),
+            Some(meta("Paris", 101)),
+            Some(meta("Tokyo", 202)),
+            Some(meta("French", 303)),
+            Some(meta("German", 404)),
         ];
         VectorIndex::new(vec![Some(gate0)], vec![Some(down0)], 1, hidden)
     }
@@ -398,7 +452,7 @@ mod tests {
         }"#;
         let catalog = Catalog::from_json_str(json).unwrap();
 
-        let labels = label_catalog(&index, &catalog, &residuals, 1, 0.5);
+        let labels = label_catalog(&index, &catalog, &residuals, 1, 0.5, &tokenize_objs);
         assert!(
             labels.contains(&((0, 0), "capital".to_string())),
             "capital labels France's Paris feature off its capital residual: {labels:?}"

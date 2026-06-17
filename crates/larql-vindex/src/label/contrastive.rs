@@ -21,13 +21,20 @@ pub fn routed_features(
 
 /// Label features for one relation using frame-subtraction.
 /// `routed`: per subject, the (layer,feat) it routes to (signed top-k across all layers — computed by the caller).
-/// `down`: (layer,feat) -> its down_meta top token. `pairs`: (subject, object).
-/// A feature is labeled `rel` if it is subject-specific (not in the relation frame) AND its
-/// down_meta top token equals that subject's object. `frame_frac`: a feature routed by
-/// > frame_frac * n subjects is considered frame and excluded.
+/// `down_ids`: (layer,feat) -> the token-id set of its down_meta top-K tokens.
+/// `obj_ids`: object string -> its token-id set (the caller tokenizes the object,
+/// including the leading-space BPE variant). `pairs`: (subject, object).
+///
+/// A feature is labeled `rel` if it is subject-specific (not in the relation
+/// frame) AND its down-meta top-K token-id set intersects that subject's object
+/// token-id set. This is the validated Phase-0 mechanism: a single down-meta
+/// top-token STRING can never equal a multi-token object, so matching is done at
+/// the token-id-set level over the feature's top-K down tokens.
+/// `frame_frac`: a feature routed by > frame_frac * n subjects is frame and excluded.
 pub fn label_relation_from_routed(
     routed: &[(String, Vec<(usize, usize)>)],
-    down: &HashMap<(usize, usize), String>,
+    down_ids: &HashMap<(usize, usize), HashSet<u32>>,
+    obj_ids: &HashMap<String, HashSet<u32>>,
     pairs: &[(String, String)],
     rel: &str,
     frame_frac: f32,
@@ -49,8 +56,10 @@ pub fn label_relation_from_routed(
     for (subj, fs) in routed {
         let Some(&o) = obj.get(subj.as_str()) else { continue };
         for f in fs.iter().filter(|f| !frame.contains(f)) {
-            if down.get(f).map(|t| t.trim().eq_ignore_ascii_case(o)).unwrap_or(false) {
-                out.push((*f, rel.to_string()));
+            if let (Some(fids), Some(oids)) = (down_ids.get(f), obj_ids.get(o)) {
+                if !fids.is_disjoint(oids) {
+                    out.push((*f, rel.to_string()));
+                }
             }
         }
     }
@@ -86,21 +95,41 @@ mod tests {
         assert!(routed.contains(&(1, 2)) && routed.contains(&(1, 6)), "layer 1 routes to 2 and 6: {:?}", routed);
     }
 
+    fn ids(xs: &[u32]) -> HashSet<u32> {
+        xs.iter().copied().collect()
+    }
+
     #[test]
     fn labels_subject_specific_feature_after_frame_subtraction() {
         // Two subjects. Feature (5,0) fires for BOTH (frame). (5,1) fires only for FR
-        // and its down_meta top token == FR's object "Paris" → must be labeled; (5,0) must not.
+        // and its down-meta top-K token-id set intersects FR's object "Paris" id set
+        // → must be labeled; (5,0) must not. Feature (5,3) fires only for FR but its
+        // down ids are DISJOINT from "Paris" → must NOT be labeled.
         let routed = vec![
-            ("FR".to_string(), vec![(5usize, 0usize), (5, 1)]),
+            ("FR".to_string(), vec![(5usize, 0usize), (5, 1), (5, 3)]),
             ("JP".to_string(), vec![(5usize, 0usize), (5, 2)]),
         ];
-        let down: std::collections::HashMap<(usize, usize), String> =
-            [((5, 0), "the".to_string()), ((5, 1), "Paris".to_string()), ((5, 2), "Tokyo".to_string())]
-                .into_iter().collect();
+        // Down token-id sets per feature (e.g. (5,1)'s top-K contains id 101).
+        let down_ids: std::collections::HashMap<(usize, usize), HashSet<u32>> = [
+            ((5, 0), ids(&[1])),     // "the"
+            ((5, 1), ids(&[101])),   // Paris
+            ((5, 2), ids(&[202])),   // Tokyo
+            ((5, 3), ids(&[999])),   // disjoint from any object
+        ]
+        .into_iter()
+        .collect();
+        // Object string → token-id set (as the caller's tokenizer would supply).
+        let obj_ids: std::collections::HashMap<String, HashSet<u32>> = [
+            ("Paris".to_string(), ids(&[101])),
+            ("Tokyo".to_string(), ids(&[202])),
+        ]
+        .into_iter()
+        .collect();
         let pairs = vec![("FR".to_string(), "Paris".to_string()), ("JP".to_string(), "Tokyo".to_string())];
-        let labels = label_relation_from_routed(&routed, &down, &pairs, "capital", 0.5);
+        let labels = label_relation_from_routed(&routed, &down_ids, &obj_ids, &pairs, "capital", 0.5);
         assert!(labels.contains(&((5, 1), "capital".to_string())), "FR's specific feature (Paris) labeled");
         assert!(labels.contains(&((5, 2), "capital".to_string())), "JP's specific feature (Tokyo) labeled");
         assert!(!labels.iter().any(|(lf, _)| *lf == (5, 0)), "frame feature (5,0) NOT labeled");
+        assert!(!labels.iter().any(|(lf, _)| *lf == (5, 3)), "disjoint-id feature (5,3) NOT labeled");
     }
 }

@@ -4,7 +4,8 @@
 //!   1. captures the residual stream for each relation's subject prompts,
 //!   2. routes each subject's residual through the vindex gate (signed KNN),
 //!   3. frame-subtracts to keep subject-specific features and matches each to
-//!      its object via the feature's `down_meta` top token,
+//!      its object by intersecting the object's token-IDs with the feature's
+//!      `down_meta` top-K token-IDs,
 //!   4. writes `feature_labels.json` (the per-feature relation labels DESCRIBE
 //!      reads).
 //!
@@ -116,8 +117,30 @@ pub fn run(args: LabelArgs) -> Result<(), Box<dyn std::error::Error>> {
         // `tmp` drops here → relation's residual file is removed.
     }
 
-    // 6. Label.
-    let labels = label_catalog(&index, &catalog, &residuals, args.per_layer_k, args.frame_frac);
+    // 6. Label. The matching keys object token-IDs against each feature's
+    //    top-K down token-IDs, so the producer must tokenize objects with the
+    //    SAME tokenizer the model used. The leading-space BPE variant matters
+    //    (most subword tokenizers encode " Paris" differently from "Paris"),
+    //    so both variants' ids are unioned.
+    let tk = model.tokenizer();
+    let tokenize = |s: &str| -> std::collections::HashSet<u32> {
+        let mut ids = std::collections::HashSet::new();
+        if let Ok(enc) = tk.encode(s, false) {
+            ids.extend(enc.get_ids().iter().copied());
+        }
+        if let Ok(enc) = tk.encode(format!(" {s}"), false) {
+            ids.extend(enc.get_ids().iter().copied());
+        }
+        ids
+    };
+    let labels = label_catalog(
+        &index,
+        &catalog,
+        &residuals,
+        args.per_layer_k,
+        args.frame_frac,
+        &tokenize,
+    );
 
     // 7. Write.
     if labels.is_empty() {
