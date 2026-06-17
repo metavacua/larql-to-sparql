@@ -69,19 +69,25 @@ pub fn load_subject_residuals(
 /// features (only for subjects that have residuals), the `down_meta` token map
 /// for the routed features, then run frame-subtraction + object-match. Returns
 /// the union of labels across relations, de-duplicated.
+///
+/// `residuals` is keyed by `(relation_name, subject)` because a subject's
+/// last-token residual is relation-prompt-specific (the residual of
+/// "The capital of France is" differs from "The official language of France
+/// is"). Each relation is therefore labeled off ITS OWN relation-prompt
+/// residual; a subject shared across relations is not conflated.
 pub fn label_catalog(
     index: &VectorIndex,
     catalog: &Catalog,
-    residuals_by_subject: &HashMap<String, HashMap<usize, Array1<f32>>>,
+    residuals: &HashMap<(String, String), HashMap<usize, Array1<f32>>>,
     per_layer_k: usize,
     frame_frac: f32,
 ) -> Vec<((usize, usize), String)> {
     let mut labels: Vec<((usize, usize), String)> = Vec::new();
     for (rel_name, relation) in catalog.iter() {
-        // Routed (layer,feat) per subject that has residuals.
+        // Routed (layer,feat) per subject that has residuals for THIS relation.
         let mut routed: Vec<(String, Vec<(usize, usize)>)> = Vec::new();
         for (subject, _obj) in &relation.pairs {
-            if let Some(resid) = residuals_by_subject.get(subject) {
+            if let Some(resid) = residuals.get(&(rel_name.clone(), subject.clone())) {
                 routed.push((subject.clone(), routed_features(index, resid, per_layer_k)));
             }
         }
@@ -182,9 +188,15 @@ mod tests {
         // (top_token "Tokyo"). Disjoint features → neither is frame at n=2.
         let france = ndarray::Array1::from_vec(vec![0.0f32, 1.0, 0.0, 0.0]); // e_1
         let japan = ndarray::Array1::from_vec(vec![0.0f32, 0.0, 1.0, 0.0]); // e_2
-        let mut residuals: HashMap<String, HashMap<usize, Array1<f32>>> = HashMap::new();
-        residuals.insert("France".to_string(), [(0usize, france)].into_iter().collect());
-        residuals.insert("Japan".to_string(), [(0usize, japan)].into_iter().collect());
+        let mut residuals: HashMap<(String, String), HashMap<usize, Array1<f32>>> = HashMap::new();
+        residuals.insert(
+            ("capital".to_string(), "France".to_string()),
+            [(0usize, france)].into_iter().collect(),
+        );
+        residuals.insert(
+            ("capital".to_string(), "Japan".to_string()),
+            [(0usize, japan)].into_iter().collect(),
+        );
 
         let json = r#"{"capital":{"pid":"P36","template":"The capital of {entity} is","pairs":[["France","Paris"],["Japan","Tokyo"]]}}"#;
         let catalog = Catalog::from_json_str(json).unwrap();
@@ -197,6 +209,80 @@ mod tests {
         assert!(
             labels.contains(&((0, 2), "capital".to_string())),
             "Japan's Tokyo feature labeled: {labels:?}"
+        );
+    }
+
+    /// Synthetic index: hidden=4, one layer, four features, gate feature `f`
+    /// is the unit vector `e_f`. down_meta gives 0 → "Paris", 1 → "Tokyo",
+    /// 2 → "French", 3 → "German" — one feature per object across two relations.
+    fn synth_index_two_relations() -> VectorIndex {
+        let hidden = 4;
+        let mut gate0 = ndarray::Array2::<f32>::zeros((4, hidden));
+        for f in 0..4 {
+            gate0[[f, f]] = 1.0;
+        }
+        let down0 = vec![
+            Some(meta("Paris")),
+            Some(meta("Tokyo")),
+            Some(meta("French")),
+            Some(meta("German")),
+        ];
+        VectorIndex::new(vec![Some(gate0)], vec![Some(down0)], 1, hidden)
+    }
+
+    /// A subject's last-token residual is RELATION-PROMPT-SPECIFIC: France's
+    /// residual under "The capital of France is" differs from its residual
+    /// under "The official language of France is". Keying residuals by
+    /// `(relation, subject)` lets each relation label off its own residual.
+    ///
+    /// Here France routes to the "Paris" feature under `(capital, France)` and
+    /// to a DIFFERENT "French" feature under `(language, France)`. Subject-only
+    /// keying would store just one residual for France, so the second capture
+    /// would clobber the first and only one of the two assertions below could
+    /// ever hold — this test is impossible to satisfy under subject-only keying.
+    #[test]
+    fn label_catalog_keys_residuals_by_relation_for_shared_subject() {
+        let index = synth_index_two_relations();
+        let e = |i: usize| {
+            let mut v = vec![0.0f32; 4];
+            v[i] = 1.0;
+            ndarray::Array1::from_vec(v)
+        };
+        let mut residuals: HashMap<(String, String), HashMap<usize, Array1<f32>>> = HashMap::new();
+        // capital: France → Paris(feat 0), Japan → Tokyo(feat 1).
+        residuals.insert(
+            ("capital".to_string(), "France".to_string()),
+            [(0usize, e(0))].into_iter().collect(),
+        );
+        residuals.insert(
+            ("capital".to_string(), "Japan".to_string()),
+            [(0usize, e(1))].into_iter().collect(),
+        );
+        // language: France → French(feat 2), Germany → German(feat 3).
+        // Note France's residual here (e_2) DIFFERS from capital's (e_0).
+        residuals.insert(
+            ("language".to_string(), "France".to_string()),
+            [(0usize, e(2))].into_iter().collect(),
+        );
+        residuals.insert(
+            ("language".to_string(), "Germany".to_string()),
+            [(0usize, e(3))].into_iter().collect(),
+        );
+
+        let json = r#"{
+            "capital":{"pid":"P36","template":"The capital of {entity} is","pairs":[["France","Paris"],["Japan","Tokyo"]]},
+            "language":{"pid":"P37","template":"The official language of {entity} is","pairs":[["France","French"],["Germany","German"]]}
+        }"#;
+        let catalog = Catalog::from_json_str(json).unwrap();
+
+        let labels = label_catalog(&index, &catalog, &residuals, 1, 0.5);
+        assert!(
+            labels.contains(&((0, 0), "capital".to_string())),
+            "capital labels France's Paris feature off its capital residual: {labels:?}"
+        );
+        assert!(
+            labels.contains(&((0, 2), "language".to_string())),
+            "language labels France's French feature off its language residual: {labels:?}"
         );
     }
 }

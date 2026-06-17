@@ -81,7 +81,10 @@ pub fn run(args: LabelArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Capture residuals one relation at a time (bounded memory — each
     //    relation's temp dir is dropped after its residuals are loaded).
-    let mut residuals_by_subject: HashMap<String, HashMap<usize, Array1<f32>>> = HashMap::new();
+    //    Residuals are keyed by (relation, subject): a subject's last-token
+    //    residual is relation-prompt-specific, so a subject shared across
+    //    relations must keep one residual per relation (not be overwritten).
+    let mut residuals: HashMap<(String, String), HashMap<usize, Array1<f32>>> = HashMap::new();
     for (rel_name, relation) in catalog.iter() {
         let mut subjects: Vec<String> = relation.pairs.iter().map(|(s, _)| s.clone()).collect();
         subjects.sort();
@@ -104,18 +107,14 @@ pub fn run(args: LabelArgs) -> Result<(), Box<dyn std::error::Error>> {
         model.capture(&subjects, &config, tmp.path(), &mut cb)?;
 
         let captured = load_subject_residuals(&tmp.path().join("residuals.vectors.jsonl"))?;
-        residuals_by_subject.extend(captured);
+        for (subject, by_layer) in captured {
+            residuals.insert((rel_name.clone(), subject), by_layer);
+        }
         // `tmp` drops here → relation's residual file is removed.
     }
 
     // 6. Label.
-    let labels = label_catalog(
-        &index,
-        &catalog,
-        &residuals_by_subject,
-        args.per_layer_k,
-        args.frame_frac,
-    );
+    let labels = label_catalog(&index, &catalog, &residuals, args.per_layer_k, args.frame_frac);
 
     // 7. Write.
     let output_dir = args.output.unwrap_or(args.vindex);
