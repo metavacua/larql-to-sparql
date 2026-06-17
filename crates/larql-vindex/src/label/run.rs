@@ -24,39 +24,90 @@ use crate::label::contrastive::{label_relation_from_routed, routed_features};
 /// into `subject -> (layer -> residual vector)`.
 ///
 /// Each data line carries `id` ("<subject>_L<layer>"), `layer`, and `vector`.
-/// The `_header` line — and any line missing `id`/`layer`/`vector` — is
-/// skipped. The subject is `id` with its trailing `_L<layer>` stripped (using
-/// the `layer` field, so subjects that themselves contain `_L` survive).
+/// The subject is `id` with its trailing `_L<layer>` stripped (using the
+/// `layer` field, so subjects that themselves contain `_L` survive).
+///
+/// Only the `_header` line is skipped (detected by its `_header` field, which
+/// also supplies the expected `dimension`). Every other non-empty line is a
+/// data record that must fully parse: a line that is not valid JSON, lacks
+/// `id`/`layer`/`vector`, has a non-numeric vector element, or whose vector
+/// length disagrees with the expected dimension is a malformed/truncated
+/// record and yields an `io::Error` (InvalidData) naming the offending id.
+/// This refuses to let a silently-shortened vector escape into routing, where
+/// the gate matmul would panic on a dimension mismatch. If no `_header`
+/// dimension is present, the first valid record's length sets the expectation.
 pub fn load_subject_residuals(
     path: &Path,
 ) -> std::io::Result<HashMap<String, HashMap<usize, Array1<f32>>>> {
+    use std::io::{Error, ErrorKind};
+
     let text = std::fs::read_to_string(path)?;
     let mut out: HashMap<String, HashMap<usize, Array1<f32>>> = HashMap::new();
+    let mut expected_dim: Option<usize> = None;
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<Value>(line) else {
+        let v: Value = serde_json::from_str(line).map_err(|e| {
+            Error::new(ErrorKind::InvalidData, format!("malformed residual line: {e}"))
+        })?;
+        // The header is the only intentionally skipped line; capture its
+        // declared dimension to validate every data record's length.
+        if v.get("_header").is_some() {
+            if let Some(dim) = v.get("dimension").and_then(Value::as_u64) {
+                expected_dim = Some(dim as usize);
+            }
             continue;
-        };
-        let (Some(id), Some(layer), Some(vec_json)) =
-            (v.get("id").and_then(Value::as_str), v.get("layer").and_then(Value::as_u64), v.get("vector"))
-        else {
-            continue;
+        }
+        let (Some(id), Some(layer), Some(vec_json)) = (
+            v.get("id").and_then(Value::as_str),
+            v.get("layer").and_then(Value::as_u64),
+            v.get("vector"),
+        ) else {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("residual record missing id/layer/vector: {line}"),
+            ));
         };
         let Some(arr) = vec_json.as_array() else {
-            continue;
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("residual record '{id}' vector is not an array"),
+            ));
         };
+        // Strict per-element parse: a non-numeric element (null / string /
+        // truncated token) is a malformed record, not a droppable slot.
+        let mut vector: Vec<f32> = Vec::with_capacity(arr.len());
+        for elem in arr {
+            let Some(f) = elem.as_f64() else {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("residual record '{id}' has a non-numeric vector element"),
+                ));
+            };
+            vector.push(f as f32);
+        }
+        // Validate length against the expected dimension (header, else first
+        // valid record). A short vector here is the truncated-write failure.
+        match expected_dim {
+            Some(dim) if vector.len() != dim => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!(
+                        "residual record '{id}' has vector length {} but expected dimension {dim}",
+                        vector.len()
+                    ),
+                ));
+            }
+            None => expected_dim = Some(vector.len()),
+            _ => {}
+        }
         let layer = layer as usize;
         let subject = id
             .strip_suffix(&format!("_L{layer}"))
             .unwrap_or(id)
             .to_string();
-        let vector: Vec<f32> = arr
-            .iter()
-            .filter_map(|x| x.as_f64().map(|f| f as f32))
-            .collect();
         out.entry(subject)
             .or_default()
             .insert(layer, Array1::from_vec(vector));
@@ -156,6 +207,78 @@ mod tests {
         assert_eq!(france.len(), 2, "both layers present");
         assert_eq!(france.get(&5).unwrap().to_vec(), vec![1.0, 2.0, 3.0]);
         assert_eq!(france.get(&7).unwrap().to_vec(), vec![4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn load_subject_residuals_rejects_non_numeric_element() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("residuals.vectors.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"_header":true,"component":"residuals","model":"m","dimension":4}}"#
+        )
+        .unwrap();
+        // Good record (len 4).
+        writeln!(
+            f,
+            r#"{{"id":"France_L5","layer":5,"vector":[1.0,2.0,3.0,4.0]}}"#
+        )
+        .unwrap();
+        // Bad record: a non-numeric element (truncated mid-write token).
+        writeln!(
+            f,
+            r#"{{"id":"Japan_L5","layer":5,"vector":[1.0,null,3.0,4.0]}}"#
+        )
+        .unwrap();
+
+        let err = load_subject_residuals(&path)
+            .expect_err("non-numeric vector element must be rejected, not silently shortened");
+        let msg = err.to_string();
+        assert!(msg.contains("Japan_L5"), "error names the offending id: {msg}");
+    }
+
+    #[test]
+    fn load_subject_residuals_rejects_wrong_length_vector() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("residuals.vectors.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"_header":true,"component":"residuals","model":"m","dimension":4}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"id":"France_L5","layer":5,"vector":[1.0,2.0,3.0,4.0]}}"#
+        )
+        .unwrap();
+        // Bad record: wrong length (truncated write).
+        writeln!(f, r#"{{"id":"Japan_L5","layer":5,"vector":[1.0,2.0]}}"#).unwrap();
+
+        let err = load_subject_residuals(&path)
+            .expect_err("wrong-length vector must be rejected, not stored short");
+        let msg = err.to_string();
+        assert!(msg.contains("Japan_L5"), "error names the offending id: {msg}");
+    }
+
+    #[test]
+    fn load_subject_residuals_errors_on_unparseable_data_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("residuals.vectors.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"_header":true,"component":"residuals","model":"m","dimension":4}}"#
+        )
+        .unwrap();
+        // Not valid JSON (truncated line) — must error, not silently skip.
+        writeln!(f, r#"{{"id":"France_L5","layer":5,"vec"#).unwrap();
+
+        let err = load_subject_residuals(&path)
+            .expect_err("unparseable data line must be an error, not a silent skip");
+        // InvalidData category.
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
     fn meta(token: &str) -> FeatureMeta {
