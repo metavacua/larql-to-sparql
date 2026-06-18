@@ -164,13 +164,8 @@ pub fn label_catalog(
                 if down_ids.contains_key(&(layer, feat)) {
                     continue;
                 }
-                if let Some(meta) = index.feature_meta(layer, feat) {
-                    let mut set: HashSet<u32> = HashSet::new();
-                    set.insert(meta.top_token_id);
-                    for entry in &meta.top_k {
-                        set.insert(entry.token_id);
-                    }
-                    down_ids.insert((layer, feat), set);
+                if let Some(ids) = index.down_token_ids(layer, feat) {
+                    down_ids.insert((layer, feat), ids.into_iter().collect());
                 }
             }
         }

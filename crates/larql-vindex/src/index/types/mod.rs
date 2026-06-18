@@ -181,6 +181,46 @@ impl DownMetaMmap {
         })
     }
 
+    /// Down-meta top-K token IDs for a feature, WITHOUT decoding to strings.
+    /// Returns `top_token_id` followed by each populated `top_k` entry's token id;
+    /// `None` for an empty slot (same emptiness check as [`Self::feature_meta`]).
+    ///
+    /// This avoids the per-token tokenizer `decode` that `feature_meta` performs —
+    /// which is costly for large vocabularies (e.g. Qwen's 151,936-token vocab,
+    /// where decoding ~11 tokens per feature × hundreds of features dominated the
+    /// label producer's runtime). Callers that only need the ids should use this.
+    pub fn down_token_ids(&self, layer: usize, feature: usize) -> Option<Vec<u32>> {
+        if layer >= self.layer_offsets.len() {
+            return None;
+        }
+        let num_features = self.layer_num_features[layer];
+        if num_features == 0 || feature >= num_features {
+            return None;
+        }
+        let rec_size = self.record_size();
+        let offset = self.layer_offsets[layer] + feature * rec_size;
+        if offset + rec_size > self.mmap.len() {
+            return None;
+        }
+        let b = &self.mmap[offset..offset + rec_size];
+        let top_token_id = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        let c_score = f32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+        if top_token_id == 0 && c_score == 0.0 {
+            return None;
+        }
+        let mut ids = Vec::with_capacity(self.top_k_count + 1);
+        ids.push(top_token_id);
+        for i in 0..self.top_k_count {
+            let o = 8 + i * 8;
+            let tid = u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+            let logit = f32::from_le_bytes([b[o + 4], b[o + 5], b[o + 6], b[o + 7]]);
+            if tid > 0 || logit != 0.0 {
+                ids.push(tid);
+            }
+        }
+        Some(ids)
+    }
+
     pub fn num_features(&self, layer: usize) -> usize {
         self.layer_num_features.get(layer).copied().unwrap_or(0)
     }
