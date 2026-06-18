@@ -54,7 +54,9 @@ pub use tokenizers;
 // ── Re-export essentials at crate root ──
 
 // Canonical
-pub use canonical::{CanonicalMeta, LayerCanonicalInfo, Regime};
+pub use canonical::{
+    CanonicalMeta, HeadHilbertianInfo, HilbertianMeta, LayerCanonicalInfo, Regime,
+};
 
 // Config
 pub use config::dtype::StorageDtype;

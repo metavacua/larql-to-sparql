@@ -73,6 +73,32 @@ impl CanonicalMeta {
     }
 }
 
+/// Per-head Hilbertian residual: how close head `query_head`'s query/key
+/// coupling is to complex-linear w.r.t. the split-half complex structure.
+/// `residual` ∈ [0, 2]; 0 = exactly complex-linear (an upper bound on the
+/// optimal-J residual).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeadHilbertianInfo {
+    pub layer: usize,
+    pub query_head: usize,
+    pub kv_head: usize,
+    pub residual: f64,
+}
+
+/// Root metadata written to `hilbertian_meta.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HilbertianMeta {
+    pub version: u32,
+    pub model: String,
+    pub hidden_size: usize,
+    pub head_dim: usize,
+    pub num_q_heads: usize,
+    pub num_kv_heads: usize,
+    /// The fixed complex-structure convention used (currently always "split_half").
+    pub complex_structure: String,
+    pub heads: Vec<HeadHilbertianInfo>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,5 +174,29 @@ mod tests {
         };
         assert!(meta.unpack_cholesky_l().is_err(),
             "truncated packing must Err, not panic");
+    }
+
+    #[test]
+    fn hilbertian_meta_round_trips_through_json() {
+        let meta = HilbertianMeta {
+            version: 1,
+            model: "test/model".into(),
+            hidden_size: 4,
+            head_dim: 2,
+            num_q_heads: 2,
+            num_kv_heads: 1,
+            complex_structure: "split_half".into(),
+            heads: vec![
+                HeadHilbertianInfo { layer: 0, query_head: 0, kv_head: 0, residual: 0.0 },
+                HeadHilbertianInfo { layer: 0, query_head: 1, kv_head: 0, residual: 1.25 },
+            ],
+        };
+        let json = serde_json::to_string_pretty(&meta).unwrap();
+        let back: HilbertianMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.model, "test/model");
+        assert_eq!(back.heads.len(), 2);
+        assert_eq!(back.heads[1].query_head, 1);
+        assert!((back.heads[1].residual - 1.25).abs() < 1e-15);
+        assert_eq!(back.complex_structure, "split_half");
     }
 }

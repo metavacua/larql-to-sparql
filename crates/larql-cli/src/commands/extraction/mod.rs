@@ -15,6 +15,7 @@ pub mod ffn_latency_cmd;
 pub mod ffn_overlap_cmd;
 pub mod fingerprint_extract_cmd;
 pub mod hf_cmd;
+pub mod hilbertian_cmd;
 pub mod index_gates_cmd;
 pub mod kg_bench_cmd;
 pub mod ov_gate_cmd;

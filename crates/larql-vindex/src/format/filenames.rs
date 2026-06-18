@@ -22,6 +22,7 @@ pub const MODEL_WEIGHTS_BIN: &str = "model_weights.bin";
 
 // ── Canonical form sidecar ──────────────────────────────────────────────
 pub const CANONICAL_META_JSON: &str = "canonical_meta.json";
+pub const HILBERTIAN_META_JSON: &str = "hilbertian_meta.json";
 
 // ── Labels / clustering sidecars ───────────────────────────────────────
 pub const RELATION_CLUSTERS_JSON: &str = "relation_clusters.json";
@@ -295,6 +296,7 @@ mod tests {
             KNN_STORE_BIN,
             MODEL_WEIGHTS_BIN,
             CANONICAL_META_JSON,
+            HILBERTIAN_META_JSON,
             RELATION_CLUSTERS_JSON,
             FEATURE_CLUSTERS_JSONL,
             FEATURE_LABELS_JSON,
@@ -522,5 +524,11 @@ mod tests {
                 "CANONICAL_META_JSON collides with {name}");
         }
         assert_eq!(CANONICAL_META_JSON, "canonical_meta.json");
+    }
+
+    #[test]
+    fn hilbertian_meta_json_is_distinct_from_canonical() {
+        assert_ne!(HILBERTIAN_META_JSON, CANONICAL_META_JSON);
+        assert_eq!(HILBERTIAN_META_JSON, "hilbertian_meta.json");
     }
 }
