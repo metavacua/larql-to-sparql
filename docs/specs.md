@@ -1,9 +1,10 @@
 # Specs
 
-All specs live with the crate they describe.
+Crate-scoped specs live with the crate they describe. Cross-cutting / theory specs live in `docs/`.
 
 | Spec | Crate | Path |
 |------|-------|------|
+| Transformation, alignment & knowledge-coupling theory (CC-BY-SA 4.0, SOTA) | — (cross-cutting) | [docs/transformation-theory-spec.md](transformation-theory-spec.md) |
 | Vindex format | larql-vindex | [crates/larql-vindex/docs/format-spec.md](../crates/larql-vindex/docs/format-spec.md) |
 | Vindex operations | larql-vindex | [crates/larql-vindex/docs/operations-spec.md](../crates/larql-vindex/docs/operations-spec.md) |
 | Vindex ecosystem | larql-vindex | [crates/larql-vindex/docs/ecosystem-spec.md](../crates/larql-vindex/docs/ecosystem-spec.md) |
