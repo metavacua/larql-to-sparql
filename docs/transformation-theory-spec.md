@@ -183,11 +183,13 @@ correct by composition.
 | P3 | `SELECT` | relational condition scan over `down_meta`; the only operation with arbitrary WHERE predicates |
 | P4 | `STATS` | aggregate counts from `index.json` + artifact manifests |
 
-**Inference level** — additionally requires `attn_weights.bin` (and `lm_head.bin` unless tied to embeddings):
+**Inference level** — additionally requires `attn_weights.bin`:
 
 | ID | Operation | Distinguishing property |
 |----|-----------|------------------------|
 | P5 | `INFER` | attention-gated full forward pass → next-token logits |
+
+**Compile level** — additionally requires `up_weights.bin`, `norms.bin`, and `lm_head.bin` (or tied to `embeddings.bin`): required only for P10 `COMPILE`.
 
 **Mutation level** — additionally write back to vindex:
 
@@ -219,7 +221,7 @@ correct by composition.
 | `MERGE` | P3 from source + batch P6 into target |
 | `DIFF` | symmetric P3 over two vindexes |
 | `BEGIN/SAVE/APPLY/REMOVE PATCH`, `COMPILE INTO VINDEX` | recording overlay + materialisation of P6/P7/P8 batch |
-| `COMPILE INTO MODEL` | COMPILE INTO VINDEX + weight serialisation (P10) |
+| `COMPILE INTO MODEL` | materialise-patch (P6/P7/P8 batch) + P10 |
 
 ---
 
