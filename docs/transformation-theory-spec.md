@@ -307,20 +307,22 @@ extractable to vindexes) as follows.
 **C1 (K_E / K_C partition stability):**  
 The same facts are entity-activated across the class:  
 `∀ M ∈ ℒ : (e,r,t) ∈ K_E ⟺ t ∈ cl_DESCRIBE(V_M, e)` (once per-model witnesses hold)  
-This is the empirical hypothesis to verify once #193 is fixed: does the partition differ between
+This is the empirical hypothesis to verify once metavacua/larql-to-sparql#193 is fixed: does the partition differ between
 smollm2, qwen, and gemma architectures?
 
 **C2 (Browse-level closure under mutation):**  
 If V satisfies Browse, then for any finite sequence σ of INSERT/DELETE/UPDATE operations,
 the resulting V' also satisfies W1, W5, W6 (STATS and SELECT self-consistency are preserved by mutations).
 
-**C3 (Round-trip stability):**  
-`EXTRACT(COMPILE(V_M)) ≈ V_M` up to quantisation noise — the class is closed under the COMPILE → EXTRACT cycle.
+**C3 (Round-trip stability — compile level only):**  
+For V_M extracted at compile level (WITH ALL):  
+`EXTRACT(COMPILE(V_M)) ≈ V_M` up to quantisation noise.  
+Browse-level vindexes lack the weight artifacts required by COMPILE; C3 does not apply to them.
 
 **C4 (Threshold universality):**  
 The Browse end condition holds for all M ∈ ℒ under a **model-relative** threshold
 `θ_M = f(V_M.gate_scale)` — not an absolute constant. This is the direct statement of the
-#193 fix: the current `DESCRIBE_GATE_THRESHOLD = 5.0` is a per-class-member calibration
+metavacua/larql-to-sparql#193 fix: the current `DESCRIBE_GATE_THRESHOLD = 5.0` is a per-class-member calibration
 that belongs in the EXTRACT output (`index.json`) not as a hard constant.
 
 ---
