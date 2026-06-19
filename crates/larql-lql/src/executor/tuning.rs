@@ -128,7 +128,11 @@ pub(crate) const MEMIT_MIN_RECONSTRUCTION_COS: f32 = 0.95;
 // noise.
 
 /// Minimum gate score for a feature to be reported in DESCRIBE.
-pub(crate) const DESCRIBE_GATE_THRESHOLD: f32 = 5.0;
+///
+/// Originally tuned on Gemma 3 4B. For smaller models (e.g. smollm2-360m,
+/// hidden_size=960) the same knowledge features score ~4.5; see
+/// metavacua/larql-to-sparql#193 for the model-relative threshold task.
+pub(crate) const DESCRIBE_GATE_THRESHOLD: f32 = 4.0;
 
 /// `top_k` for the FFN walk inside DESCRIBE. Smaller than SELECT
 /// EDGES because DESCRIBE wants high-precision per-token edges; the
