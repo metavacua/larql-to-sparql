@@ -65,6 +65,14 @@ pub(super) struct DescribeEdge {
     pub best_feature: usize,
 }
 
+fn passes_threshold(hit: &larql_vindex::WalkHit) -> bool {
+    if hit.cosine_score > 0.0 {
+        hit.cosine_score >= DESCRIBE_COSINE_THRESHOLD
+    } else {
+        hit.gate_score >= DESCRIBE_GATE_THRESHOLD
+    }
+}
+
 /// Walk the trace, deduplicate by lowercased target token, and apply
 /// content / coherence filters. Output is sorted descending by gate.
 pub(super) fn describe_collect_edges(
@@ -76,14 +84,7 @@ pub(super) fn describe_collect_edges(
 
     for (layer_idx, hits) in &trace.layers {
         for hit in hits {
-            // When cosine_score is populated (walk_cosine path), filter by the
-            // model-scale-invariant cosine threshold. Otherwise fall back to
-            // the legacy raw-dot threshold (overlay patches, non-cosine walks).
-            if hit.cosine_score > 0.0 {
-                if hit.cosine_score < DESCRIBE_COSINE_THRESHOLD {
-                    continue;
-                }
-            } else if hit.gate_score < DESCRIBE_GATE_THRESHOLD {
+            if !passes_threshold(hit) {
                 continue;
             }
             let tok = &hit.meta.top_token;
