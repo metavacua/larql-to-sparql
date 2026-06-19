@@ -386,7 +386,7 @@ Two models M₁, M₂ are **DESCRIBE-equivalent** (M₁ ≅_DESCRIBE M₂) if fo
 EXTRACT is **faithful** for model M iff, for all (e, r, t) ∈ K_E:  
 `t ∈ cl_DESCRIBE(V_M, e)  ⟺  (e, r, t) ∈ K_E`  
 i.e., the DESCRIBE closure of V_M matches the entity-activated ground truth. The Browse end condition (W1–W6) is the finite witness set for this
-equivalence over the catalog K.
+equivalence over the entity-activated catalog K_E.
 
 The number of DESCRIBE-equivalence classes (over K_E) bounds the *granularity* of interpretability
 available via DESCRIBE: models in the same class are structurally indistinguishable at the
