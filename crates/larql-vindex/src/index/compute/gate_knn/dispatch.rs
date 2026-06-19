@@ -413,14 +413,16 @@ impl VectorIndex {
             None => return Vec::new(),
         };
         let view = gate.view(self.hidden_size);
+        // Precompute gate row norms in one sequential scan before gemv,
+        // so the cosine-division pass avoids re-reading the matrix.
+        let g_norms: Vec<f32> = view.rows().into_iter()
+            .map(|row| row.dot(&row).sqrt())
+            .collect();
         // dot_scores[i] = q_hat · g_i = ||g_i|| × cos(θ_i)
         let dot_scores = gemv(&view, &q_hat);
-        let n = dot_scores.len();
-        let mut scores: Vec<(usize, f32)> = (0..n)
+        let mut scores: Vec<(usize, f32)> = (0..dot_scores.len())
             .map(|i| {
-                let row = view.row(i);
-                let g_norm = row.dot(&row).sqrt();
-                let cos = if g_norm < 1e-8 { 0.0 } else { dot_scores[i] / g_norm };
+                let cos = if g_norms[i] < 1e-8 { 0.0 } else { dot_scores[i] / g_norms[i] };
                 (i, cos)
             })
             .collect();
