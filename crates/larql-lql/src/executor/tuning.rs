@@ -129,10 +129,21 @@ pub(crate) const MEMIT_MIN_RECONSTRUCTION_COS: f32 = 0.95;
 
 /// Minimum gate score for a feature to be reported in DESCRIBE.
 ///
-/// Originally tuned on Gemma 3 4B. For smaller models (e.g. smollm2-360m,
-/// hidden_size=960) the same knowledge features score ~4.5; see
-/// metavacua/larql-to-sparql#193 for the model-relative threshold task.
+/// Legacy fallback for features where cosine_score was not computed
+/// (e.g. overlay patches, walk() callers). Active only when
+/// WalkHit.cosine_score == 0.0; superseded by DESCRIBE_COSINE_THRESHOLD
+/// when cosine is available. See metavacua/larql-to-sparql#193.
 pub(crate) const DESCRIBE_GATE_THRESHOLD: f32 = 4.0;
+
+/// Minimum cosine similarity for a base feature to be reported in DESCRIBE.
+///
+/// Cosine is model-scale-invariant: independent of embed_scale (Gemma uses
+/// sqrt(hidden_size)≈50.6; LLaMA family uses 1.0). Calibrated on
+/// smollm2-360m L31: signal edges France/F972=0.276, Spain/F1087=0.284;
+/// top-noise edges France/F985=0.197, Spain/F1312=0.031.
+/// Threshold 0.22 cleanly separates signal from noise on those measurements.
+/// See metavacua/larql-to-sparql#193 for the full derivation.
+pub(crate) const DESCRIBE_COSINE_THRESHOLD: f32 = 0.22;
 
 /// `top_k` for the FFN walk inside DESCRIBE. Smaller than SELECT
 /// EDGES because DESCRIBE wants high-precision per-token edges; the

@@ -239,6 +239,7 @@ impl VectorIndex {
                         layer,
                         feature,
                         gate_score,
+                        cosine_score: 0.0,
                         meta,
                     })
                 })
@@ -388,6 +389,86 @@ impl VectorIndex {
 
         let scores = Array1::from_vec(scores_vec);
         Some(Self::top_k_from_scores(&scores, top_k))
+    }
+    /// Cosine-similarity gate KNN — model-scale-invariant.
+    ///
+    /// Returns (feature_index, cosine_similarity) sorted descending. Uses
+    /// resolve_gate so both heap and f16-mmap paths produce true cosine
+    /// (not the raw dot product returned by gate_knn).
+    pub fn gate_knn_cosine(
+        &self,
+        layer: usize,
+        residual: &Array1<f32>,
+        top_k: usize,
+    ) -> Vec<(usize, f32)> {
+        let q_sq = residual.dot(residual);
+        if q_sq < 1e-16 {
+            return Vec::new();
+        }
+        let q_norm = q_sq.sqrt();
+        let q_hat = residual.mapv(|v| v / q_norm);
+
+        let gate = match self.resolve_gate(layer) {
+            Some(g) => g,
+            None => return Vec::new(),
+        };
+        let view = gate.view(self.hidden_size);
+        // dot_scores[i] = q_hat · g_i = ||g_i|| × cos(θ_i)
+        let dot_scores = gemv(&view, &q_hat);
+        let n = dot_scores.len();
+        let mut scores: Vec<(usize, f32)> = (0..n)
+            .map(|i| {
+                let row = view.row(i);
+                let g_norm = row.dot(&row).sqrt();
+                let cos = if g_norm < 1e-8 { 0.0 } else { dot_scores[i] / g_norm };
+                (i, cos)
+            })
+            .collect();
+        scores.sort_unstable_by(|a, b| {
+            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        scores.truncate(top_k);
+        scores
+    }
+
+    /// Walk with cosine gate scores — model-scale-invariant DESCRIBE walk.
+    ///
+    /// Like walk() but uses gate_knn_cosine so WalkHit.cosine_score holds
+    /// true cosine similarity while WalkHit.gate_score retains the raw dot
+    /// product for banner / ranking / KNN scale consumers.
+    pub fn walk_cosine(
+        &self,
+        residual: &Array1<f32>,
+        layers: &[usize],
+        top_k: usize,
+    ) -> WalkTrace {
+        let mut trace_layers = Vec::with_capacity(layers.len());
+        for &layer in layers {
+            let cosine_hits = self.gate_knn_cosine(layer, residual, top_k);
+            // Fetch raw gate scores for the same features (for banner/ranking).
+            let raw_hits: std::collections::HashMap<usize, f32> = self
+                .gate_knn(layer, residual, top_k * 2)
+                .into_iter()
+                .collect();
+            let walk_hits: Vec<WalkHit> = cosine_hits
+                .into_iter()
+                .filter_map(|(feature, cosine_score)| {
+                    let meta = self.feature_meta(layer, feature)?;
+                    let gate_score = raw_hits.get(&feature).copied().unwrap_or(0.0);
+                    Some(WalkHit {
+                        layer,
+                        feature,
+                        gate_score,
+                        cosine_score,
+                        meta,
+                    })
+                })
+                .collect();
+            trace_layers.push((layer, walk_hits));
+        }
+        WalkTrace {
+            layers: trace_layers,
+        }
     }
 }
 
@@ -604,6 +685,65 @@ mod tests {
         let q = array![1.0, 2.0, 3.0, 4.0];
         let cpu = larql_compute::CpuBackend;
         assert!(v.gate_knn_q4(0, &q, 5, &cpu).is_none());
+    }
+
+    // ── gate_knn_cosine ──────────────────────────────────────────
+
+    /// 2-feature index where signal/noise have identical raw dot products
+    /// with q=[1,0,0,0] but very different cosines.
+    /// f0 (signal): g=[1.3, 0, 0, 0]    → raw=1.3, cos=1.0
+    /// f1 (noise):  g=[1.3, 18.0, 0, 0] → raw=1.3, cos≈0.072
+    fn signal_noise_idx() -> VectorIndex {
+        let gate = ndarray::Array2::from_shape_vec(
+            (2, 4),
+            vec![
+                1.3_f32, 0.0, 0.0, 0.0, // f0 signal
+                1.3_f32, 18.0, 0.0, 0.0, // f1 noise (equal raw dot, large perpendicular norm)
+            ],
+        )
+        .unwrap();
+        VectorIndex::new(vec![Some(gate)], vec![None], 1, 4)
+    }
+
+    #[test]
+    fn gate_knn_cosine_is_invariant_to_query_scale() {
+        let v = heap_idx();
+        // q1 and q2 are the same direction; Gemma-style scale is ~50.6×
+        let q1 = array![0.5_f32, 0.3, 0.0, 0.0];
+        let q2 = q1.mapv(|x| x * 50.6);
+        let h1 = v.gate_knn_cosine(0, &q1, 3);
+        let h2 = v.gate_knn_cosine(0, &q2, 3);
+        assert_eq!(h1.len(), h2.len());
+        for i in 0..h1.len() {
+            assert_eq!(h1[i].0, h2[i].0, "scale must not change feature ranking");
+            assert!(
+                (h1[i].1 - h2[i].1).abs() < 1e-5,
+                "cosines must match: {} vs {}",
+                h1[i].1,
+                h2[i].1
+            );
+        }
+    }
+
+    #[test]
+    fn gate_knn_cosine_ranks_alignment_over_gate_norm() {
+        let v = signal_noise_idx();
+        let q = array![1.0_f32, 0.0, 0.0, 0.0];
+        // Sanity: raw scores are equal, so gate_knn can't distinguish them
+        let raw = v.gate_knn(0, &q, 2);
+        assert_eq!(raw.len(), 2);
+        assert!(
+            (raw[0].1 - raw[1].1).abs() < 0.01,
+            "raw scores must be equal; got {:.4} vs {:.4}",
+            raw[0].1,
+            raw[1].1
+        );
+        // Cosine scores: signal cos=1.0, noise cos≈0.072
+        let cosine = v.gate_knn_cosine(0, &q, 2);
+        assert_eq!(cosine.len(), 2);
+        assert_eq!(cosine[0].0, 0, "signal (feature 0) must rank first");
+        assert!((cosine[0].1 - 1.0).abs() < 1e-5, "signal cosine must be 1.0");
+        assert!(cosine[1].1 < 0.15, "noise cosine must be < 0.15");
     }
 
     // ── gate_knn_adaptive ────────────────────────────────────────

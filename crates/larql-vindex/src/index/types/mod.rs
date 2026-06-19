@@ -54,7 +54,11 @@ pub struct FeatureMeta {
 pub struct WalkHit {
     pub layer: usize,
     pub feature: usize,
+    /// Raw dot product q·g — used for banner signal-strength and KNN ranking.
     pub gate_score: f32,
+    /// Cosine similarity cos(q, g) — model-scale-invariant; populated by
+    /// walk_cosine(). Zero when constructed by walk() (raw dot product path).
+    pub cosine_score: f32,
     pub meta: FeatureMeta,
 }
 
