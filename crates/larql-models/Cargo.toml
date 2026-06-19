@@ -27,7 +27,7 @@ default = []
 test-utils = []
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = { workspace = true }
 tempfile = "3"
 
 [[bench]]
