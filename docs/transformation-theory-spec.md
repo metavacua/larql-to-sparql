@@ -232,14 +232,16 @@ correct by composition.
 Let:
 - **M** be a model under test.
 - **V_M** = `EXTRACT(M)` — the vindex produced.
-- **K** = the `larql-knowledge` catalog (Wikidata CC0 + WordNet triples), partitioned as:
+- **K** = the `larql-knowledge` catalog (Wikidata CC0 + WordNet triples), with the following subsets:
   - **K_E** — *entity-activated* facts: satisfied from static entity embedding alone (nationality, continent, borders, language, morphological relations).
   - **K_C** — *completion-required* facts: only satisfiable via full forward pass (capital, genre, …).
 - **E_known** = entities appearing in K.
 - **P_test** = a finite set of known prompt → answer pairs (for inference parity).
 
 The retrieval closure under operation O on vindex V is:  
-`cl_O(V, e) = {edges/tokens reachable from entity e or prompt p by applying O to V}`.
+`cl_DESCRIBE(V, e) = { t : token t is returned as an edge target when DESCRIBE is applied to entity e on vindex V }`.  
+`cl_WALK(V, p) = { f : feature f appears in the top-features list when WALK is applied to prompt p on vindex V }`.  
+Where cl_O(V, ·) below refers to cl_DESCRIBE unless noted.
 
 ### 8.2 Per-model witnesses
 
@@ -247,7 +249,8 @@ The retrieval closure under operation O on vindex V is:
 `STATS(V_M).layer_count = M.n_layers  ∧  features_per_layer_min > 0  ∧  vocab_size = M.vocab_size`
 
 **W2 (WALK fires — P1):**  
-`∀ e ∈ E_known : |top_features(WALK(V_M, e))| > 0  at knowledge-band layers`  
+`∀ e ∈ E_known : |top_features(WALK(V_M, prompt(e)))| > 0  at knowledge-band layers`  
+where `prompt(e)` is any prompt whose last token represents entity e.
 Validates gate_vectors + embeddings present and aligned.
 
 **W3 (DESCRIBE-positive — P2):**  
@@ -259,8 +262,8 @@ Entity-activated relations surface in the DESCRIBE closure.
 Completion-required relations are absent from the DESCRIBE closure; DESCRIBE is not INFER.
 
 **W5 (SELECT round-trip — P3):**  
-`∀ e ∈ E_known : edges(SELECT * FROM EDGES WHERE entity = e)  ⊆  edges(DESCRIBE(V_M, e))`  
-down_meta and gate_vectors are self-consistent.
+`∀ e ∈ E_known : edges(DESCRIBE(V_M, e))  ⊆  edges(SELECT * FROM EDGES WHERE entity = e)`  
+DESCRIBE's filtered edges are a subset of the raw down_meta entries for entity e.
 
 **W6 (labeled coverage — P2 + label join):**  
 `relations(SHOW RELATIONS(V_M))  ⊇  {r : (e, r, t) ∈ K_E}`  
@@ -280,7 +283,7 @@ After `DELETE WHERE entity = e₀ AND relation = r₀` → V_M'':
 
 **W10 (UPDATE swap — P8):**  
 After `UPDATE SET target = t₁ WHERE entity = e₀ AND relation = r₀` → V_M''':  
-`t₁ ∈ cl_DESCRIBE(V_M''', e₀)`
+`t₁ ∈ cl_DESCRIBE(V_M''', e₀)  ∧  t₀ ∉ cl_DESCRIBE(V_M''', e₀)`
 
 ### 8.3 The end condition (conjunctive, levelled)
 
