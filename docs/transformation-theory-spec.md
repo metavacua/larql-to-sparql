@@ -161,3 +161,225 @@ LM head) makes correctness *equivalent to* a faithfulness test of `decompile` �
   to the project's producer; the divergence is model-regime, not method (§17).
 
 This document is a living spec; revise as alignment fits and the `V ⇄ SPARQL` formalization land.
+
+---
+
+## 7. LQL primitive basis
+
+LQL operations split into **primitive** (not expressible as a composition of other LQL statements) and
+**derived** (definable in terms of primitives). The end condition for correct extraction is stated only
+over the primitive basis — if each primitive is correct on a vindex V, all derived operations are
+correct by composition.
+
+### 7.1 Primitive basis
+
+**Browse level** — require only `gate_vectors.bin`, `down_meta.bin`, `embeddings.bin`, `tokenizer.json`,
+`index.json`:
+
+| ID | Operation | Distinguishing property |
+|----|-----------|------------------------|
+| P1 | `WALK` | `gate_knn` on **prompt-last-token** embedding → ranked feature list per layer |
+| P2 | `DESCRIBE` | `gate_knn` on **averaged entity** embedding → deduplicated edge set with optional relation labels; distinct query construction and output projection from P1 |
+| P3 | `SELECT` | relational condition scan over `down_meta`; the only operation with arbitrary WHERE predicates |
+| P4 | `STATS` | aggregate counts from `index.json` + artifact manifests |
+
+**Inference level** — additionally requires `attn_weights.bin` (and `lm_head.bin` unless tied to embeddings):
+
+| ID | Operation | Distinguishing property |
+|----|-----------|------------------------|
+| P5 | `INFER` | attention-gated full forward pass → next-token logits |
+
+**Mutation level** — additionally write back to vindex:
+
+| ID | Operation |
+|----|-----------|
+| P6 | `INSERT` |
+| P7 | `DELETE` |
+| P8 | `UPDATE` |
+
+**Lifecycle**:
+
+| ID | Operation |
+|----|-----------|
+| P9 | `EXTRACT` (model → vindex artifacts) |
+| P10 | `COMPILE` (vindex → model weights; inverse of P9) |
+
+### 7.2 Derived operations (not separately checkable)
+
+| Derived | Derives from |
+|---------|-------------|
+| `EXPLAIN WALK` | P1 + label join |
+| `EXPLAIN INFER` | P5 + per-layer attribution |
+| `TRACE` | P5 + residual stream capture |
+| `SHOW RELATIONS` | aggregate over P3 label dimension |
+| `SHOW LAYERS`, `SHOW FEATURES`, `SHOW ENTITIES`, `SHOW COMPACT STATUS` | specialisations of P3 / P4 |
+| `REBALANCE` | iterative (P5; P8) until convergence |
+| `COMPACT MINOR` | batch P6 MODE COMPOSE from L0 WAL |
+| `COMPACT MAJOR` | MEMIT decomposition: batch P8 over L1 edges |
+| `MERGE` | P3 from source + batch P6 into target |
+| `DIFF` | symmetric P3 over two vindexes |
+| `BEGIN/SAVE/APPLY/REMOVE PATCH`, `COMPILE INTO VINDEX` | recording overlay + materialisation of P6/P7/P8 batch |
+| `COMPILE INTO MODEL` | COMPILE INTO VINDEX + weight serialisation (P10) |
+
+---
+
+## 8. End condition for correct extraction (per-model and per-class)
+
+### 8.1 Setup
+
+Let:
+- **M** be a model under test.
+- **V_M** = `EXTRACT(M)` — the vindex produced.
+- **K** = the `larql-knowledge` catalog (Wikidata CC0 + WordNet triples), partitioned as:
+  - **K_E** — *entity-activated* facts: satisfied from static entity embedding alone (nationality, continent, borders, language, morphological relations).
+  - **K_C** — *completion-required* facts: only satisfiable via full forward pass (capital, genre, …).
+- **E_known** = entities appearing in K.
+- **P_test** = a finite set of known prompt → answer pairs (for inference parity).
+
+The retrieval closure under operation O on vindex V is:  
+`cl_O(V, e) = {edges/tokens reachable from entity e or prompt p by applying O to V}`.
+
+### 8.2 Per-model witnesses
+
+**W1 (STATS — P4):**  
+`STATS(V_M).layer_count = M.n_layers  ∧  features_per_layer_min > 0  ∧  vocab_size = M.vocab_size`
+
+**W2 (WALK fires — P1):**  
+`∀ e ∈ E_known : |top_features(WALK(V_M, e))| > 0  at knowledge-band layers`  
+Validates gate_vectors + embeddings present and aligned.
+
+**W3 (DESCRIBE-positive — P2):**  
+`∀ (e, r, t) ∈ K_E : t ∈ cl_DESCRIBE(V_M, e)`  
+Entity-activated relations surface in the DESCRIBE closure.
+
+**W4 (DESCRIBE-negative — P2):**  
+`∀ (e, r, t) ∈ K_C : t ∉ cl_DESCRIBE(V_M, e)`  
+Completion-required relations are absent from the DESCRIBE closure; DESCRIBE is not INFER.
+
+**W5 (SELECT round-trip — P3):**  
+`∀ e ∈ E_known : edges(SELECT * FROM EDGES WHERE entity = e)  ⊆  edges(DESCRIBE(V_M, e))`  
+down_meta and gate_vectors are self-consistent.
+
+**W6 (labeled coverage — P2 + label join):**  
+`relations(SHOW RELATIONS(V_M))  ⊇  {r : (e, r, t) ∈ K_E}`  
+`feature_labels.json` covers catalog relations when present.
+
+**W7 (INFER parity — P5, inference level):**  
+`∀ p ∈ P_test : top_1(INFER(V_M, p)) = top_1(dense_forward(M, p))`  
+Round-trip parity between vindex-backed and dense inference.
+
+**W8 (INSERT closure — P6):**  
+After `INSERT (e₀, r₀, t₀)` into V_M → V_M':  
+`t₀ ∈ cl_DESCRIBE(V_M', e₀)`
+
+**W9 (DELETE exclusion — P7):**  
+After `DELETE WHERE entity = e₀ AND relation = r₀` → V_M'':  
+`t₀ ∉ cl_DESCRIBE(V_M'', e₀)`
+
+**W10 (UPDATE swap — P8):**  
+After `UPDATE SET target = t₁ WHERE entity = e₀ AND relation = r₀` → V_M''':  
+`t₁ ∈ cl_DESCRIBE(V_M''', e₀)`
+
+### 8.3 The end condition (conjunctive, levelled)
+
+| Level | Condition | Enables |
+|-------|-----------|---------|
+| Browse | W1 ∧ W2 ∧ W3 ∧ W4 ∧ W5 ∧ W6 | P1, P2, P3, P4 and all derived browse operations |
+| Browse + Inference | Browse ∧ W7 | P5 and all derived inference operations |
+| Browse + Mutation | Browse ∧ W8 ∧ W9 ∧ W10 | P6, P7, P8 and all derived mutation operations |
+| Full | Browse ∧ W7 ∧ W8 ∧ W9 ∧ W10 | All LQL operations |
+
+**W3 and W4 are the critical pair.** W3 failing (entity-activated relations not found) is the extraction
+bug — evidenced on smollm2-360m and qwen3-0.6b (`metavacua/larql-to-sparql#193`). W4 failing (capital
+appearing in DESCRIBE) would mean DESCRIBE has been accidentally redefined as INFER — the overfitting
+guard. The fix must satisfy both simultaneously.
+
+### 8.4 Per-class end condition
+
+The per-model end condition extends to a **class of models** ℒ (e.g., all Transformer-family models
+extractable to vindexes) as follows.
+
+**C1 (K_E / K_C partition stability):**  
+The same facts are entity-activated across the class:  
+`∀ M ∈ ℒ : (e,r,t) ∈ K_E ⟺ t ∈ cl_DESCRIBE(V_M, e)` (once per-model witnesses hold)  
+This is the empirical hypothesis to verify once #193 is fixed: does the partition differ between
+smollm2, qwen, and gemma architectures?
+
+**C2 (Browse-level closure under mutation):**  
+If V satisfies Browse, then for any finite sequence σ of INSERT/DELETE/UPDATE operations,
+the resulting V' also satisfies W1, W5, W6 (STATS and SELECT self-consistency are preserved by mutations).
+
+**C3 (Round-trip stability):**  
+`EXTRACT(COMPILE(V_M)) ≈ V_M` up to quantisation noise — the class is closed under the COMPILE → EXTRACT cycle.
+
+**C4 (Threshold universality):**  
+The Browse end condition holds for all M ∈ ℒ under a **model-relative** threshold
+`θ_M = f(V_M.gate_scale)` — not an absolute constant. This is the direct statement of the
+#193 fix: the current `DESCRIBE_GATE_THRESHOLD = 5.0` is a per-class-member calibration
+that belongs in the EXTRACT output (`index.json`) not as a hard constant.
+
+---
+
+## 9. Formal language theory analogy
+
+The end condition has the structure of a closure / recognizability problem from formal language theory.
+The analogy is not merely metaphorical — it is structural.
+
+### 9.1 Retrieval hierarchy (Chomsky analogy)
+
+Define the **retrieval closure** of each primitive operation as the set of facts it can recover from
+vindex V for entity e:
+
+| LQL primitive | Retrieval closure | Formal analog |
+|---------------|------------------|---------------|
+| P2 `DESCRIBE` | cl_DESCRIBE(M, e): entity-activated facts, no context | Regular (finite automaton): bounded derivations, no stack |
+| P1 `WALK` | cl_WALK(M, p): prompt-context-dependent features | Context-free: depends on context stack (prompt tokens) |
+| P5 `INFER` | cl_INFER(M, p): full attention-gated generation | Unrestricted: arbitrary cross-token dependencies |
+
+Strict inclusions hold: `cl_DESCRIBE ⊊ cl_WALK ⊊ cl_INFER`  
+(evidenced for capital: not in cl_DESCRIBE, reachable via cl_INFER).
+
+### 9.2 Recognizability and the satisfiability split
+
+A fact (e, r, t) is **DESCRIBE-recognizable** iff `t ∈ cl_DESCRIBE(V_M, e)`. The recognizability
+test is the gate_knn derivation: entity embedding e → gate scores → feature f → down_meta top_token t.
+
+The satisfiability split K_E / K_C is the LQL analog of the **pumping lemma boundary**:
+
+> There exists a structural threshold (the model's entity-activation regime) such that facts in K_C
+> cannot be pumped into the DESCRIBE derivation for *any* model in the class — they require the full
+> generative machinery (INFER). Facts in K_E *can* be derived by DESCRIBE for all models where the
+> extraction is correct.
+
+W4 (DESCRIBE-negative) is the formal statement that K_C is **not** recognizable by DESCRIBE — analogous
+to the pumping lemma proof that certain languages are not regular. W3 (DESCRIBE-positive) is the
+statement that K_E *is* recognizable — the language is in the right class.
+
+### 9.3 Closure properties of the "correctly-extractable" class
+
+Define the class of correctly-extracted vindexes:
+
+`𝒞 = { V_M : M ∈ ℒ, V_M satisfies Browse end condition }`
+
+Closure properties (each is an open hypothesis or a known result):
+
+| Operation | Closed? | Note |
+|-----------|---------|------|
+| INSERT(V, (e,r,t)) → V' | **Yes** by design (W8) | New fact enters DESCRIBE closure |
+| DELETE(V, (e,r)) → V'' | **Yes** by design (W9) | Fact exits DESCRIBE closure |
+| MERGE(V₁, V₂) → V₃ | **Hypothesis** | Requires W3/W4 to hold on V₃; relation label conflicts could violate W6 |
+| COMPILE(V) → M', EXTRACT(M') → V' | **C3 hypothesis** | Round-trip stability; violated if COMPILE loses gate structure |
+| Architecture scaling M → M_large | **Hypothesis** | C4 (threshold universality): larger models may have larger gate scale, but model-relative θ_M preserves the class |
+
+### 9.4 The Nerode equivalence
+
+Two models M₁, M₂ are **LQL-equivalent** (M₁ ≅_LQL M₂) if for all (e, r, t) ∈ K:  
+`t ∈ cl_DESCRIBE(V_M₁, e)  ⟺  t ∈ cl_DESCRIBE(V_M₂, e)`
+
+EXTRACT is **faithful** for model M iff `M ≅_LQL V_M` — i.e., the vindex and the model are in the
+same LQL-equivalence class. The Browse end condition (W1–W6) is the finite witness set for this
+equivalence over the catalog K.
+
+The number of LQL-equivalence classes (over K_E) bounds the *granularity* of interpretability
+available via DESCRIBE: models in the same class are structurally indistinguishable at the
+entity-activation level of the catalog.
