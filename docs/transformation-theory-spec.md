@@ -372,8 +372,8 @@ Closure properties (each is an open hypothesis or a known result):
 
 | Operation | Closed? | Note |
 |-----------|---------|------|
-| INSERT(V, (e,r,t)) → V' | **Yes** by design (W8) | New fact enters DESCRIBE closure |
-| DELETE(V, (e,r)) → V'' | **Yes** by design (W9) | Fact exits DESCRIBE closure |
+| INSERT(V, (e,r,t)) → V' | **Hypothesis** (W8) | New fact should enter DESCRIBE closure; depends on gate vector synthesis and threshold calibration (metavacua/larql-to-sparql#193) |
+| DELETE(V, (e,r)) → V'' | **Hypothesis** (W9) | Fact should exit DESCRIBE closure; current implementation matches by top_token = entity, which does not find COMPOSE-inserted features (target-indexed) |
 | MERGE(V₁, V₂) → V₃ | **Hypothesis** | Requires W3/W4 to hold on V₃; relation label conflicts could violate W6 |
 | COMPILE(V) → M', EXTRACT(M') → V' | **C3 hypothesis** | Round-trip stability; violated if COMPILE loses gate structure |
 | Architecture scaling M → M_large | **Hypothesis** | C4 (threshold universality): larger models may have larger gate scale, but model-relative θ_M preserves the class |
