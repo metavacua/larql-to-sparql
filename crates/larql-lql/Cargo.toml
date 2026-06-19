@@ -28,7 +28,7 @@ default = []
 gpu = ["dep:larql-compute-metal", "larql-inference/gpu", "larql-vindex/gpu"]
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = { workspace = true }
 # Mocked HTTP server for testing the Remote backend's forwarders
 # without spinning up a real `larql-server`. Each test wires a
 # `mockito::Server`, points the session at it via `USE "<url>"`, and
