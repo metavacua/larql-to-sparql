@@ -5,6 +5,7 @@
 //! `dequantize_q4_k`). Not optimised — scalar code intended as a correctness
 //! reference.
 
+use crate::cpu::ops::q4_common::f16_to_f32;
 use larql_models::quant::ggml::Q4_K_BLOCK_BYTES as Q4K_BLOCK_SIZE;
 
 /// Offset to the start of the 128-byte nibble-packed quants region inside
@@ -12,38 +13,6 @@ use larql_models::quant::ggml::Q4_K_BLOCK_BYTES as Q4K_BLOCK_SIZE;
 /// bytes = 16. Pinning this so `[Q4K_HEADER_BYTES..Q4K_BLOCK_SIZE]`
 /// reads as "the quants section" instead of `[16..144]`.
 const Q4K_HEADER_BYTES: usize = 16;
-
-/// Decode f16 bits to f32, preserving subnormals (matches Metal's
-/// `decode_f16_metal`, which uses the hardware `half` → `float` cast).
-fn f16_to_f32(bits: u16) -> f32 {
-    let sign = ((bits >> 15) & 1) as u32;
-    let exp = ((bits >> 10) & 0x1F) as i32;
-    let mant = (bits & 0x3FF) as u32;
-    if exp == 0 {
-        if mant == 0 {
-            return if sign == 1 { -0.0 } else { 0.0 };
-        }
-        let val = mant as f32 / 1024.0 * 2.0f32.powi(-14);
-        return if sign == 1 { -val } else { val };
-    }
-    if exp == 31 {
-        return if mant == 0 {
-            if sign == 1 {
-                f32::NEG_INFINITY
-            } else {
-                f32::INFINITY
-            }
-        } else {
-            f32::NAN
-        };
-    }
-    let val = (1.0 + mant as f32 / 1024.0) * 2.0f32.powi(exp - 15);
-    if sign == 1 {
-        -val
-    } else {
-        val
-    }
-}
 
 /// Unpack the 12 packed bytes at `sb_bytes` into 8 scales + 8 mins.
 /// Matches llama.cpp's `get_scale_min_k4` and `dequantize_q4_k`.
