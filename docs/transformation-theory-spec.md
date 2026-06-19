@@ -330,7 +330,7 @@ that belongs in the EXTRACT output (`index.json`) not as a hard constant.
 ## 9. Formal language theory analogy
 
 The end condition has the structure of a closure / recognizability problem from formal language theory.
-The analogy is not merely metaphorical — it is structural.
+The analogy is structural in motivation: the Chomsky labels name analogous *properties* (bounded / context-dependent / unconstrained) rather than literal class memberships over string languages.
 
 ### 9.1 Retrieval hierarchy (Chomsky analogy)
 
@@ -339,12 +339,12 @@ vindex V for entity e:
 
 | LQL primitive | Retrieval closure | Formal analog |
 |---------------|------------------|---------------|
-| P2 `DESCRIBE` | cl_DESCRIBE(M, e): entity-activated facts, no context | Regular (finite automaton): bounded derivations, no stack |
-| P1 `WALK` | cl_WALK(M, p): prompt-context-dependent features | Context-free: depends on context stack (prompt tokens) |
-| P5 `INFER` | cl_INFER(M, p): full attention-gated generation | Unrestricted: arbitrary cross-token dependencies |
+| P2 `DESCRIBE` | cl_DESCRIBE(V_M, e): entity-activated facts, no context | Regular (finite automaton): bounded derivations, no stack |
+| P1 `WALK` | cl_WALK(V_M, p): prompt-context-dependent features | Context-free: depends on context stack (prompt tokens) |
+| P5 `INFER` | cl_INFER(V_M, p): full attention-gated generation | Unrestricted: arbitrary cross-token dependencies |
 
-Strict inclusions hold: `cl_DESCRIBE ⊊ cl_WALK ⊊ cl_INFER`  
-(evidenced for capital: not in cl_DESCRIBE, reachable via cl_INFER).
+`cl_DESCRIBE ⊊ cl_INFER` — evidenced: capital ∉ cl_DESCRIBE (W4), capital ∈ cl_INFER (W7 parity).  
+`cl_DESCRIBE ⊊ cl_WALK ⊊ cl_INFER` — hypothesis: requires one fact witnessed in cl_WALK \ cl_DESCRIBE and one in cl_INFER \ cl_WALK.
 
 ### 9.2 Recognizability and the satisfiability split
 
@@ -380,13 +380,14 @@ Closure properties (each is an open hypothesis or a known result):
 
 ### 9.4 The Nerode equivalence
 
-Two models M₁, M₂ are **LQL-equivalent** (M₁ ≅_LQL M₂) if for all (e, r, t) ∈ K:  
+Two models M₁, M₂ are **DESCRIBE-equivalent** (M₁ ≅_DESCRIBE M₂) if for all (e, r, t) ∈ K_E:  
 `t ∈ cl_DESCRIBE(V_M₁, e)  ⟺  t ∈ cl_DESCRIBE(V_M₂, e)`
 
-EXTRACT is **faithful** for model M iff `M ≅_LQL V_M` — i.e., the vindex and the model are in the
-same LQL-equivalence class. The Browse end condition (W1–W6) is the finite witness set for this
+EXTRACT is **faithful** for model M iff, for all (e, r, t) ∈ K_E:  
+`t ∈ cl_DESCRIBE(V_M, e)  ⟺  (e, r, t) ∈ K_E`  
+i.e., the DESCRIBE closure of V_M matches the entity-activated ground truth. The Browse end condition (W1–W6) is the finite witness set for this
 equivalence over the catalog K.
 
-The number of LQL-equivalence classes (over K_E) bounds the *granularity* of interpretability
+The number of DESCRIBE-equivalence classes (over K_E) bounds the *granularity* of interpretability
 available via DESCRIBE: models in the same class are structurally indistinguishable at the
 entity-activation level of the catalog.
