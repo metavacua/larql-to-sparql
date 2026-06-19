@@ -8,7 +8,7 @@ use crate::error::LqlError;
 use crate::executor::helpers::{is_content_token, is_readable_token};
 use crate::executor::tuning::{
     DESCRIBE_ALSO_CONTENT_TAKE, DESCRIBE_ALSO_READABLE_TAKE, DESCRIBE_COHERENCE_FLOOR,
-    DESCRIBE_GATE_THRESHOLD,
+    DESCRIBE_COSINE_THRESHOLD, DESCRIBE_GATE_THRESHOLD,
 };
 
 /// Tokenise `entity` and build a query vector by averaging its token
@@ -76,7 +76,14 @@ pub(super) fn describe_collect_edges(
 
     for (layer_idx, hits) in &trace.layers {
         for hit in hits {
-            if hit.gate_score < DESCRIBE_GATE_THRESHOLD {
+            // When cosine_score is populated (walk_cosine path), filter by the
+            // model-scale-invariant cosine threshold. Otherwise fall back to
+            // the legacy raw-dot threshold (overlay patches, non-cosine walks).
+            if hit.cosine_score > 0.0 {
+                if hit.cosine_score < DESCRIBE_COSINE_THRESHOLD {
+                    continue;
+                }
+            } else if hit.gate_score < DESCRIBE_GATE_THRESHOLD {
                 continue;
             }
             let tok = &hit.meta.top_token;
