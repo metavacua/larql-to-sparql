@@ -23,6 +23,7 @@ pub use expert::{
     run_single_expert_q4k_q8k_into, run_single_expert_with_norm, ExpertScratch,
 };
 pub use forward::cpu_moe_forward;
+pub use math::{rms_norm, rms_norm_no_weight, softmax, top_k};
 pub use within_expert::{
     is_active as within_expert_active, set_current_layer, set_routing, ExpertFeatureSelector,
     WithinExpertRouting,
