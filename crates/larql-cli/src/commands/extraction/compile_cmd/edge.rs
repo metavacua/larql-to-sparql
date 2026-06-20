@@ -94,21 +94,21 @@ pub fn install_edge(
     let alpha = (d_norm / write_norm) * alpha_mul;
 
     {
-        let gt = tensors.get_mut(gate_key).unwrap();
+        let gt = tensors.get_mut(gate_key).expect("gate key verified above");
         let hidden = gt.shape()[1];
         for j in 0..hidden.min(trigger.len()) {
             gt[[slot, j]] = trigger[j] * g_scale;
         }
     }
     {
-        let ut = tensors.get_mut(up_key).unwrap();
+        let ut = tensors.get_mut(up_key).expect("up key verified above");
         let hidden = ut.shape()[1];
         for j in 0..hidden.min(trigger.len()) {
             ut[[slot, j]] = trigger[j] * u_scale;
         }
     }
     {
-        let dt = tensors.get_mut(down_key).unwrap();
+        let dt = tensors.get_mut(down_key).expect("down key verified above");
         let hidden = dt.shape()[0];
         for j in 0..hidden.min(write.len()) {
             dt[[j, slot]] = write[j] * alpha;

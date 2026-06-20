@@ -48,9 +48,12 @@ pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let layer = args.layer;
     let arch = &*weights.arch;
-    let w_gate = weights.tensors.get(&arch.ffn_gate_key(layer)).unwrap();
-    let w_up = weights.tensors.get(&arch.ffn_up_key(layer)).unwrap();
-    let w_down = weights.tensors.get(&arch.ffn_down_key(layer)).unwrap();
+    let w_gate = weights.tensors.get(&arch.ffn_gate_key(layer))
+        .ok_or_else(|| format!("tensor '{}' not found (layer {})", arch.ffn_gate_key(layer), layer))?;
+    let w_up = weights.tensors.get(&arch.ffn_up_key(layer))
+        .ok_or_else(|| format!("tensor '{}' not found (layer {})", arch.ffn_up_key(layer), layer))?;
+    let w_down = weights.tensors.get(&arch.ffn_down_key(layer))
+        .ok_or_else(|| format!("tensor '{}' not found (layer {})", arch.ffn_down_key(layer), layer))?;
     let intermediate = w_gate.shape()[0];
 
     eprintln!(
