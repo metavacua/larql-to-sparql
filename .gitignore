@@ -47,6 +47,9 @@ build/
 
 # Nix
 result
+
+# graphify output (generated, large — commit GRAPH_REPORT.md manually if desired)
+graphify-out/
 result-*
 
 # output
