@@ -2,7 +2,6 @@
 ///
 /// Every LQL statement parses into one `Statement` variant.
 /// The executor dispatches each variant to the appropriate backend.
-
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;

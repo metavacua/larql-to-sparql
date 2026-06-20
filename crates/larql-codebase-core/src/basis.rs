@@ -88,13 +88,13 @@ impl BasisTransform for BitNetBasis {
 
             // Pack in 128-element I2_S blocks (zero-pad last block if needed).
             let total = trits.len();
-            let n_blocks = (total + 127) / 128;
+            let n_blocks = total.div_ceil(128);
             let mut data = Vec::with_capacity(n_blocks * 32);
             for b in 0..n_blocks {
                 let mut block = [0i8; 128];
-                for k in 0..128 {
+                for (k, slot) in block.iter_mut().enumerate() {
                     let idx = b * 128 + k;
-                    block[k] = if idx < total { trits[idx] } else { 0 };
+                    *slot = if idx < total { trits[idx] } else { 0 };
                 }
                 data.extend_from_slice(&pack_i2s_block(&block));
             }
@@ -124,8 +124,10 @@ mod tests {
     };
 
     fn small_edges() -> Vec<(&'static str, &'static str, f64)> {
-        let nodes = ["node_0","node_1","node_2","node_3","node_4",
-                     "node_5","node_6","node_7","node_8","node_9"];
+        let nodes = [
+            "node_0", "node_1", "node_2", "node_3", "node_4", "node_5", "node_6", "node_7",
+            "node_8", "node_9",
+        ];
         let mut v = Vec::new();
         for i in 0..10usize {
             v.push((nodes[i], nodes[(i + 1) % 10], 1.0));

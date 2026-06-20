@@ -66,8 +66,11 @@ mod tests {
             "L3".to_string(),
             "L4".to_string(),
         ];
-        let index: BTreeMap<String, usize> =
-            names.iter().enumerate().map(|(i, n)| (n.clone(), i)).collect();
+        let index: BTreeMap<String, usize> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.clone(), i))
+            .collect();
         let idx = NodeIndex { names, index };
         let adj = SparseAdj {
             n: 5,

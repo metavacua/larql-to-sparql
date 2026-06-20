@@ -9,6 +9,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum GraphifyError {
     #[error("missing 'nodes' array in graphify JSON")]
     MissingNodes,
@@ -18,19 +19,14 @@ pub enum GraphifyError {
     Io(#[from] std::io::Error),
     #[error("JSON: {0}")]
     Json(#[from] serde_json::Error),
-    #[allow(dead_code)]
     #[error("graph: {0}")]
     Graph(String),
 }
 
 /// φ-transform: convert a NetworkX node-link JSON value into a `larql_core::Graph`.
 pub fn phi_transform(v: &Value) -> Result<Graph, GraphifyError> {
-    let nodes_arr = v["nodes"]
-        .as_array()
-        .ok_or(GraphifyError::MissingNodes)?;
-    let links_arr = v["links"]
-        .as_array()
-        .ok_or(GraphifyError::MissingLinks)?;
+    let nodes_arr = v["nodes"].as_array().ok_or(GraphifyError::MissingNodes)?;
+    let links_arr = v["links"].as_array().ok_or(GraphifyError::MissingLinks)?;
 
     // Build id → label map (id may be int or string in the JSON).
     let mut id_to_label: HashMap<String, String> = HashMap::new();

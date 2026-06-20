@@ -24,14 +24,11 @@ mod integration {
 
     // Static node/fn names to avoid heap allocation in const context.
     const MODS: &[&str] = &[
-        "mod_0", "mod_1", "mod_2", "mod_3", "mod_4",
-        "mod_5", "mod_6", "mod_7", "mod_8", "mod_9",
+        "mod_0", "mod_1", "mod_2", "mod_3", "mod_4", "mod_5", "mod_6", "mod_7", "mod_8", "mod_9",
     ];
     const FNS: &[&str] = &[
-        "fn_0",  "fn_1",  "fn_2",  "fn_3",  "fn_4",
-        "fn_5",  "fn_6",  "fn_7",  "fn_8",  "fn_9",
-        "fn_10", "fn_11", "fn_12", "fn_13", "fn_14",
-        "fn_15", "fn_16", "fn_17", "fn_18", "fn_19",
+        "fn_0", "fn_1", "fn_2", "fn_3", "fn_4", "fn_5", "fn_6", "fn_7", "fn_8", "fn_9", "fn_10",
+        "fn_11", "fn_12", "fn_13", "fn_14", "fn_15", "fn_16", "fn_17", "fn_18", "fn_19",
     ];
 
     #[test]

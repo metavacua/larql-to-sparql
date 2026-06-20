@@ -20,13 +20,7 @@ pub fn symmetric_normalise(adj: &SparseAdj) -> NormAdj {
     }
     let inv_sqrt: Vec<f64> = deg
         .iter()
-        .map(|&d| {
-            if d > 0.0 {
-                1.0 / libm::sqrt(d)
-            } else {
-                0.0
-            }
-        })
+        .map(|&d| if d > 0.0 { 1.0 / libm::sqrt(d) } else { 0.0 })
         .collect();
     let entries = adj
         .entries

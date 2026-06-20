@@ -93,8 +93,8 @@ mod tests {
     #[test]
     fn i2s_mixed_values_round_trip() {
         let mut block = [0i8; 128];
-        for i in 0..128 {
-            block[i] = match i % 3 {
+        for (i, slot) in block.iter_mut().enumerate() {
+            *slot = match i % 3 {
                 0 => 1,
                 1 => -1,
                 _ => 0,

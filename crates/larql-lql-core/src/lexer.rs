@@ -1,5 +1,4 @@
 /// LQL Lexer — tokenises an input string into a stream of `Token`s
-
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -663,7 +662,6 @@ impl core::error::Error for LexError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::ToString;
 
     // ── Basic tokenisation ──
 

@@ -22,7 +22,9 @@ pub use io::format::Format;
 #[cfg(not(target_arch = "wasm32"))]
 pub use io::json::{load_json, save_json};
 #[cfg(not(target_arch = "wasm32"))]
-pub use io::{from_bytes, load, load_graph, load_with_format, save, save_graph, save_with_format, to_bytes};
+pub use io::{
+    from_bytes, load, load_graph, load_with_format, save, save_graph, save_with_format, to_bytes,
+};
 
 pub use algo::components::{are_connected, connected_components};
 pub use algo::diff::{diff, ChangedEdge, GraphDiff};

@@ -1,5 +1,4 @@
 /// LQL error types.
-
 use alloc::format;
 use alloc::string::String;
 

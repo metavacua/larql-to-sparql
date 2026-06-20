@@ -49,7 +49,13 @@ fn extract_node<'a>(
                 graph.add_edge(ast_edge(&qualified, "defined_in", path));
                 // Walk body for call_expression children
                 for i in 0..node.child_count() {
-                    extract_node(node.child(i as u32).unwrap(), src, path, graph, Some(&qualified));
+                    extract_node(
+                        node.child(i as u32).unwrap(),
+                        src,
+                        path,
+                        graph,
+                        Some(&qualified),
+                    );
                 }
                 return;
             }

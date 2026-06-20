@@ -30,10 +30,7 @@ pub fn export_to_gguf(input: &Path, output: &Path) -> Result<(), Box<dyn std::er
     let repr = graph_to_weight_repr(&graph, &BitNetBasis);
 
     let mut writer = GgufWriter::new();
-    writer.meta(
-        "general.architecture",
-        GgufValue::String("bitnet".into()),
-    );
+    writer.meta("general.architecture", GgufValue::String("bitnet".into()));
     writer.meta(
         "general.name",
         GgufValue::String("larql-codebase-bitnet".into()),
@@ -42,10 +39,7 @@ pub fn export_to_gguf(input: &Path, output: &Path) -> Result<(), Box<dyn std::er
         "larql.hidden_size",
         GgufValue::U32(repr.arch.hidden_size as u32),
     );
-    writer.meta(
-        "larql.n_layers",
-        GgufValue::U32(repr.arch.n_layers as u32),
-    );
+    writer.meta("larql.n_layers", GgufValue::U32(repr.arch.n_layers as u32));
 
     for t in repr.tensors {
         writer.tensor(GgufTensor {

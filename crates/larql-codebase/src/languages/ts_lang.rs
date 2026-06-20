@@ -62,8 +62,7 @@ mod tests {
 
     #[test]
     fn ts_function_produces_defined_in() {
-        let src =
-            "function greet(name: string): string { return `Hello ${name}`; }";
+        let src = "function greet(name: string): string { return `Hello ${name}`; }";
         let mut g = Graph::new();
         TsExtractor.extract(src, "hello.ts", &mut g);
         let entities = g.list_entities();

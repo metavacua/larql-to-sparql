@@ -35,10 +35,7 @@ pub fn extract_codebase(root: &Path) -> Result<Graph, CodebaseError> {
             continue;
         }
         let path = entry.path();
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let rel_path = path
             .strip_prefix(root)
             .unwrap_or(path)
