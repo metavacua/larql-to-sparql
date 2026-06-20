@@ -54,10 +54,14 @@ pub fn run(args: AttnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let norm_offset = arch.norm_weight_offset();
     let iters = args.iterations;
 
-    let w_q = weights.tensors.get(&arch.attn_q_key(layer)).unwrap();
-    let w_k = weights.tensors.get(&arch.attn_k_key(layer)).unwrap();
-    let w_v = weights.tensors.get(&arch.attn_v_key(layer)).unwrap();
-    let w_o = weights.tensors.get(&arch.attn_o_key(layer)).unwrap();
+    let w_q = weights.tensors.get(&arch.attn_q_key(layer))
+        .ok_or_else(|| format!("tensor '{}' not found (layer {})", arch.attn_q_key(layer), layer))?;
+    let w_k = weights.tensors.get(&arch.attn_k_key(layer))
+        .ok_or_else(|| format!("tensor '{}' not found (layer {})", arch.attn_k_key(layer), layer))?;
+    let w_v = weights.tensors.get(&arch.attn_v_key(layer))
+        .ok_or_else(|| format!("tensor '{}' not found (layer {})", arch.attn_v_key(layer), layer))?;
+    let w_o = weights.tensors.get(&arch.attn_o_key(layer))
+        .ok_or_else(|| format!("tensor '{}' not found (layer {})", arch.attn_o_key(layer), layer))?;
 
     let q_dim = num_q * head_dim;
     let kv_dim = num_kv * head_dim;

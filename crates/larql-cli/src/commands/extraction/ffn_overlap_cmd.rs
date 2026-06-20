@@ -54,7 +54,8 @@ pub fn run(args: FfnOverlapArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     for (layer, residual_vec) in &trace.residuals {
         let arch = &*weights.arch;
-        let w_gate = weights.tensors.get(&arch.ffn_gate_key(*layer)).unwrap();
+        let w_gate = weights.tensors.get(&arch.ffn_gate_key(*layer))
+            .ok_or_else(|| format!("tensor '{}' not found (layer {})", arch.ffn_gate_key(*layer), layer))?;
         let _hidden = weights.hidden_size;
 
         // Ground truth: actual gate matmul on the residual
