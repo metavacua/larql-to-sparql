@@ -92,6 +92,7 @@ pub fn default_source_priority(source: &SourceType) -> u8 {
         SourceType::Parametric => 3,
         SourceType::Document => 2,
         SourceType::Installed => 1,
+        SourceType::Ast => 0,
         SourceType::Unknown => 0,
     }
 }

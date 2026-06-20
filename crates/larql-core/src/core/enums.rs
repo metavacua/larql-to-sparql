@@ -9,6 +9,7 @@ pub enum SourceType {
     Installed,
     Wikidata,
     Manual,
+    Ast,
     #[default]
     Unknown,
 }
@@ -21,6 +22,7 @@ impl SourceType {
             Self::Installed => "installed",
             Self::Wikidata => "wikidata",
             Self::Manual => "manual",
+            Self::Ast => "ast",
             Self::Unknown => "unknown",
         }
     }
@@ -35,4 +37,17 @@ pub enum MergeStrategy {
     Union,
     /// Caller pre-sorts by source priority.
     SourcePriority,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn ast_source_type_round_trips() {
+        let s = SourceType::Ast;
+        assert_eq!(s.as_str(), "ast");
+        let json = serde_json::to_string(&s).unwrap();
+        let back: SourceType = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, SourceType::Ast);
+    }
 }
