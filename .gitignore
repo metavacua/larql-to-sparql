@@ -59,3 +59,4 @@ experiments/
 vindexes/
 .pids/
 docs/replay/
+.worktrees
