@@ -9,7 +9,6 @@ use serde_json::Value;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-#[allow(dead_code)]
 pub enum GraphifyError {
     #[error("missing 'nodes' array in graphify JSON")]
     MissingNodes,
@@ -19,8 +18,6 @@ pub enum GraphifyError {
     Io(#[from] std::io::Error),
     #[error("JSON: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("graph: {0}")]
-    Graph(String),
 }
 
 /// φ-transform: convert a NetworkX node-link JSON value into a `larql_core::Graph`.
@@ -139,6 +136,16 @@ mod tests {
         assert!(
             edges.iter().any(|e| e.relation == "defined_in"),
             "expected a 'defined_in' edge for source_file"
+        );
+    }
+
+    #[test]
+    fn phi_transform_produces_has_kind_edge() {
+        let graph = phi_transform(&fixture_json()).unwrap();
+        let edges = graph.edges();
+        assert!(
+            edges.iter().any(|e| e.relation == "has_kind"),
+            "expected a 'has_kind' edge for node with kind field"
         );
     }
 }
