@@ -324,9 +324,12 @@ extraction implementations toward agreement.
 **Location:** `larql-cli/src/commands/primary/export_cmd.rs`  
 **GGUF writer:** `larql-vindex/src/export/gguf.rs` (symmetric with existing reader at `larql-models/src/loading/gguf/parser.rs`)
 
-Writes a GGUF file with BitNet weights (trit-encoded; the exact GGUF quantisation
-type identifier for BitNet b1.58 — `Q1_S`, `IQ1_S`, or equivalent — must be
-verified against the llama.cpp GGUF spec at implementation time). After export:
+Writes a GGUF file with BitNet weights using the **I2_S** quantisation type:
+2-bit signed, strided block layout (128-element blocks / 32 bytes; byte `p` packs
+elements `{p, p+32, p+64, p+96}` at bit-shifts 6/4/2/0; unsigned code {0,1,2} →
+ternary {-1,0,+1}; zero tensor packs to `0x55`). This is the Microsoft BitNet b1.58
+layout, already implemented in `larql-models/src/loading/gguf/loader.rs` (PR #156
+decode fix, PR #159 end-to-end inference, both merged). After export:
 
 ```bash
 ollama create my-codebase -f Modelfile   # Modelfile: FROM ./model.gguf
@@ -455,9 +458,10 @@ Tier 0 crate breaks the build immediately.
 
 - **Spectral basis convergence**: Graph diameter as `n_layers` may be too deep for
   large codebases. A cap (32 layers) is specified; empirical tuning needed.
-- **GGUF BitNet quant type**: The correct GGUF quantisation type identifier for trit
-  weights needs verification against the llama.cpp source at implementation time.
-  Candidates: `Q1_S`, `IQ1_S`, or a BitNet-specific type.
+- **GGUF BitNet quant type**: Confirmed **I2_S** (Microsoft strided block layout,
+  PRs #156 + #159 merged). The existing `bitnet_writer`/`bitnet_loader` in
+  `larql-vindex/src/extract/` handle the vindex-side encoding; the GGUF export
+  writes the same I2_S bytes in the GGUF container format.
 - **`larql-lql-core` split scope**: The LQL executor boundary (which parts are pure
   vs. IO-dependent) needs a file-by-file audit of `larql-lql/src/executor/` at
   implementation time.
