@@ -2169,6 +2169,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "larql-codebase"
+version = "0.1.0"
+dependencies = [
+ "larql-codebase-core",
+ "larql-core",
+ "larql-models",
+ "larql-vindex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "larql-codebase-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "larql-compute"
 version = "0.1.0"
 dependencies = [
@@ -2211,6 +2232,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

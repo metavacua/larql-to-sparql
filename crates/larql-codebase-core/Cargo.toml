@@ -1,0 +1,11 @@
+[package]
+name = "larql-codebase-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Codebase-to-model weight derivation — pure Tier-0 (wasm32v1-none safe)"
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive"] }
+thiserror = { version = "2", default-features = false }
