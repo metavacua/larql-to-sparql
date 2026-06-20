@@ -17,6 +17,12 @@
 #![allow(clippy::large_enum_variant)]
 
 use clap::{Parser, Subcommand};
+use larql_compute::resource_guard::{
+    apply_cpu_reservation, detect_physical_memory_bytes, set_memory_cap, CapAllocator,
+};
+
+#[global_allocator]
+static ALLOC: CapAllocator = CapAllocator;
 
 mod anyres_tiler;
 mod commands;
@@ -522,6 +528,14 @@ fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
 }
 
 fn main() {
+    // Reserve 1 core for the OS; cap heap + mmap to 85 % of physical RAM.
+    // Must run before any rayon or tokio thread pool is created.
+    let _workers = apply_cpu_reservation();
+    let phys = detect_physical_memory_bytes();
+    if phys > 0 {
+        set_memory_cap(phys * 85 / 100);
+    }
+
     // Windows defaults the main thread to a 1 MiB stack, which our large
     // clap-derived `Commands` enum overflows during parse_from in debug
     // builds. Spawn the real entrypoint on a worker thread with a roomy

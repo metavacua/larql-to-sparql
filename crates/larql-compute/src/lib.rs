@@ -74,6 +74,7 @@
 extern crate blas_src;
 
 pub mod async_compute_backend;
+pub mod resource_guard;
 pub mod attention;
 pub mod backend;
 pub mod connectors;

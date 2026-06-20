@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use ndarray::Array2;
 
 use crate::detect::{detect_architecture_validated, ModelError};
+use crate::resource::TrackedMmap;
 use crate::weights::{ModelWeights, PACKED_EXPERTS_DOWN_PROJ, PACKED_EXPERTS_GATE_UP_PROJ};
 
 const SAFETENSORS_EXT: &str = "safetensors";
@@ -175,7 +176,7 @@ fn load_model_dir_filtered_with_validation(
     let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
     let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
     let raw_bytes: HashMap<String, Vec<u8>> = HashMap::new();
-    let mut packed_mmaps: HashMap<String, memmap2::Mmap> = HashMap::new();
+    let mut packed_mmaps: HashMap<String, TrackedMmap> = HashMap::new();
     let mut packed_byte_ranges: HashMap<String, (String, usize, usize)> = HashMap::new();
     let mut skipped_tensors: Vec<(String, String)> = Vec::new();
 
@@ -194,7 +195,7 @@ fn load_model_dir_filtered_with_validation(
 
     for st_path in &st_files {
         let file = std::fs::File::open(st_path)?;
-        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        let mmap = unsafe { TrackedMmap::map(&file)? };
         let (header_len, metadata) = safetensors::SafeTensors::read_metadata(&mmap)
             .map_err(|e| ModelError::Parse(e.to_string()))?;
         let data_base = header_len

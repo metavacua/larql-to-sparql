@@ -1618,7 +1618,11 @@ mod branch_tests {
         index.vocab_size = weights.vocab_size;
         let mut anon = memmap2::MmapMut::map_anon(attn_payload.len()).expect("anon");
         anon.copy_from_slice(&attn_payload);
-        let mmap = Arc::new(anon.make_read_only().unwrap());
+        let ro = anon.make_read_only().unwrap();
+        // Charge the bytes permanently: this mapping lives for the process lifetime
+        // inside the Arc so release is never needed.
+        larql_compute::resource_guard::charge_mmap(ro.len());
+        let mmap = Arc::new(ro);
         Arc::make_mut(&mut index.storage).set_attn_kquant(mmap, Some(attn_manifest));
         assert!(
             !layer_supports_direct_matvec(&index, 0),

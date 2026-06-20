@@ -30,7 +30,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use memmap2::Mmap;
+use larql_compute::resource_guard::TrackedMmap;
 
 const MAGIC: [u8; 4] = *b"CTXT";
 const VERSION: u32 = 1;
@@ -130,14 +130,14 @@ impl ContextEntry {
 
 /// Read-only mmap'd context store.
 pub struct ContextStore {
-    mmap: Mmap,
+    mmap: TrackedMmap,
     header: ContextHeader,
 }
 
 impl ContextStore {
     pub fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
-        let mmap = unsafe { Mmap::map(&file)? };
+        let mmap = unsafe { TrackedMmap::map(&file)? };
 
         if mmap.len() < HEADER_SIZE {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "file too small"));

@@ -27,7 +27,7 @@ use crate::error::VindexError;
 /// Mmap'd safetensors file — kept alive for the duration of extraction.
 pub(super) struct MmapShard {
     pub(super) _file: std::fs::File,
-    pub(super) mmap: memmap2::Mmap,
+    pub(super) mmap: larql_compute::resource_guard::TrackedMmap,
 }
 
 /// Tensor source for the streaming pipeline. Dispatches `get_tensor_f32`
@@ -57,7 +57,7 @@ pub(super) enum TensorSource {
 /// matmul produces NaN).
 pub(super) struct GgufTensorSource {
     pub(super) gguf: larql_models::loading::gguf::GgufFile,
-    pub(super) shard_mmaps: Vec<memmap2::Mmap>,
+    pub(super) shard_mmaps: Vec<larql_compute::resource_guard::TrackedMmap>,
     /// hf_key (after `normalize_gguf_key`) → index into `gguf.tensor_infos`.
     pub(super) index: HashMap<String, usize>,
     /// Canonical hidden_size — used to orient ffn tensors to HF Linear shape.
@@ -131,12 +131,13 @@ impl GgufTensorSource {
         hidden_size: usize,
         intermediate_size: usize,
     ) -> Result<Self, VindexError> {
-        let mut shard_mmaps: Vec<memmap2::Mmap> = Vec::with_capacity(gguf.shards.len());
+        let mut shard_mmaps: Vec<larql_compute::resource_guard::TrackedMmap> =
+            Vec::with_capacity(gguf.shards.len());
         for shard in &gguf.shards {
             let file = std::fs::File::open(&shard.path)
                 .map_err(|e| VindexError::Parse(format!("open {}: {e}", shard.path.display())))?;
             // SAFETY: shard files are owned, immutable input.
-            let mmap = unsafe { memmap2::Mmap::map(&file) }
+            let mmap = unsafe { larql_compute::resource_guard::TrackedMmap::map(&file) }
                 .map_err(|e| VindexError::Parse(format!("mmap {}: {e}", shard.path.display())))?;
             shard_mmaps.push(mmap);
         }
@@ -445,7 +446,9 @@ mod tests {
         f.sync_all().ok();
 
         let file = std::fs::File::open(&path).expect("reopen fixture");
-        let mmap = unsafe { memmap2::Mmap::map(&file).expect("mmap fixture") };
+        let mmap = unsafe {
+            larql_compute::resource_guard::TrackedMmap::map(&file).expect("mmap fixture")
+        };
         let mut index = HashMap::new();
         for t in &tensors {
             index.insert(t.name.clone(), (0_usize, t.name.clone()));

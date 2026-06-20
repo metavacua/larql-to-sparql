@@ -6,6 +6,7 @@ use std::path::Path;
 use ndarray::Array2;
 
 use crate::detect::{detect_from_json_validated, ModelError};
+use crate::resource::TrackedMmap;
 use crate::weights::ModelWeights;
 
 use super::constants::*;
@@ -86,7 +87,7 @@ impl GgufFile {
         ),
         ModelError,
     > {
-        let mut shard_mmaps: Vec<Option<memmap2::Mmap>> =
+        let mut shard_mmaps: Vec<Option<TrackedMmap>> =
             (0..self.shards.len()).map(|_| None).collect();
 
         let mut tensors = HashMap::new();
@@ -102,7 +103,7 @@ impl GgufFile {
             let shard = &self.shards[info.shard_idx];
             if shard_mmaps[info.shard_idx].is_none() {
                 let f = std::fs::File::open(&shard.path)?;
-                let m = unsafe { memmap2::Mmap::map(&f)? };
+                let m = unsafe { TrackedMmap::map(&f)? };
                 shard_mmaps[info.shard_idx] = Some(m);
             }
             let mmap = shard_mmaps[info.shard_idx]

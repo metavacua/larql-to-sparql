@@ -9,6 +9,7 @@ use std::path::Path;
 
 use ndarray::Array2;
 
+use larql_compute::resource_guard::TrackedMmap;
 use larql_models::ModelWeights;
 
 use crate::error::VindexError;
@@ -69,7 +70,7 @@ pub fn load_model_weights_kquant_shard(
     let manifest_path = dir.join(WEIGHT_MANIFEST_JSON);
     let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
     let mut tensors: HashMap<String, larql_models::WeightArray> = HashMap::new();
-    let mut packed_mmaps: HashMap<String, memmap2::Mmap> = HashMap::new();
+    let mut packed_mmaps: HashMap<String, TrackedMmap> = HashMap::new();
     let mut packed_byte_ranges: HashMap<String, (String, usize, usize)> = HashMap::new();
     let mut lm_head_loaded: Option<larql_models::WeightArray> = None;
 
@@ -78,7 +79,7 @@ pub fn load_model_weights_kquant_shard(
         let entries: Vec<WeightEntry> =
             serde_json::from_str(&manifest_text).map_err(|e| VindexError::Parse(e.to_string()))?;
 
-        let mut mmap_cache: HashMap<String, memmap2::Mmap> = HashMap::new();
+        let mut mmap_cache: HashMap<String, TrackedMmap> = HashMap::new();
         for entry in &entries {
             if entry.file.is_empty() {
                 continue;
@@ -94,7 +95,7 @@ pub fn load_model_weights_kquant_shard(
             if !mmap_cache.contains_key(&entry.file) {
                 let fpath = dir.join(&entry.file);
                 if let Ok(f) = std::fs::File::open(&fpath) {
-                    if let Ok(m) = unsafe { memmap2::Mmap::map(&f) } {
+                    if let Ok(m) = unsafe { TrackedMmap::map(&f) } {
                         mmap_cache.insert(entry.file.clone(), m);
                     }
                 }
@@ -181,7 +182,7 @@ pub fn load_model_weights_kquant_shard(
                 continue;
             }
             if let Ok(f) = std::fs::File::open(&fpath) {
-                if let Ok(mmap) = unsafe { memmap2::Mmap::map(&f) } {
+                if let Ok(mmap) = unsafe { TrackedMmap::map(&f) } {
                     if let Some((_fmt, _num_entries, _inter, _hidden, offsets)) =
                         parse_layer_weights_header(&mmap)
                     {

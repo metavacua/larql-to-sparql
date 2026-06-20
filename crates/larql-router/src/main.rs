@@ -402,8 +402,105 @@ async fn run_admin(cmd: AdminCmd) -> Result<(), Box<dyn std::error::Error + Send
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+// ── Resource guard (inline; larql-router has no larql-compute dep) ──────────
+
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static MEMORY_CAP: AtomicUsize = AtomicUsize::new(0);
+static HEAP_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+struct RouterCapAllocator;
+
+unsafe impl GlobalAlloc for RouterCapAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let sz = layout.size();
+        let prev = HEAP_BYTES.fetch_add(sz, Ordering::Relaxed);
+        let cap = MEMORY_CAP.load(Ordering::Relaxed);
+        if cap > 0 && prev + sz > cap {
+            HEAP_BYTES.fetch_sub(sz, Ordering::Relaxed);
+            return core::ptr::null_mut();
+        }
+        let ptr = System.alloc(layout);
+        if ptr.is_null() {
+            HEAP_BYTES.fetch_sub(sz, Ordering::Relaxed);
+        }
+        ptr
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        HEAP_BYTES.fetch_sub(layout.size(), Ordering::Relaxed);
+        System.dealloc(ptr, layout);
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let sz = layout.size();
+        let prev = HEAP_BYTES.fetch_add(sz, Ordering::Relaxed);
+        let cap = MEMORY_CAP.load(Ordering::Relaxed);
+        if cap > 0 && prev + sz > cap {
+            HEAP_BYTES.fetch_sub(sz, Ordering::Relaxed);
+            return core::ptr::null_mut();
+        }
+        let ptr = System.alloc_zeroed(layout);
+        if ptr.is_null() {
+            HEAP_BYTES.fetch_sub(sz, Ordering::Relaxed);
+        }
+        ptr
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        if new_size > layout.size() {
+            let delta = new_size - layout.size();
+            let prev = HEAP_BYTES.fetch_add(delta, Ordering::Relaxed);
+            let cap = MEMORY_CAP.load(Ordering::Relaxed);
+            if cap > 0 && prev + delta > cap {
+                HEAP_BYTES.fetch_sub(delta, Ordering::Relaxed);
+                return core::ptr::null_mut();
+            }
+            let new_ptr = System.realloc(ptr, layout, new_size);
+            if new_ptr.is_null() {
+                HEAP_BYTES.fetch_sub(delta, Ordering::Relaxed);
+            }
+            new_ptr
+        } else {
+            HEAP_BYTES.fetch_sub(layout.size() - new_size, Ordering::Relaxed);
+            System.realloc(ptr, layout, new_size)
+        }
+    }
+}
+
+#[global_allocator]
+static ALLOC: RouterCapAllocator = RouterCapAllocator;
+
+// ── Main ─────────────────────────────────────────────────────────────────────
+
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Reserve 1 core for the OS; cap heap to 85 % of physical RAM.
+    // (larql-router is a pure proxy: no mmap'd model weights to track.)
+    let n = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let workers = if n > 1 { n - 1 } else { 1 };
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        // SAFETY: sysconf is always safe to call.
+        let pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if pages > 0 && page_size > 0 {
+            let phys = (pages as usize).saturating_mul(page_size as usize);
+            MEMORY_CAP.store(phys * 85 / 100, Ordering::Relaxed);
+        }
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(workers)
+        .enable_all()
+        .build()?
+        .block_on(router_main())
+}
+
+async fn router_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args: Vec<String> = std::env::args().collect();
     let filtered = larql_router::cli_helpers::filter_legacy_route_arg(args);
     let root = CliRoot::parse_from(filtered);

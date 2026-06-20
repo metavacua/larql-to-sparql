@@ -22,7 +22,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use memmap2::Mmap;
+use larql_compute::resource_guard::TrackedMmap;
 
 const MAGIC: [u8; 4] = *b"BNDX";
 const VERSION: u32 = 1;
@@ -96,7 +96,7 @@ impl BoundaryEntry {
 
 /// Read-only mmap'd boundary store.
 pub struct BoundaryStore {
-    mmap: Mmap,
+    mmap: TrackedMmap,
     header: BoundaryHeader,
 }
 
@@ -104,7 +104,7 @@ impl BoundaryStore {
     /// Open an existing boundary file.
     pub fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
-        let mmap = unsafe { Mmap::map(&file)? };
+        let mmap = unsafe { TrackedMmap::map(&file)? };
 
         if mmap.len() < HEADER_SIZE {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "file too small"));

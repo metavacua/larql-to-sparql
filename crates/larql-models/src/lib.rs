@@ -1,4 +1,5 @@
 pub mod architectures;
+pub mod resource;
 pub mod config;
 pub mod connectors;
 pub mod defaults;

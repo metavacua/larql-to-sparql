@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use memmap2::Mmap;
+use crate::resource::TrackedMmap;
 use ndarray::{Array2, Array4};
 use serde::Deserialize;
 
@@ -211,7 +211,7 @@ fn load_one_file(
     patch_embed_raw: &mut Option<(Vec<f32>, Vec<usize>)>,
 ) -> Result<(), ModelError> {
     let file = std::fs::File::open(path).map_err(|e| ModelError::Parse(e.to_string()))?;
-    let mmap = unsafe { Mmap::map(&file) }.map_err(|e| ModelError::Parse(e.to_string()))?;
+    let mmap = unsafe { TrackedMmap::map(&file) }.map_err(|e| ModelError::Parse(e.to_string()))?;
     let st = safetensors::SafeTensors::deserialize(&mmap)
         .map_err(|e| ModelError::Parse(e.to_string()))?;
 

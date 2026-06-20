@@ -1,7 +1,7 @@
 //! Model weight tensors — the loaded representation of a model's parameters.
 
+use crate::resource::TrackedMmap;
 use crate::ModelArchitecture;
-use memmap2::Mmap;
 use ndarray::ArcArray2;
 use std::collections::{HashMap, HashSet};
 
@@ -53,8 +53,8 @@ pub struct ModelWeights {
     /// Small tensors only — do not put large (>1 GB) data here.
     pub raw_bytes: HashMap<String, Vec<u8>>,
     /// Memory-mapped files for large packed-byte tensors (experts_packed.bin, etc.).
-    /// Each entry maps a file name to its Mmap handle so the OS can page-in on demand.
-    pub packed_mmaps: HashMap<String, Mmap>,
+    /// Each entry maps a file name to its TrackedMmap handle so the OS can page-in on demand.
+    pub packed_mmaps: HashMap<String, TrackedMmap>,
     /// Tensors skipped during loading because their dtype is not convertible to f32.
     /// Each entry is `(tensor_key, dtype_name)`. Integer tensors (attention masks,
     /// token type IDs) appear here and are benign; unexpected entries indicate a

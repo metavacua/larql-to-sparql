@@ -1558,7 +1558,7 @@ fn get_packed_bytes_from_mmap_range_takes_precedence() {
     drop(file);
 
     let file = std::fs::File::open(&path).unwrap();
-    let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let mmap = unsafe { larql_models::resource::TrackedMmap::map(&file).unwrap() };
     let mut w = minimal_weights();
     w.raw_bytes.insert("tensor.key".into(), vec![1u8, 2, 3]);
     w.packed_mmaps.insert("packed.bin".into(), mmap);
@@ -1580,7 +1580,7 @@ fn get_packed_bytes_out_of_bounds_mmap_range_returns_none() {
     drop(file);
 
     let file = std::fs::File::open(&path).unwrap();
-    let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let mmap = unsafe { larql_models::resource::TrackedMmap::map(&file).unwrap() };
     let mut w = minimal_weights();
     w.packed_mmaps.insert("packed.bin".into(), mmap);
     w.packed_byte_ranges
@@ -1653,7 +1653,7 @@ fn drop_ffn_weights_releases_unreferenced_mmaps() {
     drop(file);
 
     let file = std::fs::File::open(&path).unwrap();
-    let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let mmap = unsafe { larql_models::resource::TrackedMmap::map(&file).unwrap() };
     let mut w = minimal_weights();
     w.packed_mmaps.insert("packed.bin".into(), mmap);
     w.packed_byte_ranges.insert(

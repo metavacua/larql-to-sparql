@@ -144,7 +144,9 @@ impl<'a> StreamingContext<'a> {
                 .iter()
                 .map(|path| {
                     let file = std::fs::File::open(path).unwrap();
-                    let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+                    let mmap = unsafe {
+                        larql_compute::resource_guard::TrackedMmap::map(&file).unwrap()
+                    };
                     MmapShard { _file: file, mmap }
                 })
                 .collect();
