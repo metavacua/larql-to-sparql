@@ -2185,6 +2185,7 @@ dependencies = [
 name = "larql-codebase-core"
 version = "0.1.0"
 dependencies = [
+ "libm",
  "serde",
  "thiserror 2.0.18",
 ]
