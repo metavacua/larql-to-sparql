@@ -1,6 +1,7 @@
 pub mod algo;
 pub mod core;
 pub mod engine;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod io;
 
 // Re-export the essential types at crate root.
@@ -14,10 +15,14 @@ pub use engine::chain::{chain_tokens, ChainResult};
 pub use engine::provider::{ModelProvider, PredictionResult, TokenPrediction};
 pub use engine::templates::TemplateRegistry;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::checkpoint::CheckpointLog;
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::format::Format;
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::json::{load_json, save_json};
-pub use io::{from_bytes, load, load_with_format, save, save_with_format, to_bytes};
+#[cfg(not(target_arch = "wasm32"))]
+pub use io::{from_bytes, load, load_graph, load_with_format, save, save_graph, save_with_format, to_bytes};
 
 pub use algo::components::{are_connected, connected_components};
 pub use algo::diff::{diff, ChangedEdge, GraphDiff};
@@ -30,5 +35,7 @@ pub use algo::pagerank::{pagerank, PageRankResult};
 pub use algo::shortest_path::{astar, shortest_path, shortest_path_with_weight, PathResult};
 pub use algo::traversal::{bfs as bfs_traversal, dfs, TraversalResult};
 pub use algo::walk::{walk_all_paths, WalkResult};
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::csv::{load_csv, save_csv};
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::packed::{from_packed_bytes, load_packed, save_packed, to_packed_bytes};

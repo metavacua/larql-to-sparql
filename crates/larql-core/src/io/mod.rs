@@ -10,6 +10,22 @@ use std::path::Path;
 use crate::core::graph::{Graph, GraphError};
 pub use format::Format;
 
+/// Load a graph from a JSON file.
+///
+/// This is a convenience function that delegates to `json::load_json`.
+/// Unlike `load()`, it does not require the file to have a recognized extension.
+pub fn load_graph(path: &Path) -> Result<Graph, GraphError> {
+    json::load_json(path)
+}
+
+/// Save a graph to a JSON file.
+///
+/// This is a convenience function that delegates to `json::save_json`.
+/// Unlike `save()`, it does not require the file to have a recognized extension.
+pub fn save_graph(graph: &Graph, path: &Path) -> Result<(), GraphError> {
+    json::save_json(graph, path)
+}
+
 /// Load a graph from disk, auto-detecting format from the file extension.
 pub fn load(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     let path = path.as_ref();
@@ -69,5 +85,23 @@ pub fn from_bytes(bytes: &[u8], fmt: Format) -> Result<Graph, GraphError> {
         #[cfg(feature = "msgpack")]
         Format::MessagePack => msgpack::from_msgpack_bytes(bytes),
         Format::Packed => packed::from_packed_bytes(bytes),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::edge::Edge;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn round_trips_graph_through_file() {
+        let mut g = Graph::new();
+        g.add_edge(Edge::new("A", "calls", "B"));
+        let f = NamedTempFile::new().unwrap();
+        save_graph(&g, f.path()).unwrap();
+        let g2 = load_graph(f.path()).unwrap();
+        assert_eq!(g2.edge_count(), 1);
+        assert!(g2.exists("A", "calls", "B"));
     }
 }
