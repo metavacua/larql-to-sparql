@@ -322,7 +322,7 @@ extraction implementations toward agreement.
 
 **Tier:** 1 (filesystem read/write)  
 **Location:** `larql-cli/src/commands/primary/export_cmd.rs`  
-**GGUF writer:** `larql-vindex/src/export/gguf.rs` (symmetric with existing reader at `larql-models/src/loading/gguf/parser.rs`)
+**GGUF writer:** uses existing `larql_models::loading::gguf::writer::GgufWriter` (`larql-models/src/loading/gguf/writer.rs`), which already provides `to_bytes()` and `write_to_file()`. No new writer needed.
 
 Writes a GGUF file with BitNet weights using the **I2_S** quantisation type:
 2-bit signed, strided block layout (128-element blocks / 32 bytes; byte `p` packs
