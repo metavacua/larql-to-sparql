@@ -2,7 +2,7 @@ name: Tier-0 wasm32v1-none
 
 on:
   push:
-    branches: [main, "feat/**", "fix/**"]
+    branches: [main, "feat/**", "fix/**", "impl/**"]
   pull_request:
 
 jobs:

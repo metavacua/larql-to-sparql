@@ -13,7 +13,7 @@ pub enum ExportFormat {
 
 #[derive(Args)]
 pub struct ExportArgs {
-    /// Input: a .larql.json graph or a .vindex directory.
+    /// Input: a .larql.json graph file.
     input: PathBuf,
 
     /// Output file path.
@@ -40,6 +40,7 @@ pub fn export_to_gguf(input: &Path, output: &Path) -> Result<(), Box<dyn std::er
         GgufValue::U32(repr.arch.hidden_size as u32),
     );
     writer.meta("larql.n_layers", GgufValue::U32(repr.arch.n_layers as u32));
+    writer.meta("larql.n_heads", GgufValue::U32(repr.arch.n_heads as u32));
 
     for t in repr.tensors {
         writer.tensor(GgufTensor {

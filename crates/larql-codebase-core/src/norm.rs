@@ -25,7 +25,7 @@ pub fn symmetric_normalise(adj: &SparseAdj) -> NormAdj {
     let entries = adj
         .entries
         .iter()
-        .map(|&(i, j, _)| (i, j, inv_sqrt[i] * inv_sqrt[j]))
+        .map(|&(i, j, w)| (i, j, w * inv_sqrt[i] * inv_sqrt[j]))
         .collect();
     NormAdj { n: adj.n, entries }
 }
@@ -58,5 +58,28 @@ mod tests {
         let adj = star_adj();
         let norm = symmetric_normalise(&adj);
         assert_eq!(norm.entries.len(), adj.entries.len());
+    }
+
+    #[test]
+    fn normalised_weighted_edge() {
+        // Single edge with weight 0.5 between nodes with degree 0.5 each
+        // Expected: 0.5 * (1/sqrt(0.5)) * (1/sqrt(0.5)) = 0.5 * 2 * 2 = 2.0
+        // OR: Create a case with weight 0.5 where both nodes have degree 2 (two edges each)
+        // Node 0: edges (0,1,0.5) and (0,2,1.5) → degree 2.0
+        // Node 1: edges (0,1,0.5) and (1,3,1.5) → degree 2.0
+        // Expected for (0,1): 0.5 * (1/sqrt(2)) * (1/sqrt(2)) = 0.5 * 0.5 = 0.25
+        let adj = SparseAdj {
+            n: 4,
+            entries: vec![
+                (0, 1, 0.5),
+                (0, 2, 1.5),
+                (1, 3, 1.5),
+            ],
+        };
+        let norm = symmetric_normalise(&adj);
+        // First entry should be (0, 1) with weight 0.5
+        let (_, _, w) = norm.entries[0];
+        let expected = 0.5 * (1.0 / libm::sqrt(2.0)) * (1.0 / libm::sqrt(2.0));
+        assert!((w - expected).abs() < 1e-10, "got {w}, expected {expected}");
     }
 }

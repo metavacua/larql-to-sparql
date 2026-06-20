@@ -583,19 +583,21 @@ mod tests {
     #[test]
     fn test_roundtrip_source_types() {
         let mut graph = Graph::new();
-        graph.add_edge(Edge::new("A", "r", "B").with_source(SourceType::Parametric));
-        graph.add_edge(Edge::new("C", "r", "D").with_source(SourceType::Document));
-        graph.add_edge(Edge::new("E", "r", "F").with_source(SourceType::Wikidata));
-        graph.add_edge(Edge::new("G", "r", "H").with_source(SourceType::Manual));
-        graph.add_edge(Edge::new("I", "r", "J").with_source(SourceType::Installed));
-        graph.add_edge(Edge::new("K", "r", "L").with_source(SourceType::Unknown));
+        graph.add_edge(Edge::new("A", "r", "B").with_source(SourceType::Ast));
+        graph.add_edge(Edge::new("C", "r", "D").with_source(SourceType::Parametric));
+        graph.add_edge(Edge::new("E", "r", "F").with_source(SourceType::Document));
+        graph.add_edge(Edge::new("G", "r", "H").with_source(SourceType::Wikidata));
+        graph.add_edge(Edge::new("I", "r", "J").with_source(SourceType::Manual));
+        graph.add_edge(Edge::new("K", "r", "L").with_source(SourceType::Installed));
+        graph.add_edge(Edge::new("M", "r", "N").with_source(SourceType::Unknown));
 
         let bytes = to_packed_bytes(&graph).unwrap();
         let loaded = from_packed_bytes(&bytes).unwrap();
 
-        assert_eq!(loaded.edge_count(), 6);
+        assert_eq!(loaded.edge_count(), 7);
         // Check that sources roundtrip
         let sources: Vec<_> = loaded.edges().iter().map(|e| e.source.clone()).collect();
+        assert!(sources.contains(&SourceType::Ast));
         assert!(sources.contains(&SourceType::Parametric));
         assert!(sources.contains(&SourceType::Document));
         assert!(sources.contains(&SourceType::Wikidata));
