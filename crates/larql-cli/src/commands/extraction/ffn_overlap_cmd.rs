@@ -68,7 +68,7 @@ pub fn run(args: FfnOverlapArgs) -> Result<(), Box<dyn std::error::Error>> {
             .enumerate()
             .map(|(i, v)| (i, v * larql_inference::ffn::sigmoid(v)))
             .collect();
-        indexed.sort_unstable_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+        indexed.sort_unstable_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
         let gate_top64: std::collections::HashSet<usize> =
             indexed.iter().take(64).map(|x| x.0).collect();
         let gate_top256: std::collections::HashSet<usize> =

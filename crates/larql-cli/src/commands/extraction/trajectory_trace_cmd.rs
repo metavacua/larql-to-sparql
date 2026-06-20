@@ -204,7 +204,7 @@ fn svd_singular_values(rows: &[Vec<f32>], n_rows: usize) -> Vec<f32> {
         }
     }
 
-    eigenvalues.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    eigenvalues.sort_by(|a, b| b.total_cmp(a));
     eigenvalues
 }
 

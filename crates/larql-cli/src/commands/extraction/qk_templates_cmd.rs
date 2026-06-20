@@ -198,7 +198,7 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    variable_heads.sort_by(|a, b| a.avg_corr.partial_cmp(&b.avg_corr).unwrap());
+    variable_heads.sort_by(|a, b| a.avg_corr.total_cmp(&b.avg_corr));
 
     println!(
         "\n═══ Variable Heads ({} variable, {} fixed) ═══\n",
@@ -255,7 +255,7 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
                 let (max_pos, max_val) = weights
                     .iter()
                     .enumerate()
-                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                    .max_by(|a, b| a.1.total_cmp(b.1))
                     .unwrap_or((0, &0.0));
                 let label = all_token_labels
                     .get(ti)

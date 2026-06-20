@@ -103,7 +103,7 @@ pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
         for s in 0..seq_len {
             let mut indexed: Vec<(usize, f32)> =
                 gate_act.row(s).iter().copied().enumerate().collect();
-            indexed.select_nth_unstable_by(64, |a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+            indexed.select_nth_unstable_by(64, |a, b| b.1.abs().total_cmp(&a.1.abs()));
         }
     }
     let topk_us = start.elapsed().as_micros() as f64 / iters as f64;

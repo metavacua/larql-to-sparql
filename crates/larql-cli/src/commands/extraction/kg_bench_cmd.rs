@@ -115,7 +115,7 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         if !token_votes.is_empty() {
             let mut sorted: Vec<_> = token_votes.into_iter().collect();
-            sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            sorted.sort_by(|a, b| b.1.total_cmp(&a.1));
             print!("  → ");
             for (tok, score) in sorted.iter().take(8) {
                 print!("{:?}({:.0}) ", tok, score);
