@@ -1,0 +1,20 @@
+name: Tier-0 wasm32v1-none
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+
+jobs:
+  tier0:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Tier-0 crates for wasm32v1-none
+        run: |
+          cargo build --target wasm32v1-none -p larql-codebase-core
+          cargo build --target wasm32v1-none -p larql-lql-core
