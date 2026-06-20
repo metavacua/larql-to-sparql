@@ -361,6 +361,9 @@ fn synthesize_gate_from_q4k(
     let mmap = anon
         .make_read_only()
         .map_err(|e| VindexError::Parse(format!("make_read_only: {e}")))?;
+    // Charge against the OOM cap. This mmap lives permanently inside the
+    // VectorIndex (process lifetime), so no matching release is needed.
+    larql_compute::resource_guard::charge_mmap(mmap.len());
     Ok((mmap, gate_slices))
 }
 
