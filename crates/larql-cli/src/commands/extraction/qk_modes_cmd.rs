@@ -154,9 +154,9 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
                     gate_scores.iter().copied().enumerate().collect();
                 let k = args.top_k.min(indexed.len());
                 indexed
-                    .select_nth_unstable_by(k, |a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+                    .select_nth_unstable_by(k, |a, b| b.1.abs().total_cmp(&a.1.abs()));
                 indexed.truncate(k);
-                indexed.sort_unstable_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+                indexed.sort_unstable_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
 
                 // Get labels
                 let features_str: String = indexed

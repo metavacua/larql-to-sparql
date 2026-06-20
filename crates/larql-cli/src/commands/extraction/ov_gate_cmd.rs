@@ -163,9 +163,9 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
             let total_coupling: f32 = couplings.iter().map(|(_, n)| n).sum::<f32>();
 
             let k = args.top_k.min(couplings.len());
-            couplings.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap());
+            couplings.select_nth_unstable_by(k, |a, b| b.1.total_cmp(&a.1));
             couplings.truncate(k);
-            couplings.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            couplings.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
 
             all_heads.push(HeadData {
                 layer,
@@ -363,9 +363,9 @@ fn project_top_n(
     }
 
     let k = n.min(scores.len());
-    scores.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap());
+    scores.select_nth_unstable_by(k, |a, b| b.1.total_cmp(&a.1));
     scores.truncate(k);
-    scores.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    scores.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
 
     scores
         .into_iter()

@@ -1123,7 +1123,7 @@ fn naive_softmax(x: &mut [f32]) {
 fn naive_top_k(logits: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
     let k = k.min(logits.len());
     let mut idx: Vec<usize> = (0..logits.len()).collect();
-    idx.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap());
+    idx.sort_by(|&a, &b| logits[b].total_cmp(&logits[a]));
     idx.truncate(k);
     let weights: Vec<f32> = idx.iter().map(|&i| logits[i]).collect();
     (idx, weights)
