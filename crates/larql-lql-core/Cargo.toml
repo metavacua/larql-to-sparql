@@ -1,0 +1,13 @@
+[package]
+name = "larql-lql-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LQL lexer, parser, and AST — pure Tier-0 (wasm32v1-none safe)"
+
+[dependencies]
+# Explicit version (not workspace) so we can use default-features = false for
+# no_std / wasm32v1-none compatibility. The std feature controls whether
+# thiserror generates std::error::Error or core::error::Error impls.
+thiserror = { version = "2", default-features = false }
