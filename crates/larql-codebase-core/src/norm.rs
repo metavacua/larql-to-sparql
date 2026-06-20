@@ -70,11 +70,7 @@ mod tests {
         // Expected for (0,1): 0.5 * (1/sqrt(2)) * (1/sqrt(2)) = 0.5 * 0.5 = 0.25
         let adj = SparseAdj {
             n: 4,
-            entries: vec![
-                (0, 1, 0.5),
-                (0, 2, 1.5),
-                (1, 3, 1.5),
-            ],
+            entries: vec![(0, 1, 0.5), (0, 2, 1.5), (1, 3, 1.5)],
         };
         let norm = symmetric_normalise(&adj);
         // First entry should be (0, 1) with weight 0.5
