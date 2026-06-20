@@ -5,6 +5,7 @@
 //! under `larql dev <subcmd>`.
 
 pub mod accuracy_cmd;
+pub mod export_cmd;
 pub mod bench;
 pub mod cache;
 pub mod diag_cmd;

@@ -116,6 +116,22 @@ enum Commands {
 
     // ── Build / extract ─────────────────────────────────────────────
     #[command(next_help_heading = "Build")]
+    /// Build a vindex by extracting AST knowledge from a codebase.
+    ExtractCodebase(extract_codebase_cmd::ExtractCodebaseArgs),
+
+    #[command(next_help_heading = "Build")]
+    /// Convert a graphify node-link JSON to a .larql.json graph.
+    ExtractGraphify(extract_graphify_cmd::ExtractGraphifyArgs),
+
+    #[command(next_help_heading = "Build")]
+    /// Consensus-merge two .larql.json graphs (shared edges → confidence 1.0).
+    GraphDiff(graph_diff_cmd::GraphDiffArgs),
+
+    #[command(next_help_heading = "Build")]
+    /// Export a .larql.json graph to a model format (GGUF).
+    Export(export_cmd::ExportArgs),
+
+    #[command(next_help_heading = "Build")]
     /// Build a .vindex by decompiling a HuggingFace model.
     Extract(extract_index_cmd::ExtractIndexArgs),
 
@@ -559,6 +575,10 @@ fn real_main() -> i32 {
         Commands::Rm(args) => rm_cmd::run(args),
 
         // ── Build / extract ──
+        Commands::ExtractCodebase(args) => extract_codebase_cmd::run(args),
+        Commands::ExtractGraphify(args) => extract_graphify_cmd::run(args),
+        Commands::GraphDiff(args) => graph_diff_cmd::run(args),
+        Commands::Export(args) => export_cmd::run(args),
         Commands::Extract(args) => extract_index_cmd::run(args),
         Commands::ExtractIndex(args) => extract_index_cmd::run(args),
         Commands::Build(args) => build_cmd::run(args),

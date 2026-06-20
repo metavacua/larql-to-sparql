@@ -11,6 +11,8 @@ name = "larql"
 path = "src/main.rs"
 
 [dependencies]
+larql-codebase = { path = "../larql-codebase" }
+larql-codebase-core = { path = "../larql-codebase-core" }
 larql-core = { path = "../larql-core" }
 larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
