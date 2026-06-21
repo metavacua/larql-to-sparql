@@ -27,6 +27,9 @@ on:
       - '.github/workflows/larql-compute.yml'
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: test · ${{ matrix.os }}

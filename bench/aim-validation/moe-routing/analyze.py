@@ -27,6 +27,10 @@ PAGES_PER_EXPERT = 180
 
 line_re = re.compile(r"\[L(\d+)\].*experts:\[([\d,\s]+)\]")
 
+if not Path(CAP).exists():
+    print(f"Error: capture file not found at {CAP}")
+    sys.exit(1)
+
 groups = []  # each: {layer: [experts]}
 cur = {}
 for line in Path(CAP).read_text(errors="ignore").splitlines():
@@ -84,12 +88,12 @@ for L in range(N_LAYERS):
         "working_set": len(seen),
         "working_set_frac": len(seen) / NUM_EXPERTS,
         "new_experts_per_tok_tail": sum(new_per_tok[-tail:]) / tail,
-        "top10_expert_mass": sum(top10) / total_acts,
+        "top10_expert_mass": sum(top10) / total_acts if total_acts > 0 else 0.0,
     }
 
 def avg(key):
     vals = [v[key] for v in per_layer.values()]
-    return sum(vals) / len(vals)
+    return sum(vals) / len(vals) if vals else 0.0
 
 overall = {
     "adjacent_reuse": avg("adjacent_reuse"),

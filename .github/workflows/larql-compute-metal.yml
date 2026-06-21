@@ -30,6 +30,9 @@ on:
       - '.github/workflows/larql-compute-metal.yml'
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: test · macos-14

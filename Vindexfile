@@ -1,4 +1,4 @@
-FROM /home/metavacua/larql-vindexes/qwen3-0.6b.vindex
+FROM ./qwen3-0.6b.vindex
 
 # larql-main codebase knowledge — generated from Cargo.toml + AGENTS.md
 # by graphify + larql-knowledge integration (2026-06-20)
