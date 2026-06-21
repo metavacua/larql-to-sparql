@@ -17,8 +17,8 @@ impl LanguageExtractor for GraphqlExtractor {
         };
 
         for def in &doc.definitions {
-            match def {
-                Definition::TypeDefinition(td) => match td {
+            if let Definition::TypeDefinition(td) = def {
+                match td {
                     TypeDefinition::Object(obj) => {
                         graph.add_edge(ast_edge(&obj.name, "defined_in", path));
                         for field in &obj.fields {
@@ -40,8 +40,7 @@ impl LanguageExtractor for GraphqlExtractor {
                         graph.add_edge(ast_edge(&input.name, "has_input", path));
                     }
                     _ => {}
-                },
-                _ => {}
+                }
             }
         }
     }

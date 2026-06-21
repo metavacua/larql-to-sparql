@@ -10,6 +10,7 @@ pub fn python_extractor() -> QueryExtractor {
 pub struct PythonExtractor;
 
 impl PythonExtractor {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> QueryExtractor {
         python_extractor()
     }

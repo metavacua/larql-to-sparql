@@ -12,6 +12,7 @@ pub fn rust_extractor() -> QueryExtractor {
 pub struct RustExtractor;
 
 impl RustExtractor {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> QueryExtractor {
         rust_extractor()
     }

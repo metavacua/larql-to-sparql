@@ -12,6 +12,7 @@ pub fn ts_extractor() -> QueryExtractor {
 pub struct TsExtractor;
 
 impl TsExtractor {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> QueryExtractor {
         ts_extractor()
     }
