@@ -5,6 +5,7 @@ use walkdir::WalkDir;
 
 use larql_core::core::graph::Graph;
 
+use crate::languages::java_lang::java_extractor;
 use crate::languages::python_lang::python_extractor;
 use crate::languages::rust_lang::rust_extractor;
 use crate::languages::ts_lang::ts_extractor;
@@ -21,6 +22,7 @@ fn extractors() -> Vec<Box<dyn LanguageExtractor>> {
         Box::new(rust_extractor()),
         Box::new(python_extractor()),
         Box::new(ts_extractor()),
+        Box::new(java_extractor()),
     ]
 }
 
