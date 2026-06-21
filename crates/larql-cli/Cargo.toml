@@ -57,4 +57,4 @@ tempfile = "3"
 # used by run_cmd_image tests to borrow a real ModelConfig without
 # enumerating every field by hand. Production builds don't compile it.
 larql-models = { path = "../larql-models", features = ["test-utils"] }
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.5", features = ["util"] }
