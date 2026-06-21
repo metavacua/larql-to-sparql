@@ -12,6 +12,7 @@ use crate::languages::python_lang::python_extractor;
 use crate::languages::rust_lang::rust_extractor;
 use crate::languages::sparql_extractor::SparqlExtractor;
 use crate::languages::ts_lang::ts_extractor;
+use crate::languages::wasm_extractor::WasmExtractor;
 use crate::languages::LanguageExtractor;
 
 #[derive(Error, Debug)]
@@ -29,6 +30,9 @@ fn extractors() -> Vec<Box<dyn LanguageExtractor>> {
         Box::new(SparqlExtractor),
         Box::new(GraphqlExtractor),
         Box::new(LqlExtractor),
+        // WAT text format (.wat); .wasm binary files are skipped by read_to_string
+        // in the walker (non-UTF-8) — future work: add a separate binary-file path.
+        Box::new(WasmExtractor),
     ]
 }
 
