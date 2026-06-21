@@ -97,23 +97,20 @@ pub fn respond_to_prompt(graph: &Graph, prompt: &str) -> String {
 
     if let Some(entity) = trimmed.strip_prefix("WALK ") {
         let entity = entity.trim();
-        // walk with no relation filter: walk(entity, &[]) returns immediately
-        // since there are no hops to follow; format as the entity itself.
-        let result = graph.walk(entity, &[]);
-        return match result {
-            Some((final_entity, path)) => {
-                if path.is_empty() {
-                    format!("WALK {entity} → {final_entity}")
-                } else {
-                    let steps: Vec<_> = path
-                        .iter()
-                        .map(|e| format!("{} --[{}]--> {}", e.subject, e.relation, e.object))
-                        .collect();
-                    steps.join("\n")
-                }
-            }
-            None => String::new(),
-        };
+        // Use describe() to show direct outgoing and incoming neighbors (1-hop traversal).
+        // Returns empty string if entity doesn't exist.
+        let result = graph.describe(entity);
+        if result.outgoing.is_empty() && result.incoming.is_empty() {
+            return String::new();
+        }
+        let mut lines = vec![format!("WALK {} →", entity)];
+        for e in &result.outgoing {
+            lines.push(format!("  via [{}] → {}", e.relation, e.object));
+        }
+        for e in &result.incoming {
+            lines.push(format!("  ← via [{}] — {}", e.relation, e.subject));
+        }
+        return lines.join("\n");
     }
 
     // Fallback: describe the first word.
@@ -259,5 +256,26 @@ mod tests {
         let g = Graph::new();
         let result = respond_to_prompt(&g, "DESCRIBE nonexistent_entity");
         assert_eq!(result, "");
+    }
+
+    #[test]
+    fn walk_existing_entity_shows_neighbors() {
+        let mut g = Graph::new();
+        g.add_edge(Edge::new("module_a", "calls", "module_b"));
+        g.add_edge(Edge::new("module_c", "calls", "module_a"));
+        let result = respond_to_prompt(&g, "WALK module_a");
+        assert!(!result.is_empty(), "WALK should return non-empty output for existing entity");
+        assert!(result.contains("WALK module_a"), "output should include WALK header");
+        assert!(result.contains("module_b"), "output should include outgoing neighbor");
+        assert!(result.contains("module_c"), "output should include incoming neighbor");
+        assert!(result.contains("calls"), "output should include relation label");
+    }
+
+    #[test]
+    fn walk_unknown_entity_returns_empty() {
+        let mut g = Graph::new();
+        g.add_edge(Edge::new("module_a", "calls", "module_b"));
+        let result = respond_to_prompt(&g, "WALK nonexistent");
+        assert_eq!(result, "", "WALK on unknown entity should return empty string");
     }
 }
