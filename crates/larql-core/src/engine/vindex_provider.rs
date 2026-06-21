@@ -28,6 +28,18 @@ impl VindexProvider {
         Ok(Self::from_graph(graph))
     }
 
+    /// Format a DescribeResult into a newline-separated edge list.
+    fn format_result(r: &crate::core::graph::DescribeResult) -> String {
+        let mut parts = Vec::new();
+        for e in &r.outgoing {
+            parts.push(format!("{} --[{}]--> {}", e.subject, e.relation, e.object));
+        }
+        for e in &r.incoming {
+            parts.push(format!("{} --[{}]--> {}", e.subject, e.relation, e.object));
+        }
+        parts.join("\n")
+    }
+
     /// Answer a prompt by querying the graph.
     ///
     /// Supported patterns:
@@ -41,14 +53,7 @@ impl VindexProvider {
             if r.outgoing.is_empty() && r.incoming.is_empty() {
                 return String::new();
             }
-            let mut parts = Vec::new();
-            for e in &r.outgoing {
-                parts.push(format!("{} --[{}]--> {}", e.subject, e.relation, e.object));
-            }
-            for e in &r.incoming {
-                parts.push(format!("{} --[{}]--> {}", e.subject, e.relation, e.object));
-            }
-            return parts.join("\n");
+            return Self::format_result(&r);
         }
 
         // Fallback: describe the first word of the prompt.
@@ -60,14 +65,7 @@ impl VindexProvider {
         if r.outgoing.is_empty() && r.incoming.is_empty() {
             return String::new();
         }
-        let mut parts = Vec::new();
-        for e in &r.outgoing {
-            parts.push(format!("{} --[{}]--> {}", e.subject, e.relation, e.object));
-        }
-        for e in &r.incoming {
-            parts.push(format!("{} --[{}]--> {}", e.subject, e.relation, e.object));
-        }
-        parts.join("\n")
+        Self::format_result(&r)
     }
 }
 
