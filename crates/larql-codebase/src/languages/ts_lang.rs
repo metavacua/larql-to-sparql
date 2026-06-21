@@ -1,68 +1,60 @@
-use larql_core::core::graph::Graph;
-use tree_sitter::{Node, Parser};
+use larql_codebase_core::languages::TS_QUERIES;
 
-use super::{ast_edge, LanguageExtractor};
+use super::QueryExtractor;
 
-pub struct TsExtractor;
-
-impl LanguageExtractor for TsExtractor {
-    fn extensions(&self) -> &[&'static str] {
-        &["ts", "tsx"]
-    }
-
-    fn extract(&self, source: &str, path: &str, graph: &mut Graph) {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
-            .expect("tree-sitter-typescript");
-        let tree = match parser.parse(source, None) {
-            Some(t) => t,
-            None => return,
-        };
-        extract_ts(tree.root_node(), source.as_bytes(), path, graph);
-    }
+pub fn ts_extractor() -> QueryExtractor {
+    QueryExtractor::new(&TS_QUERIES, || {
+        tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
+    })
 }
 
-fn extract_ts(node: Node, src: &[u8], path: &str, graph: &mut Graph) {
-    match node.kind() {
-        "function_declaration" | "arrow_function" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let name = name_node.utf8_text(src).unwrap_or("?");
-                graph.add_edge(ast_edge(name, "defined_in", path));
-            }
-        }
-        "import_statement" => {
-            if let Some(src_node) = node.child_by_field_name("source") {
-                let module = src_node
-                    .utf8_text(src)
-                    .unwrap_or("?")
-                    .trim_matches('"')
-                    .trim_matches('\'');
-                graph.add_edge(ast_edge(path, "imports", module));
-            }
-        }
-        _ => {}
-    }
-    for i in 0..node.child_count() {
-        extract_ts(node.child(i as u32).unwrap(), src, path, graph);
+/// Preserve the public name for backward compatibility.
+pub struct TsExtractor;
+
+impl TsExtractor {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new() -> QueryExtractor {
+        ts_extractor()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use larql_core::core::graph::Graph;
+
+    use super::*;
+    use crate::languages::LanguageExtractor;
 
     #[test]
     fn ts_function_produces_defined_in() {
-        let src = "function greet(name: string): string { return `Hello ${name}`; }";
+        let src = "function greet(name: string): string { return name; }";
         let mut g = Graph::new();
-        TsExtractor.extract(src, "hello.ts", &mut g);
-        let entities = g.list_entities();
+        ts_extractor().extract(src, "src/greet.ts", &mut g);
         assert!(
-            entities.iter().any(|n| n.contains("greet")),
-            "expected 'greet' in entities, got: {:?}",
-            entities
+            g.list_entities().iter().any(|n| n.contains("greet")),
+            "expected 'greet' in entities"
+        );
+    }
+
+    #[test]
+    fn ts_import_produces_imports_edge() {
+        let src = "import { foo } from './bar';";
+        let mut g = Graph::new();
+        ts_extractor().extract(src, "src/main.ts", &mut g);
+        assert!(
+            g.edges().iter().any(|e| e.relation == "imports"),
+            "expected an 'imports' edge"
+        );
+    }
+
+    #[test]
+    fn ts_method_produces_defined_in() {
+        let mut g = Graph::new();
+        ts_extractor().extract("class Foo { bar() { } }", "foo.ts", &mut g);
+        assert!(
+            g.edges().iter().any(|e| e.subject == "bar"),
+            "Expected 'bar' method in graph entities, got: {:?}",
+            g.edges()
         );
     }
 }

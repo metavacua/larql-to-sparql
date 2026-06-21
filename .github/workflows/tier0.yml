@@ -16,5 +16,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build Tier-0 crates for wasm32v1-none
         run: |
+          # larql-codebase-core includes the languages/ module (EdgeTemplate, query tables,
+          # LQL adapter, compilation matrix) — all must compile for wasm32v1-none.
           cargo build --target wasm32v1-none -p larql-codebase-core
           cargo build --target wasm32v1-none -p larql-lql-core

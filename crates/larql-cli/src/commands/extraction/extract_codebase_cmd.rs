@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 use larql_codebase::extract_codebase;
+use larql_codebase::graph_to_ntriples;
 use larql_codebase::graph_to_weight_repr;
 use larql_codebase::write_weight_repr_to_gguf;
 use larql_codebase_core::basis::BitNetBasis;
@@ -15,6 +16,10 @@ pub struct ExtractCodebaseArgs {
     /// Output vindex directory (created if absent).
     #[arg(short, long, default_value = "codebase.vindex")]
     output: PathBuf,
+
+    /// Output format: "json" (default) or "ntriples" (RDFC-1.0 sorted N-Triples)
+    #[arg(long, default_value = "json")]
+    format: String,
 }
 
 pub fn run(args: ExtractCodebaseArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -27,6 +32,17 @@ pub fn run(args: ExtractCodebaseArgs) -> Result<(), Box<dyn std::error::Error>> 
         graph.node_count(),
         graph.edge_count()
     );
+
+    if args.format == "ntriples" {
+        let ntriples = graph_to_ntriples(&graph, "urn:larql:");
+        let nt_path = args.output.with_extension("nt");
+        if let Some(parent) = nt_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&nt_path, &ntriples)?;
+        eprintln!("  N-Triples written to: {}", nt_path.display());
+        return Ok(());
+    }
 
     let repr = graph_to_weight_repr(&graph, &BitNetBasis);
     eprintln!("  {} weight tensors synthesised", repr.tensors.len());

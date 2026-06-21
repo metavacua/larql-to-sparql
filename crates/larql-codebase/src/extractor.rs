@@ -5,7 +5,15 @@ use walkdir::WalkDir;
 
 use larql_core::core::graph::Graph;
 
-use crate::languages::{LanguageExtractor, PythonExtractor, RustExtractor, TsExtractor};
+use crate::languages::graphql_extractor::GraphqlExtractor;
+use crate::languages::java_lang::java_extractor;
+use crate::languages::lql_extractor::LqlExtractor;
+use crate::languages::python_lang::python_extractor;
+use crate::languages::rust_lang::rust_extractor;
+use crate::languages::sparql_extractor::SparqlExtractor;
+use crate::languages::ts_lang::ts_extractor;
+use crate::languages::wasm_extractor::WasmExtractor;
+use crate::languages::LanguageExtractor;
 
 #[derive(Error, Debug)]
 pub enum CodebaseError {
@@ -15,9 +23,16 @@ pub enum CodebaseError {
 
 fn extractors() -> Vec<Box<dyn LanguageExtractor>> {
     vec![
-        Box::new(RustExtractor),
-        Box::new(PythonExtractor),
-        Box::new(TsExtractor),
+        Box::new(rust_extractor()),
+        Box::new(python_extractor()),
+        Box::new(ts_extractor()),
+        Box::new(java_extractor()),
+        Box::new(SparqlExtractor),
+        Box::new(GraphqlExtractor),
+        Box::new(LqlExtractor),
+        // WAT text format (.wat); .wasm binary files are skipped by read_to_string
+        // in the walker (non-UTF-8) — future work: add a separate binary-file path.
+        Box::new(WasmExtractor),
     ]
 }
 
