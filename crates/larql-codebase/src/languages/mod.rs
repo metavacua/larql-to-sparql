@@ -5,7 +5,14 @@ pub use python_lang::PythonExtractor;
 pub use rust_lang::RustExtractor;
 pub use ts_lang::TsExtractor;
 
-use larql_core::core::graph::Graph;
+use larql_core::core::{edge::Edge, enums::SourceType, graph::Graph};
+
+pub(super) fn ast_edge(s: &str, r: &str, o: &str) -> Edge {
+    let mut e = Edge::new(s, r, o);
+    e.source = SourceType::Ast;
+    e.confidence = 1.0;
+    e
+}
 
 pub trait LanguageExtractor: Send + Sync {
     fn extensions(&self) -> &[&'static str];

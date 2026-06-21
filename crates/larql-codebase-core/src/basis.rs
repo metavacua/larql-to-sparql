@@ -38,14 +38,12 @@ pub fn edges_to_weight_repr(edges: &[(&str, &str, f64)], basis: &dyn BasisTransf
     use crate::{
         adj::{build_adjacency, build_node_index},
         arch::size_architecture,
-        god_node::god_nodes,
         norm::symmetric_normalise,
     };
     let idx = build_node_index(edges);
     let adj = build_adjacency(edges, &idx);
     let norm = symmetric_normalise(&adj);
-    let god = god_nodes(&adj, &idx, 3.0);
-    let arch = size_architecture(idx.names.len(), edges.len(), god.len());
+    let arch = size_architecture(idx.names.len(), edges.len());
     basis.transform(&norm, &arch)
 }
 
@@ -141,7 +139,7 @@ mod tests {
         let idx = build_node_index(&edges);
         let adj = build_adjacency(&edges, &idx);
         let norm = symmetric_normalise(&adj);
-        let arch = size_architecture(idx.names.len(), edges.len(), 0);
+        let arch = size_architecture(idx.names.len(), edges.len());
         let basis = BitNetBasis;
         let repr = basis.transform(&norm, &arch);
         assert!(!repr.tensors.is_empty());
@@ -154,7 +152,7 @@ mod tests {
         let idx = build_node_index(&edges);
         let adj = build_adjacency(&edges, &idx);
         let norm = symmetric_normalise(&adj);
-        let arch = size_architecture(idx.names.len(), edges.len(), 0);
+        let arch = size_architecture(idx.names.len(), edges.len());
         let repr = BitNetBasis.transform(&norm, &arch);
         for t in &repr.tensors {
             assert_eq!(t.ggml_type, 36u32, "I2_S = 36, got {}", t.ggml_type);
@@ -167,7 +165,7 @@ mod tests {
         let idx = build_node_index(&edges);
         let adj = build_adjacency(&edges, &idx);
         let norm = symmetric_normalise(&adj);
-        let arch = size_architecture(idx.names.len(), edges.len(), 0);
+        let arch = size_architecture(idx.names.len(), edges.len());
         let repr = BitNetBasis.transform(&norm, &arch);
         for t in &repr.tensors {
             assert_eq!(

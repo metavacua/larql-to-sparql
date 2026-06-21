@@ -24,10 +24,8 @@ pub fn quantise_to_trits(values: &[f64], scale: f64) -> Vec<i8> {
 /// Encode 128 trits as a 32-byte I2_S block (Microsoft strided layout).
 ///
 /// Trit code: -1 → 0b00, 0 → 0b01, +1 → 0b10
-/// Byte p packs elements at indices {p, p+32, p+64, p+96}, two bits each (low→high).
-/// Element at offset `k` (k in 0..4) uses bits (k*2) of byte (k%32 + (k/32... no, byte p = element % 32).
-///
-/// Mapping: element index `elem_idx` → byte = elem_idx % 32, bit_offset = (elem_idx / 32) * 2
+/// Byte `p` (0..32) packs elements at indices `p`, `p+32`, `p+64`, `p+96`.
+/// Element at strided offset `k` (k in 0..4) occupies bits `k*2` and `k*2+1` of byte `p`.
 pub fn pack_i2s_block(trits: &[i8; 128]) -> [u8; 32] {
     let mut out = [0u8; 32];
     for p in 0..32usize {

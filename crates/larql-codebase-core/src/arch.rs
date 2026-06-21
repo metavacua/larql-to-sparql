@@ -10,15 +10,6 @@ pub struct ArchConfig {
     pub ffn_dim: usize,
 }
 
-/// Return the smallest power of two >= n, clamped to minimum `min`.
-fn next_power_of_two_min(n: usize, min: usize) -> usize {
-    let mut p = min;
-    while p < n {
-        p *= 2;
-    }
-    p
-}
-
 /// Size a BitNet architecture from graph statistics.
 ///
 /// Rules (spec §4.2):
@@ -27,9 +18,9 @@ fn next_power_of_two_min(n: usize, min: usize) -> usize {
 /// - n_heads     = max(4, hidden_size / 64)
 /// - head_dim    = 64 (BitNet standard)
 /// - ffn_dim     = hidden_size * 4
-pub fn size_architecture(n_nodes: usize, n_edges: usize, _god_node_count: usize) -> ArchConfig {
+pub fn size_architecture(n_nodes: usize, n_edges: usize) -> ArchConfig {
     let sqrt_n = libm::ceil(libm::sqrt(n_nodes as f64)) as usize;
-    let hidden_size = next_power_of_two_min(sqrt_n, 64);
+    let hidden_size = (sqrt_n.max(64)).next_power_of_two();
 
     let avg_degree = if n_nodes > 0 {
         (n_edges as f64) / (n_nodes as f64)
@@ -63,38 +54,38 @@ mod tests {
 
     #[test]
     fn hidden_size_is_power_of_two() {
-        let cfg = size_architecture(1000, 5000, 10);
+        let cfg = size_architecture(1000, 5000);
         assert!(cfg.hidden_size.is_power_of_two());
         assert!(cfg.hidden_size >= 64);
     }
 
     #[test]
     fn head_dim_always_64() {
-        let cfg = size_architecture(500, 2000, 5);
+        let cfg = size_architecture(500, 2000);
         assert_eq!(cfg.head_dim, 64);
     }
 
     #[test]
     fn ffn_is_4x_hidden() {
-        let cfg = size_architecture(500, 2000, 5);
+        let cfg = size_architecture(500, 2000);
         assert_eq!(cfg.ffn_dim, cfg.hidden_size * 4);
     }
 
     #[test]
     fn n_layers_at_least_2() {
-        let cfg = size_architecture(10, 10, 0);
+        let cfg = size_architecture(10, 10);
         assert!(cfg.n_layers >= 2);
     }
 
     #[test]
     fn n_heads_at_least_4() {
-        let cfg = size_architecture(10, 10, 0);
+        let cfg = size_architecture(10, 10);
         assert!(cfg.n_heads >= 4);
     }
 
     #[test]
     fn min_graph_doesnt_panic() {
-        let cfg = size_architecture(0, 0, 0);
+        let cfg = size_architecture(0, 0);
         assert!(cfg.hidden_size >= 64);
         assert!(cfg.n_layers >= 2);
     }

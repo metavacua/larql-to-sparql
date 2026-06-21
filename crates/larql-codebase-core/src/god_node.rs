@@ -8,7 +8,6 @@ use crate::adj::{NodeIndex, SparseAdj};
 pub struct DegreeStats {
     pub mean: f64,
     pub std: f64,
-    pub threshold: f64,
 }
 
 /// Compute degree statistics over all nodes in adj.
@@ -23,11 +22,7 @@ pub fn degree_stats(adj: &SparseAdj) -> DegreeStats {
     let mean = deg.iter().sum::<f64>() / n;
     let variance = deg.iter().map(|&d| (d - mean) * (d - mean)).sum::<f64>() / n;
     let std = libm::sqrt(variance);
-    DegreeStats {
-        mean,
-        std,
-        threshold: mean + 3.0 * std,
-    }
+    DegreeStats { mean, std }
 }
 
 /// Return names of nodes whose total degree exceeds `mean + sigma * std`.

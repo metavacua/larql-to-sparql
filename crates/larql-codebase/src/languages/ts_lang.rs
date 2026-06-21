@@ -1,16 +1,9 @@
-use larql_core::core::{edge::Edge, enums::SourceType, graph::Graph};
+use larql_core::core::graph::Graph;
 use tree_sitter::{Node, Parser};
 
-use super::LanguageExtractor;
+use super::{ast_edge, LanguageExtractor};
 
 pub struct TsExtractor;
-
-fn ast_edge(s: &str, r: &str, o: &str) -> Edge {
-    let mut e = Edge::new(s, r, o);
-    e.source = SourceType::Ast;
-    e.confidence = 1.0;
-    e
-}
 
 impl LanguageExtractor for TsExtractor {
     fn extensions(&self) -> &[&'static str] {
