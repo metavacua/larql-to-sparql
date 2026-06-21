@@ -35,4 +35,14 @@ mod tests {
     fn python_queries_extensions() {
         assert!(PYTHON_QUERIES.extensions.contains(&"py"));
     }
+
+    #[test]
+    fn python_queries_has_defined_in_template() {
+        assert!(PYTHON_QUERIES.templates.iter().any(|t| t.relation == "defined_in"));
+    }
+
+    #[test]
+    fn python_queries_has_imports_template() {
+        assert!(PYTHON_QUERIES.templates.iter().any(|t| t.relation == "imports"));
+    }
 }

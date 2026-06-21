@@ -56,4 +56,9 @@ mod tests {
             ASSEMBLYSCRIPT_QUERIES.templates.as_ptr()
         ));
     }
+
+    #[test]
+    fn ts_queries_has_defined_in_template() {
+        assert!(TS_QUERIES.templates.iter().any(|t| t.relation == "defined_in"));
+    }
 }
