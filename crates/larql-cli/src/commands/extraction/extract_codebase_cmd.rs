@@ -36,6 +36,9 @@ pub fn run(args: ExtractCodebaseArgs) -> Result<(), Box<dyn std::error::Error>> 
     if args.format == "ntriples" {
         let ntriples = graph_to_ntriples(&graph, "urn:larql:");
         let nt_path = args.output.with_extension("nt");
+        if let Some(parent) = nt_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         std::fs::write(&nt_path, &ntriples)?;
         eprintln!("  N-Triples written to: {}", nt_path.display());
         return Ok(());

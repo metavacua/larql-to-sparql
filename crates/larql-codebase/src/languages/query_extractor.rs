@@ -84,6 +84,7 @@ impl LanguageExtractor for QueryExtractor {
             .collect();
 
         let mut scope_stack: Vec<String> = Vec::new();
+        let mut cursor = QueryCursor::new();
         walk_node(
             tree.root_node(),
             src_bytes,
@@ -93,6 +94,7 @@ impl LanguageExtractor for QueryExtractor {
             &kinds,
             graph,
             &mut scope_stack,
+            &mut cursor,
         );
     }
 }
@@ -107,6 +109,7 @@ fn walk_node<'a>(
     kinds: &[&str],
     graph: &mut Graph,
     scope_stack: &mut Vec<String>,
+    cursor: &mut QueryCursor,
 ) {
     let node_kind = node.kind();
     // Track how many scopes we push at this node level so we can pop them
@@ -128,7 +131,6 @@ fn walk_node<'a>(
         // Run the query starting at this node, but only allow matches
         // rooted here (depth 0). This avoids double-counting when we
         // also recurse into children that have the same node kind.
-        let mut cursor = QueryCursor::new();
         cursor.set_max_start_depth(Some(0));
         let mut matches = cursor.matches(query, node, src);
         while let Some(m) = matches.next() {
@@ -169,6 +171,7 @@ fn walk_node<'a>(
             kinds,
             graph,
             scope_stack,
+            cursor,
         );
     }
 

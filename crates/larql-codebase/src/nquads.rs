@@ -43,20 +43,15 @@ fn mint_iri(s: &str, base_iri: &str) -> String {
 }
 
 fn percent_encode(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~' | '/' | ':') {
-                c.to_string().chars().collect::<Vec<char>>()
-            } else {
-                // encode as UTF-8 percent-escaped bytes
-                c.to_string()
-                    .as_bytes()
-                    .iter()
-                    .flat_map(|b| format!("%{:02X}", b).chars().collect::<Vec<char>>())
-                    .collect()
-            }
-        })
-        .collect()
+    let mut encoded = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/' | b':') {
+            encoded.push(b as char);
+        } else {
+            encoded.push_str(&format!("%{:02X}", b));
+        }
+    }
+    encoded
 }
 
 #[cfg(test)]
