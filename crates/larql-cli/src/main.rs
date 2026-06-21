@@ -109,6 +109,10 @@ enum Commands {
     /// Serve a .larql.json graph over HTTP (OpenAI-compat + graph describe API).
     GraphServe(graph_serve_cmd::GraphServeArgs),
 
+    #[command(next_help_heading = "Server")]
+    /// JIT codebase-derived coding agent — query a graph or codebase in-process.
+    Agent(agent_cmd::AgentArgs),
+
     // ── LQL ─────────────────────────────────────────────────────────
     #[command(next_help_heading = "LQL")]
     /// Launch the LQL interactive REPL.
@@ -619,6 +623,7 @@ fn real_main() -> i32 {
         // ── Serve (exec into larql-server) ──
         Commands::Serve(args) => run_serve(args),
         Commands::GraphServe(args) => graph_serve_cmd::run(args),
+        Commands::Agent(args) => agent_cmd::run(args),
 
         // ── Research / dev tools ──
         Commands::Dev(cmd) => run_dev(cmd),
