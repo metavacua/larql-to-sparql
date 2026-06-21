@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use clap::Args;
 use larql_codebase::extract_codebase;
 use larql_codebase::graph_to_weight_repr;
+use larql_codebase::write_weight_repr_to_gguf;
 use larql_codebase_core::basis::BitNetBasis;
-use larql_models::loading::gguf::{GgufTensor, GgufValue, GgufWriter};
 use serde_json::json;
 
 #[derive(Args)]
@@ -35,24 +35,13 @@ pub fn run(args: ExtractCodebaseArgs) -> Result<(), Box<dyn std::error::Error>> 
 
     // Write weights as a GGUF file inside the vindex directory.
     let gguf_path = args.output.join("weights.gguf");
-    let mut writer = GgufWriter::new();
-    writer.meta("general.architecture", GgufValue::String("bitnet".into()));
-    writer.meta("general.name", GgufValue::String("larql-codebase".into()));
-    writer.meta(
-        "larql.hidden_size",
-        GgufValue::U32(repr.arch.hidden_size as u32),
-    );
-    writer.meta("larql.n_layers", GgufValue::U32(repr.arch.n_layers as u32));
-    writer.meta("larql.n_heads", GgufValue::U32(repr.arch.n_heads as u32));
-    for t in &repr.tensors {
-        writer.tensor(GgufTensor {
-            name: t.name.clone(),
-            dims: t.dims.clone(),
-            ggml_type: t.ggml_type,
-            data: t.data.clone(),
-        });
-    }
-    writer.write_to_file(&gguf_path)?;
+    let model_name = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("larql-codebase");
+    // Save arch before repr is consumed by the GGUF writer.
+    let arch = repr.arch.clone();
+    write_weight_repr_to_gguf(repr, model_name, &gguf_path)?;
 
     // Write a minimal vindex manifest so `larql show` can recognise the dir.
     let manifest = json!({
@@ -61,10 +50,10 @@ pub fn run(args: ExtractCodebaseArgs) -> Result<(), Box<dyn std::error::Error>> 
         "source": root.to_string_lossy(),
         "weights": "weights.gguf",
         "arch": {
-            "hidden_size": repr.arch.hidden_size,
-            "n_layers": repr.arch.n_layers,
-            "n_heads": repr.arch.n_heads,
-            "head_dim": repr.arch.head_dim,
+            "hidden_size": arch.hidden_size,
+            "n_layers": arch.n_layers,
+            "n_heads": arch.n_heads,
+            "head_dim": arch.head_dim,
         }
     });
     std::fs::write(

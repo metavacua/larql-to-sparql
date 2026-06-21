@@ -60,9 +60,14 @@ impl BasisTransform for BitNetBasis {
         let h = arch.hidden_size;
         let mut tensors = Vec::new();
 
+        // Allocate once and reset at the top of each iteration to avoid
+        // repeated allocation inside the loop.
+        let mut dense = vec![0.0_f64; h * h];
+
         for layer in 0..arch.n_layers {
+            // Reset the buffer for this layer.
+            dense.fill(0.0);
             // Fill a flat h*h buffer (row-major, zero-padded) with adjacency values.
-            let mut dense = vec![0.0_f64; h * h];
             for &(i, j, w) in adj.entries.iter() {
                 let row = i % h;
                 let col = j % h;

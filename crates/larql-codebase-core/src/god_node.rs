@@ -32,8 +32,11 @@ pub fn god_nodes(adj: &SparseAdj, idx: &NodeIndex, sigma: f64) -> Vec<String> {
         deg[i] += 1.0;
         deg[j] += 1.0;
     }
-    let stats = degree_stats(adj);
-    let threshold = stats.mean + sigma * stats.std;
+    let n = deg.len() as f64;
+    let mean = deg.iter().copied().sum::<f64>() / n;
+    let variance = deg.iter().map(|&d| (d - mean) * (d - mean)).sum::<f64>() / n;
+    let std_dev = libm::sqrt(variance);
+    let threshold = mean + sigma * std_dev;
     idx.names
         .iter()
         .enumerate()

@@ -8,15 +8,12 @@ use larql_core::core::graph::Graph;
 /// converting the graph's edges to the raw `(&str, &str, f64)` form that
 /// `edges_to_weight_repr` expects.
 pub fn graph_to_weight_repr(graph: &Graph, basis: &dyn BasisTransform) -> WeightRepr {
-    // Collect owned strings first so we can take &str slices below.
-    let owned: Vec<(String, String, f64)> = graph
+    // `graph.edges()` returns `&[Edge]`; borrow subject/object directly to
+    // avoid a clone-into-owned-Vec intermediate.
+    let edge_refs: Vec<(&str, &str, f64)> = graph
         .edges()
         .iter()
-        .map(|e| (e.subject.clone(), e.object.clone(), e.confidence))
-        .collect();
-    let edge_refs: Vec<(&str, &str, f64)> = owned
-        .iter()
-        .map(|(s, o, c)| (s.as_str(), o.as_str(), *c))
+        .map(|e| (e.subject.as_str(), e.object.as_str(), e.confidence))
         .collect();
     edges_to_weight_repr(&edge_refs, basis)
 }

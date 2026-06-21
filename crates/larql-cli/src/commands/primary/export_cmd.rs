@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
 use larql_codebase::graph_to_weight_repr;
+use larql_codebase::write_weight_repr_to_gguf;
 use larql_codebase_core::basis::BitNetBasis;
 use larql_core::io::load_graph;
-use larql_models::loading::gguf::{GgufTensor, GgufValue, GgufWriter};
 
 #[derive(ValueEnum, Clone)]
 pub enum ExportFormat {
@@ -29,34 +29,13 @@ pub fn export_to_gguf(input: &Path, output: &Path) -> Result<(), Box<dyn std::er
     let graph = load_graph(input).map_err(|e| format!("load graph: {e}"))?;
     let repr = graph_to_weight_repr(&graph, &BitNetBasis);
 
-    let mut writer = GgufWriter::new();
-    writer.meta("general.architecture", GgufValue::String("bitnet".into()));
-    writer.meta(
-        "general.name",
-        GgufValue::String("larql-codebase-bitnet".into()),
-    );
-    writer.meta(
-        "larql.hidden_size",
-        GgufValue::U32(repr.arch.hidden_size as u32),
-    );
-    writer.meta("larql.n_layers", GgufValue::U32(repr.arch.n_layers as u32));
-    writer.meta("larql.n_heads", GgufValue::U32(repr.arch.n_heads as u32));
-
-    for t in repr.tensors {
-        writer.tensor(GgufTensor {
-            name: t.name,
-            dims: t.dims,
-            ggml_type: t.ggml_type,
-            data: t.data,
-        });
-    }
-
-    writer.write_to_file(output)?;
-    eprintln!(
-        "Wrote {} tensors → {}",
-        writer.tensor_count(),
-        output.display()
-    );
+    let model_name = output
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("larql-export");
+    let n_tensors = repr.tensors.len();
+    write_weight_repr_to_gguf(repr, model_name, output)?;
+    eprintln!("Wrote {} tensors → {}", n_tensors, output.display());
     Ok(())
 }
 
