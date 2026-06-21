@@ -64,10 +64,7 @@ pub fn respond_to_prompt(graph: &Graph, prompt: &str) -> String {
     if let Some(rest) = trimmed.strip_prefix("WHAT DOES ") {
         if let Some(entity) = rest.strip_suffix(" IMPLEMENT") {
             let entity = entity.trim();
-            let edges: Vec<_> = graph
-                .select(entity, Some("implements"))
-                .into_iter()
-                .collect();
+            let edges = graph.select(entity, Some("implements"));
             if edges.is_empty() {
                 return String::new();
             }
@@ -81,10 +78,7 @@ pub fn respond_to_prompt(graph: &Graph, prompt: &str) -> String {
 
     if let Some(entity) = trimmed.strip_prefix("WHAT DEPENDS ON ") {
         let entity = entity.trim();
-        let edges: Vec<_> = graph
-            .select(entity, Some("depends_on"))
-            .into_iter()
-            .collect();
+        let edges = graph.select(entity, Some("depends_on"));
         if edges.is_empty() {
             return String::new();
         }
