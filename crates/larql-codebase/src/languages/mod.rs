@@ -1,7 +1,9 @@
 pub mod python_lang;
+pub mod query_extractor;
 pub mod rust_lang;
 pub mod ts_lang;
 pub use python_lang::PythonExtractor;
+pub use query_extractor::QueryExtractor;
 pub use rust_lang::RustExtractor;
 pub use ts_lang::TsExtractor;
 
