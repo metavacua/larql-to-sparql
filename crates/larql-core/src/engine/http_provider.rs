@@ -37,6 +37,11 @@ impl HttpProvider {
     pub fn llama_cpp(model: &str) -> Self {
         Self::new("http://localhost:8080/v1", model)
     }
+
+    /// Local larql graph-serve backend on given port.
+    pub fn larql_graph(port: u16) -> Self {
+        Self::new(format!("http://127.0.0.1:{port}/v1"), "larql-graph")
+    }
 }
 
 #[cfg(feature = "http")]
@@ -113,5 +118,20 @@ impl ModelProvider for HttpProvider {
             prompt: prompt.to_string(),
             predictions,
         })
+    }
+}
+
+#[cfg(all(test, feature = "http"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn larql_graph_url_contains_port() {
+        let p = HttpProvider::larql_graph(8181);
+        assert!(
+            p.base_url.contains("8181"),
+            "base_url should contain port 8181, got: {}",
+            p.base_url
+        );
     }
 }
