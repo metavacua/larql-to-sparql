@@ -1,98 +1,38 @@
-use larql_core::core::graph::Graph;
-use tree_sitter::{Node, Parser};
+use larql_codebase_core::languages::RUST_QUERIES;
 
-use super::{ast_edge, LanguageExtractor};
+use super::QueryExtractor;
 
-pub struct RustExtractor;
-
-impl LanguageExtractor for RustExtractor {
-    fn extensions(&self) -> &[&'static str] {
-        &["rs"]
-    }
-
-    fn extract(&self, source: &str, path: &str, graph: &mut Graph) {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_rust::LANGUAGE.into())
-            .expect("tree-sitter-rust load");
-        let tree = match parser.parse(source, None) {
-            Some(t) => t,
-            None => return,
-        };
-        let bytes = source.as_bytes();
-        extract_node(tree.root_node(), bytes, path, graph, None);
-    }
+/// Rust source extractor — delegates to the generic `QueryExtractor`
+/// with the Tier-0 `RUST_QUERIES` table.
+pub fn rust_extractor() -> QueryExtractor {
+    QueryExtractor::new(&RUST_QUERIES, || tree_sitter_rust::LANGUAGE.into())
 }
 
-fn extract_node<'a>(
-    node: Node<'a>,
-    src: &[u8],
-    path: &str,
-    graph: &mut Graph,
-    scope: Option<&str>,
-) {
-    match node.kind() {
-        "function_item" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let fn_name = name_node.utf8_text(src).unwrap_or("?");
-                let qualified = match scope {
-                    Some(s) => format!("{s}::{fn_name}"),
-                    None => fn_name.to_string(),
-                };
-                graph.add_edge(ast_edge(&qualified, "defined_in", path));
-                // Walk body for call_expression children
-                for i in 0..node.child_count() {
-                    extract_node(
-                        node.child(i as u32).unwrap(),
-                        src,
-                        path,
-                        graph,
-                        Some(&qualified),
-                    );
-                }
-                return;
-            }
-        }
-        "call_expression" => {
-            if let Some(func) = node.child_by_field_name("function") {
-                let callee = func.utf8_text(src).unwrap_or("?");
-                if let Some(s) = scope {
-                    graph.add_edge(ast_edge(s, "calls", callee));
-                }
-            }
-        }
-        "use_declaration" => {
-            let text = node.utf8_text(src).unwrap_or("");
-            let path_str = text.trim_start_matches("use ").trim_end_matches(';');
-            graph.add_edge(ast_edge(path, "imports", path_str));
-        }
-        _ => {}
-    }
-    for i in 0..node.child_count() {
-        extract_node(node.child(i as u32).unwrap(), src, path, graph, scope);
+/// Preserve the public name for backward compatibility.
+pub struct RustExtractor;
+
+impl RustExtractor {
+    pub fn new() -> QueryExtractor {
+        rust_extractor()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use larql_core::core::graph::Graph;
+
+    use super::*;
+    use crate::languages::LanguageExtractor;
 
     #[test]
     fn extracts_function_def_edge() {
-        let source = r#"
-            fn hello_world() {
-                println!("hi");
-            }
-        "#;
+        let source = r#"fn hello_world() { println!("hi"); }"#;
         let mut g = Graph::new();
-        let extractor = RustExtractor;
-        extractor.extract(source, "src/lib.rs", &mut g);
-        // Should produce at least one edge involving "hello_world"
+        rust_extractor().extract(source, "src/lib.rs", &mut g);
         let entities = g.list_entities();
         assert!(
             entities.iter().any(|n| n.contains("hello_world")),
-            "expected hello_world to appear as a node, got: {:?}",
+            "expected hello_world, got: {:?}",
             entities
         );
     }
@@ -101,11 +41,10 @@ mod tests {
     fn use_statement_produces_imports_edge() {
         let source = "use std::collections::HashMap;";
         let mut g = Graph::new();
-        RustExtractor.extract(source, "src/main.rs", &mut g);
-        let edges = g.edges();
+        rust_extractor().extract(source, "src/main.rs", &mut g);
         assert!(
-            edges.iter().any(|e| e.relation == "imports"),
-            "expected an 'imports' edge for use statement"
+            g.edges().iter().any(|e| e.relation == "imports"),
+            "expected an 'imports' edge"
         );
     }
 }

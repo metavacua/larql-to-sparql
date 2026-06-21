@@ -5,7 +5,10 @@ use walkdir::WalkDir;
 
 use larql_core::core::graph::Graph;
 
-use crate::languages::{LanguageExtractor, PythonExtractor, RustExtractor, TsExtractor};
+use crate::languages::python_lang::python_extractor;
+use crate::languages::rust_lang::rust_extractor;
+use crate::languages::ts_lang::ts_extractor;
+use crate::languages::LanguageExtractor;
 
 #[derive(Error, Debug)]
 pub enum CodebaseError {
@@ -15,9 +18,9 @@ pub enum CodebaseError {
 
 fn extractors() -> Vec<Box<dyn LanguageExtractor>> {
     vec![
-        Box::new(RustExtractor),
-        Box::new(PythonExtractor),
-        Box::new(TsExtractor),
+        Box::new(rust_extractor()),
+        Box::new(python_extractor()),
+        Box::new(ts_extractor()),
     ]
 }
 
