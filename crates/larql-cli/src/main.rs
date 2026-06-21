@@ -105,6 +105,10 @@ enum Commands {
     /// Serve a vindex over HTTP + gRPC.
     Serve(ServeArgs),
 
+    #[command(next_help_heading = "Server")]
+    /// Serve a .larql.json graph over HTTP (OpenAI-compat + graph describe API).
+    GraphServe(graph_serve_cmd::GraphServeArgs),
+
     // ── LQL ─────────────────────────────────────────────────────────
     #[command(next_help_heading = "LQL")]
     /// Launch the LQL interactive REPL.
@@ -614,6 +618,7 @@ fn real_main() -> i32 {
 
         // ── Serve (exec into larql-server) ──
         Commands::Serve(args) => run_serve(args),
+        Commands::GraphServe(args) => graph_serve_cmd::run(args),
 
         // ── Research / dev tools ──
         Commands::Dev(cmd) => run_dev(cmd),
