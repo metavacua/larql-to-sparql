@@ -20,7 +20,7 @@ pub enum Endpoint {
 /// `query` is a standard tree-sitter S-expression pattern string. It is stored
 /// as `&'static str` (Tier-0 data) and compiled to a `tree_sitter::Query`
 /// by the Tier-1 `QueryExtractor` at extraction time.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EdgeTemplate {
     /// Tree-sitter S-expression pattern, e.g.
     /// `"(function_item name: (identifier) @name)"`.
@@ -37,6 +37,7 @@ pub struct EdgeTemplate {
 }
 
 /// All extraction rules for one language.
+#[derive(Clone, Debug)]
 pub struct LanguageQueries {
     /// File extensions this language handles, e.g. `&["rs"]`.
     pub extensions: &'static [&'static str],
