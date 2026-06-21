@@ -7,7 +7,8 @@ pub struct WasmExtractor;
 
 impl LanguageExtractor for WasmExtractor {
     fn extensions(&self) -> &[&'static str] {
-        &["wat", "wasm"]
+        // "wasm" (binary) not yet supported — requires binary file read path
+        &["wat"]
     }
 
     fn extract(&self, source: &str, path: &str, graph: &mut Graph) {
@@ -151,6 +152,7 @@ mod tests {
     #[test]
     fn wasm_extractor_extensions() {
         assert!(WasmExtractor.extensions().contains(&"wat"));
-        assert!(WasmExtractor.extensions().contains(&"wasm"));
+        // "wasm" (binary) not yet supported — binary read path not implemented
+        assert!(!WasmExtractor.extensions().contains(&"wasm"));
     }
 }

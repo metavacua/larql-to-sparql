@@ -42,4 +42,45 @@ public class Greeter {
             "expected an 'imports' edge"
         );
     }
+
+    #[test]
+    fn java_class_produces_has_class() {
+        let mut g = Graph::new();
+        java_extractor().extract("class Greeter { }", "Greeter.java", &mut g);
+        assert!(
+            g.edges().iter().any(|e| e.relation == "has_class"),
+            "Expected 'has_class' edge for class declaration, got: {:?}",
+            g.edges()
+        );
+    }
+
+    #[test]
+    fn java_interface_produces_has_interface() {
+        let mut g = Graph::new();
+        java_extractor().extract(
+            "interface Printable { void print(); }",
+            "Printable.java",
+            &mut g,
+        );
+        assert!(
+            g.edges().iter().any(|e| e.relation == "has_interface"),
+            "Expected 'has_interface' edge for interface declaration, got: {:?}",
+            g.edges()
+        );
+    }
+
+    #[test]
+    fn java_method_invocation_produces_calls() {
+        let mut g = Graph::new();
+        java_extractor().extract(
+            "class A { void run() { doSomething(); } }",
+            "A.java",
+            &mut g,
+        );
+        assert!(
+            g.edges().iter().any(|e| e.relation == "calls"),
+            "Expected 'calls' edge for method invocation, got: {:?}",
+            g.edges()
+        );
+    }
 }

@@ -37,7 +37,7 @@ pub struct EdgeTemplate {
 }
 
 /// All extraction rules for one language.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LanguageQueries {
     /// File extensions this language handles, e.g. `&["rs"]`.
     pub extensions: &'static [&'static str],

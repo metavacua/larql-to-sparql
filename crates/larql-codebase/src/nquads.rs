@@ -1,8 +1,8 @@
 use larql_core::core::graph::Graph;
 
-/// Serialize a `Graph` to sorted N-Quads (RDFC-1.0 for all-named-node graphs).
+/// Serialize a `Graph` to sorted N-Triples (RDFC-1.0 for all-named-node graphs).
 ///
-/// Each edge `(subject, relation, object)` becomes one N-Quads line:
+/// Each edge `(subject, relation, object)` becomes one N-Triples line:
 /// `<subject_iri> <relation_iri> <object_iri> .\n`
 ///
 /// IRIs that are already absolute (`http://`, `https://`, `urn:`, `file://`) are
@@ -11,7 +11,10 @@ use larql_core::core::graph::Graph;
 ///
 /// The output is sorted lexicographically — a stable, content-addressable
 /// fingerprint equivalent to RDFC-1.0 for graphs with no blank nodes.
-pub fn graph_to_nquads(graph: &Graph, base_iri: &str) -> String {
+///
+/// Note: this emits 3-term triples `<s> <p> <o> .` without a graph label —
+/// that is N-Triples format, not N-Quads (which requires a 4th graph IRI).
+pub fn graph_to_ntriples(graph: &Graph, base_iri: &str) -> String {
     let mut lines: Vec<String> = graph
         .edges()
         .iter()
@@ -68,22 +71,22 @@ mod tests {
     }
 
     #[test]
-    fn nquads_output_ends_with_newline() {
+    fn ntriples_output_ends_with_newline() {
         let g = make_graph_with_edge("Alice", "knows", "Bob");
-        let out = graph_to_nquads(&g, "urn:larql:");
-        assert!(out.ends_with('\n'), "N-Quads must end with newline");
+        let out = graph_to_ntriples(&g, "urn:larql:");
+        assert!(out.ends_with('\n'), "N-Triples must end with newline");
     }
 
     #[test]
-    fn nquads_output_is_sorted() {
+    fn ntriples_output_is_sorted() {
         let mut g = Graph::new();
         g.add_edge(Edge::new("Z", "rel", "A"));
         g.add_edge(Edge::new("A", "rel", "Z"));
-        let out = graph_to_nquads(&g, "urn:larql:");
+        let out = graph_to_ntriples(&g, "urn:larql:");
         let lines: Vec<&str> = out.lines().collect();
         let mut sorted = lines.clone();
         sorted.sort();
-        assert_eq!(lines, sorted, "N-Quads lines must be sorted");
+        assert_eq!(lines, sorted, "N-Triples lines must be sorted");
     }
 
     #[test]
@@ -93,7 +96,7 @@ mod tests {
             "http://schema.org/knows",
             "http://example.org/Bob",
         );
-        let out = graph_to_nquads(&g, "urn:larql:");
+        let out = graph_to_ntriples(&g, "urn:larql:");
         assert!(
             out.contains("<http://example.org/Alice>"),
             "HTTP IRIs must appear verbatim in angle brackets"
@@ -103,7 +106,7 @@ mod tests {
     #[test]
     fn non_iri_strings_are_minted() {
         let g = make_graph_with_edge("hello world", "is", "greeting");
-        let out = graph_to_nquads(&g, "urn:larql:");
+        let out = graph_to_ntriples(&g, "urn:larql:");
         assert!(out.contains("urn:larql:"), "non-IRI strings must be minted");
     }
 }

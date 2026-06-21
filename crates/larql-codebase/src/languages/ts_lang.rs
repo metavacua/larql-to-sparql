@@ -46,4 +46,15 @@ mod tests {
             "expected an 'imports' edge"
         );
     }
+
+    #[test]
+    fn ts_method_produces_defined_in() {
+        let mut g = Graph::new();
+        ts_extractor().extract("class Foo { bar() { } }", "foo.ts", &mut g);
+        assert!(
+            g.edges().iter().any(|e| e.subject == "bar"),
+            "Expected 'bar' method in graph entities, got: {:?}",
+            g.edges()
+        );
+    }
 }

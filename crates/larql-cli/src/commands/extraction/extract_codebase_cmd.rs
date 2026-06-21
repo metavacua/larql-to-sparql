@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 use larql_codebase::extract_codebase;
-use larql_codebase::graph_to_nquads;
+use larql_codebase::graph_to_ntriples;
 use larql_codebase::graph_to_weight_repr;
 use larql_codebase::write_weight_repr_to_gguf;
 use larql_codebase_core::basis::BitNetBasis;
@@ -17,7 +17,7 @@ pub struct ExtractCodebaseArgs {
     #[arg(short, long, default_value = "codebase.vindex")]
     output: PathBuf,
 
-    /// Output format: "json" (default) or "nquads" (RDFC-1.0 sorted N-Quads)
+    /// Output format: "json" (default) or "ntriples" (RDFC-1.0 sorted N-Triples)
     #[arg(long, default_value = "json")]
     format: String,
 }
@@ -33,11 +33,11 @@ pub fn run(args: ExtractCodebaseArgs) -> Result<(), Box<dyn std::error::Error>> 
         graph.edge_count()
     );
 
-    if args.format == "nquads" {
-        let nquads = graph_to_nquads(&graph, "urn:larql:");
-        let nq_path = args.output.with_extension("nq");
-        std::fs::write(&nq_path, &nquads)?;
-        eprintln!("  N-Quads written to: {}", nq_path.display());
+    if args.format == "ntriples" {
+        let ntriples = graph_to_ntriples(&graph, "urn:larql:");
+        let nt_path = args.output.with_extension("nt");
+        std::fs::write(&nt_path, &ntriples)?;
+        eprintln!("  N-Triples written to: {}", nt_path.display());
         return Ok(());
     }
 
