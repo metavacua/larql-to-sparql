@@ -254,7 +254,7 @@ LARQL's server and protocol layers make excellent OSS choices throughout:
 | **P2** | Use llama.cpp's flash-attention MSL shader as design reference for D-ATTN-MTG | 0 extra effort | Avoids repeating the TG-count regression. Direct the D-ATTN-MTG session to start by reading llama.cpp's `kernel_flash_attn_ext_vec_reduce`. |
 | **P3** | Evaluate llama.cpp Q4K kernel (MIT) and candle's `k_quants.rs` (MIT/Apache-2.0) for parity with LARQL's C kernels | 1 day audit | candle has SIMD-dispatched AVX2/NEON/WASM Q4K vec_dot (confirmed 2026). If LARQL's kernels lag in stride or SIMD variant coverage, borrow the kernel math from either source. |
 | **P4** | Consider `pest` grammar if LQL syntax grows significantly | 3–5 days (future) | Cleaner grammar evolution. Not urgent while LQL is stable. |
-| **P5** | Re-evaluate HNSW if gate-vector count scales to 31B+ models | 2–3 days (future) | `instant-distance` as drop-in if custom HNSW becomes a bottleneck. |
+| **P5** | Re-evaluate HNSW if gate-vector count scales to 31B+ models | 2–3 days (future) | Prefer `usearch` (most actively maintained, fastest per benchmarks) as HNSW replacement. `instant-distance` is a third-tier option (no crates.io release since 2023). |
 
 ---
 
