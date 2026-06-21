@@ -23,7 +23,7 @@ pub enum MatrixStatus {
 }
 
 /// One entry in the compilation strategy matrix.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MatrixEntry {
     pub language: &'static str,
     pub target: WasmTarget,
