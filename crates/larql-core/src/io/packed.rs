@@ -27,6 +27,7 @@ const SOURCE_DOCUMENT: u8 = 2;
 const SOURCE_INSTALLED: u8 = 3;
 const SOURCE_WIKIDATA: u8 = 4;
 const SOURCE_MANUAL: u8 = 5;
+const SOURCE_AST: u8 = 6;
 
 // ── String table ──
 
@@ -110,6 +111,7 @@ fn source_to_u8(s: &SourceType) -> u8 {
         SourceType::Installed => SOURCE_INSTALLED,
         SourceType::Wikidata => SOURCE_WIKIDATA,
         SourceType::Manual => SOURCE_MANUAL,
+        SourceType::Ast => SOURCE_AST,
     }
 }
 
@@ -121,6 +123,7 @@ fn u8_to_source(v: u8) -> Result<SourceType, GraphError> {
         SOURCE_INSTALLED => Ok(SourceType::Installed),
         SOURCE_WIKIDATA => Ok(SourceType::Wikidata),
         SOURCE_MANUAL => Ok(SourceType::Manual),
+        SOURCE_AST => Ok(SourceType::Ast),
         _ => Err(GraphError::Deserialize(format!(
             "invalid source tag in packed edge record: {v}"
         ))),
