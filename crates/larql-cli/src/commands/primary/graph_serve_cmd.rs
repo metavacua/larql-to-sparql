@@ -16,6 +16,7 @@ use larql_core::core::graph::Graph;
 use larql_core::io::load_graph;
 use serde::{Deserialize, Serialize};
 
+/// Arguments for `larql graph-serve` — serves a `.larql.json` graph over HTTP.
 #[derive(Args)]
 pub struct GraphServeArgs {
     /// Path to a .larql.json graph file.
@@ -124,6 +125,7 @@ async fn handle_completions(
     (StatusCode::OK, Json(resp))
 }
 
+/// Load the graph and start the axum HTTP server, blocking until killed.
 pub fn run(args: GraphServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let graph = load_graph(&args.graph).map_err(|e| format!("{e}"))?;
     let graph = Arc::new(Mutex::new(graph));

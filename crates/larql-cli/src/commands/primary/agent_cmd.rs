@@ -5,6 +5,7 @@ use clap::Args;
 use larql_core::core::graph::Graph;
 use larql_core::io::load_graph;
 
+/// Arguments for `larql agent` — the JIT codebase-derived coding agent.
 #[derive(Args)]
 pub struct AgentArgs {
     /// Root directory of the codebase to extract JIT.
@@ -31,7 +32,7 @@ pub struct AgentArgs {
 /// - `WHAT CALLS <entity>`          — incoming edges where relation contains "call"
 /// - `WHAT DOES <entity> IMPLEMENT` — outgoing edges where relation == "implements"
 /// - `WHAT DEPENDS ON <entity>`     — outgoing edges where relation == "depends_on"
-/// - `WALK <entity>`                — multi-hop walk with no relation filter
+/// - `WALK <entity>`                — 1-hop neighbourhood (outgoing + incoming edges)
 /// - anything else                  — describe the first whitespace-separated word
 ///
 /// Returns an empty string when no matching edges are found.
@@ -130,6 +131,7 @@ fn format_describe(r: &larql_core::core::graph::DescribeResult) -> String {
     parts.join("\n")
 }
 
+/// Load the graph (JIT or from file), then run one-shot or interactive REPL mode.
 pub fn run(args: AgentArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Validate mutually-exclusive source/mode pairs.
     if args.codebase.is_none() && args.vindex.is_none() {
