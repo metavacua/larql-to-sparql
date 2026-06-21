@@ -7,6 +7,7 @@ use larql_core::core::graph::Graph;
 
 use crate::languages::graphql_extractor::GraphqlExtractor;
 use crate::languages::java_lang::java_extractor;
+use crate::languages::lql_extractor::LqlExtractor;
 use crate::languages::python_lang::python_extractor;
 use crate::languages::rust_lang::rust_extractor;
 use crate::languages::sparql_extractor::SparqlExtractor;
@@ -27,6 +28,7 @@ fn extractors() -> Vec<Box<dyn LanguageExtractor>> {
         Box::new(java_extractor()),
         Box::new(SparqlExtractor),
         Box::new(GraphqlExtractor),
+        Box::new(LqlExtractor),
     ]
 }
 

@@ -1,5 +1,6 @@
 pub mod graphql_extractor;
 pub mod java_lang;
+pub mod lql_extractor;
 pub mod python_lang;
 pub mod query_extractor;
 pub mod rust_lang;
@@ -7,6 +8,7 @@ pub mod sparql_extractor;
 pub mod ts_lang;
 pub use graphql_extractor::GraphqlExtractor;
 pub use java_lang::java_extractor;
+pub use lql_extractor::LqlExtractor;
 pub use python_lang::PythonExtractor;
 pub use query_extractor::QueryExtractor;
 pub use rust_lang::RustExtractor;
