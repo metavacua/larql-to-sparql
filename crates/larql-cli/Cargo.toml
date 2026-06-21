@@ -39,6 +39,8 @@ rayon = "1.10"
 # Pruned features — we only need JPEG/PNG/WebP. Skipping TIFF/AVIF/HDR/etc
 # avoids dragging in libavif, libtiff, openexr, and a 2 MB binary tax.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 
 [features]
 default = ["gpu"]
@@ -55,3 +57,4 @@ tempfile = "3"
 # used by run_cmd_image tests to borrow a real ModelConfig without
 # enumerating every field by hand. Production builds don't compile it.
 larql-models = { path = "../larql-models", features = ["test-utils"] }
+tower = { version = "0.5", features = ["util"] }

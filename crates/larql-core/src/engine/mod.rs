@@ -5,3 +5,5 @@ pub mod http_provider;
 pub mod mock_provider;
 pub mod provider;
 pub mod templates;
+pub mod vindex_provider;
+pub use vindex_provider::VindexProvider;
