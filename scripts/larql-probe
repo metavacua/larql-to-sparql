@@ -1,0 +1,766 @@
+#!/usr/bin/env bash
+# larql-probe v0.3.0 — resource-aware LARQL development harness
+#
+# Isolates any command in a memory + CPU-capped systemd scope. OOM or
+# CPU-starve kills the process, not the Crostini container or terminal.
+# Logs resource stats and detects allocation/parallelism anti-patterns.
+#
+# Usage: larql-probe <mode> [options] [-- command...]
+# Modes: safe | source-scan | build-check | report | setup
+
+set -uo pipefail
+
+VERSION="0.3.0"
+LARQL_DIR="${LARQL_DIR:-$HOME/larql}"
+LOG_DIR="${LARQL_LOG_DIR:-$HOME/.larql-probe}"
+DEFAULT_MEM_MB=4000       # ~2 GB headroom for system + claude on a 6 GB box
+DEFAULT_CPUS=7            # 7 of 8 physical cores; 1 reserved exclusively for OS/compositor
+DEFAULT_CPU_WEIGHT=20     # cgroup weight: system default=100; 20 deprioritises vs OS
+POLL_INTERVAL=2
+
+R='\033[0;31m' Y='\033[1;33m' G='\033[0;32m' B='\033[0;34m' N='\033[0m'
+err()  { echo -e "${R}error:${N} $*" >&2; }
+info() { echo -e "${B}·${N} $*" >&2; }
+ok()   { echo -e "${G}✓${N} $*" >&2; }
+warn() { echo -e "${Y}!${N} $*" >&2; }
+
+usage() {
+    cat <<EOF
+larql-probe $VERSION — resource-aware LARQL development harness
+
+MODES
+  safe [--mem MB] [--cpus N] [--cpu-weight W] [--no-cpu-pin] [--label L] -- CMD
+      Run CMD inside a memory + CPU-capped systemd scope.
+      Defaults: ${DEFAULT_MEM_MB} MB RAM, ${DEFAULT_CPUS}/8 cores (1 reserved for OS), CPUWeight=${DEFAULT_CPU_WEIGHT}.
+      Also sets RAYON_NUM_THREADS and TOKIO_WORKER_THREADS to --cpus value.
+      Exit 137 = cgroup OOM-kill; exit 134 = Rust alloc abort (ulimit fallback).
+
+  source-scan [--dir DIR] [--verbose]
+      Static analysis of LARQL source for unbounded allocation AND parallelism
+      patterns. Reports memory, thread, and unsafe code findings by severity.
+
+  shells [--snapshot]
+      Enumerate all active shell sessions: PTY, cwd, foreground job, CPU/RSS.
+      Saves ~/.larql-probe/session.json. Run this to give Claude Code
+      awareness of what's running in your other terminal tabs.
+      (Also runs automatically as preflight before every 'safe' invocation.)
+
+  build-check [--asan | --leak] [-- CARGO_ARGS...]
+      Compile with address/leak sanitizers (requires nightly + rust-src).
+      No sanitizer flag: measures compile-time RAM via safe mode.
+
+  report [--last N | LOGFILE]
+      Parse probe logs: peak RSS, CPU stats, OOM events, timeline summary.
+
+  setup
+      Print install commands for optional tools and a sudoers snippet.
+
+EXAMPLES
+  larql-probe safe -- larql run my-model.gguf
+  larql-probe safe --mem 3500 -- larql extract my-model -o out.vindex --level all
+  larql-probe safe --cpus 3 -- larql run my-model.gguf   # lighter, 5 cores free
+  larql-probe safe -- cargo build --release -p larql-inference
+  larql-probe shells                            # snapshot all session shells
+  larql-probe source-scan
+  larql-probe source-scan --verbose > /tmp/scan.txt
+  larql-probe report --last 5
+
+ENV
+  LARQL_DIR          Path to larql workspace (default: ~/larql)
+  LARQL_LOG_DIR      Log directory (default: ~/.larql-probe)
+  RAYON_NUM_THREADS  Overrides --cpus for the Rayon threadpool if set externally
+EOF
+}
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+have_sudo() { sudo -n true 2>/dev/null; }
+
+mem_avail_kb() { awk '/MemAvailable/{print $2}' /proc/meminfo; }
+ncpus()         { nproc 2>/dev/null || echo 8; }
+
+# Background stats poller: writes JSONL to $1 until killed
+# Captures memory + per-process CPU% alongside RSS
+start_monitor() {
+    local logfile=$1
+    (
+        while true; do
+            local avail ts
+            ts=$(date -Iseconds)
+            avail=$(mem_avail_kb)
+            local procs
+            # pid, %cpu, rss_kb, comm — sorted by %cpu desc
+            procs=$(ps -eo pid,pcpu,rss,comm --no-headers --sort=-%cpu 2>/dev/null | head -5 \
+                | awk '{printf "%s{\"pid\":%s,\"cpu_pct\":%s,\"rss_kb\":%s,\"cmd\":\"%s\"}", \
+                        sep,$1,$2,$3,$4; sep=","}')
+            printf '{"ts":"%s","mem_avail_kb":%d,"top":[%s]}\n' "$ts" "$avail" "$procs" >> "$logfile"
+            sleep "$POLL_INTERVAL"
+        done
+    ) &
+    echo $!
+}
+
+# ── session shell snapshot ────────────────────────────────────────────────────
+# Writes ~/.larql-probe/session.json and prints a compact summary.
+# Called at start of cmd_safe (preflight) and by cmd_shells.
+
+SESSION_SNAP="$LOG_DIR/session.json"
+
+snapshot_shells() {
+    local my_session_pid=$PPID   # SESSION_BASH = the bash that invoked larql-probe
+
+    python3 - "$my_session_pid" "$SESSION_SNAP" <<'PYEOF'
+import sys, os, json, re
+
+snap_path = sys.argv[2]
+home = os.path.expanduser("~")
+
+def get_ppid(pid):
+    try:
+        raw = re.sub(r'\(.*?\)', 'COMM', open(f"/proc/{pid}/stat").read())
+        return int(raw.split()[3])
+    except: return 0
+
+def read_cwd(pid):
+    try:    return os.readlink(f"/proc/{pid}/cwd")
+    except: return "?"
+
+def read_cmd(pid):
+    try:
+        return open(f"/proc/{pid}/cmdline", "rb").read().replace(b'\x00', b' ').decode(errors='replace').strip()
+    except: return "?"
+
+def rss_kb(pid):
+    try:
+        for line in open(f"/proc/{pid}/status"):
+            if line.startswith("VmRSS"):
+                return int(line.split()[1])
+    except: pass
+    return 0
+
+def cpu_pct(pid):
+    try:
+        f = re.sub(r'\(.*?\)', 'COMM', open(f"/proc/{pid}/stat").read()).split()
+        utime, stime = int(f[13]), int(f[14])
+        hz = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
+        uptime = float(open("/proc/uptime").read().split()[0])
+        starttime = int(f[21]) / hz
+        elapsed = uptime - starttime
+        return round(100.0 * (utime + stime) / hz / elapsed, 1) if elapsed > 0 else 0.0
+    except: return 0.0
+
+def get_children(ppid):
+    result = []
+    for pid_s in os.listdir("/proc"):
+        if not pid_s.isdigit(): continue
+        p = int(pid_s)
+        try:
+            raw = re.sub(r'\(.*?\)', 'COMM', open(f"/proc/{p}/stat").read())
+            if int(raw.split()[3]) == ppid:
+                result.append(p)
+        except: pass
+    return result
+
+# sys.argv[1] = $PPID = SESSION_BASH PID (the bash that ran larql-probe)
+my_session_pid = int(sys.argv[1])
+
+def find_claude_pid(start_pid):
+    """Walk up from start_pid to find the claude CLI process."""
+    pid = start_pid
+    for _ in range(15):
+        if pid <= 1: return None
+        try:
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b'\x00', b' ').decode(errors='replace')
+            if re.search(r'\bclaude\b', cmd) and not re.search(r'\b(bash|sh|python)\b', cmd):
+                return pid
+        except: pass
+        pid = get_ppid(pid)
+    return None
+
+claude_pid = find_claude_pid(my_session_pid)
+
+def active_work(session_pid, depth=0):
+    """Return meaningful commands running under session_pid; skip bare bash wrappers."""
+    if depth > 3: return []
+    result = []
+    for c in get_children(session_pid):
+        cmd = read_cmd(c)
+        base = cmd.split()[0].split("/")[-1] if cmd.strip() else ""
+        if base in ("bash", "sh"):
+            inner = active_work(c, depth + 1)
+            if inner:
+                result.extend(inner)
+            elif cpu_pct(c) > 1.0:
+                # bash wrapper that IS doing work inline (no children but consuming CPU)
+                result.append({"pid": c, "cmd": cmd, "rss_kb": rss_kb(c), "cpu_pct": cpu_pct(c)})
+            # 0%-CPU bash with no active children = completion cleanup → treat as idle
+        else:
+            result.append({"pid": c, "cmd": cmd, "rss_kb": rss_kb(c), "cpu_pct": cpu_pct(c)})
+    return result
+
+# --- enumerate claude code shell sessions (direct bash children of claude) ---
+shells = []
+if claude_pid:
+    for child_pid in sorted(get_children(claude_pid)):
+        cmd = read_cmd(child_pid)
+        if not re.search(r'\b(bash|sh)\b', cmd): continue
+        is_me = (child_pid == my_session_pid)
+        shells.append({
+            "pid":    child_pid,
+            "cwd":    read_cwd(child_pid),
+            "rss_kb": rss_kb(child_pid),
+            "is_me":  is_me,
+            "active": [] if is_me else active_work(child_pid),
+        })
+
+snap = {
+    "claude_pid":     claude_pid,
+    "my_session_pid": my_session_pid,
+    "shells":         shells,
+}
+os.makedirs(os.path.dirname(snap_path), exist_ok=True)
+with open(snap_path, "w") as f:
+    json.dump(snap, f, indent=2)
+
+# --- compact output ---
+my_idx = next((i for i, s in enumerate(shells) if s["is_me"]), None)
+current_label = f"  [current=shell-{my_idx+1}]" if my_idx is not None else "  [current=unknown]"
+print(f"  claude code: {len(shells)} shell(s){current_label}")
+for i, s in enumerate(shells):
+    cwd   = s["cwd"].replace(home, "~")
+    label = f"shell-{i+1}"
+    me    = " [me]" if s["is_me"] else ""
+    if s["active"]:
+        top      = s["active"][0]
+        cmd_name = top["cmd"].split()[0].split("/")[-1]
+        c_pct    = top["cpu_pct"]
+        c_rss    = top["rss_kb"] // 1024
+        print(f"  {label:<9} {cwd:<30} running: {cmd_name}  ({c_pct:.0f}% CPU, {c_rss} MB){me}")
+    else:
+        print(f"  {label:<9} {cwd:<30} idle{me}")
+PYEOF
+}
+
+preflight() {
+    info "session shells:"
+    snapshot_shells >&2
+    echo "" >&2
+}
+
+# ── mode: safe ────────────────────────────────────────────────────────────────
+
+cmd_safe() {
+    local mem_mb=$DEFAULT_MEM_MB
+    local cpus=$DEFAULT_CPUS
+    local cpu_weight=$DEFAULT_CPU_WEIGHT
+    local no_cpu_pin=0
+    local label=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --mem)          mem_mb=$2; shift 2 ;;
+            --cpus)         cpus=$2; shift 2 ;;
+            --cpu-weight)   cpu_weight=$2; shift 2 ;;
+            --no-cpu-pin)   no_cpu_pin=1; shift ;;
+            --label)        label=$2; shift 2 ;;
+            --)             shift; break ;;
+            -h|--help)      usage; exit 0 ;;
+            *)              err "unknown option: $1"; exit 1 ;;
+        esac
+    done
+
+    if [[ $# -eq 0 ]]; then
+        err "no command given after --"
+        echo "  usage: larql-probe safe [--mem MB] [--cpus N] -- COMMAND [ARGS...]" >&2
+        exit 1
+    fi
+
+    preflight
+
+    local total_cpus
+    total_cpus=$(ncpus)
+    if [[ $cpus -ge $total_cpus ]]; then
+        warn "--cpus ${cpus} >= total cores ${total_cpus}; capping at $(( total_cpus - 1 )) to leave 1 for OS"
+        cpus=$(( total_cpus - 1 ))
+    fi
+
+    # CPU core range to pin to (cores 0..cpus-1; OS gets the rest)
+    local cpu_range="0-$(( cpus - 1 ))"
+    # CPU quota: cpus × 100% (hard ceiling on CPU time per period)
+    local cpu_quota=$(( cpus * 100 ))
+
+    mkdir -p "$LOG_DIR"
+    local cmd_name
+    cmd_name=$(basename "$1")
+    local ts
+    ts=$(date +%Y%m%d-%H%M%S)
+    local tag="${label:-${cmd_name}}"
+    local logfile="$LOG_DIR/${ts}-${tag}.jsonl"
+    local metafile="$LOG_DIR/${ts}-${tag}.meta.json"
+
+    # Write metadata header
+    printf '{"probe_version":"%s","ts_start":"%s","mem_limit_mb":%d,"cpus":%d,"cpu_weight":%d,"cmd":%s}\n' \
+        "$VERSION" "$(date -Iseconds)" "$mem_mb" "$cpus" "$cpu_weight" \
+        "$(printf '%s\n' "$@" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().split("\n")[:-1]))')" \
+        > "$metafile"
+
+    local oom_before
+    oom_before=$(dmesg --time-format iso 2>/dev/null | grep -c "oom-kill:.*CONSTRAINT_MEMCG" || echo 0)
+
+    local monitor_pid
+    monitor_pid=$(start_monitor "$logfile")
+
+    local exit_code=0 isolation_mode
+    local t_start t_end
+    t_start=$(date +%s%N)
+
+    # Resolve thread counts: honour existing env overrides, else use --cpus value.
+    # sudo strips the calling environment, so cgroup mode passes these via --setenv.
+    local rayon_threads="${RAYON_NUM_THREADS:-${cpus}}"
+    local tokio_threads="${TOKIO_WORKER_THREADS:-${cpus}}"
+
+    if have_sudo; then
+        # Preferred: cgroup-based isolation (memory + CPU weight + cpuset pin)
+        isolation_mode="cgroup(mem=${mem_mb}MB,cpus=${cpus}/${total_cpus},weight=${cpu_weight})"
+        local sd_args=(
+            -p "MemoryMax=${mem_mb}M"
+            -p "MemorySwapMax=0"
+            -p "CPUWeight=${cpu_weight}"
+            -p "CPUQuota=${cpu_quota}%"
+            "--setenv=RAYON_NUM_THREADS=${rayon_threads}"
+            "--setenv=TOKIO_WORKER_THREADS=${tokio_threads}"
+        )
+        if [[ $no_cpu_pin -eq 0 ]]; then
+            sd_args+=( -p "AllowedCPUs=${cpu_range}" )
+        fi
+        sudo systemd-run --scope "${sd_args[@]}" -- "$@" || exit_code=$?
+    else
+        # Fallback: ulimit -v + nice (no sudo needed).
+        # Thread caps go into the subshell environment (not stripped by sudo here).
+        isolation_mode="ulimit-v(mem=${mem_mb}MB,cpus=${cpus} via env,nice=10)"
+        warn "sudo not available — cgroup isolation off; using ulimit-v + nice + env thread caps"
+        local vs_kb=$(( mem_mb * 1024 ))
+        ( export RAYON_NUM_THREADS="$rayon_threads"; export TOKIO_WORKER_THREADS="$tokio_threads"; ulimit -v "$vs_kb"; exec nice -n 10 "$@" ) || exit_code=$?
+    fi
+
+    t_end=$(date +%s%N)
+    info "isolation: ${isolation_mode}"
+    info "threads:   RAYON_NUM_THREADS=${rayon_threads}  TOKIO_WORKER_THREADS=${tokio_threads}"
+    info "log:       $logfile"
+
+    kill "$monitor_pid" 2>/dev/null || true
+    wait "$monitor_pid" 2>/dev/null || true
+
+    local elapsed_ms=$(( (t_end - t_start) / 1000000 ))
+
+    # Compute peak RSS from log
+    local peak_rss_kb=0
+    if [[ -f "$logfile" ]]; then
+        peak_rss_kb=$(python3 - "$logfile" <<'PYEOF'
+import sys, json
+peak = 0
+with open(sys.argv[1]) as f:
+    for line in f:
+        try:
+            row = json.loads(line)
+            for p in row.get("top", []):
+                peak = max(peak, p.get("rss_kb", 0))
+        except Exception:
+            pass
+print(peak)
+PYEOF
+)
+    fi
+
+    local peak_rss_mb=$(( peak_rss_kb / 1024 ))
+
+    # Check dmesg for OOM events that occurred during this run only
+    local oom_after oom_events
+    oom_after=$(dmesg --time-format iso 2>/dev/null | grep -c "oom-kill:.*CONSTRAINT_MEMCG" || echo 0)
+    oom_events=$(( oom_after - oom_before ))
+
+    # Write summary to meta
+    printf '{"ts_end":"%s","elapsed_ms":%d,"exit_code":%d,"peak_rss_mb":%d,"oom_events":%d}\n' \
+        "$(date -Iseconds)" "$elapsed_ms" "$exit_code" "$peak_rss_mb" "$oom_events" \
+        >> "$metafile"
+
+    echo ""
+    if [[ $exit_code -eq 137 || $exit_code -eq 134 ]]; then
+        # 137 = SIGKILL from cgroup OOM; 134 = SIGABRT from Rust alloc failure under ulimit -v
+        err "OOM-KILLED (exit ${exit_code})  peak RSS ≥ ${peak_rss_mb} MB / limit ${mem_mb} MB  [${elapsed_ms}ms]"
+        warn "Hit memory cap. Try --mem $(( mem_mb + 500 )) or see: larql-probe source-scan"
+    elif [[ $exit_code -eq 143 || $exit_code -eq 130 ]]; then
+        warn "TERMINATED (exit ${exit_code}) — likely user kill or timeout  [${elapsed_ms}ms]"
+    elif [[ $exit_code -ne 0 ]]; then
+        warn "exited ${exit_code}  peak RSS ${peak_rss_mb} MB / limit ${mem_mb} MB  [${elapsed_ms}ms]"
+    else
+        ok "success  peak RSS ${peak_rss_mb} MB / limit ${mem_mb} MB  [${elapsed_ms}ms]"
+    fi
+    info "logs: $logfile  meta: $metafile"
+
+    return $exit_code
+}
+
+# ── mode: source-scan ─────────────────────────────────────────────────────────
+
+cmd_source_scan() {
+    local dir="$LARQL_DIR"
+    local verbose=0
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --dir)     dir=$2; shift 2 ;;
+            --verbose|-v) verbose=1; shift ;;
+            -h|--help) usage; exit 0 ;;
+            *) err "unknown option: $1"; exit 1 ;;
+        esac
+    done
+
+    if [[ ! -d "$dir" ]]; then
+        err "LARQL dir not found: $dir (set LARQL_DIR or use --dir)"
+        exit 1
+    fi
+
+    echo "=== larql-probe source-scan: $dir ==="
+    echo ""
+
+    local findings=0
+
+    _scan_pattern() {
+        local label=$1 severity=$2 pattern=$3 hint=$4
+        shift 4
+        local paths=("$@")
+        local matches
+        matches=$(grep -rn --include="*.rs" -E "$pattern" "${paths[@]}" 2>/dev/null || true)
+        if [[ -n "$matches" ]]; then
+            local count
+            count=$(echo "$matches" | wc -l)
+            echo -e "${Y}[$severity]${N} $label (${count} sites)"
+            echo "    hint: $hint"
+            if [[ $verbose -eq 1 || $count -le 5 ]]; then
+                echo "$matches" | sed 's/^/    /'
+            else
+                echo "$matches" | head -3 | sed 's/^/    /'
+                echo "    ... ($((count - 3)) more; use --verbose)"
+            fi
+            echo ""
+            findings=$(( findings + count ))
+        fi
+    }
+
+    echo "── Known memory / OOM sites ─────────────────────────────────────"
+    echo ""
+
+    # f32 vindex loader: loads ALL weight files into RAM
+    _scan_pattern \
+        "Eager full-model load (f32 vindex)" HIGH \
+        "load_model_weights|ModelWeights" \
+        "f32 loader materialises all weight tensors. Consider streaming per-layer or returning an iterator." \
+        "$dir/crates/larql-vindex/src/format/weights"
+
+    # Inference: large allocations per token/layer
+    _scan_pattern \
+        "Per-layer Vec allocation in forward pass" MEDIUM \
+        "Vec::with_capacity|vec!\[0\.0|ndarray::Array2::zeros|Array2::from_shape_vec" \
+        "Allocations inside per-layer loops accumulate. Verify these are freed between layers, not held." \
+        "$dir/crates/larql-inference/src/forward" \
+        "$dir/crates/larql-inference/src/layer_executor"
+
+    # Model loading: eager collect
+    _scan_pattern \
+        "Collect-all on weight iterators" MEDIUM \
+        "\.collect::<Vec|\.collect::<HashMap" \
+        "Collecting all weights before use prevents streaming. Consider processing lazily." \
+        "$dir/crates/larql-models/src/loading" \
+        "$dir/crates/larql-models/src/quant"
+
+    echo "── General allocation patterns ──────────────────────────────────"
+    echo ""
+
+    # Clones of large data structures in hot paths
+    _scan_pattern \
+        "Arc/Rc clones — verify no large payload copy" LOW \
+        "Arc::clone|Rc::clone|\.clone\(\)" \
+        "clone() is usually fine on Arc, but clone() on Vec<f32> / Array2 in hot paths copies the payload." \
+        "$dir/crates/larql-inference/src" \
+        "$dir/crates/larql-models/src"
+
+    # File reads without BufReader
+    _scan_pattern \
+        "File::open without BufReader" LOW \
+        "File::open.*\?" \
+        "Unbuffered File reads amplify syscall overhead on large weight files. Wrap with BufReader." \
+        "$dir/crates/larql-models/src/loading" \
+        "$dir/crates/larql-vindex/src"
+
+    # Explicit drops missing — large values held to end of scope
+    _scan_pattern \
+        "Missing explicit drop before next large allocation" LOW \
+        "let weights =|let model =|let tensors =|let embeddings =" \
+        "Large bindings held until end-of-scope can double peak RSS. Add drop(x) before the next big alloc." \
+        "$dir/crates/larql-cli/src/commands" \
+        "$dir/crates/larql-inference/src"
+
+    # unsafe raw pointer arithmetic over large buffers
+    _scan_pattern \
+        "unsafe memory over large buffers" HIGH \
+        "from_raw_parts|transmute|slice::from_raw_parts" \
+        "Ensure the source buffer lives exactly as long as the derived slice — no aliasing, no double-free." \
+        "$dir/crates"
+
+    echo "── Thread / CPU saturation patterns ─────────────────────────────"
+    echo ""
+
+    # Rayon par_iter in inference/compute hot paths — saturates all cores by default
+    _scan_pattern \
+        "Unbounded Rayon par_iter in hot paths" HIGH \
+        "par_iter\(\)|par_iter_mut\(\)|into_par_iter\(\)|par_chunks|par_bridge" \
+        "Rayon defaults to ncpus() threads (8 here). Each par_iter saturates all cores, starving the OS.
+    Mitigation: RAYON_NUM_THREADS env var or ThreadPoolBuilder::new().num_threads(N).build_global()." \
+        "$dir/crates/larql-inference/src" \
+        "$dir/crates/larql-compute/src"
+
+    # auto_default_threads returning 0 on Linux — Rayon picks all cores
+    _scan_pattern \
+        "auto_default_threads() returns 0 on Linux (Rayon takes all cores)" HIGH \
+        "auto_default_threads" \
+        "fn auto_default_threads() returns 0 on non-aarch64-macos, meaning Rayon uses available_parallelism() = 8.
+    Fix: return a sensible non-zero Linux default, or document that RAYON_NUM_THREADS must be set." \
+        "$dir/crates/larql-cli/src"
+
+    # Tokio multi_thread runtime without worker_threads limit
+    _scan_pattern \
+        "tokio multi-thread runtime without worker_threads cap" MEDIUM \
+        "new_multi_thread\(\)|Runtime::new\(\)" \
+        "tokio::runtime::Runtime::new() spawns one worker per CPU. On 8 cores, this adds 8 more threads
+    competing with Rayon's 8. Cap with .worker_threads(N).build()." \
+        "$dir/crates/larql-inference/src" \
+        "$dir/crates/larql-server/src" \
+        "$dir/crates/larql-router/src"
+
+    # std::thread::spawn without join — fire-and-forget threads
+    _scan_pattern \
+        "std::thread::spawn (fire-and-forget risk)" LOW \
+        "std::thread::spawn|thread::Builder::new\(\)" \
+        "Spawned threads that are never joined accumulate. Each contributes to scheduler load." \
+        "$dir/crates"
+
+    # available_parallelism used without cap
+    _scan_pattern \
+        "available_parallelism() without upper bound" MEDIUM \
+        "available_parallelism\(\)" \
+        "Returns 8 on this machine. Any code that scales directly off this saturates all cores.
+    Cap with .min(N) where N = desired thread count." \
+        "$dir/crates"
+
+    echo "── Summary ──────────────────────────────────────────────────────"
+    echo ""
+    if [[ $findings -eq 0 ]]; then
+        ok "no patterns matched (or LARQL_DIR is wrong)"
+    else
+        warn "$findings pattern sites found. HIGH = known OOM contributor. Pipe to a file to review offline."
+    fi
+}
+
+# ── mode: shells ──────────────────────────────────────────────────────────────
+
+cmd_shells() {
+    echo "=== larql-probe shells (claude code session) ==="
+    echo ""
+    snapshot_shells
+    echo ""
+    info "snapshot written to $SESSION_SNAP"
+    echo ""
+    info "To give Claude Code session context, run:  cat $SESSION_SNAP"
+}
+
+# ── mode: build-check ─────────────────────────────────────────────────────────
+
+cmd_build_check() {
+    local sanitizer=""
+    local cargo_args=()
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --asan)  sanitizer=address; shift ;;
+            --leak)  sanitizer=leak; shift ;;
+            --msan)  sanitizer=memory; shift ;;
+            --)      shift; cargo_args=("$@"); break ;;
+            -h|--help) usage; exit 0 ;;
+            *) cargo_args+=("$1"); shift ;;
+        esac
+    done
+
+    if [[ -z "$sanitizer" ]]; then
+        warn "no sanitizer specified — running safe cargo build to measure compile-time RAM"
+        cmd_safe --label "cargo-build" -- cargo build --manifest-path "$LARQL_DIR/Cargo.toml" "${cargo_args[@]:-}"
+        return
+    fi
+
+    # Sanitizer build needs nightly + rust-src
+    if ! rustup toolchain list 2>/dev/null | grep -q nightly; then
+        err "sanitizer builds require nightly: rustup toolchain install nightly"
+        exit 1
+    fi
+    if ! rustup component list --toolchain nightly --installed 2>/dev/null | grep -q rust-src; then
+        err "sanitizer builds require rust-src: rustup component add rust-src --toolchain nightly"
+        exit 1
+    fi
+
+    info "building with sanitizer=$sanitizer (nightly, x86_64-unknown-linux-gnu)"
+    warn "sanitizer builds are 2-5× slower and use more memory; use safe mode with a reasonable --mem limit"
+
+    local san_flags="-Z sanitizer=${sanitizer}"
+    RUSTFLAGS="$san_flags" \
+    cmd_safe --label "cargo-build-${sanitizer}" -- \
+        cargo +nightly build \
+            --target x86_64-unknown-linux-gnu \
+            --manifest-path "$LARQL_DIR/Cargo.toml" \
+            "${cargo_args[@]:-}"
+}
+
+# ── mode: report ──────────────────────────────────────────────────────────────
+
+cmd_report() {
+    local last_n=5
+    local target_log=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --last)  last_n=$2; shift 2 ;;
+            -h|--help) usage; exit 0 ;;
+            *.jsonl|*.json) target_log=$1; shift ;;
+            *) err "unknown argument: $1"; exit 1 ;;
+        esac
+    done
+
+    if [[ ! -d "$LOG_DIR" ]]; then
+        err "no log directory: $LOG_DIR (run larql-probe safe first)"
+        exit 1
+    fi
+
+    local meta_files
+    if [[ -n "$target_log" ]]; then
+        meta_files="${target_log%.jsonl}.meta.json"
+    else
+        meta_files=$(ls -t "$LOG_DIR"/*.meta.json 2>/dev/null | head -"$last_n" || true)
+    fi
+
+    if [[ -z "$meta_files" ]]; then
+        err "no probe logs found in $LOG_DIR"
+        exit 1
+    fi
+
+    echo "=== larql-probe report (last $last_n runs) ==="
+    echo ""
+
+    python3 - $meta_files <<'PYEOF'
+import sys, json, os
+
+for path in sys.argv[1:]:
+    try:
+        lines = open(path).readlines()
+        meta = {}
+        for line in lines:
+            try:
+                meta.update(json.loads(line))
+            except Exception:
+                pass
+
+        ts   = meta.get("ts_start", "?")[:19]
+        cmd  = " ".join(meta.get("cmd", ["?"]))[:60]
+        lim  = meta.get("mem_limit_mb", "?")
+        peak = meta.get("peak_rss_mb", "?")
+        ec   = meta.get("exit_code", "?")
+        ms   = meta.get("elapsed_ms", 0)
+        oom  = meta.get("oom_events", 0)
+
+        status = "OOM" if ec in (137, 134) else ("OK" if ec == 0 else f"err({ec})")
+        elapsed = f"{ms//1000}s" if ms else "?"
+
+        print(f"  {ts}  [{status:7s}]  peak {peak:>5} MB / {lim} MB  {elapsed:>6}  {cmd}")
+        if oom:
+            print(f"             ↳ {oom} OOM kill event(s) recorded in dmesg")
+    except Exception as e:
+        print(f"  (could not parse {os.path.basename(path)}: {e})")
+
+PYEOF
+    echo ""
+    info "full logs in $LOG_DIR"
+}
+
+# ── mode: setup ───────────────────────────────────────────────────────────────
+
+cmd_setup() {
+    echo "=== larql-probe setup ==="
+    echo ""
+    echo "── Optional tools (apt) ──────────────────────────────────────────"
+    echo "  sudo apt-get install -y linux-perf heaptrack valgrind strace time"
+    echo ""
+    echo "── Rust nightly + sanitizers ─────────────────────────────────────"
+    echo "  rustup toolchain install nightly"
+    echo "  rustup component add rust-src --toolchain nightly"
+    echo ""
+    echo "── CPU topology ──────────────────────────────────────────────────"
+    echo "  $(nproc) logical cores  |  default: ${DEFAULT_CPUS} for LARQL, 1 reserved for OS"
+    echo "  Per-run override: larql-probe safe --cpus N -- ..."
+    echo "  Thread env vars set automatically: RAYON_NUM_THREADS, TOKIO_WORKER_THREADS"
+    echo ""
+    echo "── Passwordless sudo for cgroup isolation (recommended) ──────────"
+    echo "  Without this, falls back to ulimit-v + nice (weaker but functional)."
+    echo "  Run: sudo visudo -f /etc/sudoers.d/larql-probe"
+    echo "  Paste:"
+    echo ""
+    echo "  $(whoami) ALL=(root) NOPASSWD: /usr/bin/systemd-run --scope *"
+    echo ""
+    echo "── Current status ────────────────────────────────────────────────"
+
+    local tools=(perf heaptrack valgrind strace)
+    for t in "${tools[@]}"; do
+        if which "$t" &>/dev/null; then
+            ok "$t found: $(which $t)"
+        else
+            warn "$t not installed"
+        fi
+    done
+
+    if rustup toolchain list 2>/dev/null | grep -q nightly; then
+        ok "nightly toolchain installed"
+    else
+        warn "nightly toolchain not installed (needed for sanitizer builds)"
+    fi
+
+    local log_count
+    log_count=$(ls "$LOG_DIR"/*.meta.json 2>/dev/null | wc -l || echo 0)
+    info "$log_count probe run(s) logged in $LOG_DIR"
+}
+
+# ── main dispatch ─────────────────────────────────────────────────────────────
+
+main() {
+    if [[ $# -eq 0 ]]; then
+        usage
+        exit 0
+    fi
+
+    mkdir -p "$LOG_DIR"
+
+    local mode=$1; shift
+    case $mode in
+        safe)         cmd_safe "$@" ;;
+        shells)       cmd_shells ;;
+        source-scan)  cmd_source_scan "$@" ;;
+        build-check)  cmd_build_check "$@" ;;
+        report)       cmd_report "$@" ;;
+        setup)        cmd_setup ;;
+        -h|--help)    usage ;;
+        --version)    echo "larql-probe $VERSION" ;;
+        *)
+            err "unknown mode: $mode"
+            echo "Run 'larql-probe --help' for usage." >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
