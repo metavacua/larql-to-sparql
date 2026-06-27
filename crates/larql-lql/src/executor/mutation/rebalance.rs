@@ -20,7 +20,7 @@
 //! to dampen oscillation between competing template-shared facts.
 
 use crate::error::LqlError;
-use crate::executor::helpers::{target_prefix, TARGET_PREFIX_CHARS};
+use crate::executor::helpers::{target_first_subtoken, target_prefix, TARGET_PREFIX_CHARS};
 use crate::executor::tuning::{
     REBALANCE_CEILING_DEFAULT, REBALANCE_DOWN_SCALE, REBALANCE_FLOOR_DEFAULT,
     REBALANCE_MAX_ITERS_DEFAULT, REBALANCE_PROBE_TOP_K, REBALANCE_UP_SCALE,
@@ -82,10 +82,15 @@ impl Session {
                 );
 
                 let prefix = target_prefix(&fact.target, TARGET_PREFIX_CHARS);
+                let first_subtoken = target_first_subtoken(&tokenizer, &fact.target);
                 let prob: f64 = r
                     .predictions
                     .iter()
-                    .find(|(tok, _)| tok.contains(&fact.target) || tok.starts_with(prefix))
+                    .find(|(tok, _)| {
+                        tok.contains(&fact.target)
+                            || tok.starts_with(prefix)
+                            || first_subtoken.as_deref() == Some(tok.as_str())
+                    })
                     .map(|(_, p)| *p)
                     .unwrap_or(0.0);
                 final_probs[i] = prob;

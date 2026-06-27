@@ -22,6 +22,26 @@ pub(crate) fn target_prefix(s: &str, n: usize) -> &str {
     }
 }
 
+/// Encode `target` as it appears mid-sentence (space-prefixed) and return
+/// the decoded first BPE subtoken, preserving leading whitespace.
+///
+/// Multi-subtoken targets like `_check_larql` tokenize to `[Ġ_, check, …]`;
+/// `predict_with_ffn` emits `" _"` (with space) — not the full identifier —
+/// so `contains(target)` and `starts_with(prefix)` both miss it. This
+/// function produces the string that actually appears in the prediction list.
+pub(crate) fn target_first_subtoken(
+    tokenizer: &larql_vindex::tokenizers::Tokenizer,
+    target: &str,
+) -> Option<String> {
+    let spaced = format!(" {target}");
+    tokenizer
+        .encode(spaced.as_str(), false)
+        .ok()
+        .and_then(|enc| enc.get_ids().first().copied())
+        .and_then(|id| tokenizer.decode(&[id], true).ok())
+        .filter(|s| !s.is_empty())
+}
+
 /// Average a sequence of embedding rows, applying `embed_scale`. The
 /// pure half of [`entity_query_vec`]: extracted so unit tests can
 /// exercise the math without a tokenizer fixture.
