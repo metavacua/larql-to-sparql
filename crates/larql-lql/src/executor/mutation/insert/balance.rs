@@ -12,7 +12,7 @@
 //!     until priors recover, capped at CROSS_ITERS.
 
 use crate::error::LqlError;
-use crate::executor::helpers::{target_prefix, TARGET_PREFIX_CHARS};
+use crate::executor::helpers::{target_first_subtoken, target_prefix, TARGET_PREFIX_CHARS};
 use crate::executor::tuning::{
     canonical_prompt, BALANCE_ITERS, BALANCE_PROBE_TOP_K, CROSS_ITERS, DOWN_SCALE,
     MAX_PRIORS_CHECKED, MAX_STALE, PRIOR_FLOOR, PROB_CEILING, PROB_FLOOR, UP_SCALE,
@@ -57,6 +57,11 @@ impl Session {
             .map_err(|e| LqlError::exec("balance: tokenize", e))?;
         let prompt_ids: Vec<u32> = enc.get_ids().to_vec();
 
+        // Pre-compute target matching values once — both are pure functions of
+        // `target` and the tokenizer and don't change across iterations.
+        let prefix = target_prefix(target, TARGET_PREFIX_CHARS);
+        let first_subtoken = target_first_subtoken(&tokenizer, target);
+
         // Snapshot/restore applies only to the AMPLIFY path: when
         // UP_SCALE saturates (residual blow-up, softmax collapse in
         // late layers), we roll back to the iteration that produced
@@ -80,11 +85,14 @@ impl Session {
                 &walk_ffn,
             );
 
-            let prefix = target_prefix(target, TARGET_PREFIX_CHARS);
             let target_prob: f64 = result
                 .predictions
                 .iter()
-                .find(|(tok, _)| tok.contains(target) || tok.starts_with(prefix))
+                .find(|(tok, _)| {
+                    tok.contains(target)
+                        || tok.starts_with(prefix)
+                        || first_subtoken.as_deref() == Some(tok.as_str())
+                })
                 .map(|(_, prob)| *prob)
                 .unwrap_or(0.0);
 
@@ -186,35 +194,48 @@ impl Session {
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
             .map_err(|e| LqlError::exec("cross-balance: load tokenizer", e))?;
 
-        for _iter in 0..CROSS_ITERS {
-            let mut any_regressed = false;
-            let priors_to_check: Vec<_> = self
-                .installed_edges
-                .iter()
-                .rev()
-                .take(MAX_PRIORS_CHECKED)
-                .cloned()
-                .collect();
-            for fact in &priors_to_check {
+        // Pre-compute per-fact immutable data once — canonical prompt tokenization
+        // and first subtoken are pure functions of each fact and the tokenizer;
+        // recomputing them across CROSS_ITERS iterations is wasted work.
+        let priors_to_check: Vec<_> = self
+            .installed_edges
+            .iter()
+            .rev()
+            .take(MAX_PRIORS_CHECKED)
+            .map(|fact| -> Result<_, LqlError> {
                 let enc = tokenizer
                     .encode(fact.canonical_prompt.as_str(), true)
                     .map_err(|e| LqlError::exec("cross-balance: tokenize", e))?;
-                let fact_ids: Vec<u32> = enc.get_ids().to_vec();
+                Ok((
+                    fact.target.clone(),
+                    enc.get_ids().to_vec(),
+                    target_first_subtoken(&tokenizer, &fact.target),
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for _iter in 0..CROSS_ITERS {
+            let mut any_regressed = false;
+            for (fact_target, fact_ids, fact_first_subtoken) in &priors_to_check {
                 let (_, _, patched) = self.require_vindex()?;
                 let walk =
                     larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
                 let r = larql_inference::predict_with_ffn(
                     &weights,
                     &tokenizer,
-                    &fact_ids,
+                    fact_ids,
                     BALANCE_PROBE_TOP_K,
                     &walk,
                 );
-                let prefix = target_prefix(&fact.target, TARGET_PREFIX_CHARS);
+                let prefix = target_prefix(fact_target, TARGET_PREFIX_CHARS);
                 let p: f64 = r
                     .predictions
                     .iter()
-                    .find(|(tok, _)| tok.contains(&fact.target) || tok.starts_with(prefix))
+                    .find(|(tok, _)| {
+                        tok.contains(fact_target.as_str())
+                            || tok.starts_with(prefix)
+                            || fact_first_subtoken.as_deref() == Some(tok.as_str())
+                    })
                     .map(|(_, p)| *p)
                     .unwrap_or(0.0);
                 if p < PRIOR_FLOOR {
