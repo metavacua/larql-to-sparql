@@ -207,7 +207,7 @@ impl Session {
                     .encode(fact.canonical_prompt.as_str(), true)
                     .map_err(|e| LqlError::exec("cross-balance: tokenize", e))?;
                 Ok((
-                    fact.clone(),
+                    fact.target.clone(),
                     enc.get_ids().to_vec(),
                     target_first_subtoken(&tokenizer, &fact.target),
                 ))
@@ -216,7 +216,7 @@ impl Session {
 
         for _iter in 0..CROSS_ITERS {
             let mut any_regressed = false;
-            for (fact, fact_ids, fact_first_subtoken) in &priors_to_check {
+            for (fact_target, fact_ids, fact_first_subtoken) in &priors_to_check {
                 let (_, _, patched) = self.require_vindex()?;
                 let walk =
                     larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
@@ -227,12 +227,12 @@ impl Session {
                     BALANCE_PROBE_TOP_K,
                     &walk,
                 );
-                let prefix = target_prefix(&fact.target, TARGET_PREFIX_CHARS);
+                let prefix = target_prefix(fact_target, TARGET_PREFIX_CHARS);
                 let p: f64 = r
                     .predictions
                     .iter()
                     .find(|(tok, _)| {
-                        tok.contains(&fact.target)
+                        tok.contains(fact_target.as_str())
                             || tok.starts_with(prefix)
                             || fact_first_subtoken.as_deref() == Some(tok.as_str())
                     })

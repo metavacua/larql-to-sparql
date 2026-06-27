@@ -59,35 +59,49 @@ impl Session {
         let mut iters_run = 0usize;
         let mut final_probs: Vec<f64> = vec![0.0; n_facts];
 
+        // Pre-compute per-fact immutable data once — canonical prompt
+        // tokenization, prefix, and first subtoken are pure functions of each
+        // fact and the tokenizer and don't change across max_iters iterations.
+        let facts_precomputed: Vec<_> = {
+            let facts_snapshot = self.installed_edges.clone();
+            facts_snapshot
+                .into_iter()
+                .map(|fact| -> Result<_, LqlError> {
+                    let enc = tokenizer
+                        .encode(fact.canonical_prompt.as_str(), true)
+                        .map_err(|e| LqlError::exec("rebalance: tokenize", e))?;
+                    let ids = enc.get_ids().to_vec();
+                    let prefix_len = target_prefix(&fact.target, TARGET_PREFIX_CHARS).len();
+                    let first_subtoken = target_first_subtoken(&tokenizer, &fact.target);
+                    Ok((fact, ids, prefix_len, first_subtoken))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+
         for iter in 0..max_iters {
             iters_run = iter + 1;
             let mut any_changed = false;
-            let facts_snapshot = self.installed_edges.clone();
 
-            for (i, fact) in facts_snapshot.iter().enumerate() {
-                let enc = tokenizer
-                    .encode(fact.canonical_prompt.as_str(), true)
-                    .map_err(|e| LqlError::exec("rebalance: tokenize", e))?;
-                let ids: Vec<u32> = enc.get_ids().to_vec();
-
+            for (i, (fact, ids, prefix_len, first_subtoken)) in
+                facts_precomputed.iter().enumerate()
+            {
                 let (_, _, patched) = self.require_vindex()?;
                 let walk =
                     larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
                 let r = larql_inference::predict_with_ffn(
                     &weights,
                     &tokenizer,
-                    &ids,
+                    ids,
                     REBALANCE_PROBE_TOP_K,
                     &walk,
                 );
 
-                let prefix = target_prefix(&fact.target, TARGET_PREFIX_CHARS);
-                let first_subtoken = target_first_subtoken(&tokenizer, &fact.target);
+                let prefix = &fact.target[..*prefix_len];
                 let prob: f64 = r
                     .predictions
                     .iter()
                     .find(|(tok, _)| {
-                        tok.contains(&fact.target)
+                        tok.contains(fact.target.as_str())
                             || tok.starts_with(prefix)
                             || first_subtoken.as_deref() == Some(tok.as_str())
                     })

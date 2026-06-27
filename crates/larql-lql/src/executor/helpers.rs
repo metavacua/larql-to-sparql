@@ -33,6 +33,9 @@ pub(crate) fn target_first_subtoken(
     tokenizer: &larql_vindex::tokenizers::Tokenizer,
     target: &str,
 ) -> Option<String> {
+    if target.is_empty() {
+        return None;
+    }
     let spaced = format!(" {target}");
     tokenizer
         .encode(spaced.as_str(), false)
