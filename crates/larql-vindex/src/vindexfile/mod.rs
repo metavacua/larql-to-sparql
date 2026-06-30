@@ -13,8 +13,10 @@
 //! EXPOSE browse inference
 //! ```
 
+pub mod github;
 mod parser;
 
+pub use github::{download_gh_file, graphql_commit, FileAddition, GhUrl};
 pub use parser::{
     parse_vindexfile, parse_vindexfile_str, Vindexfile, VindexfileDirective, VindexfileStage,
 };
@@ -190,6 +192,9 @@ fn resolve_vindexfile_path(
         // — caches under HF's standard cache dir, conditional fetch
         // by ETag. Returns the local snapshot path.
         crate::format::huggingface::resolve_hf_vindex(path)
+    } else if path.starts_with("gh://") {
+        let gh = GhUrl::parse(path)?;
+        github::download_gh_file(&gh)
     } else if path.starts_with("https://") || path.starts_with("http://") {
         Err(VindexError::Parse(format!(
             "remote URLs not yet implemented in Vindexfile: {path} \

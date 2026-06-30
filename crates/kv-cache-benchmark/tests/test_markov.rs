@@ -3,6 +3,7 @@ use kv_cache_benchmark::model_config::ModelConfig;
 use kv_cache_benchmark::*;
 
 #[test]
+#[cfg(target_pointer_width = "64")]
 fn test_markov_cold_tier_size() {
     let config = ModelConfig::gemma_4b();
     let strategy = MarkovResidual::new(512);
@@ -49,7 +50,12 @@ fn test_markov_much_smaller_than_standard() {
     // At short contexts that's not much smaller than standard KV.
     // The benefit is that it stays FLAT while standard KV grows O(n).
     // At 32K+ the window is a fraction of standard KV.
-    for &seq_len in &[32768, 131072, 370_000] {
+    // 131_072 and 370_000 overflow usize on 32-bit; only run on 64-bit.
+    #[cfg(not(target_pointer_width = "64"))]
+    let large_lens: &[usize] = &[32768];
+    #[cfg(target_pointer_width = "64")]
+    let large_lens: &[usize] = &[32768, 131072, 370_000];
+    for &seq_len in large_lens {
         let std_mem = standard.memory_bytes(&config, seq_len);
         let mrk_mem = markov.memory_bytes(&config, seq_len);
         assert!(

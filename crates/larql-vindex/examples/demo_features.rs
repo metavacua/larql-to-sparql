@@ -295,6 +295,7 @@ fn main() {
         description: Some("Medical facts".into()),
         author: Some("demo".into()),
         tags: vec!["medical".into()],
+        dependencies: None,
         operations: vec![
             // Compose-mode INSERT writes gate + up + down overrides
             // together; persisting all three in the .vlp lets a
@@ -322,6 +323,7 @@ fn main() {
                     top_token_id: 200,
                     c_score: 4.2,
                 }),
+                quality: None,
             },
             larql_vindex::PatchOp::Delete {
                 layer: 0,

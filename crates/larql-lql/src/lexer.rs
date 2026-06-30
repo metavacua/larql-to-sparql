@@ -139,6 +139,11 @@ pub enum Keyword {
     Converged,
     Compact,
     Status,
+    Export,
+    Branch,
+    Message,
+    Create,
+    Empty,
 }
 
 impl Keyword {
@@ -252,6 +257,11 @@ impl Keyword {
             Self::Converged => "converged",
             Self::Compact => "compact",
             Self::Status => "status",
+            Self::Export => "export",
+            Self::Branch => "branch",
+            Self::Message => "message",
+            Self::Create => "create",
+            Self::Empty => "empty",
         }
     }
 
@@ -362,6 +372,11 @@ impl Keyword {
             "CONVERGED" => Some(Self::Converged),
             "COMPACT" => Some(Self::Compact),
             "STATUS" => Some(Self::Status),
+            "EXPORT" => Some(Self::Export),
+            "BRANCH" => Some(Self::Branch),
+            "MESSAGE" => Some(Self::Message),
+            "CREATE" => Some(Self::Create),
+            "EMPTY" => Some(Self::Empty),
             _ => None,
         }
     }

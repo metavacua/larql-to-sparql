@@ -280,6 +280,9 @@ impl Session {
                     top_token_id: plan.target_id,
                     c_score,
                 }),
+                quality: Some(larql_vindex::patch::format::FeatureQuality::from_c_score(
+                    c_score,
+                )),
             };
 
             installed.push(InstalledSlot {

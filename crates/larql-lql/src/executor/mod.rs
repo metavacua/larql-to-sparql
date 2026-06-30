@@ -118,6 +118,11 @@ impl Session {
             }
             Statement::Use { target } => self.exec_use(target),
             Statement::Stats { vindex } => self.exec_stats(vindex.as_deref()),
+            Statement::CreateVindex {
+                path,
+                architecture,
+                init,
+            } => self.exec_create_vindex(path, architecture, *init),
             Statement::Walk {
                 prompt,
                 top,
@@ -268,6 +273,11 @@ impl Session {
             Statement::ApplyPatch { path } => self.exec_apply_patch(path),
             Statement::ShowPatches => self.exec_show_patches(),
             Statement::RemovePatch { path } => self.exec_remove_patch(path),
+            Statement::ExportPatch {
+                target,
+                branch,
+                message,
+            } => self.exec_export_patch(target, branch.as_deref(), message.as_deref()),
             // ── Trace commands ──
             Statement::Trace {
                 prompt,
@@ -373,20 +383,24 @@ impl Session {
             ));
         }
 
-        let model_name = match &self.backend {
-            Backend::Vindex { config, .. } => config.model.clone(),
-            Backend::Weight { model_id, .. } => model_id.clone(),
-            _ => "unknown".into(),
+        let (model_name, base_checksum) = match &self.backend {
+            Backend::Vindex { config, path, .. } => (
+                config.model.clone(),
+                larql_vindex::checksums::compute_base_checksum(path).ok(),
+            ),
+            Backend::Weight { model_id, .. } => (model_id.clone(), None),
+            _ => ("unknown".into(), None),
         };
 
         let patch = larql_vindex::VindexPatch {
-            version: 1,
+            version: 2,
             base_model: model_name,
-            base_checksum: None,
+            base_checksum,
             created_at: String::new(),
             description: None,
             author: None,
             tags: vec![],
+            dependencies: None,
             operations: recording.operations,
         };
 

@@ -161,6 +161,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn dense_ffn_forward_backend_matches_no_backend() {
         // backend=None should produce the same result as dense_ffn_forward
@@ -283,6 +284,7 @@ mod tests {
         assert!(act.iter().all(|v| v.is_finite()));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn dense_ffn_forward_backend_with_some_matches_no_backend() {
         // backend=Some(CpuBackend) and backend=None route through

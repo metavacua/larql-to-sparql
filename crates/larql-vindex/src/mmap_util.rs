@@ -20,6 +20,10 @@
 /// The caller must ensure the file is not modified or truncated while the
 /// mmap is alive.
 pub unsafe fn mmap_optimized(file: &std::fs::File) -> Result<memmap2::Mmap, std::io::Error> {
+    // Windows CreateFileMapping returns ERROR_INVALID_PARAMETER (87) for zero-length files.
+    if file.metadata()?.len() == 0 {
+        return memmap2::MmapMut::map_anon(1)?.make_read_only();
+    }
     let mmap = memmap2::Mmap::map(file)?;
     advise_sequential(&mmap);
     Ok(mmap)
@@ -40,6 +44,10 @@ pub unsafe fn mmap_optimized(file: &std::fs::File) -> Result<memmap2::Mmap, std:
 /// The caller must ensure the file is not modified or truncated while the
 /// mmap is alive.
 pub unsafe fn mmap_demand_paged(file: &std::fs::File) -> Result<memmap2::Mmap, std::io::Error> {
+    // Windows CreateFileMapping returns ERROR_INVALID_PARAMETER (87) for zero-length files.
+    if file.metadata()?.len() == 0 {
+        return memmap2::MmapMut::map_anon(1)?.make_read_only();
+    }
     let mmap = memmap2::Mmap::map(file)?;
     #[cfg(unix)]
     {

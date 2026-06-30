@@ -27,11 +27,42 @@ use crate::error::VindexError;
 // Patch data types
 // ═══════════════════════════════════════════════════════════════
 
+/// Confidence-based quality annotation for a patch operation.
+///
+/// Travels in the `.vlp` JSON so that downstream consumers (git reviewers,
+/// SPARQL edge type-checkers) can identify potentially lossy facts without
+/// re-running inference.  `--strict-cleanliness` on `apply_patch` can
+/// refuse `Polysemantic` ops; export is always faithful regardless.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FeatureQuality {
+    /// `c_score > 0.7` — clear single attribution, faithful round-trip expected.
+    Monosemantic,
+    /// `0.3 < c_score ≤ 0.7` — moderate confidence, possible multi-attribution.
+    Ambiguous,
+    /// `c_score ≤ 0.3` — likely polysemantic; symbolic projection is lossy.
+    Polysemantic,
+}
+
+impl FeatureQuality {
+    pub fn from_c_score(c_score: f32) -> Self {
+        if c_score > 0.7 {
+            Self::Monosemantic
+        } else if c_score >= 0.3 {
+            Self::Ambiguous
+        } else {
+            Self::Polysemantic
+        }
+    }
+}
+
 /// A vindex patch — a set of operations to apply to a base vindex.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VindexPatch {
     pub version: u32,
     pub base_model: String,
+    /// SHA-256 of the base vindex's `index.json`.  Populated on export;
+    /// verified by `apply_patch_verified`.  `None` on legacy patches.
     #[serde(default)]
     pub base_checksum: Option<String>,
     pub created_at: String,
@@ -41,6 +72,17 @@ pub struct VindexPatch {
     pub author: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Explicit partial order over `operations` indices.
+    ///
+    /// - `None` or `Some([])`: infer from `key()` — ops with different
+    ///   `(layer, feature)` keys commute freely.
+    /// - `Some(deps)`: `(i, j)` means `operations[i]` must precede
+    ///   `operations[j]`.  Must be a DAG.
+    ///
+    /// Enables Mazurkiewicz-trace canonicalization (future `--canonicalize`
+    /// flag on DIFF).  Shipped as an inert field until that flag lands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<Vec<(usize, usize)>>,
     pub operations: Vec<PatchOp>,
 }
 
@@ -72,6 +114,10 @@ pub enum PatchOp {
         down_vector_b64: Option<String>,
         #[serde(default)]
         down_meta: Option<PatchDownMeta>,
+        /// Confidence-based quality annotation emitted by DIFF.
+        /// `None` on patches generated before this field was added.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quality: Option<FeatureQuality>,
     },
     Update {
         layer: usize,
@@ -84,6 +130,9 @@ pub enum PatchOp {
         down_vector_b64: Option<String>,
         #[serde(default)]
         down_meta: Option<PatchDownMeta>,
+        /// Confidence-based quality annotation emitted by DIFF.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quality: Option<FeatureQuality>,
     },
     Delete {
         layer: usize,
@@ -129,6 +178,50 @@ impl PatchOp {
             PatchOp::Delete { layer, feature, .. } => Some((*layer, *feature)),
             PatchOp::InsertKnn { .. } | PatchOp::DeleteKnn { .. } => None,
         }
+    }
+
+    /// Quality annotation if present.
+    pub fn quality(&self) -> Option<&FeatureQuality> {
+        match self {
+            PatchOp::Insert { quality, .. } | PatchOp::Update { quality, .. } => quality.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+impl VindexPatch {
+    /// Returns true if operations `i` and `j` commute (applying in either
+    /// order produces the same result).
+    ///
+    /// When `dependencies` is `None` or empty, commutativity is inferred from
+    /// `key()`: ops targeting different `(layer, feature)` slots are
+    /// independent.  When `dependencies` is populated, any explicit ordering
+    /// constraint between `i` and `j` makes them non-commutative.
+    pub fn commute(&self, i: usize, j: usize) -> bool {
+        if let Some(deps) = &self.dependencies {
+            if !deps.is_empty() {
+                return !deps.contains(&(i, j)) && !deps.contains(&(j, i));
+            }
+        }
+        // Infer from key: different addresses → independent
+        let ki = self.operations.get(i).and_then(|op| op.key());
+        let kj = self.operations.get(j).and_then(|op| op.key());
+        match (ki, kj) {
+            (Some(a), Some(b)) => a != b,
+            _ => false, // KNN ops conservatively non-commutative
+        }
+    }
+
+    /// Return a copy of this patch with `base_checksum` set.
+    pub fn with_base_checksum(mut self, checksum: String) -> Self {
+        self.base_checksum = Some(checksum);
+        self
+    }
+
+    /// Return a copy of this patch with explicit `dependencies` set.
+    pub fn with_dependencies(mut self, deps: Vec<(usize, usize)>) -> Self {
+        self.dependencies = if deps.is_empty() { None } else { Some(deps) };
+        self
     }
 }
 
@@ -321,6 +414,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         };
         assert_eq!(op.key(), Some((3, 42)));
     }
@@ -334,6 +428,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         };
         assert_eq!(op.key(), Some((5, 7)));
     }
@@ -379,6 +474,7 @@ mod tests {
             description: None,
             author: None,
             tags: vec![],
+            dependencies: None,
             operations: ops,
         }
     }
@@ -405,6 +501,7 @@ mod tests {
                 up_vector_b64: None,
                 down_vector_b64: None,
                 down_meta: None,
+                quality: None,
             },
             PatchOp::Insert {
                 layer: 0,
@@ -417,6 +514,7 @@ mod tests {
                 up_vector_b64: None,
                 down_vector_b64: None,
                 down_meta: None,
+                quality: None,
             },
             PatchOp::Update {
                 layer: 0,
@@ -425,6 +523,7 @@ mod tests {
                 up_vector_b64: None,
                 down_vector_b64: None,
                 down_meta: None,
+                quality: None,
             },
             PatchOp::Delete {
                 layer: 0,
@@ -476,6 +575,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }];
         let patch = VindexPatch {
             version: 1,
@@ -485,6 +585,7 @@ mod tests {
             description: Some("test patch".into()),
             author: Some("test".into()),
             tags: vec!["geography".into()],
+            dependencies: None,
             operations: ops,
         };
 
@@ -524,6 +625,7 @@ mod tests {
             up_vector_b64: Some(encode_gate_vector(&up)),
             down_vector_b64: Some(encode_gate_vector(&down)),
             down_meta: None,
+            quality: None,
         }];
         let patch = VindexPatch {
             version: 1,
@@ -533,6 +635,7 @@ mod tests {
             description: None,
             author: None,
             tags: vec![],
+            dependencies: None,
             operations: ops,
         };
         patch.save(&path).unwrap();
@@ -603,5 +706,246 @@ mod tests {
             }
             _ => panic!("expected Insert"),
         }
+    }
+
+    // ── FeatureQuality ────────────────────────────────────────────────────
+
+    #[test]
+    fn feature_quality_from_c_score() {
+        assert_eq!(
+            FeatureQuality::from_c_score(0.9),
+            FeatureQuality::Monosemantic
+        );
+        assert_eq!(
+            FeatureQuality::from_c_score(0.71),
+            FeatureQuality::Monosemantic
+        );
+        assert_eq!(FeatureQuality::from_c_score(0.5), FeatureQuality::Ambiguous);
+        assert_eq!(FeatureQuality::from_c_score(0.3), FeatureQuality::Ambiguous);
+        assert_eq!(
+            FeatureQuality::from_c_score(0.29),
+            FeatureQuality::Polysemantic
+        );
+        assert_eq!(
+            FeatureQuality::from_c_score(0.0),
+            FeatureQuality::Polysemantic
+        );
+    }
+
+    #[test]
+    fn feature_quality_boundary_exactly_0_7() {
+        // c_score = 0.7 is NOT > 0.7, so it's Ambiguous, not Monosemantic
+        assert_eq!(FeatureQuality::from_c_score(0.7), FeatureQuality::Ambiguous);
+    }
+
+    #[test]
+    fn quality_field_round_trips_in_patch() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("q.vlp");
+        let ops = vec![PatchOp::Insert {
+            layer: 0,
+            feature: 0,
+            relation: None,
+            entity: "X".into(),
+            target: "Y".into(),
+            confidence: Some(0.5),
+            gate_vector_b64: None,
+            up_vector_b64: None,
+            down_vector_b64: None,
+            down_meta: None,
+            quality: Some(FeatureQuality::Ambiguous),
+        }];
+        let patch = make_patch(ops);
+        patch.save(&path).unwrap();
+        let loaded = VindexPatch::load(&path).unwrap();
+        assert_eq!(
+            loaded.operations[0].quality(),
+            Some(&FeatureQuality::Ambiguous)
+        );
+    }
+
+    #[test]
+    fn quality_field_defaults_to_none_on_legacy_patch() {
+        let json = r#"{
+          "version": 1,
+          "base_model": "test",
+          "created_at": "2026-01-01",
+          "operations": [
+            { "op": "insert", "layer": 0, "feature": 0,
+              "entity": "X", "target": "Y" }
+          ]
+        }"#;
+        let patch: VindexPatch = serde_json::from_str(json).unwrap();
+        assert_eq!(patch.operations[0].quality(), None);
+    }
+
+    // ── VindexPatch::commute ──────────────────────────────────────────────
+
+    #[test]
+    fn commute_different_keys_inferred() {
+        let ops = vec![
+            PatchOp::Insert {
+                layer: 0,
+                feature: 0,
+                relation: None,
+                entity: "A".into(),
+                target: "B".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
+            },
+            PatchOp::Insert {
+                layer: 0,
+                feature: 1,
+                relation: None,
+                entity: "C".into(),
+                target: "D".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
+            },
+        ];
+        let patch = make_patch(ops);
+        assert!(
+            patch.commute(0, 1),
+            "different (layer,feature) should commute"
+        );
+    }
+
+    #[test]
+    fn commute_same_key_does_not_commute() {
+        let ops = vec![
+            PatchOp::Insert {
+                layer: 1,
+                feature: 5,
+                relation: None,
+                entity: "A".into(),
+                target: "B".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
+            },
+            PatchOp::Update {
+                layer: 1,
+                feature: 5,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
+            },
+        ];
+        let patch = make_patch(ops);
+        assert!(
+            !patch.commute(0, 1),
+            "same (layer,feature) must not commute"
+        );
+    }
+
+    #[test]
+    fn commute_knn_ops_are_non_commutative() {
+        let kv = encode_gate_vector(&[1.0f32]);
+        let ops = vec![
+            PatchOp::InsertKnn {
+                layer: 0,
+                entity: "e".into(),
+                relation: "r".into(),
+                target: "t".into(),
+                target_id: 1,
+                confidence: None,
+                key_vector_b64: kv.clone(),
+            },
+            PatchOp::InsertKnn {
+                layer: 0,
+                entity: "f".into(),
+                relation: "r".into(),
+                target: "t2".into(),
+                target_id: 2,
+                confidence: None,
+                key_vector_b64: kv,
+            },
+        ];
+        let patch = make_patch(ops);
+        assert!(
+            !patch.commute(0, 1),
+            "KNN ops conservatively non-commutative"
+        );
+    }
+
+    #[test]
+    fn commute_respects_explicit_dependencies() {
+        let ops = vec![
+            PatchOp::Insert {
+                layer: 0,
+                feature: 0,
+                relation: None,
+                entity: "A".into(),
+                target: "B".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
+            },
+            PatchOp::Insert {
+                layer: 0,
+                feature: 1,
+                relation: None,
+                entity: "C".into(),
+                target: "D".into(),
+                confidence: None,
+                gate_vector_b64: None,
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+                quality: None,
+            },
+        ];
+        // Different keys → would normally commute, but explicit dep says otherwise
+        let patch = make_patch(ops).with_dependencies(vec![(0, 1)]);
+        assert!(
+            !patch.commute(0, 1),
+            "explicit dependency overrides key inference"
+        );
+    }
+
+    // ── VindexPatch::with_base_checksum / with_dependencies ──────────────
+
+    #[test]
+    fn with_base_checksum_sets_field() {
+        let patch = make_patch(vec![]).with_base_checksum("abc123".into());
+        assert_eq!(patch.base_checksum.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn with_dependencies_sets_field() {
+        let patch = make_patch(vec![]).with_dependencies(vec![(0, 1), (1, 2)]);
+        assert_eq!(patch.dependencies, Some(vec![(0, 1), (1, 2)]));
+    }
+
+    #[test]
+    fn with_dependencies_empty_clears_field() {
+        let patch = make_patch(vec![]).with_dependencies(vec![]);
+        assert!(patch.dependencies.is_none());
+    }
+
+    #[test]
+    fn dependencies_not_serialized_when_none() {
+        let patch = make_patch(vec![]);
+        let json = serde_json::to_string(&patch).unwrap();
+        assert!(
+            !json.contains("dependencies"),
+            "should be omitted when None"
+        );
     }
 }

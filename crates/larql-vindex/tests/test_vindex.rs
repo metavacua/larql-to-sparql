@@ -1262,6 +1262,7 @@ fn patch_save_and_load_round_trip() {
         description: Some("Test patch".into()),
         author: Some("test".into()),
         tags: vec!["test".into()],
+        dependencies: None,
         operations: vec![
             larql_vindex::PatchOp::Insert {
                 layer: 26,
@@ -1278,6 +1279,7 @@ fn patch_save_and_load_round_trip() {
                     top_token_id: 42,
                     c_score: 4.2,
                 }),
+                quality: None,
             },
             larql_vindex::PatchOp::Delete {
                 layer: 24,
@@ -1325,6 +1327,7 @@ fn patched_vindex_overrides_base() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Update {
             layer: 0,
             feature: 0,
@@ -1336,6 +1339,7 @@ fn patched_vindex_overrides_base() {
                 top_token_id: 300,
                 c_score: 0.99,
             }),
+            quality: None,
         }],
     };
     patched.apply_patch(patch);
@@ -1362,6 +1366,7 @@ fn patched_vindex_delete_hides_feature() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Delete {
             layer: 0,
             feature: 2,
@@ -1387,6 +1392,7 @@ fn patched_vindex_bake_down() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![
             larql_vindex::PatchOp::Update {
                 layer: 0,
@@ -1399,6 +1405,7 @@ fn patched_vindex_bake_down() {
                     top_token_id: 300,
                     c_score: 0.99,
                 }),
+                quality: None,
             },
             larql_vindex::PatchOp::Delete {
                 layer: 0,
@@ -1439,6 +1446,7 @@ fn patched_vindex_remove_patch() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Update {
             layer: 0,
             feature: 0,
@@ -1450,6 +1458,7 @@ fn patched_vindex_remove_patch() {
                 top_token_id: 300,
                 c_score: 0.99,
             }),
+            quality: None,
         }],
     };
     patched.apply_patch(patch);
@@ -1603,6 +1612,7 @@ fn patch_empty_operations() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![],
     };
     assert_eq!(patch.len(), 0);
@@ -1624,6 +1634,7 @@ fn patch_multiple_patches_stack() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Update {
             layer: 0,
             feature: 0,
@@ -1635,6 +1646,7 @@ fn patch_multiple_patches_stack() {
                 top_token_id: 300,
                 c_score: 0.99,
             }),
+            quality: None,
         }],
     };
     patched.apply_patch(p1);
@@ -1648,6 +1660,7 @@ fn patch_multiple_patches_stack() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Update {
             layer: 0,
             feature: 1,
@@ -1659,6 +1672,7 @@ fn patch_multiple_patches_stack() {
                 top_token_id: 301,
                 c_score: 0.95,
             }),
+            quality: None,
         }],
     };
     patched.apply_patch(p2);
@@ -1683,6 +1697,7 @@ fn patched_vindex_later_patch_overrides_earlier() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Update {
             layer: 0,
             feature: 0,
@@ -1694,6 +1709,7 @@ fn patched_vindex_later_patch_overrides_earlier() {
                 top_token_id: 300,
                 c_score: 0.99,
             }),
+            quality: None,
         }],
     };
     let p2 = larql_vindex::VindexPatch {
@@ -1704,6 +1720,7 @@ fn patched_vindex_later_patch_overrides_earlier() {
         description: None,
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Update {
             layer: 0,
             feature: 0,
@@ -1715,6 +1732,7 @@ fn patched_vindex_later_patch_overrides_earlier() {
                 top_token_id: 400,
                 c_score: 0.88,
             }),
+            quality: None,
         }],
     };
     patched.apply_patch(p1);
@@ -2213,6 +2231,7 @@ fn extract_with_patches_bake_down() {
         description: Some("test patch".into()),
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Update {
             layer: 0,
             feature: 0,
@@ -2224,6 +2243,7 @@ fn extract_with_patches_bake_down() {
                 top_token_id: 888,
                 c_score: 5.0,
             }),
+            quality: None,
         }],
     };
 
@@ -2417,6 +2437,7 @@ fn vindexfile_parse_and_build() {
         description: Some("test".into()),
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Update {
             layer: 0,
             feature: 0,
@@ -2428,6 +2449,7 @@ fn vindexfile_parse_and_build() {
                 top_token_id: 999,
                 c_score: 9.0,
             }),
+            quality: None,
         }],
     };
     let patch_path = patch_dir.join("test.vlp");

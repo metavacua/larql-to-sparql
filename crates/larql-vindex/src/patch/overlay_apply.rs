@@ -6,6 +6,10 @@
 //! Pulled out of `overlay.rs` so the file holding `PatchedVindex`'s
 //! query/mutation API stays focused.
 
+use std::path::Path;
+
+use crate::error::VindexError;
+use crate::format::checksums::compute_base_checksum;
 use crate::index::types::DEFAULT_C_SCORE;
 use crate::index::FeatureMeta;
 
@@ -13,6 +17,30 @@ use super::format::{decode_gate_vector, PatchOp, VindexPatch};
 use super::overlay::PatchedVindex;
 
 impl PatchedVindex {
+    /// Apply a patch after verifying its `base_checksum` against the base
+    /// vindex directory.  Returns `VindexError::ChecksumMismatch` if the
+    /// patch was generated against a different base.
+    ///
+    /// Callers that do not have the base vindex path available (e.g. in-memory
+    /// only) should use `apply_patch` directly.
+    pub fn apply_patch_verified(
+        &mut self,
+        patch: VindexPatch,
+        base_dir: &Path,
+    ) -> Result<(), VindexError> {
+        if let Some(expected) = &patch.base_checksum {
+            let actual = compute_base_checksum(base_dir)?;
+            if &actual != expected {
+                return Err(VindexError::ChecksumMismatch {
+                    expected: expected.clone(),
+                    actual,
+                });
+            }
+        }
+        self.apply_patch(patch);
+        Ok(())
+    }
+
     /// Apply a patch. Operations are resolved into the override maps.
     pub fn apply_patch(&mut self, patch: VindexPatch) {
         for op in &patch.operations {
@@ -182,6 +210,7 @@ mod tests {
             description: None,
             author: None,
             tags: vec![],
+            dependencies: None,
             operations: ops,
         }
     }
@@ -200,6 +229,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }]);
         pv.apply_patch(patch);
         assert!(pv.overrides_meta.contains_key(&(2, 5)));
@@ -225,6 +255,7 @@ mod tests {
                 top_token_id: 42,
                 c_score: 0.75,
             }),
+            quality: None,
         }]);
         pv.apply_patch(patch);
         let meta = pv.overrides_meta[&(1, 10)].as_ref().unwrap();
@@ -249,6 +280,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }]);
         pv.apply_patch(patch);
         assert!(pv.overrides_gate.contains_key(&(3, 7)));
@@ -279,6 +311,7 @@ mod tests {
             up_vector_b64: Some(encode_gate_vector(&up)),
             down_vector_b64: Some(encode_gate_vector(&down)),
             down_meta: None,
+            quality: None,
         }]);
         pv.apply_patch(patch);
         assert_eq!(pv.overrides_gate_at(4, 9), Some(gate.as_slice()));
@@ -315,6 +348,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }]);
         pv.apply_patch(insert_patch);
         assert!(pv.overrides_gate.contains_key(&(0, 1)));
@@ -343,6 +377,7 @@ mod tests {
                 top_token_id: 99,
                 c_score: 0.5,
             }),
+            quality: None,
         }]);
         pv.apply_patch(patch);
         let meta = pv.overrides_meta[&(0, 2)].as_ref().unwrap();
@@ -365,6 +400,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }]);
         let p2 = make_patch(vec![PatchOp::Insert {
             layer: 0,
@@ -377,6 +413,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }]);
         pv.apply_patch(p1);
         pv.apply_patch(p2);
@@ -399,6 +436,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }]);
         let p2 = make_patch(vec![PatchOp::Insert {
             layer: 0,
@@ -411,6 +449,7 @@ mod tests {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }]);
         pv.apply_patch(p1);
         pv.apply_patch(p2);
@@ -468,5 +507,50 @@ mod tests {
         assert_eq!(pv.knn_store.len(), 1);
         pv.apply_patch(delete);
         assert_eq!(pv.knn_store.len(), 0);
+    }
+
+    // Gap A: apply_patch_verified — checksum paths
+
+    #[test]
+    fn apply_patch_verified_succeeds_when_base_checksum_is_none() {
+        // base_checksum = None skips verification regardless of base_dir content.
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut pv = empty_pv();
+        let patch = make_patch(vec![]);
+        // No index.json needed — the None branch is a no-op.
+        pv.apply_patch_verified(patch, dir.path())
+            .expect("no-verify path should succeed");
+    }
+
+    #[test]
+    fn apply_patch_verified_succeeds_when_checksums_match() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("index.json"), b"{\"version\":2}").unwrap();
+        let actual = crate::format::checksums::compute_base_checksum(dir.path()).unwrap();
+
+        let mut pv = empty_pv();
+        let mut patch = make_patch(vec![]);
+        patch.base_checksum = Some(actual);
+        pv.apply_patch_verified(patch, dir.path())
+            .expect("matching checksum should succeed");
+    }
+
+    #[test]
+    fn apply_patch_verified_returns_checksum_mismatch_on_wrong_hash() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("index.json"), b"{\"version\":2}").unwrap();
+
+        let mut pv = empty_pv();
+        let mut patch = make_patch(vec![]);
+        patch.base_checksum =
+            Some("0000000000000000000000000000000000000000000000000000000000000000".into());
+
+        let err = pv
+            .apply_patch_verified(patch, dir.path())
+            .expect_err("mismatched checksum must error");
+        assert!(
+            matches!(err, crate::error::VindexError::ChecksumMismatch { .. }),
+            "expected ChecksumMismatch, got {err:?}"
+        );
     }
 }

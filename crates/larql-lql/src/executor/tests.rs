@@ -1802,6 +1802,7 @@ fn refresh_recorded_patch_ops_for_slots_persists_latest_overlay_vectors() {
                 9.0, 9.0, 9.0, 9.0,
             ])),
             down_meta: None,
+            quality: None,
         }],
     });
 
@@ -1970,6 +1971,7 @@ fn compile_on_conflict_fail_detects_collision() {
             description: None,
             author: None,
             tags: Vec::new(),
+            dependencies: None,
             operations: vec![PatchOp::Insert {
                 layer: 0,
                 feature: 0,
@@ -1981,6 +1983,7 @@ fn compile_on_conflict_fail_detects_collision() {
                 up_vector_b64: None,
                 down_vector_b64: None,
                 down_meta: None,
+                quality: None,
             }],
         };
         patched.patches.push(mkp("A"));
@@ -2020,6 +2023,7 @@ fn compile_on_conflict_last_wins_succeeds() {
             description: None,
             author: None,
             tags: Vec::new(),
+            dependencies: None,
             operations: vec![PatchOp::Insert {
                 layer: 0,
                 feature: 0,
@@ -2031,6 +2035,7 @@ fn compile_on_conflict_last_wins_succeeds() {
                 up_vector_b64: None,
                 down_vector_b64: None,
                 down_meta: None,
+                quality: None,
             }],
         };
         patched.patches.push(mkp("A"));
@@ -2067,6 +2072,7 @@ fn memit_facts_count_inserts_only() {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         },
         PatchOp::Delete {
             layer: 10,
@@ -2080,6 +2086,7 @@ fn memit_facts_count_inserts_only() {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         },
     ];
     let insert_count = ops
@@ -2101,6 +2108,7 @@ fn memit_facts_deduplicate_across_patches() {
         description: None,
         author: None,
         tags: Vec::new(),
+        dependencies: None,
         operations: vec![PatchOp::Insert {
             layer: 10,
             feature: 5,
@@ -2112,6 +2120,7 @@ fn memit_facts_deduplicate_across_patches() {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }],
     };
     let patches = vec![mkp(0.9), mkp(0.95)];
@@ -3041,6 +3050,7 @@ fn compile_skips_memit_fact_with_no_relation() {
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }],
     });
 
@@ -4683,6 +4693,7 @@ fn compile_into_vindex_on_conflict_highest_confidence_runs() {
             description: None,
             author: None,
             tags: Vec::new(),
+            dependencies: None,
             operations: vec![PatchOp::Insert {
                 layer: 0,
                 feature: 0,
@@ -4694,6 +4705,7 @@ fn compile_into_vindex_on_conflict_highest_confidence_runs() {
                 up_vector_b64: None,
                 down_vector_b64: None,
                 down_meta: None,
+                quality: None,
             }],
         };
         patched.patches.push(mkp(0.5, "low"));
@@ -4793,6 +4805,7 @@ fn mk_insert_patch(
         description: None,
         author: None,
         tags: Vec::new(),
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Insert {
             layer,
             feature,
@@ -4804,6 +4817,7 @@ fn mk_insert_patch(
             up_vector_b64: None,
             down_vector_b64: None,
             down_meta: None,
+            quality: None,
         }],
     }
 }
@@ -4975,4 +4989,225 @@ fn compact_major_skips_inserts_with_no_relation() {
         "expected the relation-bearing edge to still flow through MEMIT, got: {joined}",
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ══════════════════════════════════════════════════════════════
+// Gap E: FeatureQuality propagation — DIFF INTO PATCH carries quality annotations
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn diff_into_patch_carries_feature_quality_annotations() {
+    // DIFF base → modified with INTO PATCH; the emitted .vlp ops must carry
+    // quality annotations derived from the target c_score via from_c_score().
+    let dir_a = make_test_vindex_dir("fq_diff_a");
+    let dir_b = make_modified_test_vindex_dir("fq_diff_b");
+    let patch_path = std::env::temp_dir().join(format!(
+        "larql_fq_diff_{}_{}_.vlp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    ));
+    let mut session = Session::new();
+    let stmt = parser::parse(&format!(
+        r#"DIFF "{}" "{}" INTO PATCH "{}";"#,
+        lql_path(&dir_a),
+        lql_path(&dir_b),
+        lql_path(&patch_path),
+    ))
+    .unwrap();
+    session
+        .execute(&stmt)
+        .expect("DIFF INTO PATCH for quality check");
+
+    let patch =
+        larql_vindex::VindexPatch::load(&patch_path).expect("patch file should be loadable");
+
+    // L0F0: Paris→Madrid (c_score 0.92 → Monosemantic) → Update op
+    // L1F1: None→Rome   (c_score 0.85 → Monosemantic) → Insert op
+    let update_quality = patch.operations.iter().find_map(|op| match op {
+        larql_vindex::PatchOp::Update {
+            layer: 0,
+            feature: 0,
+            quality,
+            ..
+        } => quality.as_ref(),
+        _ => None,
+    });
+    assert_eq!(
+        update_quality,
+        Some(&larql_vindex::patch::format::FeatureQuality::Monosemantic),
+        "L0F0 Update op (c_score 0.92) must be annotated Monosemantic"
+    );
+
+    let insert_quality = patch.operations.iter().find_map(|op| match op {
+        larql_vindex::PatchOp::Insert {
+            layer: 1,
+            feature: 1,
+            quality,
+            ..
+        } => quality.as_ref(),
+        _ => None,
+    });
+    assert_eq!(
+        insert_quality,
+        Some(&larql_vindex::patch::format::FeatureQuality::Monosemantic),
+        "L1F1 Insert op (c_score 0.85) must be annotated Monosemantic"
+    );
+
+    let _ = std::fs::remove_file(&patch_path);
+    let _ = std::fs::remove_dir_all(&dir_a);
+    let _ = std::fs::remove_dir_all(&dir_b);
+}
+
+// CREATE VINDEX … EMPTY
+// ══════════════════════════════════════════════════════════════
+
+/// Write a minimal `config.json` that `detect_architecture` accepts.
+fn make_model_config_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "larql_lql_model_config_{tag}_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let config_json = serde_json::json!({
+        "model_type": "tinymodel",
+        "hidden_size": 16,
+        "num_hidden_layers": 2,
+        "intermediate_size": 32,
+        "head_dim": 8,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 2,
+        "vocab_size": 64,
+    });
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string_pretty(&config_json).unwrap(),
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn create_vindex_empty_produces_initial_object() {
+    let model_dir = make_model_config_dir("create_empty_basic");
+    let out_dir = std::env::temp_dir().join(format!(
+        "larql_lql_create_empty_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&out_dir);
+
+    let mut session = Session::new();
+    let stmt = parser::parse(&format!(
+        r#"CREATE VINDEX "{}" ARCHITECTURE "{}" EMPTY;"#,
+        lql_path(&out_dir),
+        lql_path(&model_dir),
+    ))
+    .unwrap();
+
+    let result = session
+        .execute(&stmt)
+        .expect("create_vindex_empty should succeed");
+    assert!(!result.is_empty(), "expected non-empty output");
+    assert!(result[0].contains("Created empty vindex"));
+
+    // Read back and verify this is the initial object (num_features = 0 ∀ layer).
+    let config = larql_vindex::load_vindex_config(&out_dir)
+        .expect("index.json should be present after CREATE VINDEX EMPTY");
+    assert_eq!(config.num_layers, 2, "num_layers should match architecture");
+    assert_eq!(config.hidden_size, 16);
+    assert_eq!(config.intermediate_size, 32);
+    assert_eq!(
+        config.extract_level,
+        larql_vindex::ExtractLevel::Browse,
+        "empty vindex is Browse-tier (initial object)"
+    );
+    for layer_info in &config.layers {
+        assert_eq!(
+            layer_info.num_features, 0,
+            "initial object has no features at layer {}",
+            layer_info.layer
+        );
+    }
+    assert_eq!(config.layers.len(), 2);
+
+    let _ = std::fs::remove_dir_all(&model_dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn create_vindex_empty_then_apply_patch_yields_rank1_object() {
+    use larql_vindex::{PatchOp, VindexPatch};
+
+    let model_dir = make_model_config_dir("create_empty_patch");
+    let out_dir = std::env::temp_dir().join(format!(
+        "larql_lql_create_empty_patch_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&out_dir);
+
+    // Create the empty vindex (initial object).
+    let mut session = Session::new();
+    let create_stmt = parser::parse(&format!(
+        r#"CREATE VINDEX "{}" ARCHITECTURE "{}" EMPTY;"#,
+        lql_path(&out_dir),
+        lql_path(&model_dir),
+    ))
+    .unwrap();
+    session.execute(&create_stmt).expect("CREATE VINDEX EMPTY");
+
+    // Apply a one-operation patch (inserts one feature → rank-1 object).
+    let patch = VindexPatch {
+        version: 2,
+        base_model: "tinymodel".to_string(),
+        base_checksum: None,
+        created_at: "2026-06-05T00:00:00Z".to_string(),
+        description: None,
+        author: None,
+        tags: vec![],
+        dependencies: None,
+        operations: vec![PatchOp::Insert {
+            layer: 0,
+            feature: 0,
+            relation: Some("capital".to_string()),
+            entity: "France".to_string(),
+            target: "Paris".to_string(),
+            confidence: Some(0.9),
+            gate_vector_b64: None,
+            up_vector_b64: None,
+            down_vector_b64: None,
+            down_meta: None,
+            quality: None,
+        }],
+    };
+    let patch_path = out_dir.join("test.vlp");
+    let patch_json = serde_json::to_string_pretty(&patch).unwrap();
+    std::fs::write(&patch_path, &patch_json).unwrap();
+
+    let apply_stmt =
+        parser::parse(&format!(r#"APPLY PATCH "{}";"#, lql_path(&patch_path))).unwrap();
+
+    // USE the vindex first so the session has a backend.
+    let use_stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&out_dir))).unwrap();
+    session.execute(&use_stmt).expect("USE empty vindex");
+    session
+        .execute(&apply_stmt)
+        .expect("APPLY PATCH to empty vindex");
+
+    let _ = std::fs::remove_dir_all(&model_dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
 }

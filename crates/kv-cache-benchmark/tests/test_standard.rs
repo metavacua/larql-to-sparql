@@ -57,13 +57,16 @@ fn test_standard_kv_memory_formula() {
     let expected = 4096 * 34 * 2 * 2 * 256 * 2;
     assert_eq!(mem, expected);
 
-    // 370K tokens
-    let mem_370k = StandardKv.memory_bytes(&config, 370_000);
-    let expected_370k = 370_000 * 34 * 2 * 2 * 256 * 2;
-    assert_eq!(mem_370k, expected_370k);
-    // 370K × 34L × 2(KV) × 2 heads × 256 dim × 2 bytes = ~25.8 GB
-    assert!(mem_370k > 20_000_000_000);
-    assert!(mem_370k < 30_000_000_000);
+    // 370K tokens — 25.8 GB exceeds 32-bit usize; skip on 32-bit targets
+    #[cfg(target_pointer_width = "64")]
+    {
+        let mem_370k = StandardKv.memory_bytes(&config, 370_000);
+        let expected_370k = 370_000 * 34 * 2 * 2 * 256 * 2;
+        assert_eq!(mem_370k, expected_370k);
+        // 370K × 34L × 2(KV) × 2 heads × 256 dim × 2 bytes = ~25.8 GB
+        assert!(mem_370k > 20_000_000_000);
+        assert!(mem_370k < 30_000_000_000);
+    }
 }
 
 #[test]

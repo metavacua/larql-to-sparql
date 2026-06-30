@@ -1946,3 +1946,102 @@ fn parser_rejects_trailing_identifier_without_semicolon() {
     let result = parse(r#"STATS unexpected"#);
     assert!(result.is_err(), "single-statement parser must consume EOF");
 }
+
+// ── EXPORT PATCH ──
+
+#[test]
+fn parse_export_patch_minimal() {
+    let stmt = parse(r#"EXPORT PATCH TO "gh://owner/repo";"#).unwrap();
+    match stmt {
+        Statement::ExportPatch {
+            target,
+            branch,
+            message,
+        } => {
+            assert_eq!(target, "gh://owner/repo");
+            assert!(branch.is_none());
+            assert!(message.is_none());
+        }
+        _ => panic!("expected ExportPatch"),
+    }
+}
+
+#[test]
+fn parse_export_patch_with_branch_and_message() {
+    let stmt =
+        parse(r#"EXPORT PATCH TO "gh://owner/repo" BRANCH "knowledge" MESSAGE "add facts";"#)
+            .unwrap();
+    match stmt {
+        Statement::ExportPatch {
+            target,
+            branch,
+            message,
+        } => {
+            assert_eq!(target, "gh://owner/repo");
+            assert_eq!(branch.as_deref(), Some("knowledge"));
+            assert_eq!(message.as_deref(), Some("add facts"));
+        }
+        _ => panic!("expected ExportPatch"),
+    }
+}
+
+#[test]
+fn parse_export_patch_message_before_branch() {
+    let stmt = parse(r#"EXPORT PATCH TO "gh://owner/repo" MESSAGE "msg" BRANCH "br";"#).unwrap();
+    match stmt {
+        Statement::ExportPatch {
+            target,
+            branch,
+            message,
+        } => {
+            assert_eq!(target, "gh://owner/repo");
+            assert_eq!(branch.as_deref(), Some("br"));
+            assert_eq!(message.as_deref(), Some("msg"));
+        }
+        _ => panic!("expected ExportPatch"),
+    }
+}
+
+// ── CREATE VINDEX ──
+
+#[test]
+fn parse_create_vindex_empty() {
+    let stmt =
+        parse(r#"CREATE VINDEX "/tmp/new.vindex" ARCHITECTURE "gemma-3-4b" EMPTY;"#).unwrap();
+    match stmt {
+        Statement::CreateVindex {
+            path,
+            architecture,
+            init,
+        } => {
+            assert_eq!(path, "/tmp/new.vindex");
+            assert_eq!(architecture, "gemma-3-4b");
+            assert_eq!(init, VindexInit::Empty);
+        }
+        _ => panic!("expected CreateVindex"),
+    }
+}
+
+#[test]
+fn parse_create_vindex_empty_no_semicolon() {
+    let stmt = parse(r#"CREATE VINDEX "/out" ARCHITECTURE "google/gemma-3-4b-it" EMPTY"#).unwrap();
+    assert!(matches!(
+        stmt,
+        Statement::CreateVindex {
+            init: VindexInit::Empty,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn parse_create_vindex_case_insensitive_keywords() {
+    let stmt = parse(r#"create vindex "/x" architecture "model" empty"#).unwrap();
+    assert!(matches!(
+        stmt,
+        Statement::CreateVindex {
+            init: VindexInit::Empty,
+            ..
+        }
+    ));
+}

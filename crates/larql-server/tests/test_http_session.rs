@@ -33,6 +33,7 @@ async fn session_manager_apply_patch_and_list() {
         description: Some("my-patch".into()),
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Delete {
             layer: 0,
             feature: 0,
@@ -61,6 +62,7 @@ async fn session_manager_remove_nonexistent_patch_returns_err() {
         description: Some("my-patch".into()),
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Delete {
             layer: 0,
             feature: 0,
@@ -88,6 +90,7 @@ async fn session_manager_remove_patch_by_name() {
             description: Some((*name).into()),
             author: None,
             tags: vec![],
+            dependencies: None,
             operations: vec![larql_vindex::PatchOp::Delete {
                 layer: 0,
                 feature: 1,
@@ -127,6 +130,7 @@ fn one_op_patch(name: &str) -> larql_vindex::VindexPatch {
         description: Some(name.into()),
         author: None,
         tags: vec![],
+        dependencies: None,
         operations: vec![larql_vindex::PatchOp::Delete {
             layer: 0,
             feature: 0,

@@ -123,7 +123,9 @@ impl VectorIndex {
                 "gate_vectors (absent — client-only slice)",
                 &dir.display().to_string(),
             );
-            let empty = memmap2::MmapMut::map_anon(0)?.make_read_only()?;
+            // map_anon(0) fails on Windows (CreateFileMapping returns ERROR_INVALID_PARAMETER
+            // when size is zero). Use 1 byte — the mmap is never dereferenced when num_features=0.
+            let empty = memmap2::MmapMut::map_anon(1)?.make_read_only()?;
             let gate_slices: Vec<crate::index::core::GateLayerSlice> = vec![
                 crate::index::core::GateLayerSlice { float_offset: 0, num_features: 0 };
                 num_layers

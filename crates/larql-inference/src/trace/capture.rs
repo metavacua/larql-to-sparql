@@ -149,26 +149,28 @@ pub fn trace(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ffn::FfnBackend;
-    use crate::forward::trace_forward_with_ffn;
-    // `forward_raw_logits` / `hidden_to_raw_logits` are only used by
-    // `trace_final_residual_matches_raw_forward_logits`, which is gated
-    // off on Windows. Keep the imports under the same gate so `clippy
-    // -D warnings` doesn't trip on unused imports.
-    #[cfg(not(windows))]
-    use crate::forward::{forward_raw_logits, hidden_to_raw_logits};
     use crate::test_utils::make_test_weights;
     use larql_models::ModelWeights;
-    use ndarray::Array2;
     use std::sync::OnceLock;
+    // All items below are only used by tests gated off on Windows:
+    // non-reproducible OpenBLAS summation order across dispatch paths
+    // means cross-path residual comparisons can't meet any tight tolerance.
+    #[cfg(not(windows))]
+    use crate::ffn::FfnBackend;
+    #[cfg(not(windows))]
+    use crate::forward::{forward_raw_logits, hidden_to_raw_logits, trace_forward_with_ffn};
+    #[cfg(not(windows))]
+    use ndarray::Array2;
 
     fn weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)
     }
 
+    #[cfg(not(windows))]
     struct ZeroFfn;
 
+    #[cfg(not(windows))]
     impl FfnBackend for ZeroFfn {
         fn forward(&self, _layer: usize, x: &Array2<f32>) -> Array2<f32> {
             Array2::zeros((x.nrows(), x.ncols()))
@@ -321,6 +323,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn trace_custom_ffn_matches_hooked_forward_final_residual() {
         let w = weights();

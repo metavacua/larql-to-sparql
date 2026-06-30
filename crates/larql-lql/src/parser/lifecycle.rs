@@ -211,6 +211,38 @@ impl Parser {
         Ok(Statement::Use { target })
     }
 
+    /// `EXPORT PATCH TO "gh://owner/repo" [BRANCH "branch"] [MESSAGE "msg"];`
+    pub(crate) fn parse_export_patch(&mut self) -> Result<Statement, ParseError> {
+        self.expect_keyword(Keyword::Export)?;
+        self.expect_keyword(Keyword::Patch)?;
+        self.expect_keyword(Keyword::To)?;
+        let target = self.expect_string()?;
+
+        let mut branch = None;
+        let mut message = None;
+
+        loop {
+            match self.peek() {
+                crate::lexer::Token::Keyword(Keyword::Branch) => {
+                    self.advance();
+                    branch = Some(self.expect_string()?);
+                }
+                crate::lexer::Token::Keyword(Keyword::Message) => {
+                    self.advance();
+                    message = Some(self.expect_string()?);
+                }
+                _ => break,
+            }
+        }
+
+        self.eat_semicolon();
+        Ok(Statement::ExportPatch {
+            target,
+            branch,
+            message,
+        })
+    }
+
     /// `COMPACT MINOR;`
     /// `COMPACT MAJOR [FULL] [WITH LAMBDA = <f>];`
     pub(crate) fn parse_compact(&mut self) -> Result<Statement, ParseError> {
@@ -264,5 +296,41 @@ impl Parser {
                 self.peek(),
             ))),
         }
+    }
+
+    /// `CREATE VINDEX "path" ARCHITECTURE "model-id-or-path" EMPTY;`
+    pub(crate) fn parse_create_vindex(&mut self) -> Result<Statement, ParseError> {
+        self.expect_keyword(Keyword::Create)?;
+        // VINDEX parsed as a case-insensitive identifier (same pattern as COMPILE INTO VINDEX)
+        match self.peek() {
+            crate::lexer::Token::Ident(ref s) if s.eq_ignore_ascii_case("vindex") => {
+                self.advance();
+            }
+            other => {
+                return Err(ParseError(format!(
+                    "expected VINDEX after CREATE, got {other:?}"
+                )));
+            }
+        }
+        let path = self.expect_string()?;
+        // ARCHITECTURE parsed as a case-insensitive identifier
+        match self.peek() {
+            crate::lexer::Token::Ident(ref s) if s.eq_ignore_ascii_case("architecture") => {
+                self.advance();
+            }
+            other => {
+                return Err(ParseError(format!(
+                    "expected ARCHITECTURE after path, got {other:?}"
+                )));
+            }
+        }
+        let architecture = self.expect_string()?;
+        self.expect_keyword(Keyword::Empty)?;
+        self.eat_semicolon();
+        Ok(Statement::CreateVindex {
+            path,
+            architecture,
+            init: VindexInit::Empty,
+        })
     }
 }

@@ -186,6 +186,14 @@ jobs:
       - name: Format check
         run: cargo fmt -p larql-cli -- --check
 
+      - name: Clippy (CPU only) on Linux/Windows/Android
+        if: matrix.platform != 'macos'
+        run: cargo clippy -p larql-cli --target ${{ matrix.target }} --bins --tests --no-default-features -- -D warnings
+
+      - name: Clippy (default features incl. metal) on macOS
+        if: matrix.platform == 'macos'
+        run: cargo clippy -p larql-cli --target ${{ matrix.target }} --bins --tests -- -D warnings
+
       - name: Check (CPU only) on Linux/Windows/Android
         if: matrix.platform != 'macos'
         run: cargo check -p larql-cli --target ${{ matrix.target }} --bins --tests --no-default-features
