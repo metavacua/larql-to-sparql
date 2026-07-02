@@ -128,6 +128,34 @@ pub fn ridge_decomposition_solve(
     Ok(delta_w_f64.mapv(|v| v as f32))
 }
 
+/// Back-substitution: solve L^T X = B where L is lower-triangular.
+/// L^T is upper-triangular, so we iterate from bottom row to top.
+/// Returns X of the same shape as B.
+pub fn back_solve_lt(l: &Array2<f64>, b: &Array2<f64>) -> Array2<f64> {
+    let n = l.shape()[0];
+    let m = b.shape()[1];
+    let mut x = Array2::<f64>::zeros((n, m));
+    // L^T[i,j] = L[j,i]. Upper-triangular back-substitution:
+    for i in (0..n).rev() {
+        for col in 0..m {
+            let mut sum = b[[i, col]];
+            for k in (i + 1)..n {
+                sum -= l[[k, i]] * x[[k, col]]; // L^T[i,k] = L[k,i]
+            }
+            x[[i, col]] = sum / l[[i, i]];
+        }
+    }
+    x
+}
+
+/// Compute L^{-T} explicitly: the d×d matrix such that L^{-T} @ L^T = I.
+/// Solves L^T X = I column by column via back_solve_lt.
+pub fn compute_l_inv_t(l: &Array2<f64>) -> Array2<f64> {
+    let n = l.shape()[0];
+    let identity = Array2::<f64>::eye(n);
+    back_solve_lt(l, &identity)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,6 +315,52 @@ mod tests {
             let nt: f32 = t_i.iter().map(|v| v * v).sum::<f32>().sqrt();
             let cos = dot / (nr * nt + 1e-12);
             assert!(cos > 0.95, "fact {i}: cos {cos}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod canonical_linalg_tests {
+    use super::*;
+    use ndarray::Array2;
+
+    fn lower_3x3() -> Array2<f64> {
+        // L = [[2,0,0],[1,3,0],[4,5,6]]
+        let mut l = Array2::<f64>::zeros((3, 3));
+        l[[0,0]] = 2.0; l[[1,0]] = 1.0; l[[1,1]] = 3.0;
+        l[[2,0]] = 4.0; l[[2,1]] = 5.0; l[[2,2]] = 6.0;
+        l
+    }
+
+    #[test]
+    fn back_solve_lt_recovers_rhs() {
+        // L^T z = b, check L^T (back_solve_lt(L, b)) == b
+        let l = lower_3x3();
+        let b = Array2::from_shape_vec((3, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+        let z = back_solve_lt(&l, &b);
+        // Verify L^T z == b
+        let lt = l.t().to_owned();
+        for col in 0..2 {
+            for row in 0..3 {
+                let dot: f64 = (0..3).map(|k| lt[[row, k]] * z[[k, col]]).sum();
+                assert!((dot - b[[row, col]]).abs() < 1e-10, "row={row} col={col} dot={dot} expected={}", b[[row,col]]);
+            }
+        }
+    }
+
+    #[test]
+    fn compute_l_inv_t_times_l_t_is_identity() {
+        let l = lower_3x3();
+        let l_inv_t = compute_l_inv_t(&l);
+        // l_inv_t @ l^T should == I
+        let lt = l.t().to_owned();
+        let product = l_inv_t.dot(&lt);
+        for i in 0..3 {
+            for j in 0..3 {
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!((product[[i,j]] - expected).abs() < 1e-10,
+                    "product[{i},{j}]={} expected={expected}", product[[i,j]]);
+            }
         }
     }
 }

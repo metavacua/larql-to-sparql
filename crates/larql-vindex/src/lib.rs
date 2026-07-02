@@ -25,6 +25,7 @@
 // BLAS provided by larql-compute dependency (no direct blas_src needed)
 
 // ── Module structure ──
+pub mod canonical;
 pub mod clustering;
 pub mod config;
 pub mod describe;
@@ -51,6 +52,9 @@ pub use ndarray;
 pub use tokenizers;
 
 // ── Re-export essentials at crate root ──
+
+// Canonical
+pub use canonical::{CanonicalMeta, LayerCanonicalInfo, Regime};
 
 // Config
 pub use config::dtype::StorageDtype;

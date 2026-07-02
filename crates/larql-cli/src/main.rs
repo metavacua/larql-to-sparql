@@ -151,6 +151,10 @@ enum Commands {
     /// Cross-backend numerical parity diff (CPU vs Metal vs reference).
     Parity(parity::ParityArgs),
 
+    #[command(next_help_heading = "Build")]
+    /// Compute canonical form metadata for a vindex (writes canonical_meta.json).
+    Canonicalize(canonicalize_cmd::CanonicalizeArgs),
+
     // ── Query (legacy, pre-LQL graph-file surface) ──────────────────
     #[command(next_help_heading = "Query")]
     /// Query a graph file for facts.
@@ -563,6 +567,7 @@ fn real_main() -> i32 {
         Commands::ExtractIndex(args) => extract_index_cmd::run(args),
         Commands::Build(args) => build_cmd::run(args),
         Commands::Compile(args) => compile_cmd::run(args),
+        Commands::Canonicalize(args) => canonicalize_cmd::run(args),
         Commands::Convert(args) => convert_cmd::run(args),
         Commands::Hf(args) => hf_cmd::run(args),
         Commands::Verify(args) => verify_cmd::run(args),
