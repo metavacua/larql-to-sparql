@@ -96,7 +96,11 @@ start_monitor() {
             printf '{"ts":"%s","mem_avail_kb":%d,"top":[%s]}\n' "$ts" "$avail" "$procs" >> "$logfile"
             sleep "$POLL_INTERVAL"
         done
-    ) &
+    ) >/dev/null 2>&1 &
+    # ^ stdout MUST be redirected: this function is called via command substitution
+    # (monitor_pid=$(start_monitor ...)); without the redirect the backgrounded
+    # subshell inherits and holds the substitution's stdout pipe, so $() never
+    # sees EOF and cmd_safe deadlocks before ever running the wrapped command.
     echo $!
 }
 
@@ -327,9 +331,12 @@ cmd_safe() {
             -p "MemorySwapMax=0"
             -p "CPUWeight=${cpu_weight}"
             -p "CPUQuota=${cpu_quota}%"
+            "--uid=$(id -un)"
             "--setenv=RAYON_NUM_THREADS=${rayon_threads}"
             "--setenv=TOKIO_WORKER_THREADS=${tokio_threads}"
         )
+        # --uid: without it, sudo systemd-run executes the wrapped command as ROOT,
+        # leaving root-owned output files (observed: extracted vindex unwritable by user).
         if [[ $no_cpu_pin -eq 0 ]]; then
             sd_args+=( -p "AllowedCPUs=${cpu_range}" )
         fi
