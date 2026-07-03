@@ -633,6 +633,7 @@ pub fn walk_trace_from_residuals(
                     layer: *layer,
                     feature,
                     gate_score,
+                    cosine_score: 0.0,
                     meta,
                 })
             })

@@ -1,27 +1,6 @@
-// ── Local routing math ────────────────────────────────────────────────────────
-// Mirrored from larql-compute cpu/ops/moe.rs so the client can route without
-// having the expert weights locally.
-
-pub(super) fn rms_norm(x: &[f32], w: &[f32], eps: f32, offset: f32) -> Vec<f32> {
-    if w.is_empty() || x.is_empty() {
-        return x.to_vec();
-    }
-    let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32 + eps).sqrt();
-    x.iter()
-        .zip(w.iter())
-        .map(|(&xi, &wi)| xi / rms * (wi + offset))
-        .collect()
-}
-
-/// Parameter-free RMSNorm (HF `Gemma4RMSNorm(with_scale=False)`): scales
-/// `x` by `1/sqrt(mean(x²) + eps)` with no learned weight.
-pub(super) fn rms_norm_no_weight(x: &[f32], eps: f32) -> Vec<f32> {
-    if x.is_empty() {
-        return Vec::new();
-    }
-    let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32 + eps).sqrt();
-    x.iter().map(|v| v / rms).collect()
-}
+pub(super) use larql_compute::cpu::ops::moe::rms_norm;
+pub(super) use larql_compute::cpu::ops::moe::rms_norm_no_weight;
+use larql_compute::cpu::ops::moe::{softmax, top_k};
 
 fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<f32> {
     (0..out_rows)
@@ -30,31 +9,6 @@ fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<f32>
             x.iter().zip(w_row.iter()).map(|(a, b)| a * b).sum()
         })
         .collect()
-}
-
-fn softmax(v: &mut [f32]) {
-    let max = v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let mut sum = 0.0f32;
-    for x in v.iter_mut() {
-        *x = (*x - max).exp();
-        sum += *x;
-    }
-    if sum > 0.0 {
-        for x in v.iter_mut() {
-            *x /= sum;
-        }
-    }
-}
-
-fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
-    let k = k.min(v.len());
-    let mut indexed: Vec<(usize, f32)> = v.iter().copied().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    indexed.truncate(k);
-    (
-        indexed.iter().map(|(i, _)| *i).collect(),
-        indexed.iter().map(|(_, v)| *v).collect(),
-    )
 }
 
 /// Routing-only parameters. A subset of `MoeLayerWeights` — the expert weight

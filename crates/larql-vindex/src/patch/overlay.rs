@@ -546,6 +546,7 @@ impl PatchedVindex {
                         layer,
                         feature,
                         gate_score,
+                        cosine_score: 0.0,
                         meta,
                     })
                 })
@@ -555,6 +556,27 @@ impl PatchedVindex {
         WalkTrace {
             layers: trace_layers,
         }
+    }
+
+    /// Walk with cosine gate scores for DESCRIBE — model-scale-invariant.
+    ///
+    /// When the index has no patches (the common case for DESCRIBE), delegates
+    /// to `base.walk_cosine` so WalkHit.cosine_score holds true cosine
+    /// similarity and collect.rs can apply a scale-invariant threshold.
+    ///
+    /// When patches are present, falls back to the raw-dot `walk`
+    /// (cosine_score=0.0). collect.rs detects zero cosine_score and uses
+    /// the legacy DESCRIBE_GATE_THRESHOLD for those hits.
+    pub fn walk_cosine(
+        &self,
+        residual: &Array1<f32>,
+        layers: &[usize],
+        top_k: usize,
+    ) -> WalkTrace {
+        if self.overrides_gate.is_empty() && self.deleted.is_empty() {
+            return self.base.walk_cosine(residual, layers, top_k);
+        }
+        self.walk(residual, layers, top_k)
     }
 
     /// Flatten all patches into the base, producing a new clean VectorIndex (heap mode).

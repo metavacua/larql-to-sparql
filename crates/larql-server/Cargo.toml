@@ -80,7 +80,7 @@ parking_lot = "0.12"
 # extraction reader.
 safetensors = "0.7"
 # Exp 53 ShardService criterion benches.
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { workspace = true }
 
 [[bench]]
 name = "shard_query"

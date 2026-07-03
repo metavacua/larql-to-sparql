@@ -53,7 +53,7 @@ impl Session {
         let scan_layers = describe_scan_layers(&bands, &patched.loaded_layers(), band, layer);
 
         // ── Phase 3: walk + collect edges ──
-        let trace = patched.walk(&query, &scan_layers, DESCRIBE_WALK_TOP_K);
+        let trace = patched.walk_cosine(&query, &scan_layers, DESCRIBE_WALK_TOP_K);
         let mut edges = describe_collect_edges(&trace, entity);
 
         // ── Phase 3b: append KNN store entries for this entity ──

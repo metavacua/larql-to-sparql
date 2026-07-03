@@ -39,6 +39,32 @@ impl VectorIndex {
         None
     }
 
+    /// Down-meta top-K token IDs for a feature, WITHOUT decoding to strings.
+    /// Same heap-then-mmap resolution as [`Self::feature_meta`], but skips the
+    /// per-token tokenizer `decode` — costly for large vocabularies. Use this
+    /// when only the token ids are needed (e.g. label-producer down-id matching).
+    pub fn down_token_ids(&self, layer: usize, feature: usize) -> Option<Vec<u32>> {
+        // Heap path first — catches mutation overrides (INSERT/UPDATE)
+        if let Some(meta) = self
+            .metadata
+            .down_meta
+            .get(layer)
+            .and_then(|v| v.as_ref())
+            .and_then(|metas| metas.get(feature))
+            .and_then(|m| m.as_ref())
+        {
+            let mut ids = Vec::with_capacity(meta.top_k.len() + 1);
+            ids.push(meta.top_token_id);
+            ids.extend(meta.top_k.iter().map(|e| e.token_id));
+            return Some(ids);
+        }
+        // Mmap path (production — zero heap, no mutations, no decode)
+        if let Some(ref dm) = self.metadata.down_meta_mmap {
+            return dm.down_token_ids(layer, feature);
+        }
+        None
+    }
+
     /// Human-readable description of what the walk kernel will actually
     /// do on this vindex. Use to sanity-check a loaded vindex — if the
     /// description says "weights fallback" or "dense (legacy)", the

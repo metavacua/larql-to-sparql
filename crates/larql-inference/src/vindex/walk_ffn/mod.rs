@@ -296,6 +296,7 @@ impl<'a> WalkFfn<'a> {
                         layer,
                         feature,
                         gate_score,
+                        cosine_score: 0.0,
                         meta,
                     })
                 })
