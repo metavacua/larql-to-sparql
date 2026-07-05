@@ -3781,6 +3781,57 @@ fn compact_major_with_lambda_clause_parses_and_errors_on_small_dim() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn compact_minor_cannot_relieve_l1_composed_facts_on_small_hidden_dim() {
+    // Regression anchor for #261: on hidden_dim<1024 models (this
+    // fixture is 16; smollm2-360m is 960), MODE COMPOSE facts that
+    // collide once a layer's capacity is exceeded have NO escalation
+    // path today. COMPACT MAJOR is deliberately gated to
+    // hidden_dim>=1024 (see compact_major_on_small_hidden_dim_errors)
+    // — that gate is intentional, not the bug. COMPACT MINOR is the
+    // only remaining primitive, but it only promotes L0 (KNN) entries
+    // to L1 (COMPOSE); it has no mechanism to touch facts already at
+    // L1. This test asserts that structurally: several MODE COMPOSE
+    // inserts sharing one layer leave COMPACT MINOR reporting "L0 is
+    // empty" — it cannot see, let alone resolve, L1-internal
+    // collisions.
+    //
+    // This does NOT reproduce the specific numeric cross-entity
+    // collision found empirically on a real (trained-weight)
+    // smollm2-360m vindex (see issue #261) — this fixture's weights
+    // are random-init, so gate_knn selection here is not meaningful
+    // in the same sense. What's asserted is the structural gap: no
+    // compaction primitive exists that can act on same-layer L1
+    // interference for this model class.
+    let (mut session, dir) = full_vindex_session("compact_minor_l1_gap");
+
+    for (e, r, t) in &[
+        ("[1]", "[2]", "[5]"),
+        ("[3]", "[2]", "[6]"),
+        ("[7]", "[2]", "[9]"),
+    ] {
+        let sql = format!(
+            r#"INSERT INTO EDGES (entity, relation, target)
+               VALUES ("{e}", "{r}", "{t}") AT LAYER 0 MODE COMPOSE;"#,
+        );
+        let stmt = parser::parse(&sql).unwrap();
+        let _ = session.execute(&stmt);
+    }
+
+    let stmt = parser::parse("COMPACT MINOR;").unwrap();
+    let out = session
+        .execute(&stmt)
+        .expect("COMPACT MINOR should run without error");
+    let joined = out.join("\n");
+    assert!(
+        joined.contains("L0 is empty"),
+        "expected COMPACT MINOR to have no visibility into L1-resident \
+         compose facts (confirming no escalation path exists for them \
+         on this model class), got: {joined}",
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ── Full-fixture tests (real ModelWeights on disk) ───────────
 
 #[test]
