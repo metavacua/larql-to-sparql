@@ -15,7 +15,11 @@ impl<'a> WeightSource for GgufWeightSource<'a> {
         let arr = self.gguf.get_tensor_f32(key).ok()??;
         let rows = arr.shape()[0];
         let cols = arr.shape()[1];
-        let data = arr.as_standard_layout().to_owned().into_raw_vec_and_offset().0;
+        let data = arr
+            .as_standard_layout()
+            .to_owned()
+            .into_raw_vec_and_offset()
+            .0;
         Some((data, rows, cols))
     }
 
@@ -47,8 +51,8 @@ impl<'a> WeightSource for GgufWeightSource<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larql_models::loading::gguf::{GgufFile, GgufTensor, GgufValue, GgufWriter};
     use crate::extract::streaming::tensor_io::GgufTensorSource;
+    use larql_models::loading::gguf::{GgufFile, GgufTensor, GgufValue, GgufWriter};
 
     fn make_test_gguf_source() -> (tempfile::TempDir, GgufTensorSource) {
         // 2-D tensor: logical shape (2 rows, 3 cols).
@@ -124,7 +128,11 @@ mod tests {
         let (data, rows, cols) = result.unwrap();
         assert_eq!(rows, 2, "rows must be 2");
         assert_eq!(cols, 3, "cols must be 3");
-        assert_eq!(data, vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], "data must be row-major");
+        assert_eq!(
+            data,
+            vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "data must be row-major"
+        );
 
         // Missing key → None
         assert!(ws.get_tensor("missing").is_none());
@@ -149,7 +157,11 @@ mod tests {
         };
 
         let result = ws.get_vector("n1d");
-        assert_eq!(result, Some(vec![7.0f32, 8.0, 9.0]), "get_vector must return 1-D data");
+        assert_eq!(
+            result,
+            Some(vec![7.0f32, 8.0, 9.0]),
+            "get_vector must return 1-D data"
+        );
 
         assert!(ws.get_vector("missing").is_none());
     }
@@ -195,8 +207,14 @@ mod tests {
         };
 
         let names = ws.vector_names();
-        assert!(names.contains(&"n1d".to_string()), "vector_names must contain 'n1d'; got: {names:?}");
-        assert!(!names.contains(&"w2d".to_string()), "vector_names must NOT contain 2-D key 'w2d'");
+        assert!(
+            names.contains(&"n1d".to_string()),
+            "vector_names must contain 'n1d'; got: {names:?}"
+        );
+        assert!(
+            !names.contains(&"w2d".to_string()),
+            "vector_names must NOT contain 2-D key 'w2d'"
+        );
     }
 
     /// Fix D: verify that `get_tensor` correctly row-major-flattens a transposed FFN tensor.
@@ -257,7 +275,10 @@ mod tests {
 
         // The normalized key for blk.0.ffn_up.weight is layers.0.mlp.up_proj.weight.
         let result = ws.get_tensor("layers.0.mlp.up_proj.weight");
-        assert!(result.is_some(), "get_tensor must return Some for the FFN key");
+        assert!(
+            result.is_some(),
+            "get_tensor must return Some for the FFN key"
+        );
         let (data_out, rows, cols) = result.unwrap();
         assert_eq!(rows, 2, "rows must equal intermediate_size after orient");
         assert_eq!(cols, 3, "cols must equal hidden_size after orient");
