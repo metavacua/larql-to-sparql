@@ -155,6 +155,9 @@ impl Session {
                             num_probes,
                             format_number(total_features),
                         ));
+                        if num_probes == 0 {
+                            out.push("    (no feature_labels.json — per-feature probe labels come from a separate labeling pass, not larql extract; cluster labels are used as fallback)".into());
+                        }
                         out.push(format!(
                             "    Cluster-labelled:  {:.0}% of clusters ({} / {})",
                             cluster_pct, mapped_clusters, num_clusters,

@@ -3513,6 +3513,37 @@ fn stats_with_relation_classifier_renders_coverage_breakdown() {
 }
 
 #[test]
+fn stats_without_feature_labels_notes_missing_probe_layer() {
+    // Classifier present (relation_clusters + feature_clusters) so the
+    // Coverage block renders, but NO feature_labels.json → num_probes == 0.
+    // STATS must surface a note that the probe-label layer is absent.
+    let dir = make_test_vindex_dir("stats_no_feature_labels");
+    std::fs::write(
+        dir.join(larql_vindex::format::filenames::RELATION_CLUSTERS_JSON),
+        r#"{"k":2,"centres":[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0]],"labels":["capital","language"],"counts":[5,3],"top_tokens":[["paris"],["english"]]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(larql_vindex::format::filenames::FEATURE_CLUSTERS_JSONL),
+        "{\"l\":0,\"f\":0,\"c\":0}\n{\"l\":1,\"f\":2,\"c\":1}\n",
+    )
+    .unwrap();
+    // Deliberately NO feature_labels.json.
+
+    let mut session = Session::new();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
+    session.execute(&stmt).expect("USE without feature_labels");
+    let stmt = parser::parse("STATS;").unwrap();
+    let out = session.execute(&stmt).expect("STATS");
+    let joined = out.join("\n");
+    assert!(
+        joined.contains("no feature_labels.json"),
+        "expected missing-probe-layer note, got: {joined}",
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn stats_with_explicit_path_runs() {
     // STATS "<path>" form — explicit vindex path argument.
     let (mut session, dir) = vindex_session("stats_path");
