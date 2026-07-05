@@ -69,6 +69,12 @@ pub(super) struct StreamingContext<'a> {
     /// Set by the embeddings stage; read by the down-meta stage. Held
     /// in an `Option` so down-meta can `take()` it if it ever needs to.
     pub(super) embed: Option<Array2<f32>>,
+
+    /// Relation-clustering accumulator. The down-meta stage collects
+    /// per-feature offset directions for knowledge-band features (dense
+    /// only); the orchestrator drains it into `run_clustering_pipeline`
+    /// after down-meta completes. Mirrors `BuildContext::cluster`.
+    pub(super) cluster: crate::extract::build_helpers::ClusterData,
 }
 
 impl<'a> StreamingContext<'a> {
@@ -223,6 +229,7 @@ impl<'a> StreamingContext<'a> {
             layer_infos: Vec::new(),
             vocab_size: 0,
             embed: None,
+            cluster: crate::extract::build_helpers::ClusterData::default(),
         })
     }
 

@@ -3,6 +3,8 @@
 use ndarray::Array2;
 
 use crate::error::VindexError;
+use crate::extract::build::{clustering_gate_key, knowledge_layer_range};
+use crate::extract::build_helpers::compute_gate_top_tokens_from_matrix;
 use crate::extract::constants::FEATURE_PROJECTION_BATCH;
 use crate::extract::stage_labels::*;
 use crate::extract::streaming::context::StreamingContext;
@@ -37,13 +39,19 @@ impl<'a> StreamingContext<'a> {
             .as_ref()
             .expect("embeddings stage must run before down_meta stage");
 
-        // Build whole-word vocab once
-        let (_ww_ids, _ww_embed) = crate::extract::build_helpers::build_whole_word_vocab(
-            self.tokenizer,
-            embed,
-            self.vocab_size,
-            self.hidden_size,
-        );
+        // Build whole-word vocab once — shared across knowledge layers for
+        // the gate→down clustering collection (mirrors the in-memory path).
+        let (ww_ids_shared, ww_embed_shared) =
+            crate::extract::build_helpers::build_whole_word_vocab(
+                self.tokenizer,
+                embed,
+                self.vocab_size,
+                self.hidden_size,
+            );
+
+        // Knowledge-band range drives which layers contribute relation
+        // directions, exactly as the in-memory path computes it.
+        let knowledge_layers = knowledge_layer_range(self.arch.family(), self.num_layers);
 
         let prefixes: Vec<&str> = self.prefixes.iter().map(|s| s.as_str()).collect();
         let down_layer_count = if resumed_down { 0 } else { self.num_layers };
@@ -146,6 +154,32 @@ impl<'a> StreamingContext<'a> {
                 continue;
             }
 
+            let is_knowledge_layer = knowledge_layers
+                .map(|(start, end)| layer >= start && layer < end)
+                .unwrap_or(false);
+
+            // Dense knowledge layers contribute relation directions for
+            // clustering. Pre-compute the gate top token per feature (the
+            // "what activates this feature" label) at full width, exactly
+            // as the in-memory path does. (MoE: skip — too many features.)
+            let gate_top_tokens: Vec<String> = if is_knowledge_layer && !self.is_moe {
+                let num_features = down_matrices[0].shape()[1];
+                let gate_key = clustering_gate_key(self.arch.as_ref(), layer);
+                let nk = normalize_key(&gate_key, &prefixes);
+                match self.tensor_source.get_tensor_f32(&nk)? {
+                    Some(w_gate) => compute_gate_top_tokens_from_matrix(
+                        w_gate.view(),
+                        self.tokenizer,
+                        num_features,
+                        &ww_ids_shared,
+                        &ww_embed_shared,
+                    ),
+                    None => vec![],
+                }
+            } else {
+                vec![]
+            };
+
             // The `--summary-features-per-expert` cap (which gates the
             // gate-vectors SVD path) also caps how many down_proj feature
             // columns we compute meta for. Without this cap, many-experts
@@ -218,6 +252,26 @@ impl<'a> StreamingContext<'a> {
                                 (String::new(), 0, 0.0)
                             };
 
+                        // Collect gate→down offset direction for relation
+                        // clustering — identical to the in-memory path
+                        // (`build::down_meta`). Dense knowledge layers only;
+                        // `feature_offset == 0` there, so `feat` is the
+                        // absolute feature index and indexes `gate_top_tokens`.
+                        if is_knowledge_layer && !gate_top_tokens.is_empty() {
+                            self.cluster.collect(
+                                layer,
+                                feat,
+                                &gate_top_tokens[feat],
+                                top_token_id,
+                                &top_token,
+                                &top_k_entries,
+                                embed.view(),
+                                self.tokenizer,
+                                self.hidden_size,
+                                self.vocab_size,
+                            );
+                        }
+
                         let feat_idx = feature_offset + feat;
                         if layer_down_meta.is_none() {
                             *layer_down_meta = Some(Vec::new());
@@ -269,5 +323,29 @@ impl<'a> StreamingContext<'a> {
             )?;
         }
         Ok(())
+    }
+
+    /// Stage 3b — k-means + label the relation directions the down-meta
+    /// stage collected, writing `relation_clusters.json` /
+    /// `feature_clusters.jsonl`. Mirrors `BuildContext::run_clustering`.
+    ///
+    /// Drains the `cluster_*` accumulators. No-op when nothing was
+    /// collected (e.g. a model with no knowledge band, an MoE model, or
+    /// a resumed run that skipped the down-meta loop) — the pipeline
+    /// early-returns on empty directions.
+    pub(in crate::extract::streaming) fn run_clustering(&mut self) -> Result<(), VindexError> {
+        let data = std::mem::take(&mut self.cluster);
+        let embed = match self.embed.as_ref() {
+            Some(e) => e,
+            None => return Ok(()),
+        };
+        crate::extract::build_helpers::run_clustering_pipeline(
+            data,
+            self.hidden_size,
+            embed.view(),
+            self.tokenizer,
+            self.output_dir,
+            self.callbacks,
+        )
     }
 }
