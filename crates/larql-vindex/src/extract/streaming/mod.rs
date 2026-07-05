@@ -21,7 +21,7 @@
 
 mod context;
 mod stages;
-mod tensor_io;
+pub(crate) mod tensor_io;
 
 use std::path::Path;
 
