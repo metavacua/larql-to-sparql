@@ -309,7 +309,7 @@ cmd_safe() {
         > "$metafile"
 
     local oom_before
-    oom_before=$(dmesg --time-format iso 2>/dev/null | grep -c "oom-kill:.*CONSTRAINT_MEMCG" || echo 0)
+    oom_before=$(dmesg --time-format iso 2>/dev/null | grep -c "oom-kill:.*CONSTRAINT_MEMCG")
 
     local monitor_pid
     monitor_pid=$(start_monitor "$logfile")
@@ -334,13 +334,24 @@ cmd_safe() {
             "--uid=$(id -un)"
             "--setenv=RAYON_NUM_THREADS=${rayon_threads}"
             "--setenv=TOKIO_WORKER_THREADS=${tokio_threads}"
+            "--setenv=PATH=${PATH}"
         )
         # --uid: without it, sudo systemd-run executes the wrapped command as ROOT,
         # leaving root-owned output files (observed: extracted vindex unwritable by user).
         if [[ $no_cpu_pin -eq 0 ]]; then
             sd_args+=( -p "AllowedCPUs=${cpu_range}" )
         fi
-        sudo systemd-run --scope "${sd_args[@]}" -- "$@" || exit_code=$?
+        # Route the final exec through a shell rather than passing the bare
+        # command directly to systemd-run. systemd-run resolves a bare argv[0]
+        # into an absolute path before the unit's runtime environment (set via
+        # --setenv above) is in effect for that lookup, so it falls back to
+        # root/systemd's own default PATH (e.g. /usr/bin) — not the caller's.
+        # A shell -c wrapper does its own PATH search internally, using the
+        # environment --setenv actually propagates, so it sees the caller's
+        # PATH (confirmed empirically: cargo resolved to the wrong 1.65.0
+        # system binary when passed as bare argv[0], correct 1.95.0
+        # rustup-managed binary when routed through `bash -c 'exec "$@"'`).
+        sudo systemd-run --scope "${sd_args[@]}" -- bash -c 'exec "$@"' bash "$@" || exit_code=$?
     else
         # Fallback: ulimit -v + nice (no sudo needed).
         # Thread caps go into the subshell environment (not stripped by sudo here).
@@ -383,7 +394,7 @@ PYEOF
 
     # Check dmesg for OOM events that occurred during this run only
     local oom_after oom_events
-    oom_after=$(dmesg --time-format iso 2>/dev/null | grep -c "oom-kill:.*CONSTRAINT_MEMCG" || echo 0)
+    oom_after=$(dmesg --time-format iso 2>/dev/null | grep -c "oom-kill:.*CONSTRAINT_MEMCG")
     oom_events=$(( oom_after - oom_before ))
 
     # Write summary to meta
