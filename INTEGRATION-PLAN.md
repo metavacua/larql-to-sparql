@@ -14,6 +14,46 @@ Mechanism: a **single `git merge`** (preserves both forks' commits pristine → 
 consumer/provider cascade, 15/123 applied, build broke; commit-rewriting was rejected — severs
 upstream sync.)
 
+## Why cherry-pick was rejected (full evidence, consolidated from the 2026-06-08 candidate review)
+
+Candidate branch `integration/three-way-candidate` (local only, never pushed): ianblenke/main @
+`e5e2a905` as base, chrishayuk's unique commits cherry-picked with conflicts deferred.
+
+**Result:** 15/123 (12%) of chrishayuk's commits applied cleanly; 107/123 (87%) deferred on
+conflict; 1 already present. **All of chrishayuk's actual substance — the Metal split
+(`larql-compute-metal`), KV unification, performance work, Granite vision, GGUF modularization —
+is in the 107 deferred**, not the 15 applied. The 15 that landed are trivial (license pin, CI
+config, a 32-bit overflow guard, GGUF-input acceptance, remote-FFN norm wiring) — cosmetically
+clean, substantively empty.
+
+**The headline finding, stated precisely:** composing only non-conflicting commits cannot
+integrate two forks that both rewrote the same code. This is inherent to the "non-conflicting
+first" rule, not an execution bug — it is the structural mirror of the complaint that agents keep
+dropping ianblenke's work; applied to chrishayuk-onto-ianblenke, the same rule instead drops
+chrishayuk's substance.
+
+**Concrete proof the 15 "clean" cherry-picks don't even yield a buildable tree:**
+`cargo build --workspace -j2` failed (exit 101) on `error[E0425]: cannot find function
+write_model_weights_kquant_with_opts in crate larql_vindex` — `larql-cli` fails to compile. Root
+cause: cherry-pick `62ce88f8` ("fix(extract): accept GGUF input") is a `larql-cli` consumer commit
+that applied cleanly, but the `larql-vindex` provider commit defining the function it calls
+(chrishayuk's `write_kquant/mod.rs`) was deferred as a conflict. Consumer applied, provider
+deferred → dangling reference → break. This is a real, composition-induced failure, not an
+environment or pre-existing issue (the pure ianblenke base is unaffected).
+
+**Caveat on the 15/107 split (don't over-read it):** the cherry-pick loop aborts each conflicting
+commit and tries the next against a HEAD still missing it, so deferring commit N cascades to N's
+dependents. 107 is a floor on composability under this specific procedure, not a clean measure of
+the true simultaneous conflict surface — a single `git merge` (the approach actually adopted,
+per this plan) shows that without the cascade artifact.
+
+**Still-open decision this review flagged, not yet resolved anywhere:** scratch candidates present
+only in the ianblenke base — `RESUME_PROMPT.md`, `RESUME_PROMPT_SESSION_2026-05-14.md`, agent-config
+dirs (`.opencode/`, `.kilocode/`, `.gemini/`, `.codex/`, `.claude/`), and `openspec/` (84 files —
+flagged as possibly a real spec system, not scratch, verify before discarding) — keep or remove is
+explicitly "for your call," not decided by this pass or the merge pass since. Resolve this when
+resuming reconciliation, not before.
+
 ## Status — Phase 0–1 DONE (this session)
 
 - **Merge stood up** in isolated worktree `/home/metavacua/larql-integration-wt` (branch
