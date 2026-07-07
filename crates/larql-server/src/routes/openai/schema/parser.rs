@@ -99,15 +99,14 @@ fn parse_inner(value: &Value, opts: ParseOptions) -> Result<Schema, String> {
         return Ok(Schema::OneOf(branches));
     }
 
-    if obj.contains_key("$ref") || obj.contains_key("$defs") || obj.contains_key("definitions") {
-        return Err("$ref / $defs / definitions not yet supported".into());
-    }
-    if obj.contains_key("not") || obj.contains_key("allOf") || obj.contains_key("if") {
-        return Err("not / allOf / if-then-else not yet supported".into());
-    }
-    if obj.contains_key("pattern") || obj.contains_key("format") {
-        return Err("pattern / format not yet supported".into());
-    }
+    // Graceful degradation for agent compatibility (metavacua/larql-to-sparql#266):
+    // schema keywords the constrained-decoding grammar does not (yet) model — `$ref` /
+    // `$defs` / `definitions`, `not` / `allOf` / `if-then-else`, `pattern` / `format` — are
+    // ACCEPTED and IGNORED (that axis becomes unconstrained; `type` / `enum` / `properties`
+    // still bind) rather than returned as a 400. Real coding agents (e.g. Goose) send
+    // tool-parameter schemas carrying these keywords; hard-rejecting them blocked a
+    // larql-served vindex from driving an agent at all. A schema whose only content is an
+    // unmodelled keyword falls through to `Schema::Any` (the `type` match below) — unconstrained.
 
     let kind = obj.get("type");
     match kind {
@@ -410,12 +409,30 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_features_rejected() {
-        assert!(parse_schema(&serde_json::json!({"$ref": "#/x"})).is_err());
-        assert!(parse_schema(&serde_json::json!({"pattern": "^x$"})).is_err());
-        assert!(parse_schema(&serde_json::json!({"not": {}})).is_err());
-        assert!(parse_schema(&serde_json::json!({"allOf": []})).is_err());
+    fn non_object_schema_rejected() {
+        // a boolean/non-object is still not a valid schema object
         assert!(parse_schema(&serde_json::json!(false)).is_err());
+    }
+
+    #[test]
+    fn unmodelled_keywords_accepted_and_ignored() {
+        // #266: none of these may 400 — real agents (Goose) send tool schemas carrying them.
+        // Constraint keywords on a typed schema are ignored; the base type still binds:
+        let s = parse_schema(&serde_json::json!({"type": "string", "pattern": "^x$"}))
+            .expect("pattern must be accepted");
+        assert!(matches!(s, Schema::String(_)));
+        let f = parse_schema(&serde_json::json!({"type": "string", "format": "date-time"}))
+            .expect("format must be accepted");
+        assert!(matches!(f, Schema::String(_)));
+        // Structural keywords with no modellable type fall through to unconstrained (Any):
+        for kw in [
+            serde_json::json!({"$ref": "#/$defs/Foo"}),
+            serde_json::json!({"allOf": []}),
+            serde_json::json!({"not": {}}),
+        ] {
+            let sc = parse_schema(&kw).expect("unmodelled structural keyword must be accepted");
+            assert!(matches!(sc, Schema::Any), "expected Any for {kw:?}, got {sc:?}");
+        }
     }
 
     #[test]
