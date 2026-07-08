@@ -30,6 +30,12 @@ on:
       prompt:
         description: "prompt for the single forward pass"
         default: "The capital of France is"
+  # Also run on PRs that touch THIS experiment file — lets the experiment run
+  # on its own introducing PR (workflow_dispatch isn't dispatchable until the
+  # file lands on the default branch), without firing on every engine change.
+  pull_request:
+    paths:
+      - '.github/workflows/exp2-engine-parity.yml'
 
 env:
   MODEL_ID: ${{ github.event.inputs.model || 'HuggingFaceTB/SmolLM2-135M' }}
