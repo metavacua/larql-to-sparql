@@ -67,3 +67,29 @@ If Q2 = reject, the same loop still works on Standard K/V, just with growth
 that `larql-probe` currently contains. Q1 is the load-bearing one: it decides
 whether "extend the running context in place" is even available, versus
 re-prefilling a flat context each turn.
+
+## Results (first run — PR #269)
+
+**Q1 = ACCEPT.** `decode_step` is provenance-agnostic. The in-prompt and
+injected final states matched to **~1e-8 per element** (f32 accumulation-order
+noise), e.g. `-0.18079771` vs `-0.18079768`. The first run was red only because
+the assertion used bit-exact `assert_eq!` across the batched-prefill /
+incremental-decode boundary, where float accumulation order legitimately
+differs (same reason `dispatch_parity` gates `not(windows)`). The bar, not the
+result, was wrong; the test now asserts `max|Δ| < 1e-3` and prints the actual
+delta. **Consequence:** injecting a larql command's output tokens via
+`decode_step` and continuing yields the mathematically-equivalent state — the
+persistent-context primitive (Approach B) exists, no re-prefill.
+
+**Q2 = ACCEPT (scope: top-10 tokens, one prompt).** On SmolLM2-135M (a
+non-Gemma arch), `--engine markov-rs` ran without hitting a precondition gate,
+and its top-10 next-token table was identical to `--engine standard`. Caveat:
+the check strips percentages (compares top-10 *token identities*, not full
+logits) on a single prompt — strong evidence the residual-stream engine is
+usable on this arch, **not** a proof of the full bit-identical-logits contract.
+Strengthening (full-logit / cosine compare across prompts) is a follow-up.
+
+**Design consequence:** Q1 accept + Q2 accept(provisional) ⇒ Approach B (extend
+the model's running state in place) is viable and can ride the **residual
+stream** (bounded memory), aligned with larql's own canonical persistent state
+and the reflexive design — with Standard K/V as the always-valid fallback.
