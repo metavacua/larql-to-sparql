@@ -1,0 +1,121 @@
+# Experiment Q2 — is the residual-stream engine (MarkovResidual / --engine
+# markov-rs) bit-identical on an architecture other than Gemma 3 4B?
+#
+# The MarkovResidualEngine correctness contract (bit-identical logits vs the
+# Standard KV path, same model+quant tier) is validated on Gemma 3 4B; the
+# spec says the contract "holds only on supported architectures … adding an
+# architecture means passing its precondition check, not hoping it works."
+# The agent's candidate vindexes are SmolLM2 / Qwen2 — NOT Gemma. So: does
+# markov-rs agree with standard on SmolLM2-135M?
+#
+# Method: extract the model to a vindex, run one forward pass through BOTH
+# engines on the same prompt, and diff the top-K next-token tables.
+#   identical  ⇒ Q2 = ACCEPT — residual-stream engine valid on this arch, so
+#                the bounded-memory substrate is available to the agent loop.
+#   divergent  ⇒ Q2 = REJECT — non-bit-identical (silent-wrong-logits risk,
+#                residual N2); the agent rides Standard KV and accepts growth.
+#   markov-rs errors ⇒ the precondition check gates it — also a clean answer.
+#
+# This is a DISCOVERY experiment: it records the raw outcome and does NOT fail
+# the build on divergence — divergence/errors are the data, not a regression.
+
+name: exp2-engine-parity
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "HF model id to extract and compare engines on"
+        default: "HuggingFaceTB/SmolLM2-135M"
+      prompt:
+        description: "prompt for the single forward pass"
+        default: "The capital of France is"
+  # Also run on PRs that touch THIS experiment file — lets the experiment run
+  # on its own introducing PR (workflow_dispatch isn't dispatchable until the
+  # file lands on the default branch), without firing on every engine change.
+  pull_request:
+    paths:
+      - '.github/workflows/exp2-engine-parity.yml'
+
+env:
+  MODEL_ID: ${{ github.event.inputs.model || 'HuggingFaceTB/SmolLM2-135M' }}
+  PROMPT: ${{ github.event.inputs.prompt || 'The capital of France is' }}
+
+jobs:
+  exp2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-exp2-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-exp2-
+
+      - name: Cache HF snapshot
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/huggingface/hub
+          key: ${{ runner.os }}-hf-${{ env.MODEL_ID }}
+          restore-keys: ${{ runner.os }}-hf-
+
+      - name: Install BLAS
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+
+      - name: Build larql-cli (release)
+        run: cargo build --release -p larql-cli
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Pre-download HF model snapshot
+        run: |
+          python -m pip install --quiet huggingface_hub
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL_ID}')"
+
+      - name: Extract vindex (inference level — enough for forward pass)
+        run: ./target/release/larql extract "${MODEL_ID}" -o out.vindex --level inference
+
+      - name: Run BOTH engines, one forward pass, top-10 next-token table
+        run: |
+          set +e
+          ./target/release/larql run out.vindex "${PROMPT}" -n 1 --top 10 --engine standard \
+            >std.out 2>std.err ; echo "standard_exit=$?"
+          ./target/release/larql run out.vindex "${PROMPT}" -n 1 --top 10 --engine markov-rs \
+            >mrs.out 2>mrs.err ; echo "markovrs_exit=$?"
+          echo "── standard top-10 ──";  sed 's/\x1b\[[0-9;]*m//g' std.out
+          echo "── markov-rs top-10 ──"; sed 's/\x1b\[[0-9;]*m//g' mrs.out
+          echo "── markov-rs stderr (precondition errors land here) ──"; tail -20 mrs.err
+
+      - name: Verdict (raw — does NOT fail the build)
+        run: |
+          norm() { sed 's/\x1b\[[0-9;]*m//g' "$1" | sed 's/[0-9]\+\.[0-9]\+%//g'; }
+          if [ ! -s mrs.out ] && grep -qiE "error|unsupported|precondition|invariant|panic" mrs.err; then
+            V="Q2 = markov-rs ERRORED on ${MODEL_ID} (precondition-gated) — see mrs.err"
+          elif diff <(norm std.out) <(norm mrs.out) >/dev/null 2>&1; then
+            V="Q2 = ACCEPT — markov-rs top-10 IDENTICAL to standard on ${MODEL_ID}"
+          else
+            V="Q2 = DIVERGENT — markov-rs top-10 differs from standard on ${MODEL_ID}"
+          fi
+          echo "$V" | tee verdict.txt
+          { echo "## Exp-2 verdict"; echo; echo "$V"; echo; echo '### standard'; echo '```'; sed 's/\x1b\[[0-9;]*m//g' std.out; echo '```'; echo '### markov-rs'; echo '```'; sed 's/\x1b\[[0-9;]*m//g' mrs.out; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload raw outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp2-engine-parity
+          path: |
+            std.out
+            std.err
+            mrs.out
+            mrs.err
+            verdict.txt

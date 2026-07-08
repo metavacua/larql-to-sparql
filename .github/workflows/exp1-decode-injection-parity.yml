@@ -1,0 +1,48 @@
+# Experiment Q1 — is `decode_step` provenance-agnostic?
+#
+# Runs the synthetic-weights bit-identity test
+# `crates/larql-kv/tests/exp1_decode_injection.rs`:
+#   prefill([t0,t1,t2,t3])  ==  prefill([t0,t1]) + decode_step(t2) + decode_step(t3)
+#
+# The test's pass/fail IS the empirical verdict:
+#   green ⇒ Q1 = ACCEPT — injecting non-sampled tokens ≡ having them in the
+#           prompt, so the persistent-context agent can push a larql command's
+#           output through decode_step and continue (no re-prefill).
+#   red   ⇒ Q1 = REJECT — injection diverges; a different injection path
+#           (prefill_from_hidden, or re-prefill) is required.
+#
+# No model download: this is a mechanism property, deterministic on synthetic
+# weights. Fast enough to gate on PRs touching the engine.
+
+name: exp1-decode-injection-parity
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'crates/larql-kv/**'
+      - 'crates/larql-inference/**'
+      - '.github/workflows/exp1-decode-injection-parity.yml'
+
+jobs:
+  exp1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-exp1-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-exp1-
+
+      - name: Install BLAS (CPU forward path uses OpenBLAS)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+
+      - name: Exp-1 — decode_step injection ≡ in-prompt (bit-for-bit)
+        run: cargo test -p larql-kv --test exp1_decode_injection -- --nocapture
