@@ -62,12 +62,24 @@ the captured files itself, utf-8, truncating by codepoint); `timeout
 
 | file | role |
 |---|---|
-| `commands.jsonl` | the command corpus (matrix columns); `{{VINDEX}}`/`{{MODEL}}`/`{{TMP}}` placeholders |
+| `commands.jsonl` | the command corpus (matrix rows); `{{VINDEX}}`/`{{MODEL}}`/`{{TMP}}` placeholders |
+| `gen_legs.py` | enumerates every CLI-invokable **leg** (`source × produce-recipe × level`) as JSON — the matrix columns |
+| `descriptor.py` | reads a produced vindex's `index.json` → `(family, dtype, quant, …)` vs the leg's expected quant |
 | `run_matrix.py` | the runner — orchestrates each cell, captures full streams + RSS + error-signal → JSONL |
-| `run_matrix.sh` | thin shim → `run_matrix.py` (stable `<level> <vindex> <corpus> <out>` API) |
-| `aggregate.py` | merges per-level JSONL → `lql-matrix.md` (provenance, command×level, tally, resource, failures detail) |
-| `../../.github/workflows/lql-strategy-matrix.yml` | the CI matrix (build once → extract per level → run → aggregate → 24h artifacts + job summary) |
+| `run_matrix.sh` | thin shim → `run_matrix.py` (stable `<leg> <vindex> <corpus> <out>` API) |
+| `aggregate.py` | merges per-leg JSONL → `lql-matrix.md` (descriptor conformance, per-leg tally, resource, failures detail) |
+| `../../.github/workflows/lql-strategy-matrix.yml` | the CI matrix (plan legs → build once → produce vindex per leg → run corpus → aggregate → 24h artifacts + job summary) |
 | `../../.github/workflows/lql-matrix-smoke.yml` | fast stub-driven smoke of the harness itself on a runner (no build/model) |
+
+## Legs (source × recipe × level)
+
+A **leg** is one produced vindex + the corpus run against it. `gen_legs.py` crosses
+each model with each produce recipe — `extract` at every level × quant-state
+(f16 / `--f32` / `--quant q4k`), `convert gguf-to-vindex` (dequant vs `--keep-quant`
+ternary), and post-hoc `convert quantize {q4k,fp4}`. **Every CLI-invokable combination
+is included** — nothing is pruned for predicted meaninglessness (e.g. `--quant q4k`
+is crossed with every level, to test the doc claim that it implies `--level all`).
+Predictions live as `expect_quant` oracles in the descriptor table, not as omissions.
 
 ## Run locally (tooling smoke-test only — NOT the full experiment)
 

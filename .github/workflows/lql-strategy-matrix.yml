@@ -1,65 +1,53 @@
-# LQL Strategy Matrix — empirical extraction × command experiment.
+# LQL Strategy Matrix — empirical (source × produce-recipe × level) × command experiment.
 #
-# Extracts one real model (Qwen2.5-Coder-0.5B-Instruct) at EACH extraction
-# level (browse / attention / inference / all) on GitHub-hosted runners, then
-# runs the full LQL command corpus against each level's vindex and records the
-# RAW MECHANICAL OUTCOME of every cell (exit code, wall time, stdout/stderr,
-# ok/err/timeout/crash). It is a DISCOVERY experiment, not a pass/fail gate:
-# nothing here asserts output correctness or fails the build on a broken cell
-# — the data (especially the breakage) is the deliverable. Runs on the hosted
-# runner precisely so a dev box's RAM/time limits are irrelevant.
-#
-# Manual (workflow_dispatch) + weekly. One model to start; add models by
-# extending the matrix later.
-#
-# Build is factored into a single `build` job that compiles larql-cli once and
-# publishes the binary as an artifact; the four matrix legs download it instead
-# of each cold-compiling the workspace (4× redundant on a fresh cache). The
-# legs still apt-install the OpenBLAS runtime the binary dynamically links.
+# For every CLI-invokable leg (a model + a produce recipe: extract at a level,
+# extract with a quant flag, gguf-to-vindex, or post-hoc quantize), the workflow
+# PRODUCES a vindex on the current binary, records its structural descriptor
+# (family/dtype/quant vs expected — so extraction/convert breakage or silent
+# dequant is observed, not assumed), then runs the full LQL command corpus against
+# it and records the RAW MECHANICAL OUTCOME of every cell. Discovery experiment,
+# not a pass/fail gate: the breakage is the deliverable. Legs are enumerated by
+# scripts/lql_matrix/gen_legs.py (no prediction-pruning — see that file).
 
 name: lql-strategy-matrix
 
 on:
-  # Push-triggered on the experiment branch so a CI run starts without the
-  # workflow having to land on the default branch first (workflow_dispatch's
-  # constraint). Scoped to the branch so unrelated pushes never fire it.
   push:
     branches: [lql-strategy-matrix]
-  workflow_dispatch:
-    inputs:
-      model:
-        description: "HF model id to extract/exhaust"
-        default: "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+  workflow_dispatch: {}
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
-# Least privilege: this workflow only reads the repo, builds, shuttles artifacts,
-# and writes the job summary. It never pushes, comments, or cuts releases, so the
-# token is dropped to read-only. (upload/download-artifact@v4 use the Actions
-# runtime backend, not GITHUB_TOKEN scopes, so they need nothing added here.)
 permissions:
   contents: read
 
-# Serialize runs per ref so repeated pushes — or the weekly schedule overlapping a
-# manual run — can't stack multiple 4×(≤350 min) matrices. cancel-in-progress:false
-# queues the newer run instead of killing an expensive in-flight data run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  MODEL_ID: ${{ github.event.inputs.model || 'Qwen/Qwen2.5-Coder-0.5B-Instruct' }}
-  # larql is Rust; without this a panic prints only "run with RUST_BACKTRACE=1"
-  # and nothing else. The matrix's deliverable is breakage — capture the trace.
   RUST_BACKTRACE: "1"
 
 jobs:
-  # Compile larql-cli ONCE and hand the release binary to every matrix leg.
+  # Enumerate every leg as JSON → consumed by the matrix via fromJSON. A malformed
+  # plan fails here in seconds, before any leg runs.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      legs: ${{ steps.gen.outputs.legs }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: gen
+        run: |
+          legs=$(python3 scripts/lql_matrix/gen_legs.py)
+          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+          echo "$legs" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{len(d)} legs planned')"
+
+  # Compile larql-cli ONCE; every leg downloads the binary.
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
       - name: Cache cargo deps
         uses: actions/cache@v5
         with:
@@ -69,74 +57,82 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-lqlmatrix-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-lqlmatrix-
-
       - name: Install BLAS (build)
         run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
-
       - name: Build larql-cli (release)
         run: cargo build --release -p larql-cli
-
       - name: Upload larql binary
         uses: actions/upload-artifact@v4
         with:
           name: larql-bin
           path: target/release/larql
-          retention-days: 1        # ephemeral: consumed by the matrix legs this run
+          retention-days: 1
           if-no-files-found: error
 
   matrix:
-    needs: build
+    needs: [plan, build]
     strategy:
-      fail-fast: false        # we WANT every cell run even when one breaks
+      fail-fast: false          # every leg runs even when one breaks — breakage is data
+      max-parallel: 12
       matrix:
-        level: [browse, attention, inference, all]
+        leg: ${{ fromJSON(needs.plan.outputs.legs) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 350       # under the 6h hard cap; extraction+compile is slow by design
+    timeout-minutes: 350
+    env:
+      NAME: ${{ matrix.leg.name }}
+      HF: ${{ matrix.leg.hf }}
+      OP: ${{ matrix.leg.op }}
+      LEVEL: ${{ matrix.leg.level }}
+      FLAGS: ${{ matrix.leg.flags }}
+      EXPECT_QUANT: ${{ matrix.leg.expect_quant }}
+      CORPUS_MODEL: ${{ matrix.leg.corpus_model }}
     steps:
       - uses: actions/checkout@v6
-
       - name: Download larql binary
         uses: actions/download-artifact@v4
         with:
           name: larql-bin
           path: bin
-
-      - name: Make binary executable
-        run: chmod +x bin/larql
-
-      # The release binary dynamically links OpenBLAS — install the runtime lib
-      # (seconds) so it can load. This is NOT the workspace build (done once
-      # above). `time` = GNU /usr/bin/time -v for per-cell peak-RSS capture.
-      - name: Install BLAS runtime + GNU time
-        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev time
-
-      - name: Cache HF model snapshot
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/huggingface/hub
-          key: ${{ runner.os }}-hf-${{ env.MODEL_ID }}
-          restore-keys: ${{ runner.os }}-hf-
-
+      - name: Prep
+        run: |
+          chmod +x bin/larql scripts/lql_matrix/run_matrix.sh
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev time
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-
-      - name: Pre-download HF model snapshot
+      - name: Pre-download source snapshot (${{ matrix.leg.hf }})
         run: |
           python -m pip install --quiet huggingface_hub
-          python -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL_ID}')"
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('${HF}')"
 
-      - name: Extract at level=${{ matrix.level }} (raw outcome captured)
+      - name: Produce vindex (${{ matrix.leg.op }})
         run: |
           set +e
           mkdir -p out
-          VINDEX="out/qwen-${{ matrix.level }}.vindex"
-          TIMEF="out/extract-${{ matrix.level }}.time"
+          LARQL=./bin/larql
+          VINDEX="out/${NAME}.vindex"
+          TIMEF="out/produce-${NAME}.time"
+          O="out/produce-${NAME}.out"; E="out/produce-${NAME}.err"
           start=$(date +%s%3N)
-          /usr/bin/time -v -o "$TIMEF" \
-            timeout 18000 ./bin/larql extract "${MODEL_ID}" -o "$VINDEX" --level ${{ matrix.level }} \
-            > "out/extract-${{ matrix.level }}.stdout.log" 2> "out/extract-${{ matrix.level }}.stderr.log"
+          case "$OP" in
+            extract)
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL extract "$HF" -o "$VINDEX" ${LEVEL:+--level $LEVEL} $FLAGS >"$O" 2>"$E" ;;
+            gguf-to-vindex)
+              GGUF=$(find ~/.cache/huggingface -name '*.gguf' | head -1)
+              echo "gguf source: $GGUF"
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL convert gguf-to-vindex "$GGUF" -o "$VINDEX" ${LEVEL:+--level $LEVEL} $FLAGS >"$O" 2>"$E" ;;
+            quantize-q4k)
+              $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL convert quantize q4k --input "${VINDEX}.src" --output "$VINDEX" >>"$O" 2>>"$E" ;;
+            quantize-fp4)
+              $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL convert quantize fp4 --input "${VINDEX}.src" --output "$VINDEX" >>"$O" 2>>"$E" ;;
+          esac
           ec=$?
           end=$(date +%s%3N)
           case "$ec" in
@@ -144,58 +140,40 @@ jobs:
           esac
           rss=$(grep 'Maximum resident' "$TIMEF" 2>/dev/null | grep -oE '[0-9]+' | head -1)
           vmb=$(du -sm "$VINDEX" 2>/dev/null | cut -f1)
-          printf '{"level":"%s","exit_code":%d,"bucket":"%s","duration_ms":%d,"peak_rss_kb":%s,"vindex_mb":%s}\n' \
-            "${{ matrix.level }}" "$ec" "$bucket" "$((end-start))" "${rss:-0}" "${vmb:-0}" \
-            > "out/extract-${{ matrix.level }}.json"
-          echo "extraction ${{ matrix.level }}: exit=$ec bucket=$bucket rss=${rss:-?}kb vindex=${vmb:-?}MB"
-
-          # --- structural data we need: which weight classes did THIS level produce? ---
-          # Proves e.g. whether the attention level actually omits FFN weights (the
-          # sparse_compute.rs:85 unwrap panic). index.json + weight_manifest.json are
-          # tiny; also derive a layer-collapsed key-family inventory for quick diffing.
-          MDIR="out/manifest-${{ matrix.level }}"; mkdir -p "$MDIR"
+          printf '{"name":"%s","op":"%s","level":"%s","flags":"%s","exit_code":%d,"bucket":"%s","duration_ms":%d,"peak_rss_kb":%s,"vindex_mb":%s}\n' \
+            "$NAME" "$OP" "$LEVEL" "$FLAGS" "$ec" "$bucket" "$((end-start))" "${rss:-0}" "${vmb:-0}" \
+            > "out/produce-${NAME}.json"
+          echo "produce ${NAME}: exit=$ec bucket=$bucket rss=${rss:-?}kb vindex=${vmb:-?}MB"
+          # descriptor: what did we actually get vs what we expected?
+          python3 scripts/lql_matrix/descriptor.py "$VINDEX" "$NAME" "$EXPECT_QUANT" \
+            > "out/descriptor-${NAME}.json" 2>/dev/null || echo '{"name":"'"$NAME"'","error":"descriptor failed"}' > "out/descriptor-${NAME}.json"
+          echo "descriptor:"; cat "out/descriptor-${NAME}.json"
+          # weight-family inventory (which classes the recipe produced)
+          MDIR="out/manifest-${NAME}"; mkdir -p "$MDIR"
           cp "$VINDEX/index.json" "$VINDEX/weight_manifest.json" "$MDIR/" 2>/dev/null || true
-          python3 - "$VINDEX/weight_manifest.json" > "$MDIR/weight_families.txt" 2>/dev/null <<'PY' || true
-          import json, sys, re, collections
-          try:
-              m = json.load(open(sys.argv[1]))
-          except Exception:
-              sys.exit(0)
-          fam = collections.Counter()
-          for t in (m if isinstance(m, list) else m.get("tensors", [])):
-              fam[re.sub(r"\d+", "*", t.get("key", ""))] += 1
-          for k, c in sorted(fam.items()):
-              print(f"{c}\t{k}")
-          PY
-          echo "weight families @ ${{ matrix.level }}:"; cat "$MDIR/weight_families.txt" 2>/dev/null || echo "  (none)"
-          # continue regardless — command cells against a partial/missing vindex are themselves data
 
-      - name: Run LQL command corpus at level=${{ matrix.level }}
+      - name: Run LQL command corpus (${{ matrix.leg.name }})
         run: |
-          chmod +x scripts/lql_matrix/run_matrix.sh
+          VINDEX="out/${NAME}.vindex"
           LARQL_BIN=./bin/larql \
-          MODEL_ID="${MODEL_ID}" \
+          MODEL_ID="${CORPUS_MODEL}" \
           TMPROOT="$(mktemp -d)" \
           CELL_TIMEOUT=900 \
           scripts/lql_matrix/run_matrix.sh \
-            ${{ matrix.level }} \
-            "out/qwen-${{ matrix.level }}.vindex" \
-            scripts/lql_matrix/commands.jsonl \
-            "out/results-${{ matrix.level }}.jsonl"
+            "${NAME}" "$VINDEX" scripts/lql_matrix/commands.jsonl "out/results-${NAME}.jsonl"
 
-      - name: Upload level results
+      - name: Upload leg results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: results-${{ matrix.level }}
-          retention-days: 1        # discovery data — retain 24h, then auto-expire
+          name: results-${{ matrix.leg.name }}
+          retention-days: 1
           path: |
-            out/results-${{ matrix.level }}.jsonl
-            out/extract-${{ matrix.level }}.json
-            out/extract-${{ matrix.level }}.stdout.log
-            out/extract-${{ matrix.level }}.stderr.log
-            out/extract-${{ matrix.level }}.time
-            out/manifest-${{ matrix.level }}/
+            out/results-${{ matrix.leg.name }}.jsonl
+            out/produce-${{ matrix.leg.name }}.json
+            out/produce-${{ matrix.leg.name }}.err
+            out/descriptor-${{ matrix.leg.name }}.json
+            out/manifest-${{ matrix.leg.name }}/
             out/cells/
 
   aggregate:
@@ -207,14 +185,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Build matrix table
+      - name: Build matrix report
         run: |
-          cp artifacts/results-*/extract-*.json . 2>/dev/null || true
+          cp artifacts/results-*/descriptor-*.json . 2>/dev/null || true
+          cp artifacts/results-*/produce-*.json . 2>/dev/null || true
           python3 scripts/lql_matrix/aggregate.py "artifacts/results-*/results-*.jsonl" lql-matrix.md
           cat lql-matrix.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload combined matrix
         uses: actions/upload-artifact@v4
         with:
           name: lql-matrix
-          retention-days: 1        # also mirrored into the job summary (the log)
+          retention-days: 1
           path: lql-matrix.md

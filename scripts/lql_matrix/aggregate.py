@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
-"""Aggregate per-level LQL matrix results into one Markdown report. Descriptive
-only — reports the raw mechanical outcome (bucket + exit code) per (command,
-level), plus an error-text overlay, resource stats, and a failures/refusals
-detail block. No pass/fail-correctness judgement is made or implied.
+"""Aggregate per-leg LQL matrix results into one Markdown report. Descriptive
+only — no pass/fail-correctness judgement. A "leg" is one (source × recipe ×
+level) job; its meta row's `level` field carries the leg name.
 
-Reads JSONL produced by run_matrix.py: one `{"type":"meta",…}` provenance row
-per level followed by one row per cell. Tolerant of malformed lines (skips
-them, loudly) and pins utf-8 so non-ASCII model output never breaks decoding.
+Reads run_matrix JSONL (`{"type":"meta",...}` + per-cell rows), plus
+`descriptor-<leg>.json` and `produce-<leg>.json` (best-effort, from cwd). utf-8
++ tolerant of malformed lines.
 """
 import glob
 import json
 import sys
 from pathlib import Path
 
-LEVEL_ORDER = ["browse", "attention", "inference", "all"]
-
 
 def load(results_glob):
-    rows, cats, order, meta = {}, {}, [], {}
-    bad = 0
+    rows, cats, order, meta, bad = {}, {}, [], {}, 0
     for path in sorted(glob.glob(results_glob)):
         for line in Path(path).read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -33,19 +29,30 @@ def load(results_glob):
                 meta[r.get("level", "?")] = r
                 continue
             try:
-                cid, lvl = r["id"], r["level"]
+                cid, leg = r["id"], r["level"]
             except KeyError:
                 bad += 1
                 continue
             if cid not in rows:
                 rows[cid], cats[cid] = {}, r.get("cat", "")
                 order.append(cid)
-            rows[cid][lvl] = r
+            rows[cid][leg] = r
     return rows, cats, order, meta, bad
 
 
+def load_json_glob(pattern, key):
+    out = {}
+    for p in glob.glob(pattern) + glob.glob("**/" + pattern, recursive=True):
+        try:
+            d = json.loads(Path(p).read_text(encoding="utf-8"))
+            if d.get(key):
+                out[d[key]] = d
+        except Exception:
+            pass
+    return out
+
+
 def mark(r):
-    """One-glance cell mark. ⚠️ = exited 0 but printed an error/refusal."""
     if r is None:
         return "·"
     b, ec, es = r.get("bucket"), r.get("exit_code", "?"), r.get("err_signal", 0)
@@ -60,85 +67,54 @@ def mark(r):
     return str(b)
 
 
-def load_extract():
-    """Best-effort scan for extract-<level>.json (written by the workflow)."""
-    ex = {}
-    for p in glob.glob("extract-*.json") + glob.glob("**/extract-*.json", recursive=True):
-        try:
-            d = json.loads(Path(p).read_text(encoding="utf-8"))
-            ex[d["level"]] = d
-        except Exception:
-            pass
-    return ex
+def first_err(r):
+    return (r.get("err_line") or "").replace("|", "\\|") if r else ""
 
 
 def main(results_glob, out_md):
     rows, cats, order, meta, bad = load(results_glob)
-    extract = load_extract()
-    present = [l for l in LEVEL_ORDER if any(l in rows[c] for c in rows)] or LEVEL_ORDER
-    expected = max((len(rows[c]) for c in rows), default=0)  # cells in the fullest leg
-    counts = {l: sum(1 for c in rows if l in rows[c]) for l in present}
+    desc = load_json_glob("descriptor-*.json", "name")
+    prod = load_json_glob("produce-*.json", "name")
+    legs = sorted(set(list(meta) + [l for c in rows for l in rows[c]]))
 
     L = ["# LQL Strategy Matrix — raw outcomes", "",
-         "Each cell is the **mechanical** result of running the command against a "
-         "vindex extracted at that level. **No claim is made about output "
-         "correctness.** Legend: ✅ exit 0 clean · ⚠️ exit 0 **but** stdout/stderr "
-         "carried an error/refusal (`larql lql` exits 0 in-band) · ❌N non-zero "
-         "exit N · 💥N crash (OOM/SIGSEGV/SIGABRT) · ⏱ per-cell timeout · · not run.",
-         ""]
+         "Each cell = the **mechanical** result of a command against a vindex "
+         "produced by that leg's recipe. **No output-correctness claim.** Legend: "
+         "✅ exit 0 clean · ⚠️ exit 0 **but** error/refusal text · ❌N non-zero N · "
+         "💥N crash (OOM/SIGSEGV/SIGABRT) · ⏱ timeout · · not run.", "",
+         f"Legs: **{len(legs)}** · commands/leg: **{len(order)}**"
+         + (f" · ⚠️ {bad} malformed line(s) skipped" if bad else ""), ""]
 
-    if bad:
-        L += [f"> ⚠️ {bad} malformed result line(s) skipped.", ""]
-
-    # incomplete-leg flag (B4): a leg with fewer cells than the fullest one
-    incomplete = [f"`{l}` ({counts[l]}/{expected})"
-                  for l in present if counts[l] < expected]
-    if incomplete:
-        L += ["> ⚠️ **Incomplete legs** (fewer cells than the fullest — runner "
-              "died / whole-leg timeout mid-corpus): " + ", ".join(incomplete), ""]
-
-    # provenance
-    if meta:
-        L += ["## Provenance", "",
-              "| level | commit | larql | model | runner | started (UTC) | backtrace |",
-              "|---|---|---|---|---|---|---|"]
-        for l in present:
-            m = meta.get(l, {})
-            L.append("| {} | `{}` | {} | {} | {} | {} | {} |".format(
-                l, (m.get("commit") or "?")[:10], m.get("larql_version") or "?",
-                m.get("model") or "?", m.get("runner_os") or "?",
-                (m.get("started_at") or "?")[:19], m.get("backtrace") or "unset"))
+    # Produced-vindex descriptor conformance — did the recipe yield what we expected?
+    if desc:
+        L += ["## Produced-vindex descriptor", "",
+              "Recorded from each produced `index.json`. `quant?` = observed quant "
+              "(ternary via `bitnet_layout`) vs the leg's expected quant.", "",
+              "| leg | produce | family | dtype | quant (obs/exp) | quant? | hidden | vindex MB |",
+              "|---|---|---|---|---|:--:|---|---|"]
+        for lg in legs:
+            d = desc.get(lg, {})
+            p = prod.get(lg, {})
+            pb = p.get("bucket", "?")
+            produced = "❌ " + pb if pb != "ok" else "ok"
+            if not d.get("produced", True) or d.get("error"):
+                L.append(f"| `{lg}` | {produced} | — | — | — | ❌ | — | {p.get('vindex_mb','?')} |")
+                continue
+            obs, exp = d.get("observed_quant"), d.get("expect_quant")
+            ok = "✅" if d.get("quant_match") else "❌"
+            L.append(f"| `{lg}` | {produced} | {d.get('family')} | {d.get('dtype')} | "
+                     f"{obs}/{exp} | {ok} | {d.get('hidden_size','?')} | {p.get('vindex_mb','?')} |")
         L.append("")
 
-    # extraction outcome (itself an observed cell)
-    if extract:
-        L += ["## Extraction outcome per level", "",
-              "| metric | " + " | ".join(present) + " |",
-              "|---|" + "---|" * len(present)]
-        def erow(label, fn):
-            return "| **" + label + "** | " + " | ".join(
-                fn(extract.get(l)) for l in present) + " |"
-        L.append(erow("outcome", lambda e: f"{e.get('bucket','?')} ({e.get('duration_ms','?')}ms)" if e else "·"))
-        L.append(erow("peak RSS (MB)", lambda e: f"{(e.get('peak_rss_kb') or 0)/1024:.0f}" if e and e.get('peak_rss_kb') else ("n/a" if e else "·")))
-        L.append(erow("vindex (MB)", lambda e: str(e.get('vindex_mb', '?')) if e else "·"))
-        L.append("")
-
-    # command × level
-    L += ["## Command × level", "",
-          "| command | cat | " + " | ".join(present) + " |",
-          "|---|---|" + "---|" * len(present)]
-    for cid in order:
-        cells = " | ".join(mark(rows[cid].get(l)) for l in present)
-        L.append(f"| `{cid}` | {cats[cid]} | {cells} |")
-
-    # tally (adds errtext = exit-0-but-error overlay)
-    L += ["", "## Tally (per level)", "",
-          "| level | ✅ ok | ⚠️ errtext | ❌ err | ⏱ timeout | 💥 crash |",
-          "|---|---|---|---|---|---|"]
-    for l in present:
+    # Per-leg tally (the primary view when legs are many)
+    L += ["## Tally (per leg)", "",
+          "| leg | ✅ ok | ⚠️ errtext | ❌ err | ⏱ timeout | 💥 crash | peak RSS MB |",
+          "|---|---|---|---|---|---|---|"]
+    for lg in legs:
         t = {"ok": 0, "errtext": 0, "err": 0, "timeout": 0, "crash": 0}
+        best_rss = 0
         for cid in rows:
-            r = rows[cid].get(l)
+            r = rows[cid].get(lg)
             if not r:
                 continue
             b = r.get("bucket")
@@ -148,50 +124,42 @@ def main(results_glob, out_md):
                 t["ok"] += 1
             else:
                 t[b] = t.get(b, 0) + 1
-        L.append(f"| {l} | {t['ok']} | {t['errtext']} | {t['err']} | "
-                 f"{t['timeout']} | {t['crash']} |")
-
-    # resource stats (perf): peak RSS + slowest cell per level
-    L += ["", "## Resource (per level)", "",
-          "| level | peak RSS (MB) | slowest cell | slowest (ms) |",
-          "|---|---|---|---|"]
-    for l in present:
-        best_rss, slow_id, slow_ms = 0, "-", 0
-        for cid in rows:
-            r = rows[cid].get(l)
-            if not r:
-                continue
             rss = r.get("peak_rss_kb") or 0
             if isinstance(rss, int) and rss > best_rss:
                 best_rss = rss
-            d = r.get("duration_ms") or 0
-            if isinstance(d, int) and d > slow_ms:
-                slow_ms, slow_id = d, cid
         rss_mb = f"{best_rss/1024:.0f}" if best_rss else "n/a"
-        L.append(f"| {l} | {rss_mb} | `{slow_id}` | {slow_ms} |")
+        L.append(f"| `{lg}` | {t['ok']} | {t['errtext']} | {t['err']} | "
+                 f"{t['timeout']} | {t['crash']} | {rss_mb} |")
 
-    # failures & refusals detail (C1): evidence inline, collapsed
-    fails = []
-    for cid in order:
-        for l in present:
-            r = rows[cid].get(l)
-            if r and (r.get("bucket") != "ok" or r.get("err_signal")):
-                fails.append((l, cid, mark(r), r.get("exit_code"),
-                              r.get("peak_rss_kb"), r.get("err_line", "")))
+    # Command × leg pivot — only when narrow enough to read; else it's in artifacts.
+    if len(legs) <= 8:
+        L += ["", "## Command × leg", "",
+              "| command | cat | " + " | ".join(legs) + " |",
+              "|---|---|" + "---|" * len(legs)]
+        for cid in order:
+            L.append(f"| `{cid}` | {cats[cid]} | "
+                     + " | ".join(mark(rows[cid].get(lg)) for lg in legs) + " |")
+    else:
+        L += ["", f"> Command × leg pivot omitted ({len(legs)} legs too wide); "
+              "per-cell detail is in the `results-*` artifacts.", ""]
+
+    # Failures & refusals detail — evidence inline, collapsed
+    fails = [(lg, cid, mark(r), r.get("exit_code"), r.get("peak_rss_kb"), first_err(r))
+             for cid in order for lg in legs
+             if (r := rows[cid].get(lg)) and (r.get("bucket") != "ok" or r.get("err_signal"))]
     L += ["", f"## Failures & refusals ({len(fails)})", ""]
     if fails:
-        L += ["<details><summary>level · cell · mark · exit · rss(kb) · first error line</summary>",
-              "", "| level | cell | mark | exit | rss | first error line |",
+        L += ["<details><summary>leg · cell · mark · exit · rss(kb) · first error line</summary>",
+              "", "| leg | cell | mark | exit | rss | first error line |",
               "|---|---|---|---|---|---|"]
-        for l, cid, mk, ec, rss, el in fails:
-            el = (el or "").replace("|", "\\|")
-            L.append(f"| {l} | `{cid}` | {mk} | {ec} | {rss} | `{el}` |")
+        L += [f"| `{lg}` | `{cid}` | {mk} | {ec} | {rss} | `{el}` |"
+              for lg, cid, mk, ec, rss, el in fails]
         L += ["", "</details>"]
     else:
         L.append("None — every cell exited 0 with no error/refusal text.")
 
     Path(out_md).write_text("\n".join(L) + "\n", encoding="utf-8")
-    print(f"wrote {out_md} ({len(order)} commands x {len(present)} levels, "
+    print(f"wrote {out_md} ({len(legs)} legs × {len(order)} commands, "
           f"{len(fails)} failures/refusals, {bad} bad lines)")
 
 
