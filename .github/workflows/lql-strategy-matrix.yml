@@ -1,0 +1,138 @@
+# LQL Strategy Matrix — empirical extraction × command experiment.
+#
+# Extracts one real model (Qwen2.5-Coder-0.5B-Instruct) at EACH extraction
+# level (browse / attention / inference / all) on GitHub-hosted runners, then
+# runs the full LQL command corpus against each level's vindex and records the
+# RAW MECHANICAL OUTCOME of every cell (exit code, wall time, stdout/stderr,
+# ok/err/timeout/crash). It is a DISCOVERY experiment, not a pass/fail gate:
+# nothing here asserts output correctness or fails the build on a broken cell
+# — the data (especially the breakage) is the deliverable. Runs on the hosted
+# runner precisely so a dev box's RAM/time limits are irrelevant.
+#
+# Manual (workflow_dispatch) + weekly. One model to start; add models by
+# extending the matrix later.
+
+name: lql-strategy-matrix
+
+on:
+  # Push-triggered on the experiment branch so a CI run starts without the
+  # workflow having to land on the default branch first (workflow_dispatch's
+  # constraint). Scoped to the branch so unrelated pushes never fire it.
+  push:
+    branches: [lql-strategy-matrix]
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "HF model id to extract/exhaust"
+        default: "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+
+env:
+  MODEL_ID: ${{ github.event.inputs.model || 'Qwen/Qwen2.5-Coder-0.5B-Instruct' }}
+
+jobs:
+  matrix:
+    strategy:
+      fail-fast: false        # we WANT every cell run even when one breaks
+      matrix:
+        level: [browse, attention, inference, all]
+    runs-on: ubuntu-latest
+    timeout-minutes: 350       # under the 6h hard cap; extraction+compile is slow by design
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lqlmatrix-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-lqlmatrix-
+
+      - name: Cache HF model snapshot
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/huggingface/hub
+          key: ${{ runner.os }}-hf-${{ env.MODEL_ID }}
+          restore-keys: ${{ runner.os }}-hf-
+
+      - name: Install BLAS
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+
+      - name: Build larql-cli (release)
+        run: cargo build --release -p larql-cli
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Pre-download HF model snapshot
+        run: |
+          python -m pip install --quiet huggingface_hub
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL_ID}')"
+
+      - name: Extract at level=${{ matrix.level }} (raw outcome captured)
+        run: |
+          set +e
+          mkdir -p out
+          VINDEX="out/qwen-${{ matrix.level }}.vindex"
+          start=$(date +%s%3N)
+          timeout 18000 ./target/release/larql extract "${MODEL_ID}" -o "$VINDEX" --level ${{ matrix.level }} \
+            > "out/extract-${{ matrix.level }}.stdout.log" 2> "out/extract-${{ matrix.level }}.stderr.log"
+          ec=$?
+          end=$(date +%s%3N)
+          case "$ec" in
+            0) bucket=ok ;; 124) bucket=timeout ;; 137|139|134) bucket=crash ;; *) bucket=err ;;
+          esac
+          printf '{"level":"%s","exit_code":%d,"bucket":"%s","duration_ms":%d}\n' \
+            "${{ matrix.level }}" "$ec" "$bucket" "$((end-start))" \
+            > "out/extract-${{ matrix.level }}.json"
+          echo "extraction ${{ matrix.level }}: exit=$ec bucket=$bucket"
+          # continue regardless — command cells against a partial/missing vindex are themselves data
+
+      - name: Run LQL command corpus at level=${{ matrix.level }}
+        run: |
+          chmod +x scripts/lql_matrix/run_matrix.sh
+          LARQL_BIN=./target/release/larql \
+          MODEL_ID="${MODEL_ID}" \
+          TMPROOT="$(mktemp -d)" \
+          CELL_TIMEOUT=900 \
+          scripts/lql_matrix/run_matrix.sh \
+            ${{ matrix.level }} \
+            "out/qwen-${{ matrix.level }}.vindex" \
+            scripts/lql_matrix/commands.jsonl \
+            "out/results-${{ matrix.level }}.jsonl"
+
+      - name: Upload level results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.level }}
+          path: |
+            out/results-${{ matrix.level }}.jsonl
+            out/extract-${{ matrix.level }}.json
+            out/extract-${{ matrix.level }}.stderr.log
+
+  aggregate:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Build matrix table
+        run: |
+          cp artifacts/results-*/extract-*.json . 2>/dev/null || true
+          python3 scripts/lql_matrix/aggregate.py "artifacts/results-*/results-*.jsonl" lql-matrix.md
+          cat lql-matrix.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload combined matrix
+        uses: actions/upload-artifact@v4
+        with:
+          name: lql-matrix
+          path: lql-matrix.md
