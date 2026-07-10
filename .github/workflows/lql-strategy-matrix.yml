@@ -49,6 +49,9 @@ concurrency:
 
 env:
   MODEL_ID: ${{ github.event.inputs.model || 'Qwen/Qwen2.5-Coder-0.5B-Instruct' }}
+  # larql is Rust; without this a panic prints only "run with RUST_BACKTRACE=1"
+  # and nothing else. The matrix's deliverable is breakage — capture the trace.
+  RUST_BACKTRACE: "1"
 
 jobs:
   # Compile larql-cli ONCE and hand the release binary to every matrix leg.
@@ -78,7 +81,7 @@ jobs:
         with:
           name: larql-bin
           path: target/release/larql
-          retention-days: 5
+          retention-days: 1        # ephemeral: consumed by the matrix legs this run
           if-no-files-found: error
 
   matrix:
@@ -102,9 +105,10 @@ jobs:
         run: chmod +x bin/larql
 
       # The release binary dynamically links OpenBLAS — install the runtime lib
-      # (seconds) so it can load. This is NOT the workspace build (done once above).
-      - name: Install BLAS (runtime)
-        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      # (seconds) so it can load. This is NOT the workspace build (done once
+      # above). `time` = GNU /usr/bin/time -v for per-cell peak-RSS capture.
+      - name: Install BLAS runtime + GNU time
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev time
 
       - name: Cache HF model snapshot
         uses: actions/cache@v5
@@ -128,18 +132,42 @@ jobs:
           set +e
           mkdir -p out
           VINDEX="out/qwen-${{ matrix.level }}.vindex"
+          TIMEF="out/extract-${{ matrix.level }}.time"
           start=$(date +%s%3N)
-          timeout 18000 ./bin/larql extract "${MODEL_ID}" -o "$VINDEX" --level ${{ matrix.level }} \
+          /usr/bin/time -v -o "$TIMEF" \
+            timeout 18000 ./bin/larql extract "${MODEL_ID}" -o "$VINDEX" --level ${{ matrix.level }} \
             > "out/extract-${{ matrix.level }}.stdout.log" 2> "out/extract-${{ matrix.level }}.stderr.log"
           ec=$?
           end=$(date +%s%3N)
           case "$ec" in
             0) bucket=ok ;; 124) bucket=timeout ;; 137|139|134) bucket=crash ;; *) bucket=err ;;
           esac
-          printf '{"level":"%s","exit_code":%d,"bucket":"%s","duration_ms":%d}\n' \
-            "${{ matrix.level }}" "$ec" "$bucket" "$((end-start))" \
+          rss=$(grep 'Maximum resident' "$TIMEF" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+          vmb=$(du -sm "$VINDEX" 2>/dev/null | cut -f1)
+          printf '{"level":"%s","exit_code":%d,"bucket":"%s","duration_ms":%d,"peak_rss_kb":%s,"vindex_mb":%s}\n' \
+            "${{ matrix.level }}" "$ec" "$bucket" "$((end-start))" "${rss:-0}" "${vmb:-0}" \
             > "out/extract-${{ matrix.level }}.json"
-          echo "extraction ${{ matrix.level }}: exit=$ec bucket=$bucket"
+          echo "extraction ${{ matrix.level }}: exit=$ec bucket=$bucket rss=${rss:-?}kb vindex=${vmb:-?}MB"
+
+          # --- structural data we need: which weight classes did THIS level produce? ---
+          # Proves e.g. whether the attention level actually omits FFN weights (the
+          # sparse_compute.rs:85 unwrap panic). index.json + weight_manifest.json are
+          # tiny; also derive a layer-collapsed key-family inventory for quick diffing.
+          MDIR="out/manifest-${{ matrix.level }}"; mkdir -p "$MDIR"
+          cp "$VINDEX/index.json" "$VINDEX/weight_manifest.json" "$MDIR/" 2>/dev/null || true
+          python3 - "$VINDEX/weight_manifest.json" > "$MDIR/weight_families.txt" 2>/dev/null <<'PY' || true
+          import json, sys, re, collections
+          try:
+              m = json.load(open(sys.argv[1]))
+          except Exception:
+              sys.exit(0)
+          fam = collections.Counter()
+          for t in (m if isinstance(m, list) else m.get("tensors", [])):
+              fam[re.sub(r"\d+", "*", t.get("key", ""))] += 1
+          for k, c in sorted(fam.items()):
+              print(f"{c}\t{k}")
+          PY
+          echo "weight families @ ${{ matrix.level }}:"; cat "$MDIR/weight_families.txt" 2>/dev/null || echo "  (none)"
           # continue regardless — command cells against a partial/missing vindex are themselves data
 
       - name: Run LQL command corpus at level=${{ matrix.level }}
@@ -160,10 +188,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: results-${{ matrix.level }}
+          retention-days: 1        # discovery data — retain 24h, then auto-expire
           path: |
             out/results-${{ matrix.level }}.jsonl
             out/extract-${{ matrix.level }}.json
+            out/extract-${{ matrix.level }}.stdout.log
             out/extract-${{ matrix.level }}.stderr.log
+            out/extract-${{ matrix.level }}.time
+            out/manifest-${{ matrix.level }}/
+            out/cells/
 
   aggregate:
     needs: matrix
@@ -183,4 +216,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lql-matrix
+          retention-days: 1        # also mirrored into the job summary (the log)
           path: lql-matrix.md

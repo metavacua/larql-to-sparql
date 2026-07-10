@@ -50,7 +50,7 @@
 {"id":"rebalance.floor_ceiling","cat":"mutation","lql":"USE \"{{VINDEX}}\"; REBALANCE FLOOR 0.20 CEILING 0.95 MAX 8;"}
 {"id":"rebalance.until_converged","cat":"mutation","lql":"USE \"{{VINDEX}}\"; REBALANCE UNTIL CONVERGED MAX 16;"}
 {"id":"patch.begin","cat":"patch","lql":"USE \"{{VINDEX}}\"; BEGIN PATCH;"}
-{"id":"patch.begin_named","cat":"patch","lql":"USE \"{{VINDEX}}\"; BEGIN PATCH \"matrix-test.vlp\";"}
+{"id":"patch.begin_named","cat":"patch","lql":"USE \"{{VINDEX}}\"; BEGIN PATCH \"{{TMP}}/matrix-test.vlp\";"}
 {"id":"patch.begin_insert_save","cat":"patch","lql":"USE \"{{VINDEX}}\"; BEGIN PATCH; INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\"); SAVE PATCH;"}
 {"id":"patch.full_lifecycle","cat":"patch","lql":"USE \"{{VINDEX}}\"; BEGIN PATCH \"mlc.vlp\"; INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\"); SAVE PATCH; SHOW PATCHES; APPLY PATCH \"mlc.vlp\"; REMOVE PATCH \"mlc.vlp\";"}
 {"id":"compact.minor","cat":"compact","lql":"USE \"{{VINDEX}}\"; COMPACT MINOR;"}

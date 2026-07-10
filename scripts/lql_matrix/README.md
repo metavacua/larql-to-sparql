@@ -34,28 +34,40 @@ workflow matrix later.
 
 ## Recording (mechanical only)
 
-Per cell, `run_matrix.sh` records: exact command, `exit_code`, `duration_ms`,
-`stdout_bytes`/`stderr_bytes`, an 800-char head of each stream, and a coarse
-**mechanical** bucket:
+The runner is `run_matrix.py` (invoked via the `run_matrix.sh` shim). It emits a
+`{"type":"meta",…}` **provenance** row per level (commit, `larql --version`,
+model, runner OS, `RUST_BACKTRACE`, timestamp), then one row per cell with:
+exact substituted command, `exit_code`, coarse **mechanical** bucket,
+`duration_ms`, `peak_rss_kb` (via `/usr/bin/time -v`), `stdout_bytes`/
+`stderr_bytes`, an 800-char head of each stream **and** an 800-char `stderr_tail`
+(panics/backtraces live at the tail), plus an **error-text overlay**
+(`err_signal`/`err_line`). The **full** stdout/stderr of every cell are written
+to `<out_dir>/cells/<level>.<id>.{out,err}` and kept as artifacts — nothing is
+captured then discarded.
 
-- `ok` — exit 0
-- `err<N>` — non-zero exit N
-- `timeout` — killed by the per-cell wall cap
-- `crash` — SIGKILL(OOM)/SIGSEGV/SIGABRT (137/139/134)
+Buckets: `ok` (exit 0) · `err<N>` (non-zero N) · `timeout` (per-cell cap) ·
+`crash` (SIGKILL-OOM/SIGSEGV/SIGABRT = 137/139/134).
 
-Note (already observed locally): `larql lql` exits `0` even on an unknown
-statement, so `ok` ≠ "did something meaningful" — the signal is in the captured
-stderr text. That is itself a finding the matrix surfaces; we record it, we do
+`larql lql` exits `0` even on an in-band error, so `ok` ≠ "did something
+meaningful". `err_signal=1` marks a cell whose stdout/stderr carried an
+`Error:`/`panicked`/`Parse error` **despite** exit 0 (a masked error or graceful
+refusal); `aggregate.py` renders it as ⚠️ vs a clean ✅. We surface this, we do
 not "correct" it.
+
+I/O practices: stream content never transits the shell argv (the driver reads
+the captured files itself, utf-8, truncating by codepoint); `timeout
+--kill-after` bounds hung cells; artifacts are retained **24h** then auto-expire.
 
 ## Files
 
 | file | role |
 |---|---|
 | `commands.jsonl` | the command corpus (matrix columns); `{{VINDEX}}`/`{{MODEL}}`/`{{TMP}}` placeholders |
-| `run_matrix.sh` | runs a corpus against one vindex → raw JSONL outcomes |
-| `aggregate.py` | merges per-level JSONL → `lql-matrix.md` (level × command table + tallies) |
-| `../../.github/workflows/lql-strategy-matrix.yml` | the CI matrix (extract per level → run → aggregate → artifacts + job summary) |
+| `run_matrix.py` | the runner — orchestrates each cell, captures full streams + RSS + error-signal → JSONL |
+| `run_matrix.sh` | thin shim → `run_matrix.py` (stable `<level> <vindex> <corpus> <out>` API) |
+| `aggregate.py` | merges per-level JSONL → `lql-matrix.md` (provenance, command×level, tally, resource, failures detail) |
+| `../../.github/workflows/lql-strategy-matrix.yml` | the CI matrix (build once → extract per level → run → aggregate → 24h artifacts + job summary) |
+| `../../.github/workflows/lql-matrix-smoke.yml` | fast stub-driven smoke of the harness itself on a runner (no build/model) |
 
 ## Run locally (tooling smoke-test only — NOT the full experiment)
 
