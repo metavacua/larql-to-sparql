@@ -37,7 +37,12 @@ def load(results_glob):
     legs = {}
     for rf in sorted(glob.glob(results_glob)):
         d = Path(rf).parent
-        for line in Path(rf).read_text(encoding="utf-8").splitlines():
+        names_here = []
+        try:
+            text = Path(rf).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -45,16 +50,21 @@ def load(results_glob):
                 r = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(r, dict):
+                continue
             name = r.get("level")
             if not name:
                 continue
             lg = legs.setdefault(name, Leg(name=name))
+            if name not in names_here:
+                names_here.append(name)
             if r.get("type") == "meta":
                 lg.meta = r
             else:
                 lg.cells[r.get("id", "?")] = r
-        # sidecars: descriptor-<name>.json / produce-<name>.json in the same dir
-        for name, lg in legs.items():
+        # sidecars: only for legs introduced by THIS results file, from THIS dir
+        for name in names_here:
+            lg = legs[name]
             dp = d / f"descriptor-{name}.json"
             pp = d / f"produce-{name}.json"
             if dp.exists():
