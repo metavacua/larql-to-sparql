@@ -103,7 +103,27 @@ def inv_completeness(legs):
     return out
 
 
-INVARIANTS = [inv_completeness]
+_CRASH_CODES = {101, 134, 137, 139}
+
+
+def _is_crash(row):
+    return row.get("bucket") == "crash" or row.get("exit_code") in _CRASH_CODES
+
+
+def inv_no_crash(legs):
+    out = []
+    for name, lg in legs.items():
+        if lg.produce and _is_crash(lg.produce):
+            out.append(Violation("no-crash", name, "produce",
+                                 f"produce crashed (exit {lg.produce.get('exit_code')})"))
+        for cid, row in lg.cells.items():
+            if _is_crash(row):
+                out.append(Violation("no-crash", name, cid,
+                                     f"panic/crash (exit {row.get('exit_code')})"))
+    return out
+
+
+INVARIANTS = [inv_completeness, inv_no_crash]
 
 
 def run(results_glob, out_md, out_json, strict):

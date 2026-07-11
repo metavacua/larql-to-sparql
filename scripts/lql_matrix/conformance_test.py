@@ -60,3 +60,17 @@ def test_feature_count_tolerates_malformed_banner():
     assert C.feature_count(lg) is None
     lg2 = make_leg(cells={"stats": _cell("stats", "(24 layers, 1.2.3 features, m)")})
     assert C.feature_count(lg2) is None
+
+
+def test_no_crash_flags_panic_and_crash_not_graceful():
+    legs = {
+        "panic": make_leg("panic", cells={"infer.top5": _cell("infer.top5", bucket="err", exit_code=101)}),
+        "crash": make_leg("crash", cells={"x": _cell("x", bucket="crash", exit_code=137)}),
+        "graceful": make_leg("graceful", cells={"infer.top5": _cell("infer.top5", bucket="ok", exit_code=0, err_signal=1, err_line="Error: requires model weights")}),
+        "cleanerr": make_leg("cleanerr", cells={"y": _cell("y", bucket="err", exit_code=3)}),
+        "produce_panic": make_leg("pp", produce={"bucket": "crash", "exit_code": 139}),
+    }
+    vs = C.inv_no_crash(legs)
+    flagged = sorted({v.leg for v in vs})
+    assert flagged == ["crash", "panic", "produce_panic"]
+    assert all(v.invariant == "no-crash" for v in vs)
