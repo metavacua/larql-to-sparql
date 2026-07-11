@@ -83,6 +83,11 @@ jobs:
           print("SMOKE PASSED")
           PY
 
+      - name: Conformance oracle unit tests
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest scripts/lql_matrix/conformance_test.py -v
+
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4

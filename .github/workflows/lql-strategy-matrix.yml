@@ -14,7 +14,12 @@ name: lql-strategy-matrix
 on:
   push:
     branches: [lql-strategy-matrix]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      strict:
+        description: "Fail the run if any conformance invariant is violated"
+        type: boolean
+        default: false
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
@@ -197,3 +202,32 @@ jobs:
           name: lql-matrix
           retention-days: 1
           path: lql-matrix.md
+
+  conformance:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Run conformance oracle
+        env:
+          STRICT_INPUT: ${{ github.event.inputs.strict }}
+        run: |
+          STRICT=""
+          [ "$STRICT_INPUT" = "true" ] && STRICT="--strict"
+          python3 scripts/lql_matrix/conformance.py \
+            "artifacts/results-*/results-*.jsonl" conformance.md conformance.json $STRICT
+          echo "=== conformance.md ==="; cat conformance.md
+          cat conformance.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload conformance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance
+          retention-days: 1
+          path: |
+            conformance.md
+            conformance.json
