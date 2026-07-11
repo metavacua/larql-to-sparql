@@ -74,7 +74,33 @@ def load(results_glob):
     return legs
 
 
-INVARIANTS = []
+_FEAT = re.compile(r"\(\s*\d+\s+layers?,\s*([\d.]+)\s*([KM]?)\s+features", re.I)
+
+
+def feature_count(leg):
+    for row in leg.cells.values():
+        m = _FEAT.search(row.get("stdout_head", "") or "")
+        if m:
+            n = float(m.group(1))
+            n *= {"K": 1e3, "M": 1e6, "": 1}[m.group(2).upper()]
+            return int(round(n))
+    return None
+
+
+def inv_completeness(legs):
+    out = []
+    for name, lg in legs.items():
+        fc = feature_count(lg)
+        if fc is None:
+            out.append(Violation("completeness", name, "",
+                                 "feature_count unknown (no STATS/banner — produce may have failed)"))
+        elif fc == 0:
+            out.append(Violation("completeness", name, "",
+                                 "hollow vindex: 0 features (silent-incomplete extraction, cf #183)"))
+    return out
+
+
+INVARIANTS = [inv_completeness]
 
 
 def run(results_glob, out_md, out_json, strict):
