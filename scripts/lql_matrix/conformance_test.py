@@ -55,6 +55,41 @@ def test_completeness_flags_hollow_vindex():
     assert vs[0].invariant == "completeness"
 
 
+def test_produce_failure_is_distinct_produce_violation_not_hollow():
+    # fp4-like: produce FAILED (exit 1, err bucket), descriptor knows produced=False,
+    # and every corpus cell errored so there is no feature banner. This must be a
+    # definitive `produce` violation, NOT a hedged completeness/hollow one.
+    fp4 = make_leg("qwen15.xform.fp4",
+                   cells={"stats": _cell("stats", "Error: vindex not found", err_signal=1)},
+                   descriptor={"produced": False, "quant_match": False},
+                   produce={"op": "quantize-fp4", "bucket": "err", "exit_code": 1})
+    # a genuinely produced-but-hollow leg (granite-like) must STAY a completeness/hollow
+    hollow = make_leg("granite",
+                      cells={"stats": _cell("stats", "(24 layers, 0 features, m)")},
+                      descriptor={"produced": True},
+                      produce={"op": "extract", "bucket": "ok", "exit_code": 0})
+    legs = {"qwen15.xform.fp4": fp4, "granite": hollow}
+
+    prod = C.inv_produce(legs)
+    assert [v.leg for v in prod] == ["qwen15.xform.fp4"]
+    assert prod[0].invariant == "produce"
+    assert "1" in prod[0].detail  # the exit code is surfaced
+
+    comp = C.inv_completeness(legs)
+    # the produce-failed leg is NOT reported as hollow; only the real hollow is
+    assert [v.leg for v in comp] == ["granite"]
+
+
+def test_produce_crash_left_to_no_crash_not_double_reported():
+    # a produce CRASH (137) is already handled by inv_no_crash; inv_produce must
+    # not also report it (avoid double-counting the same failure).
+    crash = make_leg("boom", descriptor={"produced": False},
+                     produce={"op": "extract", "bucket": "crash", "exit_code": 137})
+    legs = {"boom": crash}
+    assert any(v.invariant == "no-crash" and v.cell == "produce" for v in C.inv_no_crash(legs))
+    assert C.inv_produce(legs) == []
+
+
 def test_feature_count_tolerates_malformed_banner():
     lg = make_leg(cells={"stats": _cell("stats", "(24 layers, . features, m)")})
     assert C.feature_count(lg) is None

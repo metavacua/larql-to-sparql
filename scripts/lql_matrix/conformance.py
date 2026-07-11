@@ -101,6 +101,8 @@ def feature_count(leg):
 def inv_completeness(legs):
     out = []
     for name, lg in legs.items():
+        if _produce_failed(lg):
+            continue  # vindex was never produced → inv_produce, not a hollow vindex
         fc = feature_count(lg)
         if fc is None:
             out.append(Violation("completeness", name, "",
@@ -122,6 +124,19 @@ def _is_crash(row):
     return row.get("bucket") == "crash" or row.get("exit_code") in _CRASH_CODES
 
 
+def _produce_failed(lg):
+    """True iff this leg's vindex was not successfully produced — the definitive
+    signal (descriptor.produced=False, or a non-zero/err/timeout produce). Distinct
+    from a produced-but-hollow vindex (feat=0), which is a completeness violation."""
+    if lg.descriptor.get("produced") is False:
+        return True
+    p = lg.produce or {}
+    ec = p.get("exit_code")
+    if isinstance(ec, int) and ec != 0:
+        return True
+    return p.get("bucket") in {"err", "crash", "timeout"}
+
+
 def inv_no_crash(legs):
     out = []
     for name, lg in legs.items():
@@ -132,6 +147,25 @@ def inv_no_crash(legs):
             if _is_crash(row):
                 out.append(Violation("no-crash", name, cid,
                                      f"panic/crash (exit {row.get('exit_code')})"))
+    return out
+
+
+def inv_produce(legs):
+    """Definitive produce-failure violation: the vindex was never created. Produce
+    *crashes* (SIGKILL/panic) are already reported by inv_no_crash, so skip them here
+    to avoid double-counting; this catches the non-crash failures (exit!=0 / err /
+    timeout / descriptor.produced=False) that would otherwise be mislabeled as a
+    hedged completeness-unknown."""
+    out = []
+    for name, lg in legs.items():
+        if _is_crash(lg.produce):
+            continue
+        if _produce_failed(lg):
+            p = lg.produce or {}
+            out.append(Violation("produce", name, "produce",
+                                 f"produce failed: op={p.get('op')} exit={p.get('exit_code')} "
+                                 f"bucket={p.get('bucket')} (vindex not created; "
+                                 f"descriptor.produced={lg.descriptor.get('produced')})"))
     return out
 
 
@@ -214,7 +248,7 @@ def inv_diagnostic(legs):
     return out
 
 
-INVARIANTS = [inv_completeness, inv_no_crash, inv_descriptor_match, inv_cross_check, inv_diagnostic]
+INVARIANTS = [inv_completeness, inv_produce, inv_no_crash, inv_descriptor_match, inv_cross_check, inv_diagnostic]
 
 
 _SRC_FMT = {"extract": "safetensors", "gguf-to-vindex": "gguf",
