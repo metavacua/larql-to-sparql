@@ -81,7 +81,10 @@ def feature_count(leg):
     for row in leg.cells.values():
         m = _FEAT.search(row.get("stdout_head", "") or "")
         if m:
-            n = float(m.group(1))
+            try:
+                n = float(m.group(1))
+            except ValueError:
+                continue
             n *= {"K": 1e3, "M": 1e6, "": 1}[m.group(2).upper()]
             return int(round(n))
     return None

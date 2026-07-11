@@ -53,3 +53,10 @@ def test_completeness_flags_hollow_vindex():
     vs = C.inv_completeness({"granite": hollow, "qwen": healthy})
     assert [v.leg for v in vs] == ["granite"]
     assert vs[0].invariant == "completeness"
+
+
+def test_feature_count_tolerates_malformed_banner():
+    lg = make_leg(cells={"stats": _cell("stats", "(24 layers, . features, m)")})
+    assert C.feature_count(lg) is None
+    lg2 = make_leg(cells={"stats": _cell("stats", "(24 layers, 1.2.3 features, m)")})
+    assert C.feature_count(lg2) is None
