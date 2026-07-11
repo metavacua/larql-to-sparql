@@ -87,3 +87,25 @@ def test_descriptor_match_flags_quant_mismatch_and_generic_fallback():
     vs = C.inv_descriptor_match(legs)
     assert sorted({v.leg for v in vs}) == ["dequant", "generic"]
     assert all(v.invariant == "descriptor-match" for v in vs)
+
+
+SHOW_LAYERS_HOLLOW = ("Layer      Features  With Meta       Top Token\n"
+                      "------------------------------------------------\n"
+                      "L0                0          0\n"
+                      "L1                0          0\n")
+SHOW_LAYERS_OK = ("Layer      Features  With Meta       Top Token\n"
+                  "------------------------------------------------\n"
+                  "L0             2560          0\n"
+                  "L1             2560          0\n")
+
+
+def test_cross_check_flags_show_layers_zero_vs_stats_nonzero():
+    bad = make_leg("bad", cells={
+        "stats": _cell("stats", "(24 layers, 5K features, m)"),
+        "show.layers": _cell("show.layers", SHOW_LAYERS_HOLLOW)})
+    good = make_leg("good", cells={
+        "stats": _cell("stats", "(24 layers, 5K features, m)"),
+        "show.layers": _cell("show.layers", SHOW_LAYERS_OK)})
+    vs = C.inv_cross_check({"bad": bad, "good": good})
+    assert [v.leg for v in vs] == ["bad"]
+    assert vs[0].invariant == "cross-check"

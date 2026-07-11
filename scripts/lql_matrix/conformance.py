@@ -103,6 +103,8 @@ def inv_completeness(legs):
     return out
 
 
+_LAYER_ROW = re.compile(r"^L\d+\s+(\d+)\s+\d+", re.M)
+
 _CRASH_CODES = {101, 134, 137, 139}
 
 
@@ -140,7 +142,27 @@ def inv_descriptor_match(legs):
     return out
 
 
-INVARIANTS = [inv_completeness, inv_no_crash, inv_descriptor_match]
+def show_layers_total(leg):
+    row = leg.cells.get("show.layers")
+    if not row:
+        return None
+    counts = _LAYER_ROW.findall(row.get("stdout_head", "") or "")
+    return sum(int(c) for c in counts) if counts else None
+
+
+def inv_cross_check(legs):
+    out = []
+    for name, lg in legs.items():
+        sl = show_layers_total(lg)
+        fc = feature_count(lg)
+        if sl is not None and fc and sl == 0:
+            out.append(Violation("cross-check", name, "show.layers",
+                                 f"SHOW LAYERS reports 0 features but STATS reports {fc} "
+                                 "(mmap heap-only accessor, cf SHOW LAYERS bug)"))
+    return out
+
+
+INVARIANTS = [inv_completeness, inv_no_crash, inv_descriptor_match, inv_cross_check]
 
 
 def run(results_glob, out_md, out_json, strict):
