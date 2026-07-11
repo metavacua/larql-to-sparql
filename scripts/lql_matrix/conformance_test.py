@@ -123,3 +123,20 @@ def test_cross_check_no_false_positive_on_ksuffix_rows():
         "show.layers": _cell("show.layers", SHOW_LAYERS_MIXED)})
     assert C.show_layers_total(lg) == 2600
     assert C.inv_cross_check({"mixed": lg}) == []
+
+
+def test_diagnostic_flag_honored_and_message_attribution():
+    silent_override = make_leg("q4kbrowse",
+        produce={"op": "extract", "level": "browse", "flags": "--quant q4k",
+                 "stdout_head": "Extracting…", "stderr_head": ""})
+    honored = make_leg("q4kall",
+        produce={"op": "extract", "level": "all", "flags": "--quant q4k",
+                 "stdout_head": "Extracting…", "stderr_head": ""})
+    misattrib = make_leg("mis", produce={"op": "extract", "level": "all", "flags": ""},
+        cells={"infer.top5": _cell("infer.top5", bucket="err", exit_code=101,
+               err_line="panicked: FFN weight tensor missing — this is a `--compact` vindex")})
+    vs = C.inv_diagnostic({"q4kbrowse": silent_override, "q4kall": honored, "mis": misattrib})
+    invs = sorted((v.leg, v.invariant) for v in vs)
+    assert ("mis", "diagnostic") in invs
+    assert ("q4kbrowse", "diagnostic") in invs
+    assert not any(v.leg == "q4kall" for v in vs)

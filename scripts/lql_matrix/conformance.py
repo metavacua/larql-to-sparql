@@ -107,6 +107,8 @@ _LAYER_ROW = re.compile(r"^L\d+\s+([\d.]+[KM]?)\s+[\d.]+[KM]?", re.M)
 
 _CRASH_CODES = {101, 134, 137, 139}
 
+_WARN = re.compile(r"warn|overrid|ignor", re.I)
+
 
 def _is_crash(row):
     return row.get("bucket") == "crash" or row.get("exit_code") in _CRASH_CODES
@@ -181,7 +183,30 @@ def inv_cross_check(legs):
     return out
 
 
-INVARIANTS = [inv_completeness, inv_no_crash, inv_descriptor_match, inv_cross_check]
+def inv_diagnostic(legs):
+    out = []
+    for name, lg in legs.items():
+        p = lg.produce
+        # R-2: --quant q4k silently overrides a non-all --level
+        if (p.get("op") == "extract" and "--quant q4k" in (p.get("flags") or "")
+                and p.get("level") in {"browse", "attention", "inference"}):
+            txt = (p.get("stdout_head", "") or "") + (p.get("stderr_head", "") or "")
+            if not _WARN.search(txt):
+                out.append(Violation("diagnostic", name, "produce",
+                                     f"--level {p.get('level')} silently ignored under --quant q4k "
+                                     "(no warn/override text; cf #208)"))
+        # R-3: error text blames --compact but the recipe never passed it
+        flags = (p.get("flags") or "")
+        if "compact" not in flags:
+            for cid, row in lg.cells.items():
+                if "--compact" in (row.get("err_line", "") or ""):
+                    out.append(Violation("diagnostic", name, cid,
+                                         "error text misattributes to `--compact` (not in recipe flags)"))
+                    break
+    return out
+
+
+INVARIANTS = [inv_completeness, inv_no_crash, inv_descriptor_match, inv_cross_check, inv_diagnostic]
 
 
 def run(results_glob, out_md, out_json, strict):
