@@ -62,8 +62,9 @@ the captured files itself, utf-8, truncating by codepoint); `timeout
 
 | file | role |
 |---|---|
-| `commands.jsonl` | the command corpus (matrix rows); `{{VINDEX}}`/`{{MODEL}}`/`{{TMP}}` placeholders |
-| `gen_legs.py` | enumerates every CLI-invokable **leg** (`source × produce-recipe × level`) as JSON — the matrix columns |
+| `commands.jsonl` | the **vindex-level** corpus (runs per leg against its produced vindex); `{{VINDEX}}`/`{{TMP}}` placeholders |
+| `commands-model.jsonl` | the **model-level** corpus (`EXTRACT MODEL` / `USE MODEL`) — run once per model by the `model-lifecycle` job, not per leg |
+| `gen_legs.py` | enumerates the **legs** (native level grid + one-off transformation/encoding recipes) as JSON — the matrix columns |
 | `descriptor.py` | reads a produced vindex's `index.json` → `(family, dtype, quant, …)` vs the leg's expected quant |
 | `run_matrix.py` | the runner — orchestrates each cell, captures full streams + RSS + error-signal → JSONL |
 | `run_matrix.sh` | thin shim → `run_matrix.py` (stable `<leg> <vindex> <corpus> <out>` API) |
@@ -71,15 +72,26 @@ the captured files itself, utf-8, truncating by codepoint); `timeout
 | `../../.github/workflows/lql-strategy-matrix.yml` | the CI matrix (plan legs → build once → produce vindex per leg → run corpus → aggregate → 24h artifacts + job summary) |
 | `../../.github/workflows/lql-matrix-smoke.yml` | fast stub-driven smoke of the harness itself on a runner (no build/model) |
 
-## Legs (source × recipe × level)
+## Legs (decoupled axes)
 
-A **leg** is one produced vindex + the corpus run against it. `gen_legs.py` crosses
-each model with each produce recipe — `extract` at every level × quant-state
-(f16 / `--f32` / `--quant q4k`), `convert gguf-to-vindex` (dequant vs `--keep-quant`
-ternary), and post-hoc `convert quantize {q4k,fp4}`. **Every CLI-invokable combination
-is included** — nothing is pruned for predicted meaninglessness (e.g. `--quant q4k`
-is crossed with every level, to test the doc claim that it implies `--level all`).
-Predictions live as `expect_quant` oracles in the descriptor table, not as omissions.
+A **leg** is one produced vindex + the vindex-level corpus run against it.
+`gen_legs.py` keeps the axes separate rather than one uniform cross-product:
+
+- **Native extraction** — every model × every level `{browse, attention, inference,
+  all}` at native precision. This is the real "test each level independently".
+- **Transformations** — tested **once at `level=all`**, not multiplied by the level
+  grid: `--quant q4k` per model, `--f32`, post-hoc `quantize {q4k,fp4}`. A
+  transformation like q4k *implies* `--level all`, so crossing it with levels only
+  homogenises (that redundancy is now *asserted* via a single q4k-browse sentinel +
+  the conformance cross-check, not re-run — see tracker #275).
+- **Encoding / convert** — `gguf-to-vindex`, including BitNet native **I2_S ternary**
+  via `--keep-quant`. GGUF legs carry `tokenizer_repo`; the workflow stages the base
+  repo's `tokenizer.json` beside the `.gguf` (the `-gguf` repo ships none — #180/#277).
+
+Model-level commands (`EXTRACT MODEL` / `USE MODEL`) don't read a produced vindex, so
+they run **once per model** in the `model-lifecycle` job (`commands-model.jsonl`) —
+not replicated across every leg. Each produced vindex's actual `(family, dtype,
+quant, feature_count)` is recorded and checked by the conformance layer.
 
 ## Run locally (tooling smoke-test only — NOT the full experiment)
 

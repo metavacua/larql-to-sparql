@@ -91,6 +91,7 @@ jobs:
       FLAGS: ${{ matrix.leg.flags }}
       EXPECT_QUANT: ${{ matrix.leg.expect_quant }}
       CORPUS_MODEL: ${{ matrix.leg.corpus_model }}
+      TOKENIZER_REPO: ${{ matrix.leg.tokenizer_repo }}
     steps:
       - uses: actions/checkout@v6
       - name: Download larql binary
@@ -127,6 +128,13 @@ jobs:
             gguf-to-vindex)
               GGUF=$(find ~/.cache/huggingface -name '*.gguf' | head -1)
               echo "gguf source: $GGUF"
+              # Stage the tokenizer from the base repo beside the .gguf — the -gguf repo
+              # ships none, so gguf-to-vindex fails late without it (#180/#277).
+              if [ -n "$TOKENIZER_REPO" ]; then
+                TOKDIR=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('${TOKENIZER_REPO}', allow_patterns=['tokenizer*','*special_tokens*','config.json','generation_config.json']))")
+                cp "$TOKDIR"/tokenizer*.json "$TOKDIR"/special_tokens_map.json "$(dirname "$GGUF")/" 2>/dev/null || true
+                echo "staged tokenizer from $TOKENIZER_REPO into $(dirname "$GGUF")"
+              fi
               /usr/bin/time -v -o "$TIMEF" timeout 18000 \
                 $LARQL convert gguf-to-vindex "$GGUF" -o "$VINDEX" ${LEVEL:+--level $LEVEL} $FLAGS >"$O" 2>"$E" ;;
             quantize-q4k)
@@ -179,6 +187,63 @@ jobs:
             out/produce-${{ matrix.leg.name }}.err
             out/descriptor-${{ matrix.leg.name }}.json
             out/manifest-${{ matrix.leg.name }}/
+            out/cells/
+
+  # Model-level lifecycle cells (EXTRACT MODEL / USE MODEL) don't read a produced
+  # vindex — run them ONCE per model instead of once per leg (removes the biggest
+  # duplicated extraction: the per-leg re-extract). Separate `lifecycle-*` artifacts
+  # so the conformance/aggregate `results-*` globs ignore them.
+  model-lifecycle:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        model:
+          - { id: qwen05,    hf: "Qwen/Qwen2.5-Coder-0.5B-Instruct" }
+          - { id: smol135,   hf: "HuggingFaceTB/SmolLM2-135M-Instruct" }
+          - { id: smol360,   hf: "HuggingFaceTB/SmolLM2-360M-Instruct" }
+          - { id: qwen15,    hf: "Qwen/Qwen2.5-1.5B-Instruct" }
+          - { id: granite1b, hf: "ibm-granite/granite-3.0-1b-a400m-instruct" }
+          - { id: bitnet2b,  hf: "microsoft/bitnet-b1.58-2B-4T" }
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download larql binary
+        uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - name: Prep
+        run: |
+          chmod +x bin/larql scripts/lql_matrix/run_matrix.sh
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev time
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Pre-download snapshot (${{ matrix.model.hf }})
+        run: |
+          python -m pip install --quiet huggingface_hub
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('${{ matrix.model.hf }}')"
+      - name: Run model-level lifecycle corpus (${{ matrix.model.id }})
+        run: |
+          mkdir -p out
+          LARQL_BIN=./bin/larql \
+          MODEL_ID="${{ matrix.model.hf }}" \
+          TMPROOT="$(mktemp -d)" \
+          CELL_TIMEOUT=900 \
+          scripts/lql_matrix/run_matrix.sh \
+            "${{ matrix.model.id }}-lifecycle" "unused.vindex" \
+            scripts/lql_matrix/commands-model.jsonl "out/lifecycle-${{ matrix.model.id }}.jsonl"
+      - name: Upload lifecycle results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-${{ matrix.model.id }}
+          retention-days: 1
+          path: |
+            out/lifecycle-${{ matrix.model.id }}.jsonl
             out/cells/
 
   aggregate:
