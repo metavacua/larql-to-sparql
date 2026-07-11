@@ -74,6 +74,54 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  quality:
+    # Loud, obviously-directed signal on the LQL command stack: fmt + clippy +
+    # tests, run ALONGSIDE the matrix (NOT a dependency of it) so a red check
+    # never skips the matrix — we want both signals on the same run to compare
+    # "unit test passed" against "matrix cell crashed" and localise the defect.
+    # No exemptions: the backlog is included on purpose. The alarm stays on.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Ensure clippy + rustfmt (runner ships stable rust already)
+        run: rustup component add clippy rustfmt
+      - name: Install BLAS
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lqlmatrix-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-lqlmatrix-
+      - name: fmt (loud)
+        id: fmt
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+      - name: clippy — LQL stack (loud, no exemption)
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-lql -p larql-cli -p larql-inference -p larql-vindex -p larql-core -p larql-kv -p larql-models --no-default-features -- -D warnings
+      - name: test — LQL stack (comparative signal for the matrix)
+        id: test
+        continue-on-error: true
+        run: cargo test -p larql-lql -p larql-cli -p larql-inference -p larql-vindex -p larql-core -p larql-kv -p larql-models --no-default-features
+      - name: Report + fail loud if any check failed
+        run: |
+          {
+            echo "## Quality — LQL command stack"
+            echo "| check | outcome |"
+            echo "|---|---|"
+            echo "| fmt    | ${{ steps.fmt.outcome }} |"
+            echo "| clippy | ${{ steps.clippy.outcome }} |"
+            echo "| test   | ${{ steps.test.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "${{ steps.fmt.outcome }}" = success ] \
+            && [ "${{ steps.clippy.outcome }}" = success ] \
+            && [ "${{ steps.test.outcome }}" = success ]
+
   matrix:
     needs: [plan, build]
     strategy:
