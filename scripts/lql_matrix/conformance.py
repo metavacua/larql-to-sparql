@@ -67,10 +67,17 @@ def load(results_glob):
             lg = legs[name]
             dp = d / f"descriptor-{name}.json"
             pp = d / f"produce-{name}.json"
+            ep = d / f"produce-{name}.err"
             if dp.exists():
                 lg.descriptor = _read_json(dp)
             if pp.exists():
                 lg.produce = _read_json(pp)
+            if ep.exists():
+                try:
+                    lg.produce["stderr_head"] = ep.read_text(
+                        encoding="utf-8", errors="replace")[:800]
+                except OSError:
+                    pass
     return legs
 
 

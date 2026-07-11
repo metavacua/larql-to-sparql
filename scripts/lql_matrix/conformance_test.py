@@ -140,3 +140,16 @@ def test_diagnostic_flag_honored_and_message_attribution():
     assert ("mis", "diagnostic") in invs
     assert ("q4kbrowse", "diagnostic") in invs
     assert not any(v.leg == "q4kall" for v in vs)
+
+
+def test_load_folds_produce_err_into_stderr_head(tmp_path):
+    d = tmp_path / "results-lg1"
+    d.mkdir()
+    (d / "results-lg1.jsonl").write_text(
+        json.dumps({"type": "meta", "level": "lg1"}) + "\n", encoding="utf-8")
+    (d / "produce-lg1.json").write_text(
+        json.dumps({"name": "lg1", "op": "extract", "level": "browse", "flags": "--quant q4k"}),
+        encoding="utf-8")
+    (d / "produce-lg1.err").write_text("extract stderr, no override warning here", encoding="utf-8")
+    legs = C.load(str(tmp_path / "results-*/results-*.jsonl"))
+    assert "no override warning" in legs["lg1"].produce["stderr_head"]
