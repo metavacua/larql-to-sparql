@@ -88,6 +88,54 @@ def resolve_q8(presence_by_leg, panic_by_leg):
     return {"rows": rows, "biconditional_holds": not counter, "counterexamples": counter}
 
 
+def render_q8(presence_by_leg, violations, native_only=True):
+    """Join presence with observed crash outcomes → Q8 resolution.
+    violations: the conformance.json "violations" list, or None if the artifact
+    was unavailable. Returns a dict with keys: status ∈ {"holds","refuted",
+    "inconclusive"}, biconditional_holds (bool|None), rows, counterexamples,
+    n_native (int), n_risk (int), reason (str)."""
+    def _incon(reason):
+        return {"status": "inconclusive", "biconditional_holds": None, "rows": [],
+                "counterexamples": [], "n_native": 0, "n_risk": 0, "reason": reason}
+    if violations is None:
+        return _incon("conformance data unavailable")
+    # panic := a no-crash violation on a CORPUS cell (produce-time crashes excluded)
+    panicked = {v.get("leg") for v in violations
+                if v.get("invariant") == "no-crash" and v.get("cell") != "produce"}
+    legs = {k: p for k, p in presence_by_leg.items()
+            if (not native_only) or (".native." in k)}
+    if not legs:
+        return _incon("no native legs with a produced listing")
+    n_risk = sum(1 for p in legs.values() if p.get("ffn_unwrap_risk"))
+    n_panic = sum(1 for k in legs if k in panicked)
+    if n_risk == 0 and n_panic == 0:
+        return _incon("no risk legs and no panics observed — nothing to test")
+    panic = {k: (k in panicked) for k in legs}
+    res = resolve_q8(legs, panic)
+    res["status"] = "holds" if res["biconditional_holds"] else "refuted"
+    res["n_native"] = len(legs)
+    res["n_risk"] = n_risk
+    res["reason"] = ""
+    return res
+
+
+def q8_markdown(result):
+    """Render a render_q8() result as the q8.md report."""
+    head = {"holds": "biconditional holds: **True**",
+            "refuted": "biconditional holds: **False**",
+            "inconclusive": "**inconclusive**"}[result["status"]]
+    L = ["# Q8 — panic ⇔ (has_attn ∧ ¬has_ffn)?", "",
+         f"{head} · counterexamples: {len(result['counterexamples'])} "
+         f"· native legs: {result.get('n_native', 0)} · risk legs: {result.get('n_risk', 0)}"]
+    if result.get("reason"):
+        L.append(f"reason: {result['reason']}")
+    L += ["", "| leg | ffn_unwrap_risk | panic | agree |", "|---|---|---|---|"]
+    for r in result["rows"]:
+        mark = "✅" if r["agree"] else "❌"
+        L.append(f"| `{r['leg']}` | {r['ffn_unwrap_risk']} | {r['panic']} | {mark} |")
+    return "\n".join(L) + "\n"
+
+
 def main():
     args = sys.argv[1:]
     results_glob = args[0] if args else "artifacts/results-*/manifest-*/listing.json"

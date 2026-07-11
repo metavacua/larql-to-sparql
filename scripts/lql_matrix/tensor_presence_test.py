@@ -59,3 +59,49 @@ def test_resolve_q8_biconditional_and_counterexample():
     r2 = T.resolve_q8(pres, panic)
     assert r2["biconditional_holds"] is False
     assert "qwen05.native.attention" in [c["leg"] for c in r2["counterexamples"]]
+
+
+def test_render_q8_none_violations_is_inconclusive():
+    pres = {"m.native.attention": T.presence(ATTN_ONLY)}
+    res = T.render_q8(pres, None)
+    assert res["status"] == "inconclusive"
+    assert res["biconditional_holds"] is None
+
+def test_render_q8_empty_presence_is_inconclusive():
+    res = T.render_q8({}, [])
+    assert res["status"] == "inconclusive"
+    assert res["biconditional_holds"] is None
+
+def test_render_q8_excludes_produce_crash_from_panic():
+    # one genuine risk leg that agrees (panicked at an actual corpus cell), plus
+    # a non-risk leg whose ONLY no-crash violation is at produce-time — that
+    # produce crash must NOT be counted as a panic, so it still agrees (risk=False).
+    pres = {
+        "m.native.attention": T.presence(ATTN_ONLY),   # risk=True
+        "m.native.all":       T.presence(FULL),         # risk=False
+    }
+    violations = [
+        {"invariant": "no-crash", "leg": "m.native.attention", "cell": "infer.top5"},
+        {"invariant": "no-crash", "leg": "m.native.all", "cell": "produce"},
+    ]
+    res = T.render_q8(pres, violations)
+    assert res["status"] == "holds"
+    assert res["counterexamples"] == []
+    assert "m.native.all" not in [r["leg"] for r in res["counterexamples"]]
+
+def test_render_q8_genuine_refutation():
+    # risk=True leg with no observed corpus panic at all -> real disagreement.
+    pres = {"m.native.attention": T.presence(ATTN_ONLY)}
+    res = T.render_q8(pres, [])
+    assert res["status"] == "refuted"
+    assert "m.native.attention" in [c["leg"] for c in res["counterexamples"]]
+
+def test_render_q8_no_risk_no_panic_is_inconclusive():
+    pres = {"m.native.all": T.presence(FULL)}  # risk=False
+    res = T.render_q8(pres, [])
+    assert res["status"] == "inconclusive"
+
+def test_q8_markdown_inconclusive_does_not_raise():
+    res = T.render_q8({}, None)
+    md = T.q8_markdown(res)
+    assert "inconclusive" in md

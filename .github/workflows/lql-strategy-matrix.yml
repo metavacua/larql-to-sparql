@@ -318,23 +318,13 @@ jobs:
           sys.path.insert(0, "scripts/lql_matrix")
           import tensor_presence as T
           pres = json.load(open("presence.json"))
-          # panic := any no-crash (SIGKILL/panic, ec=101) violation on the leg
           cj = glob.glob("artifacts/conformance/conformance.json")
-          viol = json.load(open(cj[0]))["violations"] if cj else []
-          panicked = {v["leg"] for v in viol if v["invariant"] == "no-crash"}
-          # Q8 / M3(a) is the *native attention-level* asymmetry (granite panics, bitnet refuses).
-          # Scope the biconditional to native legs; q4k legs panic by the distinct K6 hollow mechanism.
-          native = {k: v for k, v in pres.items() if ".native." in k}
-          panic = {leg: (leg in panicked) for leg in native}
-          res = T.resolve_q8(native, panic)
+          violations = json.load(open(cj[0]))["violations"] if cj else None
+          res = T.render_q8(pres, violations, native_only=True)
           json.dump(res, open("q8.json", "w"), indent=2)
-          L = ["# Q8 — panic ⟺ (has_attn ∧ ¬has_ffn)?", "",
-               f"biconditional holds: **{res['biconditional_holds']}** · counterexamples: {len(res['counterexamples'])}", "",
-               "| leg | ffn_unwrap_risk | panic | agree |", "|---|---|---|---|"]
-          for r in res["rows"]:
-              L.append(f"| `{r['leg']}` | {r['ffn_unwrap_risk']} | {r['panic']} | {'✅' if r['agree'] else '❌'} |")
-          open("q8.md","w").write("\n".join(L)+"\n")
-          print("\n".join(L))
+          md = T.q8_markdown(res)
+          open("q8.md", "w", encoding="utf-8").write(md)
+          print(md)
           PY
           cat q8.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
