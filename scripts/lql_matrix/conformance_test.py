@@ -177,3 +177,18 @@ def test_run_strict_fails_on_violation(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "load", lambda g: {"lg": make_leg()})
     assert C.run("x", str(tmp_path/"c.md"), str(tmp_path/"c.json"), strict=True) == 1
     assert C.run("x", str(tmp_path/"c.md"), str(tmp_path/"c.json"), strict=False) == 0
+
+
+def test_non_dict_sidecar_does_not_crash(tmp_path):
+    d = tmp_path / "results-lg"
+    d.mkdir()
+    (d / "results-lg.jsonl").write_text(
+        json.dumps({"type": "meta", "level": "lg"}) + "\n", encoding="utf-8")
+    (d / "produce-lg.json").write_text("[1, 2, 3]", encoding="utf-8")   # valid JSON, not a dict
+    (d / "descriptor-lg.json").write_text("null", encoding="utf-8")
+    legs = C.load(str(tmp_path / "results-*/results-*.jsonl"))
+    assert legs["lg"].produce == {}
+    assert legs["lg"].descriptor == {}
+    # running the full oracle over this leg must not raise
+    C.run(str(tmp_path / "results-*/results-*.jsonl"),
+          str(tmp_path / "m.md"), str(tmp_path / "j.json"), strict=False)

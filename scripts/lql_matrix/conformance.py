@@ -28,9 +28,10 @@ class Violation:
 
 def _read_json(path):
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception:
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def load(results_glob):
