@@ -153,3 +153,27 @@ def test_load_folds_produce_err_into_stderr_head(tmp_path):
     (d / "produce-lg1.err").write_text("extract stderr, no override warning here", encoding="utf-8")
     legs = C.load(str(tmp_path / "results-*/results-*.jsonl"))
     assert "no override warning" in legs["lg1"].produce["stderr_head"]
+
+
+def test_transformation_report_surfaces_gaps():
+    legs = {
+        "qwen.q4k": make_leg("qwen.q4k",
+            produce={"op": "extract", "flags": "--quant q4k"},
+            descriptor={"family": "qwen2", "observed_quant": "q4k"}),
+        "bitnet.gguf": make_leg("bitnet.gguf",
+            produce={"op": "gguf-to-vindex", "flags": ""},
+            descriptor={"family": "bitnet", "observed_quant": "none"}),
+    }
+    md = "\n".join(C.transformation_report(legs))
+    assert "Transformation" in md
+    assert "qwen2" in md and "bitnet" in md
+    # gaps surfaced verbatim
+    assert "Ollama" in md and "GGUF" in md
+    assert "no compiled" in md.lower() or "gap" in md.lower()
+
+
+def test_run_strict_fails_on_violation(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "INVARIANTS", [lambda legs: [C.Violation("x", "lg", "", "boom")]])
+    monkeypatch.setattr(C, "load", lambda g: {"lg": make_leg()})
+    assert C.run("x", str(tmp_path/"c.md"), str(tmp_path/"c.json"), strict=True) == 1
+    assert C.run("x", str(tmp_path/"c.md"), str(tmp_path/"c.json"), strict=False) == 0

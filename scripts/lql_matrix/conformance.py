@@ -216,6 +216,30 @@ def inv_diagnostic(legs):
 INVARIANTS = [inv_completeness, inv_no_crash, inv_descriptor_match, inv_cross_check, inv_diagnostic]
 
 
+_SRC_FMT = {"extract": "safetensors", "gguf-to-vindex": "gguf",
+            "quantize-q4k": "safetensors", "quantize-fp4": "safetensors"}
+
+
+def transformation_report(legs):
+    L = ["## Transformation & consumability coverage", "",
+         "| leg | source fmt | produced arch | produced quant |",
+         "|---|---|---|---|"]
+    for name in sorted(legs):
+        lg = legs[name]
+        src = _SRC_FMT.get(lg.produce.get("op"), "?")
+        L.append(f"| `{name}` | {src} | {lg.descriptor.get('family','?')} | "
+                 f"{lg.descriptor.get('observed_quant','?')} |")
+    L += ["",
+          "**Consumer reachability & gaps (static):**",
+          "- larql-cli / larql-server (`/v1/chat`): reach any produced vindex directly.",
+          "- **Ollama:** needs GGUF; larql `compile` emits safetensors and there is **no "
+          "compiled→GGUF export** — Ollama is a **gap** (cf #181/N11).",
+          "- **Cross-arch transform** (e.g. qwen↔bitnet): produced arch equals source arch in "
+          "every leg — larql changes quant/format, **not architecture** — a **gap** for the "
+          "'transform one arch into another' use case.", ""]
+    return L
+
+
 def run(results_glob, out_md, out_json, strict):
     legs = load(results_glob)
     violations = [v for inv in INVARIANTS for v in inv(legs)]
@@ -236,6 +260,7 @@ def render(legs, violations):
             L.append(f"| {v.invariant} | `{v.leg}` | {v.cell or '-'} | {v.detail} |")
     else:
         L.append("No invariant violations.")
+    L += [""] + transformation_report(legs)
     return "\n".join(L) + "\n"
 
 
