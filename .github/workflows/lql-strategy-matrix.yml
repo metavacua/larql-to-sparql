@@ -186,11 +186,13 @@ jobs:
               /usr/bin/time -v -o "$TIMEF" timeout 18000 \
                 $LARQL convert gguf-to-vindex "$GGUF" -o "$VINDEX" ${LEVEL:+--level $LEVEL} $FLAGS >"$O" 2>"$E" ;;
             quantize-q4k)
-              $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
+              /usr/bin/time -v -o "${TIMEF}.src" timeout 18000 \
+                $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
               /usr/bin/time -v -o "$TIMEF" timeout 18000 \
                 $LARQL convert quantize q4k --input "${VINDEX}.src" --output "$VINDEX" >>"$O" 2>>"$E" ;;
             quantize-fp4)
-              $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
+              /usr/bin/time -v -o "${TIMEF}.src" timeout 18000 \
+                $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
               /usr/bin/time -v -o "$TIMEF" timeout 18000 \
                 $LARQL convert quantize fp4 --input "${VINDEX}.src" --output "$VINDEX" >>"$O" 2>>"$E" ;;
           esac
@@ -199,7 +201,9 @@ jobs:
           case "$ec" in
             0) bucket=ok ;; 124) bucket=timeout ;; 137|139|134) bucket=crash ;; *) bucket=err ;;
           esac
-          rss=$(grep 'Maximum resident' "$TIMEF" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+          # peak RSS = MAX across every command's time file (extract .src + quantize),
+          # not just the last — a fast-failing quantize must not hide a multi-GB extract.
+          rss=$(python3 scripts/lql_matrix/peak_rss.py "${TIMEF}.src" "$TIMEF" 2>/dev/null)
           vmb=$(du -sm "$VINDEX" 2>/dev/null | cut -f1)
           printf '{"name":"%s","op":"%s","level":"%s","flags":"%s","exit_code":%d,"bucket":"%s","duration_ms":%d,"peak_rss_kb":%s,"vindex_mb":%s}\n' \
             "$NAME" "$OP" "$LEVEL" "$FLAGS" "$ec" "$bucket" "$((end-start))" "${rss:-0}" "${vmb:-0}" \
