@@ -39,3 +39,23 @@ def test_collect_maps_leg_to_presence(tmp_path):
 
 def test_load_listing_tolerates_missing(tmp_path):
     assert T.load_listing(str(tmp_path / "nope.json")) == {}
+
+def test_resolve_q8_biconditional_and_counterexample():
+    pres = {
+        "qwen05.native.attention":   T.presence(ATTN_ONLY),   # risk=True
+        "qwen05.native.all":         T.presence(FULL),        # risk=False
+        "bitnet2b.native.attention": T.presence(EMPTY),       # risk=False (no attn wt)
+    }
+    panic = {  # observed panic@infer (from conformance no-crash)
+        "qwen05.native.attention":   True,
+        "qwen05.native.all":         False,
+        "bitnet2b.native.attention": False,   # refuses gracefully — matches risk=False
+    }
+    r = T.resolve_q8(pres, panic)
+    assert r["biconditional_holds"] is True
+    assert r["counterexamples"] == []
+    # now inject a violation: risk=True but no panic
+    panic["qwen05.native.attention"] = False
+    r2 = T.resolve_q8(pres, panic)
+    assert r2["biconditional_holds"] is False
+    assert "qwen05.native.attention" in [c["leg"] for c in r2["counterexamples"]]

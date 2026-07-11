@@ -76,6 +76,18 @@ def collect(results_glob):
     return rows
 
 
+def resolve_q8(presence_by_leg, panic_by_leg):
+    rows, counter = [], []
+    for leg in sorted(set(presence_by_leg) & set(panic_by_leg)):
+        risk = bool(presence_by_leg[leg]["ffn_unwrap_risk"])
+        pan = bool(panic_by_leg[leg])
+        agree = (risk == pan)
+        rows.append({"leg": leg, "ffn_unwrap_risk": risk, "panic": pan, "agree": agree})
+        if not agree:
+            counter.append({"leg": leg, "ffn_unwrap_risk": risk, "panic": pan})
+    return {"rows": rows, "biconditional_holds": not counter, "counterexamples": counter}
+
+
 def main():
     args = sys.argv[1:]
     results_glob = args[0] if args else "artifacts/results-*/manifest-*/listing.json"
