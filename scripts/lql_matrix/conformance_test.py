@@ -74,3 +74,16 @@ def test_no_crash_flags_panic_and_crash_not_graceful():
     flagged = sorted({v.leg for v in vs})
     assert flagged == ["crash", "panic", "produce_panic"]
     assert all(v.invariant == "no-crash" for v in vs)
+
+
+def test_descriptor_match_flags_quant_mismatch_and_generic_fallback():
+    legs = {
+        "ok": make_leg("ok", descriptor={"name": "ok", "quant_match": True, "family": "qwen2"}),
+        "dequant": make_leg("dequant", descriptor={"name": "dequant", "quant_match": False,
+                            "observed_quant": "none", "expect_quant": "q4k", "family": "qwen2"}),
+        "generic": make_leg("generic", descriptor={"name": "generic", "quant_match": True, "family": "generic"}),
+        "nodesc": make_leg("nodesc", descriptor={}),
+    }
+    vs = C.inv_descriptor_match(legs)
+    assert sorted({v.leg for v in vs}) == ["dequant", "generic"]
+    assert all(v.invariant == "descriptor-match" for v in vs)

@@ -123,7 +123,24 @@ def inv_no_crash(legs):
     return out
 
 
-INVARIANTS = [inv_completeness, inv_no_crash]
+def inv_descriptor_match(legs):
+    out = []
+    for name, lg in legs.items():
+        d = lg.descriptor
+        if not d or not d.get("produced", True) or d.get("error"):
+            continue  # produce-side failure — covered by completeness/no-crash
+        if not d.get("quant_match", True):
+            out.append(Violation("descriptor-match", name, "",
+                                 f"quant mismatch: produced {d.get('observed_quant')} != "
+                                 f"expected {d.get('expect_quant')}"))
+        fam = (d.get("family") or "").lower()
+        if fam in ("", "generic"):
+            out.append(Violation("descriptor-match", name, "",
+                                 f"unrecognized/generic arch fallback (family={d.get('family')!r}, cf #154)"))
+    return out
+
+
+INVARIANTS = [inv_completeness, inv_no_crash, inv_descriptor_match]
 
 
 def run(results_glob, out_md, out_json, strict):
