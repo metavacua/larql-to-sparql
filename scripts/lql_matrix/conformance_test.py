@@ -80,6 +80,26 @@ def test_produce_failure_is_distinct_produce_violation_not_hollow():
     assert [v.leg for v in comp] == ["granite"]
 
 
+def test_masked_error_flags_every_exit0_error_not_crashes():
+    # No "expected error" category: every surfaced error that isn't a crash is a
+    # violation (larql exits 0 on all of them, so the CI is otherwise blind).
+    lg = make_leg("lg", cells={
+        "patch.begin": _cell("patch.begin", bucket="ok", exit_code=0, err_signal=1,
+                             err_line="Error: Parse error: expected string literal, got Semicolon"),
+        "infer.browse": _cell("infer.browse", bucket="ok", exit_code=0, err_signal=1,
+                             err_line="Error: Execution error: INFER requires model weights"),
+        "stats": _cell("stats", stdout="(24 layers, 5K features, m)", bucket="ok",
+                       exit_code=0, err_signal=0),                       # clean → not flagged
+        "infer.panic": _cell("infer.panic", bucket="err", exit_code=101, err_signal=1,
+                             err_line="thread panicked at ffn/sparse_compute.rs"),  # crash → no-crash owns it
+    })
+    vs = C.inv_masked_error({"lg": lg})
+    flagged = {v.cell for v in vs}
+    assert flagged == {"patch.begin", "infer.browse"}   # both exit-0 errors, NO exemption
+    assert all(v.invariant == "masked-error" for v in vs)
+    assert "Parse error" in next(v for v in vs if v.cell == "patch.begin").detail
+
+
 def test_produce_crash_left_to_no_crash_not_double_reported():
     # a produce CRASH (137) is already handled by inv_no_crash; inv_produce must
     # not also report it (avoid double-counting the same failure).
