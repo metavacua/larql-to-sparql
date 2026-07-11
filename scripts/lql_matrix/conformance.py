@@ -103,7 +103,7 @@ def inv_completeness(legs):
     return out
 
 
-_LAYER_ROW = re.compile(r"^L\d+\s+(\d+)\s+\d+", re.M)
+_LAYER_ROW = re.compile(r"^L\d+\s+([\d.]+[KM]?)\s+[\d.]+[KM]?", re.M)
 
 _CRASH_CODES = {101, 134, 137, 139}
 
@@ -142,12 +142,31 @@ def inv_descriptor_match(legs):
     return out
 
 
+def _parse_num(tok):
+    m = re.fullmatch(r"([\d.]+)([KM]?)", tok, re.I)
+    if not m:
+        return None
+    try:
+        n = float(m.group(1))
+    except ValueError:
+        return None
+    return n * {"K": 1e3, "M": 1e6, "": 1}[m.group(2).upper()]
+
+
 def show_layers_total(leg):
     row = leg.cells.get("show.layers")
     if not row:
         return None
-    counts = _LAYER_ROW.findall(row.get("stdout_head", "") or "")
-    return sum(int(c) for c in counts) if counts else None
+    toks = _LAYER_ROW.findall(row.get("stdout_head", "") or "")
+    if not toks:
+        return None
+    total, seen = 0.0, False
+    for t in toks:
+        v = _parse_num(t)
+        if v is not None:
+            total += v
+            seen = True
+    return int(round(total)) if seen else None
 
 
 def inv_cross_check(legs):

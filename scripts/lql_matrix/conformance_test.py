@@ -109,3 +109,17 @@ def test_cross_check_flags_show_layers_zero_vs_stats_nonzero():
     vs = C.inv_cross_check({"bad": bad, "good": good})
     assert [v.leg for v in vs] == ["bad"]
     assert vs[0].invariant == "cross-check"
+
+
+SHOW_LAYERS_MIXED = ("Layer      Features  With Meta       Top Token\n"
+                     "------------------------------------------------\n"
+                     "L0                0          0\n"
+                     "L1             2.6K          0\n")
+
+
+def test_cross_check_no_false_positive_on_ksuffix_rows():
+    lg = make_leg("mixed", cells={
+        "stats": _cell("stats", "(24 layers, 5K features, m)"),
+        "show.layers": _cell("show.layers", SHOW_LAYERS_MIXED)})
+    assert C.show_layers_total(lg) == 2600
+    assert C.inv_cross_check({"mixed": lg}) == []
