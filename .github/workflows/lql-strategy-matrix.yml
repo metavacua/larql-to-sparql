@@ -164,6 +164,9 @@ jobs:
           # weight-family inventory (which classes the recipe produced)
           MDIR="out/manifest-${NAME}"; mkdir -p "$MDIR"
           cp "$VINDEX/index.json" "$VINDEX/weight_manifest.json" "$MDIR/" 2>/dev/null || true
+          # tensor-presence witness (Q8): filename -> size for every vindex file
+          python3 -c "import json,os,sys; d=sys.argv[1]; print(json.dumps({f: os.path.getsize(os.path.join(d,f)) for f in os.listdir(d)}) if os.path.isdir(d) else '{}')" \
+            "$VINDEX" > "$MDIR/listing.json" 2>/dev/null || echo '{}' > "$MDIR/listing.json"
 
       - name: Run LQL command corpus (${{ matrix.leg.name }})
         run: |
@@ -296,3 +299,50 @@ jobs:
           path: |
             conformance.md
             conformance.json
+
+  inventory:
+    needs: [matrix, conformance]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Tensor-presence + Q8 resolution
+        run: |
+          python3 scripts/lql_matrix/tensor_presence.py \
+            "artifacts/results-*/manifest-*/listing.json" presence.json
+          python3 - <<'PY'
+          import json, glob, sys
+          sys.path.insert(0, "scripts/lql_matrix")
+          import tensor_presence as T
+          pres = json.load(open("presence.json"))
+          # panic := any no-crash (SIGKILL/panic, ec=101) violation on the leg
+          cj = glob.glob("artifacts/conformance/conformance.json")
+          viol = json.load(open(cj[0]))["violations"] if cj else []
+          panicked = {v["leg"] for v in viol if v["invariant"] == "no-crash"}
+          # Q8 / M3(a) is the *native attention-level* asymmetry (granite panics, bitnet refuses).
+          # Scope the biconditional to native legs; q4k legs panic by the distinct K6 hollow mechanism.
+          native = {k: v for k, v in pres.items() if ".native." in k}
+          panic = {leg: (leg in panicked) for leg in native}
+          res = T.resolve_q8(native, panic)
+          json.dump(res, open("q8.json", "w"), indent=2)
+          L = ["# Q8 — panic ⟺ (has_attn ∧ ¬has_ffn)?", "",
+               f"biconditional holds: **{res['biconditional_holds']}** · counterexamples: {len(res['counterexamples'])}", "",
+               "| leg | ffn_unwrap_risk | panic | agree |", "|---|---|---|---|"]
+          for r in res["rows"]:
+              L.append(f"| `{r['leg']}` | {r['ffn_unwrap_risk']} | {r['panic']} | {'✅' if r['agree'] else '❌'} |")
+          open("q8.md","w").write("\n".join(L)+"\n")
+          print("\n".join(L))
+          PY
+          cat q8.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inventory
+          retention-days: 1
+          path: |
+            presence.json
+            q8.json
+            q8.md
