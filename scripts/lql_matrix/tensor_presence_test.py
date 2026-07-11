@@ -25,3 +25,17 @@ def test_presence_empty_no_attn_no_risk():
 def test_presence_tolerates_none_and_nonint():
     assert T.presence(None)["n_files"] == 0
     assert T.presence({"attn_weights.bin": "big"})["has_attn"] is False  # non-int size ignored
+
+def test_collect_maps_leg_to_presence(tmp_path):
+    d = tmp_path / "results-qwen05.native.attention" / "manifest-qwen05.native.attention"
+    d.mkdir(parents=True)
+    (d / "listing.json").write_text(json.dumps(ATTN_ONLY), encoding="utf-8")
+    d2 = tmp_path / "results-qwen05.native.all" / "manifest-qwen05.native.all"
+    d2.mkdir(parents=True)
+    (d2 / "listing.json").write_text(json.dumps(FULL), encoding="utf-8")
+    got = T.collect(str(tmp_path / "results-*/manifest-*/listing.json"))
+    assert got["qwen05.native.attention"]["ffn_unwrap_risk"] is True
+    assert got["qwen05.native.all"]["ffn_unwrap_risk"] is False
+
+def test_load_listing_tolerates_missing(tmp_path):
+    assert T.load_listing(str(tmp_path / "nope.json")) == {}

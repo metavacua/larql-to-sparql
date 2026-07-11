@@ -48,3 +48,43 @@ def listing_of(vindex_dir):
                 for f in os.listdir(vindex_dir)}
     except OSError:
         return {}
+
+
+def load_listing(path):
+    try:
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+_LEG_RE = re.compile(r"manifest-(.+?)/listing\.json$")
+
+
+def collect(results_glob):
+    rows = {}
+    seen = set()
+    pats = sorted(glob.glob(results_glob)) + sorted(
+        glob.glob("**/" + results_glob, recursive=True))
+    for p in pats:
+        if p in seen:
+            continue
+        seen.add(p)
+        m = _LEG_RE.search(p)
+        if m:
+            rows[m.group(1)] = presence(load_listing(p))
+    return rows
+
+
+def main():
+    args = sys.argv[1:]
+    results_glob = args[0] if args else "artifacts/results-*/manifest-*/listing.json"
+    out_json = args[1] if len(args) > 1 else "presence.json"
+    rows = collect(results_glob)
+    Path(out_json).write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    print(f"tensor-presence: {len(rows)} legs, "
+          f"{sum(1 for r in rows.values() if r['ffn_unwrap_risk'])} at ffn_unwrap_risk")
+
+
+if __name__ == "__main__":
+    main()
