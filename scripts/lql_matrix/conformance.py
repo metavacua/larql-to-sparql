@@ -40,8 +40,12 @@ def load(results_glob):
         d = Path(rf).parent
         names_here = []
         try:
-            text = Path(rf).read_text(encoding="utf-8")
-        except OSError:
+            # errors="replace": a malformed-UTF-8 artifact (plausible from a corrupt or
+            # OOM-truncated produce) must not crash the checker — the worst inputs are
+            # exactly the ones the oracle exists to report on. except Exception guards
+            # UnicodeDecodeError (a ValueError, not OSError) and any other read failure.
+            text = Path(rf).read_text(encoding="utf-8", errors="replace")
+        except Exception:
             continue
         for line in text.splitlines():
             line = line.strip()

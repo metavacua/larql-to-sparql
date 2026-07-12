@@ -16,7 +16,11 @@ from pathlib import Path
 def load(results_glob):
     rows, cats, order, meta, bad = {}, {}, [], {}, 0
     for path in sorted(glob.glob(results_glob)):
-        for line in Path(path).read_text(encoding="utf-8").splitlines():
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
             line = line.strip()
             if not line:
                 continue

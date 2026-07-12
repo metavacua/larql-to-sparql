@@ -234,6 +234,19 @@ def test_run_strict_fails_on_violation(tmp_path, monkeypatch):
     assert C.run("x", str(tmp_path/"c.md"), str(tmp_path/"c.json"), strict=False) == 0
 
 
+def test_load_tolerates_invalid_utf8_and_does_not_crash(tmp_path):
+    # A results file with invalid UTF-8 bytes must NOT crash the checker (design
+    # constraint: "conformance.py never crashes on missing/partial artifacts").
+    # read_text(encoding="utf-8") without errors="replace" raises UnicodeDecodeError
+    # (a ValueError, not OSError) — the gemini PR finding.
+    d = tmp_path / "results-bad"
+    d.mkdir()
+    (d / "results-bad.jsonl").write_bytes(
+        b'{"type":"meta","level":"bad"}\n\xff\xfe not utf-8 \x80\x81\n')
+    legs = C.load(str(tmp_path / "results-*/results-*.jsonl"))  # must not raise
+    assert "bad" in legs
+
+
 def test_non_dict_sidecar_does_not_crash(tmp_path):
     d = tmp_path / "results-lg"
     d.mkdir()
