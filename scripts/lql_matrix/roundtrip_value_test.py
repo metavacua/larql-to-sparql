@@ -18,3 +18,19 @@ def test_decode_unsupported_raises():
     import pytest
     with pytest.raises(ValueError):
         V.decode_tensor(b"\x00", "Q4_K")
+
+def test_tensor_value_metrics_exact_and_close():
+    a = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    assert V.tensor_value_metrics(a, a) == {
+        "comparable": True, "n_total": 3, "n_differing": 0,
+        "max_abs_diff": 0.0, "l2": 0.0}
+    b = np.array([1.0, 2.0, 3.5], dtype=np.float32)
+    m = V.tensor_value_metrics(a, b)
+    assert m["n_differing"] == 1
+    assert abs(m["max_abs_diff"] - 0.5) < 1e-6
+
+def test_tensor_value_metrics_shape_mismatch():
+    a = np.zeros(3, dtype=np.float32); b = np.zeros(4, dtype=np.float32)
+    m = V.tensor_value_metrics(a, b)
+    assert m["comparable"] is False
+    assert m["shape_a"] == [3] and m["shape_b"] == [4]
