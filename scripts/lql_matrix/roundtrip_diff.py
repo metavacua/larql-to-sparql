@@ -71,7 +71,8 @@ def read_safetensors_header(path):
         return (0, 0)
 
     order = sorted(tensors, key=_order_key)
-    return {"tensors": tensors, "metadata": metadata, "order": order}
+    return {"tensors": tensors, "metadata": metadata, "order": order,
+            "header_len": hlen}
 
 
 def header_diff(ha, hb):
@@ -107,19 +108,23 @@ def _flatten(obj, prefix=""):
     return out
 
 
+def _load_json(path):
+    """Return (raw_bytes, parsed_obj, error_str) — error_str is None on success."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+        return raw, json.loads(raw.decode("utf-8")), None
+    except (OSError, ValueError) as e:
+        return None, None, f"{type(e).__name__}: {e}"
+
+
 def json_structural_diff(path_a, path_b):
-    try:
-        with open(path_a, "rb") as f:
-            raw_a = f.read()
-        obj_a = json.loads(raw_a.decode("utf-8"))
-    except (OSError, ValueError) as e:
-        return {"error_a": f"{type(e).__name__}: {e}"}
-    try:
-        with open(path_b, "rb") as f:
-            raw_b = f.read()
-        obj_b = json.loads(raw_b.decode("utf-8"))
-    except (OSError, ValueError) as e:
-        return {"error_b": f"{type(e).__name__}: {e}"}
+    raw_a, obj_a, err_a = _load_json(path_a)
+    if err_a is not None:
+        return {"error_a": err_a}
+    raw_b, obj_b, err_b = _load_json(path_b)
+    if err_b is not None:
+        return {"error_b": err_b}
     fa, fb = _flatten(obj_a), _flatten(obj_b)
     a, b = set(fa), set(fb)
     changed = {p: [fa[p], fb[p]] for p in sorted(a & b) if fa[p] != fb[p]}

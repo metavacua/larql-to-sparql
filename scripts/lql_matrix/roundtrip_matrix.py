@@ -34,19 +34,21 @@ def active_variants(registry=REGISTRY):
     return out
 
 
+def _driver_rows(model_id, variant, driver, comparison_a, comparison_b):
+    """One mode-A row plus one mode-B row per INSERT form, for a driver."""
+    rows = [{"model": model_id, "variant": variant, "driver": driver,
+             "mode": "A", "insert_form": None, "comparison": comparison_a}]
+    for form in INSERT_FORMS:
+        rows.append({"model": model_id, "variant": variant, "driver": driver,
+                     "mode": "B", "insert_form": form, "comparison": comparison_b})
+    return rows
+
+
 def enumerate_comparisons(model_id, variant):
     rows = []
     for driver in DRIVERS:
-        rows.append({"model": model_id, "variant": variant, "driver": driver,
-                     "mode": "A", "insert_form": None, "comparison": "input_vs_A"})
-        for form in INSERT_FORMS:
-            rows.append({"model": model_id, "variant": variant, "driver": driver,
-                         "mode": "B", "insert_form": form, "comparison": "B_vs_A"})
-    rows.append({"model": model_id, "variant": variant, "driver": "lql+cli",
-                 "mode": "A", "insert_form": None, "comparison": "lqlA_vs_cliA"})
-    for form in INSERT_FORMS:
-        rows.append({"model": model_id, "variant": variant, "driver": "lql+cli",
-                     "mode": "B", "insert_form": form, "comparison": "lqlB_vs_cliB"})
+        rows += _driver_rows(model_id, variant, driver, "input_vs_A", "B_vs_A")
+    rows += _driver_rows(model_id, variant, "lql+cli", "lqlA_vs_cliA", "lqlB_vs_cliB")
     return rows
 
 
@@ -62,7 +64,7 @@ def diff_model_dirs(dir_a, dir_b):
                 "sha256_equal": sha_eq,
                 "header": D.header_diff(D.read_safetensors_header(pa),
                                         D.read_safetensors_header(pb)),
-                "values": V.safetensors_value_diff(pa, pb),
+                "values": V.safetensors_value_diff(pa, pb, bytes_equal=sha_eq),
             }
         elif name.endswith(".json"):
             files[name] = {"sha256_equal": sha_eq,
@@ -92,19 +94,14 @@ def to_rows(meta, dir_diff):
             row["header_tensor_only_b"] = h.get("tensor_only_b", [])
             vals = rec.get("values", {})
             row["values_bytes_equal"] = vals.get("_bytes_equal")
+            comparable = [m for k, m in vals.items()
+                          if k != "_bytes_equal" and isinstance(m, dict)
+                          and m.get("comparable")]
             row["values_max_abs_diff"] = max(
-                (m.get("max_abs_diff", 0.0) for k, m in vals.items()
-                 if k != "_bytes_equal" and isinstance(m, dict) and m.get("comparable")),
-                default=0.0)
-            row["values_n_differing_total"] = sum(
-                m.get("n_differing", 0) for k, m in vals.items()
-                if k != "_bytes_equal" and isinstance(m, dict) and m.get("comparable"))
-            row["values_l2_total"] = sum(
-                m.get("l2", 0.0) for k, m in vals.items()
-                if k != "_bytes_equal" and isinstance(m, dict) and m.get("comparable"))
-            row["values_n_total_total"] = sum(
-                m.get("n_total", 0) for k, m in vals.items()
-                if k != "_bytes_equal" and isinstance(m, dict) and m.get("comparable"))
+                (m.get("max_abs_diff", 0.0) for m in comparable), default=0.0)
+            row["values_n_differing_total"] = sum(m.get("n_differing", 0) for m in comparable)
+            row["values_l2_total"] = sum(m.get("l2", 0.0) for m in comparable)
+            row["values_n_total_total"] = sum(m.get("n_total", 0) for m in comparable)
             if "error_a" in h or "error_b" in h:
                 row["header_error_a"] = h.get("error_a")
                 row["header_error_b"] = h.get("error_b")

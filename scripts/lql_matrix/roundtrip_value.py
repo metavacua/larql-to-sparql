@@ -1,6 +1,5 @@
 """Numpy value layer: decode safetensors tensor bytes to float32 and compute
 quantified per-tensor difference metrics. Pure measurement."""
-import struct
 import numpy as np
 import roundtrip_diff as _D
 
@@ -37,14 +36,6 @@ def _tensor_bytes(path, spec, header_len):
         return f.read(end - begin)
 
 
-def _header_len(path):
-    try:
-        with open(path, "rb") as f:
-            return struct.unpack("<Q", f.read(8))[0]
-    except OSError:
-        return None
-
-
 def _spec_valid(spec):
     do = spec.get("data_offsets")
     return (
@@ -55,13 +46,11 @@ def _spec_valid(spec):
     )
 
 
-def safetensors_value_diff(path_a, path_b):
+def safetensors_value_diff(path_a, path_b, bytes_equal=None):
     ha, hb = _D.read_safetensors_header(path_a), _D.read_safetensors_header(path_b)
     if "error" in ha or "error" in hb:
         return {"error": ha.get("error") or hb.get("error")}
-    la, lb = _header_len(path_a), _header_len(path_b)
-    if la is None or lb is None:
-        return {"error": "OSError: unable to read header length"}
+    la, lb = ha["header_len"], hb["header_len"]
     out = {}
     for name in sorted(set(ha["tensors"]) & set(hb["tensors"])):
         sa, sb = ha["tensors"][name], hb["tensors"][name]
@@ -75,5 +64,7 @@ def safetensors_value_diff(path_a, path_b):
             out[name] = {"comparable": False, "decode_error": str(e)}
             continue
         out[name] = tensor_value_metrics(aa, bb)
-    out["_bytes_equal"] = _D.sha256_file(path_a) == _D.sha256_file(path_b)
+    out["_bytes_equal"] = (
+        bytes_equal if bytes_equal is not None
+        else _D.sha256_file(path_a) == _D.sha256_file(path_b))
     return out
