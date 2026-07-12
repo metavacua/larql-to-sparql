@@ -38,8 +38,21 @@ def _tensor_bytes(path, spec, header_len):
 
 
 def _header_len(path):
-    with open(path, "rb") as f:
-        return struct.unpack("<Q", f.read(8))[0]
+    try:
+        with open(path, "rb") as f:
+            return struct.unpack("<Q", f.read(8))[0]
+    except OSError:
+        return None
+
+
+def _spec_valid(spec):
+    do = spec.get("data_offsets")
+    return (
+        spec.get("dtype") is not None
+        and spec.get("shape") is not None
+        and isinstance(do, (list, tuple))
+        and len(do) == 2
+    )
 
 
 def safetensors_value_diff(path_a, path_b):
@@ -47,13 +60,18 @@ def safetensors_value_diff(path_a, path_b):
     if "error" in ha or "error" in hb:
         return {"error": ha.get("error") or hb.get("error")}
     la, lb = _header_len(path_a), _header_len(path_b)
+    if la is None or lb is None:
+        return {"error": "OSError: unable to read header length"}
     out = {}
     for name in sorted(set(ha["tensors"]) & set(hb["tensors"])):
         sa, sb = ha["tensors"][name], hb["tensors"][name]
+        if not (_spec_valid(sa) and _spec_valid(sb)):
+            out[name] = {"comparable": False, "spec_error": "malformed tensor spec"}
+            continue
         try:
             aa = decode_tensor(_tensor_bytes(path_a, sa, la), sa["dtype"]).reshape(sa["shape"])
             bb = decode_tensor(_tensor_bytes(path_b, sb, lb), sb["dtype"]).reshape(sb["shape"])
-        except ValueError as e:
+        except (ValueError, TypeError, KeyError) as e:
             out[name] = {"comparable": False, "decode_error": str(e)}
             continue
         out[name] = tensor_value_metrics(aa, bb)

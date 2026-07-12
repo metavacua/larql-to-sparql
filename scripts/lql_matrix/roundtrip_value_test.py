@@ -60,3 +60,17 @@ def test_safetensors_value_diff_cross_dtype(tmp_path):
     assert d["w"]["comparable"] is True
     assert d["w"]["max_abs_diff"] == 0.0   # 1.0/2.0 exactly representable in bf16
     assert d["_bytes_equal"] is False       # F32 bytes != BF16 bytes
+
+def test_safetensors_value_diff_degrades_on_missing_data_offsets(tmp_path):
+    a = tmp_path / "a.safetensors"; b = tmp_path / "b.safetensors"
+    v = np.array([1.0, 2.0], dtype=np.float32)
+    _st(str(a), {"w": ("F32", v)})
+    # Hand-build a header whose tensor spec omits data_offsets entirely.
+    data = v.tobytes()
+    blob = _json.dumps({"w": {"dtype": "F32", "shape": [2]}}).encode("utf-8")
+    with open(str(b), "wb") as f:
+        f.write(struct.pack("<Q", len(blob)))
+        f.write(blob)
+        f.write(data)
+    d = V.safetensors_value_diff(str(a), str(b))
+    assert d["w"]["comparable"] is False

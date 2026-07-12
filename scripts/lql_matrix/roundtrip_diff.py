@@ -61,7 +61,13 @@ def read_safetensors_header(path):
             "shape": spec.get("shape"),
             "data_offsets": spec.get("data_offsets"),
         }
-    order = sorted(tensors, key=lambda n: (tensors[n]["data_offsets"] or [0])[0])
+    def _order_key(n):
+        do = tensors[n]["data_offsets"]
+        if isinstance(do, (list, tuple)) and do:
+            return do[0]
+        return 0
+
+    order = sorted(tensors, key=_order_key)
     return {"tensors": tensors, "metadata": metadata, "order": order}
 
 

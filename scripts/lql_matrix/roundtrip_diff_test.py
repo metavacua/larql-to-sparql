@@ -68,6 +68,14 @@ def test_read_safetensors_header_oversized_length_returns_error(tmp_path):
     h = D.read_safetensors_header(str(p))
     assert "error" in h
 
+def test_read_safetensors_header_non_list_data_offsets_no_crash(tmp_path):
+    p = tmp_path / "bad_offsets.safetensors"
+    _write_safetensors(str(p), {
+        "w": {"dtype": "F32", "shape": [2], "data_offsets": 5},
+    })
+    h = D.read_safetensors_header(str(p))
+    assert "tensors" in h
+
 def test_header_diff_reports_dtype_order_metadata_changes():
     ha = {"tensors": {"w": {"dtype": "F32", "shape": [4], "data_offsets": [0, 16]},
                       "lm": {"dtype": "F32", "shape": [4], "data_offsets": [16, 32]}},
