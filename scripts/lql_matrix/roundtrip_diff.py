@@ -22,3 +22,15 @@ def file_manifest(model_dir):
             continue
         out[name] = {"size": os.path.getsize(p), "sha256": sha256_file(p)}
     return out
+
+
+def manifest_bijection(man_a, man_b):
+    a, b = set(man_a), set(man_b)
+    only_a = sorted(a - b)
+    only_b = sorted(b - a)
+    return {
+        "only_a": only_a,
+        "only_b": only_b,
+        "in_both": sorted(a & b),
+        "bijective": not only_a and not only_b,
+    }
