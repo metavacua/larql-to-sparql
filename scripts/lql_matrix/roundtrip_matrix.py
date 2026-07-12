@@ -99,12 +99,26 @@ def to_rows(meta, dir_diff):
             row["values_n_differing_total"] = sum(
                 m.get("n_differing", 0) for k, m in vals.items()
                 if k != "_bytes_equal" and isinstance(m, dict) and m.get("comparable"))
+            row["values_l2_total"] = sum(
+                m.get("l2", 0.0) for k, m in vals.items()
+                if k != "_bytes_equal" and isinstance(m, dict) and m.get("comparable"))
+            row["values_n_total_total"] = sum(
+                m.get("n_total", 0) for k, m in vals.items()
+                if k != "_bytes_equal" and isinstance(m, dict) and m.get("comparable"))
+            if "error_a" in h or "error_b" in h:
+                row["header_error_a"] = h.get("error_a")
+                row["header_error_b"] = h.get("error_b")
+            if isinstance(vals, dict) and "error" in vals:
+                row["values_error"] = vals["error"]
         if "json" in rec:
             j = rec["json"]
             row["json_changed"] = j.get("changed", {})
             row["json_only_a_paths"] = j.get("only_a_paths", [])
             row["json_only_b_paths"] = j.get("only_b_paths", [])
             row["json_byte_identical"] = j.get("byte_identical")
+            if "error_a" in j or "error_b" in j:
+                row["json_error_a"] = j.get("error_a")
+                row["json_error_b"] = j.get("error_b")
         if "size_a" in rec or "size_b" in rec:
             row["size_a"] = rec.get("size_a")
             row["size_b"] = rec.get("size_b")

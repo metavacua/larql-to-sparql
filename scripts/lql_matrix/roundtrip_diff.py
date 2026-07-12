@@ -64,8 +64,11 @@ def read_safetensors_header(path):
     def _order_key(n):
         do = tensors[n]["data_offsets"]
         if isinstance(do, (list, tuple)) and do:
-            return do[0]
-        return 0
+            first = do[0]
+            if isinstance(first, (int, float)):
+                return (0, first)
+            return (1, str(first))
+        return (0, 0)
 
     order = sorted(tensors, key=_order_key)
     return {"tensors": tensors, "metadata": metadata, "order": order}

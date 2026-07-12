@@ -71,6 +71,49 @@ def test_to_rows_carries_meta_and_measurements_no_verdicts():
         assert banned not in r
 
 
+def test_to_rows_propagates_header_and_value_errors():
+    dir_diff = {"manifest": {"bijective": True, "only_a": [], "only_b": []},
+                "files": {"model.safetensors": {
+                    "sha256_equal": True,
+                    "header": {"error_a": "bad hdr", "error_b": None},
+                    "values": {"error": "bad val"}}}}
+    meta = {"model": "smol135", "variant": "base-f32", "driver": "cli",
+            "mode": "A", "insert_form": None, "comparison": "input_vs_A"}
+    rows = M.to_rows(meta, dir_diff)
+    r = [x for x in rows if x.get("file") == "model.safetensors"][0]
+    assert r["header_error_a"] == "bad hdr"
+    assert r["values_error"] == "bad val"
+
+
+def test_to_rows_propagates_json_error():
+    dir_diff = {"manifest": {"bijective": True, "only_a": [], "only_b": []},
+                "files": {"config.json": {
+                    "sha256_equal": False,
+                    "json": {"error_a": "bad json"}}}}
+    meta = {"model": "smol135", "variant": "base-f32", "driver": "cli",
+            "mode": "A", "insert_form": None, "comparison": "input_vs_A"}
+    rows = M.to_rows(meta, dir_diff)
+    r = [x for x in rows if x.get("file") == "config.json"][0]
+    assert r["json_error_a"] == "bad json"
+
+
+def test_to_rows_emits_l2_and_ntotal():
+    dir_diff = {"manifest": {"bijective": True, "only_a": [], "only_b": []},
+                "files": {"model.safetensors": {
+                    "sha256_equal": False,
+                    "header": {"dtype_changes": {}, "order_equal": True,
+                               "metadata_equal": True, "tensor_only_a": [], "tensor_only_b": [],
+                               "shape_changes": {}},
+                    "values": {"w": {"comparable": True, "n_total": 4, "n_differing": 1,
+                                     "max_abs_diff": 0.5, "l2": 0.7}, "_bytes_equal": False}}}}
+    meta = {"model": "smol135", "variant": "base-f32", "driver": "cli",
+            "mode": "A", "insert_form": None, "comparison": "input_vs_A"}
+    rows = M.to_rows(meta, dir_diff)
+    r = [x for x in rows if x.get("file") == "model.safetensors"][0]
+    assert r["values_l2_total"] == 0.7
+    assert r["values_n_total_total"] == 4
+
+
 def test_render_markdown_is_plain_table():
     rows = [{"model": "smol135", "variant": "base-f32", "comparison": "input_vs_A",
              "file": "model.safetensors", "sha256_equal": False}]
