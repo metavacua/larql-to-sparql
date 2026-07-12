@@ -92,6 +92,9 @@ def to_rows(meta, dir_diff):
             row["header_metadata_equal"] = h.get("metadata_equal")
             row["header_tensor_only_a"] = h.get("tensor_only_a", [])
             row["header_tensor_only_b"] = h.get("tensor_only_b", [])
+            if h.get("metadata_equal") is False:
+                row["header_metadata_a"] = h.get("metadata_a")
+                row["header_metadata_b"] = h.get("metadata_b")
             vals = rec.get("values", {})
             row["values_bytes_equal"] = vals.get("_bytes_equal")
             comparable = [m for k, m in vals.items()
@@ -102,6 +105,12 @@ def to_rows(meta, dir_diff):
             row["values_n_differing_total"] = sum(m.get("n_differing", 0) for m in comparable)
             row["values_l2_total"] = sum(m.get("l2", 0.0) for m in comparable)
             row["values_n_total_total"] = sum(m.get("n_total", 0) for m in comparable)
+            # tensors the differ could not compare (shape mismatch / spec / decode) —
+            # computed but otherwise absent from the aggregates; emit them, don't drop.
+            row["values_incomparable"] = {
+                k: m for k, m in vals.items()
+                if k != "_bytes_equal" and isinstance(m, dict)
+                and not m.get("comparable")}
             if "error_a" in h or "error_b" in h:
                 row["header_error_a"] = h.get("error_a")
                 row["header_error_b"] = h.get("error_b")

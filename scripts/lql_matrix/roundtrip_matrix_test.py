@@ -151,3 +151,57 @@ def test_main_degrades_on_malformed_meta(tmp_path):
     lines = (tmp_path / "o.jsonl").read_text(encoding="utf-8").strip().splitlines()
     recs = [json.loads(l) for l in lines]
     assert any("error" in r for r in recs)
+
+
+def _st_header(**over):
+    h = {"dtype_changes": {}, "shape_changes": {}, "order_equal": True,
+         "metadata_equal": True, "metadata_a": None, "metadata_b": None,
+         "tensor_only_a": [], "tensor_only_b": []}
+    h.update(over)
+    return h
+
+
+def test_to_rows_surfaces_incomparable_tensors():
+    dir_diff = {"manifest": {"bijective": True, "only_a": [], "only_b": []},
+                "files": {"model.safetensors": {
+                    "sha256_equal": False, "header": _st_header(),
+                    "values": {
+                        "ok": {"comparable": True, "n_total": 2, "n_differing": 0,
+                               "max_abs_diff": 0.0, "l2": 0.0},
+                        "bad_shape": {"comparable": False, "shape_a": [2], "shape_b": [3]},
+                        "bad_decode": {"comparable": False, "decode_error": "boom"},
+                        "_bytes_equal": False}}}}
+    meta = {"model": "smol135", "variant": "base-f32", "driver": "cli",
+            "mode": "A", "insert_form": None, "comparison": "input_vs_A"}
+    row = [r for r in M.to_rows(meta, dir_diff) if r.get("file") == "model.safetensors"][0]
+    inc = row["values_incomparable"]
+    assert set(inc) == {"bad_shape", "bad_decode"}
+    assert inc["bad_shape"]["shape_a"] == [2] and inc["bad_shape"]["shape_b"] == [3]
+    assert inc["bad_decode"]["decode_error"] == "boom"
+    assert row["values_n_total_total"] == 2  # aggregates count only the comparable tensor
+
+
+def test_to_rows_surfaces_differing_metadata():
+    dir_diff = {"manifest": {"bijective": True, "only_a": [], "only_b": []},
+                "files": {"model.safetensors": {
+                    "sha256_equal": False,
+                    "header": _st_header(metadata_equal=False,
+                                         metadata_a={"format": "pt"}, metadata_b=None),
+                    "values": {"_bytes_equal": False}}}}
+    meta = {"model": "smol135", "variant": "base-f32", "driver": "cli",
+            "mode": "A", "insert_form": None, "comparison": "input_vs_A"}
+    row = [r for r in M.to_rows(meta, dir_diff) if r.get("file") == "model.safetensors"][0]
+    assert row["header_metadata_a"] == {"format": "pt"}
+    assert row["header_metadata_b"] is None
+
+
+def test_to_rows_omits_metadata_values_when_equal():
+    dir_diff = {"manifest": {"bijective": True, "only_a": [], "only_b": []},
+                "files": {"model.safetensors": {
+                    "sha256_equal": True, "header": _st_header(),
+                    "values": {"_bytes_equal": True}}}}
+    meta = {"model": "smol135", "variant": "x", "driver": "cli",
+            "mode": "A", "insert_form": None, "comparison": "input_vs_A"}
+    row = [r for r in M.to_rows(meta, dir_diff) if r.get("file") == "model.safetensors"][0]
+    assert "header_metadata_a" not in row
+    assert row["values_incomparable"] == {}
