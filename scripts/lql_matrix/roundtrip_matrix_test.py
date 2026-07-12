@@ -1,4 +1,6 @@
 # roundtrip_matrix_test.py
+import json
+
 import roundtrip_matrix as M
 
 
@@ -74,3 +76,35 @@ def test_render_markdown_is_plain_table():
              "file": "model.safetensors", "sha256_equal": False}]
     md = M.render_markdown(rows)
     assert "model.safetensors" in md and "|" in md
+
+
+def test_to_rows_carries_other_file_sizes():
+    dir_diff = {"manifest": {"bijective": True, "only_a": [], "only_b": []},
+                "files": {"merges.txt": {"sha256_equal": False,
+                                          "size_a": 100, "size_b": 120}}}
+    meta = {"model": "smol135", "variant": "base-f32", "driver": "cli",
+            "mode": "A", "insert_form": None, "comparison": "input_vs_A"}
+    rows = M.to_rows(meta, dir_diff)
+    r = [x for x in rows if x.get("file") == "merges.txt"][0]
+    assert r["size_a"] == 100
+    assert r["size_b"] == 120
+
+
+def test_main_degrades_on_missing_dir(tmp_path):
+    rc = M.main(["--a", str(tmp_path / "nope"), "--b", str(tmp_path / "nope2"),
+                 "--meta", "{}", "--out", str(tmp_path / "o.jsonl")])
+    assert isinstance(rc, int) and rc != 0
+    lines = (tmp_path / "o.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    recs = [json.loads(l) for l in lines]
+    assert any("error" in r for r in recs)
+
+
+def test_main_degrades_on_malformed_meta(tmp_path):
+    dir_a = tmp_path / "a"; dir_b = tmp_path / "b"
+    dir_a.mkdir(); dir_b.mkdir()
+    rc = M.main(["--a", str(dir_a), "--b", str(dir_b),
+                 "--meta", "not-json", "--out", str(tmp_path / "o.jsonl")])
+    assert isinstance(rc, int) and rc != 0
+    lines = (tmp_path / "o.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    recs = [json.loads(l) for l in lines]
+    assert any("error" in r for r in recs)

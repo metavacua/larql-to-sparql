@@ -105,6 +105,9 @@ def to_rows(meta, dir_diff):
             row["json_only_a_paths"] = j.get("only_a_paths", [])
             row["json_only_b_paths"] = j.get("only_b_paths", [])
             row["json_byte_identical"] = j.get("byte_identical")
+        if "size_a" in rec or "size_b" in rec:
+            row["size_a"] = rec.get("size_a")
+            row["size_b"] = rec.get("size_b")
         rows.append(row)
     return rows
 
@@ -128,8 +131,13 @@ def main(argv):
     ap.add_argument("--out", required=True)
     ap.add_argument("--md")
     ns = ap.parse_args(argv)
-    meta = json.loads(ns.meta)
-    rows = to_rows(meta, diff_model_dirs(ns.a, ns.b))
+    try:
+        meta = json.loads(ns.meta)
+        rows = to_rows(meta, diff_model_dirs(ns.a, ns.b))
+    except (ValueError, OSError) as e:
+        with open(ns.out, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"file": "_error", "error": str(e)}) + "\n")
+        return 1
     with open(ns.out, "w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
