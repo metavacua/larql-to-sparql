@@ -1,0 +1,75 @@
+# rdloop.toml — Research-Development-Loop manifest for larql-canonical.
+# Model: deny-by-default; every capability below is an EXPLICIT grant above the
+# least-privilege floor. Absent = denied. SCAFFOLDED — please review before Phase 0.
+
+[project]
+name = "larql-canonical"
+target = "x86_64-linux"
+docs_dir = "docs/superpowers"
+vcs = "git"
+
+[capabilities]
+# The CI branch is developed in THIS checkout (verified: `git worktree list` shows one
+# worktree; lql-strategy-matrix + smollm135-roundtrip-catalogue share it). Sibling
+# checkouts (~/work/larql-to-sparql, larql-coding-agent) are separate and NOT granted —
+# larql-internal issues go to metavacua/larql-to-sparql via gh, not the filesystem.
+filesystem = ["/home/metavacua/work/larql-canonical", "docs/superpowers"]
+network = ["api.github.com"]
+# Active work is the Python measurement harness (scripts/lql_matrix): python3 + pytest.
+# git/gh for VCS + issues. larql-probe granted for FUTURE contained local inference
+# (the follow-on harness), NOT this measurement-engine loop, which needs no inference.
+subprocess = ["git", "gh", "python3", "pytest", "larql-probe"]
+clock = true
+random = true
+threads = false
+gpu = false
+
+[dependencies]
+# The CI / measurement harness is PYTHON (scripts/lql_matrix): stdlib + numpy + pytest.
+# GAP: no formal dep manifest for the harness yet — numpy/pytest are pip-installed in
+# the workflow. Creating scripts/lql_matrix/requirements.txt is a gap to close.
+standard = "pip"
+manifest = "scripts/lql_matrix/requirements.txt"   # to be created (see GAP above)
+
+[resources]
+# 6.3 GB host, no swap (global inference-containment policy). Serialize heavy work.
+memory_budget_mb = 6300
+serialize_tasks = true
+
+[issues]
+tracker = "github"
+write_repos = ["metavacua/babel-harness", "metavacua/larql-to-sparql"]
+read_repos = ["metavacua/babel-harness", "metavacua/larql-to-sparql", "chrishayuk/larql"]
+
+[delegation]
+# Delegate mechanical, well-defined tasks to fresh subagents via the native Agent tool
+# (superpowers:subagent-driven-development) — the flow used successfully this session.
+# Not pi-harness (open bugs #18/#20/#246).
+subagent = "subagent-driven-development"
+
+[security]
+default_posture = "deny"
+# Local commits land in this repo checkout (governed by [capabilities].filesystem).
+# Issue/PR writes restricted to the metavacua forks — NEVER chrishayuk/larql (read-only).
+write_allowed = ["metavacua/babel-harness", "metavacua/larql-to-sparql"]
+
+# ── extensions ─────────────────────────────────────────────────────────────
+[x.test]
+# Canonical runner for the active sub-work (Phase-0 step 0.5). NOT cargo test.
+runner = "pytest"
+dir = "scripts/lql_matrix"
+command = "python3 -m pytest -W error"
+
+[x.inference]
+# Local inference is CONTAINED and CPU-bounded (the real failure mode is CPU
+# saturation / hypervisor-kill, not OOM). Wrapper for FUTURE local runs only.
+# CAVEAT: larql-probe safe has an open deadlock (#246) — verify before relying on it.
+# The CI experiment is STRICTLY GitHub-hosted runners; local runs are out of CI scope.
+wrapper = "larql-probe safe --cpus 2 -- "
+
+[x.scope]
+# This loop's subject: the roundtrip quantified-difference MEASUREMENT ENGINE
+# (branch smollm135-roundtrip-catalogue) and the open design signal — the differ's
+# silent-degrade disposition muting a Larql/LQL anomaly on CI, and the local-vs-CI
+# scope conflation in the spec/plan.
+branch = "smollm135-roundtrip-catalogue"
