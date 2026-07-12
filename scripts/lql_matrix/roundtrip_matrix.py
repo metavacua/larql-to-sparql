@@ -105,12 +105,14 @@ def to_rows(meta, dir_diff):
             row["values_n_differing_total"] = sum(m.get("n_differing", 0) for m in comparable)
             row["values_l2_total"] = sum(m.get("l2", 0.0) for m in comparable)
             row["values_n_total_total"] = sum(m.get("n_total", 0) for m in comparable)
-            # tensors the differ could not compare (shape mismatch / spec / decode) —
-            # computed but otherwise absent from the aggregates; emit them, don't drop.
-            row["values_incomparable"] = {
+            # Positive existence: emit EVERY tensor's difference record — comparable
+            # metrics AND incomparable reasons (shape mismatch / spec / decode). The
+            # aggregates above are a derived summary over the comparable subset; without
+            # this, a divergence can't be localized to a tensor and the omission is a
+            # silent absence a consumer can't account for.
+            row["values_per_tensor"] = {
                 k: m for k, m in vals.items()
-                if k != "_bytes_equal" and isinstance(m, dict)
-                and not m.get("comparable")}
+                if k != "_bytes_equal" and isinstance(m, dict)}
             if "error_a" in h or "error_b" in h:
                 row["header_error_a"] = h.get("error_a")
                 row["header_error_b"] = h.get("error_b")

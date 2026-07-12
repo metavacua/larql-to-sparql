@@ -161,7 +161,7 @@ def _st_header(**over):
     return h
 
 
-def test_to_rows_surfaces_incomparable_tensors():
+def test_to_rows_emits_per_tensor_detail():
     dir_diff = {"manifest": {"bijective": True, "only_a": [], "only_b": []},
                 "files": {"model.safetensors": {
                     "sha256_equal": False, "header": _st_header(),
@@ -174,11 +174,13 @@ def test_to_rows_surfaces_incomparable_tensors():
     meta = {"model": "smol135", "variant": "base-f32", "driver": "cli",
             "mode": "A", "insert_form": None, "comparison": "input_vs_A"}
     row = [r for r in M.to_rows(meta, dir_diff) if r.get("file") == "model.safetensors"][0]
-    inc = row["values_incomparable"]
-    assert set(inc) == {"bad_shape", "bad_decode"}
-    assert inc["bad_shape"]["shape_a"] == [2] and inc["bad_shape"]["shape_b"] == [3]
-    assert inc["bad_decode"]["decode_error"] == "boom"
-    assert row["values_n_total_total"] == 2  # aggregates count only the comparable tensor
+    per = row["values_per_tensor"]
+    # positive existence: EVERY tensor present — comparable metrics AND incomparable reasons
+    assert set(per) == {"ok", "bad_shape", "bad_decode"}
+    assert per["ok"]["comparable"] is True and per["ok"]["max_abs_diff"] == 0.0
+    assert per["bad_shape"]["shape_a"] == [2] and per["bad_shape"]["shape_b"] == [3]
+    assert per["bad_decode"]["decode_error"] == "boom"
+    assert row["values_n_total_total"] == 2  # aggregates summarize the comparable subset
 
 
 def test_to_rows_surfaces_differing_metadata():
@@ -204,4 +206,4 @@ def test_to_rows_omits_metadata_values_when_equal():
             "mode": "A", "insert_form": None, "comparison": "input_vs_A"}
     row = [r for r in M.to_rows(meta, dir_diff) if r.get("file") == "model.safetensors"][0]
     assert "header_metadata_a" not in row
-    assert row["values_incomparable"] == {}
+    assert row["values_per_tensor"] == {}
