@@ -56,3 +56,26 @@ def read_safetensors_header(path):
         }
     order = sorted(tensors, key=lambda n: (tensors[n]["data_offsets"] or [0])[0])
     return {"tensors": tensors, "metadata": metadata, "order": order}
+
+
+def header_diff(ha, hb):
+    if "error" in ha or "error" in hb:
+        return {"error_a": ha.get("error"), "error_b": hb.get("error")}
+    ta, tb = ha["tensors"], hb["tensors"]
+    a, b = set(ta), set(tb)
+    dtype_changes, shape_changes = {}, {}
+    for name in sorted(a & b):
+        if ta[name]["dtype"] != tb[name]["dtype"]:
+            dtype_changes[name] = [ta[name]["dtype"], tb[name]["dtype"]]
+        if ta[name]["shape"] != tb[name]["shape"]:
+            shape_changes[name] = [ta[name]["shape"], tb[name]["shape"]]
+    return {
+        "tensor_only_a": sorted(a - b),
+        "tensor_only_b": sorted(b - a),
+        "dtype_changes": dtype_changes,
+        "shape_changes": shape_changes,
+        "order_equal": ha["order"] == hb["order"],
+        "metadata_equal": ha["metadata"] == hb["metadata"],
+        "metadata_a": ha["metadata"],
+        "metadata_b": hb["metadata"],
+    }

@@ -44,3 +44,20 @@ def test_read_safetensors_header_malformed_returns_error(tmp_path):
     p.write_bytes(b"\x02\x00")  # too short for u64 length
     h = D.read_safetensors_header(str(p))
     assert "error" in h
+
+def test_header_diff_reports_dtype_order_metadata_changes():
+    ha = {"tensors": {"w": {"dtype": "F32", "shape": [4], "data_offsets": [0, 16]},
+                      "lm": {"dtype": "F32", "shape": [4], "data_offsets": [16, 32]}},
+          "metadata": {"format": "pt"}, "order": ["w", "lm"]}
+    hb = {"tensors": {"w": {"dtype": "BF16", "shape": [4], "data_offsets": [8, 16]}},
+          "metadata": None, "order": ["w"]}
+    d = D.header_diff(ha, hb)
+    assert d["tensor_only_a"] == ["lm"]
+    assert d["tensor_only_b"] == []
+    assert d["dtype_changes"] == {"w": ["F32", "BF16"]}
+    assert d["order_equal"] is False
+    assert d["metadata_equal"] is False
+
+def test_header_diff_propagates_parse_error():
+    d = D.header_diff({"error": "bad"}, {"tensors": {}, "metadata": None, "order": []})
+    assert d["error_a"] == "bad"
