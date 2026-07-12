@@ -195,9 +195,17 @@ Triggered on the isolated branch. Per active variant:
    catalogue **JSONL** + aggregated **`roundtrip-catalogue.md`**.
 
 Artifacts namespaced `roundtrip-*`, **excluded** from the `results-*` conformance
-glob, retention 24 h. Resource note: extract + compile + any INFER run real
-inference → GitHub-hosted runners only (uncontained locally would OOM the dev box;
-`larql-probe safe` itself has an open deadlock, #246).
+glob, retention 24 h.
+
+**Venue — CI-first.** This is a public repo, so GitHub-hosted Actions minutes are
+effectively free and unlimited; the local dev box is severely underpowered (the real
+failure mode for extract/compile/convert is **CPU saturation → hypervisor-kill**,
+occasionally a kernel oops — *not* OOM) and a local crash is **unrecoverable** (its
+data dies with the process), whereas a CI crash is *captured* (bucket + artifacts).
+So the CI (GitHub-hosted runners) is the **preferred** venue, not a fallback: to
+exercise the workflow, **commit → push → open a PR** and let Actions run it. Local
+runs are a constrained, non-preferred fallback, **out of CI scope**. (A contained
+local run, if ever used, wraps `larql-probe safe --cpus N -- …`, mindful of #246.)
 
 ## 9. Testing (TDD)
 

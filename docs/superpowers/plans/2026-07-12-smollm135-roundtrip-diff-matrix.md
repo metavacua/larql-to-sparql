@@ -1005,23 +1005,26 @@ git add -A && git commit -m "test(roundtrip): full suite green + synthetic end-t
 
 ## Out of scope (deliberate — a separate follow-on plan)
 
-This plan builds the **measurement engine only**. The following require contained
-larql runs and are a distinct plan (`…-roundtrip-harness.md`), each producing the
-model-directory pairs this engine consumes:
+This plan builds the **measurement engine only**. The following run larql and are a
+distinct plan (`…-roundtrip-harness.md`), each producing the model-directory pairs
+this engine consumes. **Venue is CI-first** (public repo ⇒ free unlimited Actions;
+local box is underpowered and a local crash loses data — CI captures crashes):
 
-- The **operation runner**: contained `larql-probe safe --cpus N -- …` invocations
-  for `extract`, LQL `COMPILE … INTO MODEL … FORMAT safetensors`, `larql compile`
-  CLI, and `INSERT … MODE {KNN,COMPOSE}` — capturing `input`/`A`/`B` model dirs per
-  variant/driver/mode/insert-form, plus the `run_matrix.py` mechanical outcome for
-  each driving statement (consumed, not re-classified — §6.4 of the spec).
+- The **operation runner**: on a GitHub-hosted runner (ample resources, larql runs
+  directly), invocations of `extract`, LQL `COMPILE … INTO MODEL … FORMAT safetensors`,
+  `larql compile` CLI, and `INSERT … MODE {KNN,COMPOSE}` — capturing `input`/`A`/`B`
+  model dirs per variant/driver/mode/insert-form, plus the `run_matrix.py` mechanical
+  outcome for each driving statement (consumed, not re-classified — §6.4 of the spec).
+  (An *optional*, non-preferred local run wraps `larql-probe safe --cpus N -- …`.)
 - The **matrix driver** that walks `enumerate_comparisons`, invokes the runner,
   feeds pairs to `diff_model_dirs`, and aggregates the JSONL.
 - The **CI workflow** `lql-roundtrip-catalogue.yml` (model-level, `roundtrip-*`
   artifacts excluded from the `results-*` glob).
-- **Empirical grounding:** the first harness task is a contained local run on
-  SmolLM2-135M that converts the compile-behavior questions (bf16 output, config
-  rewrite, vindex participation, LQL-vs-CLI save path) into *measured* rows — no
-  claims asserted in advance.
+- **Empirical grounding:** the first harness task is to **commit → push → open a PR**
+  and let Actions run it on SmolLM2-135M — converting the compile-behavior questions
+  (bf16 output, config rewrite, vindex participation, LQL-vs-CLI save path) into
+  *measured* rows. No claims asserted in advance; the measurements come from a CI run,
+  not a local spot-check.
 
 ## Interpretation is metalinguistic — a different level, not a later phase
 
