@@ -34,3 +34,25 @@ def manifest_bijection(man_a, man_b):
         "in_both": sorted(a & b),
         "bijective": not only_a and not only_b,
     }
+
+
+def read_safetensors_header(path):
+    try:
+        with open(path, "rb") as f:
+            raw_len = f.read(8)
+            if len(raw_len) != 8:
+                return {"error": "truncated header length"}
+            (hlen,) = struct.unpack("<Q", raw_len)
+            hdr = json.loads(f.read(hlen).decode("utf-8"))
+    except (OSError, ValueError) as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+    metadata = hdr.pop("__metadata__", None)
+    tensors = {}
+    for name, spec in hdr.items():
+        tensors[name] = {
+            "dtype": spec.get("dtype"),
+            "shape": spec.get("shape"),
+            "data_offsets": spec.get("data_offsets"),
+        }
+    order = sorted(tensors, key=lambda n: (tensors[n]["data_offsets"] or [0])[0])
+    return {"tensors": tensors, "metadata": metadata, "order": order}
