@@ -71,3 +71,73 @@ def diff_model_dirs(dir_a, dir_b):
             files[name] = {"sha256_equal": sha_eq,
                            "size_a": man_a[name]["size"], "size_b": man_b[name]["size"]}
     return {"manifest": bij, "files": files}
+
+
+def to_rows(meta, dir_diff):
+    rows = []
+    base = dict(meta)
+    rows.append({**base, "file": "_manifest",
+                 "bijective": dir_diff["manifest"]["bijective"],
+                 "only_a": dir_diff["manifest"].get("only_a", []),
+                 "only_b": dir_diff["manifest"].get("only_b", [])})
+    for name, rec in dir_diff["files"].items():
+        row = {**base, "file": name, "sha256_equal": rec.get("sha256_equal")}
+        if "header" in rec:
+            h = rec["header"]
+            row["header_dtype_changes"] = h.get("dtype_changes", {})
+            row["header_shape_changes"] = h.get("shape_changes", {})
+            row["header_order_equal"] = h.get("order_equal")
+            row["header_metadata_equal"] = h.get("metadata_equal")
+            row["header_tensor_only_a"] = h.get("tensor_only_a", [])
+            row["header_tensor_only_b"] = h.get("tensor_only_b", [])
+            vals = rec.get("values", {})
+            row["values_bytes_equal"] = vals.get("_bytes_equal")
+            row["values_max_abs_diff"] = max(
+                (m.get("max_abs_diff", 0.0) for k, m in vals.items()
+                 if k != "_bytes_equal" and isinstance(m, dict) and m.get("comparable")),
+                default=0.0)
+            row["values_n_differing_total"] = sum(
+                m.get("n_differing", 0) for k, m in vals.items()
+                if k != "_bytes_equal" and isinstance(m, dict) and m.get("comparable"))
+        if "json" in rec:
+            j = rec["json"]
+            row["json_changed"] = j.get("changed", {})
+            row["json_only_a_paths"] = j.get("only_a_paths", [])
+            row["json_only_b_paths"] = j.get("only_b_paths", [])
+            row["json_byte_identical"] = j.get("byte_identical")
+        rows.append(row)
+    return rows
+
+
+def render_markdown(rows):
+    cols = ["model", "variant", "driver", "mode", "insert_form", "comparison",
+            "file", "sha256_equal"]
+    lines = ["| " + " | ".join(cols) + " |",
+             "|" + "|".join("---" for _ in cols) + "|"]
+    for r in rows:
+        lines.append("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def main(argv):
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--a", required=True)
+    ap.add_argument("--b", required=True)
+    ap.add_argument("--meta", required=True, help="JSON meta dict")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--md")
+    ns = ap.parse_args(argv)
+    meta = json.loads(ns.meta)
+    rows = to_rows(meta, diff_model_dirs(ns.a, ns.b))
+    with open(ns.out, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+    if ns.md:
+        with open(ns.md, "w", encoding="utf-8") as f:
+            f.write(render_markdown(rows))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
