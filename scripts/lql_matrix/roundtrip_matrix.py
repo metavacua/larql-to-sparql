@@ -23,6 +23,32 @@ REGISTRY = [
 DRIVERS = ("lql", "cli")
 INSERT_FORMS = ("knn", "compose")
 
+# Declared output schema: the ONLY top-level fields `to_rows` may add to a row
+# beyond the caller-supplied `meta`. This is the positive-existence contract —
+# a consumer reads it to know every field, and the test asserts to_rows emits
+# nothing outside it (so an interpretation field under ANY name is caught, not
+# just a hardcoded denylist of a few). Every field here is a measured quantity,
+# a machine-checkable predicate, or a factual "could-not-measure" error string.
+ROW_SCHEMA = frozenset({
+    "file",
+    # manifest row
+    "bijective", "only_a", "only_b",
+    # per-file common
+    "sha256_equal",
+    # safetensors header
+    "header_dtype_changes", "header_shape_changes", "header_order_equal",
+    "header_metadata_equal", "header_tensor_only_a", "header_tensor_only_b",
+    "header_metadata_a", "header_metadata_b", "header_error_a", "header_error_b",
+    # safetensors values
+    "values_bytes_equal", "values_max_abs_diff", "values_n_differing_total",
+    "values_l2_total", "values_n_total_total", "values_per_tensor", "values_error",
+    # json
+    "json_changed", "json_only_a_paths", "json_only_b_paths", "json_byte_identical",
+    "json_error_a", "json_error_b",
+    # other files
+    "size_a", "size_b",
+})
+
 
 def active_variants(registry=REGISTRY):
     out = []
