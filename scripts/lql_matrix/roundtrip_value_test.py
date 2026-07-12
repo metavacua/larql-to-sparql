@@ -1,6 +1,9 @@
 # roundtrip_value_test.py
 import numpy as np
+import struct
+import json as _json
 import roundtrip_value as V
+import roundtrip_diff as D2
 
 def test_decode_f32_roundtrips():
     arr = np.array([1.5, -2.0, 0.0], dtype=np.float32)
@@ -34,3 +37,26 @@ def test_tensor_value_metrics_shape_mismatch():
     m = V.tensor_value_metrics(a, b)
     assert m["comparable"] is False
     assert m["shape_a"] == [3] and m["shape_b"] == [4]
+
+def _st(path, tensors):  # tensors: {name: (dtype_str, np.ndarray)}
+    header, buf, off = {}, bytearray(), 0
+    for name, (dt, arr) in tensors.items():
+        raw = arr.tobytes()
+        header[name] = {"dtype": dt, "shape": list(arr.shape),
+                        "data_offsets": [off, off + len(raw)]}
+        buf += raw; off += len(raw)
+    blob = _json.dumps(header).encode("utf-8")
+    with open(path, "wb") as f:
+        f.write(struct.pack("<Q", len(blob))); f.write(blob); f.write(bytes(buf))
+
+def test_safetensors_value_diff_cross_dtype(tmp_path):
+    a = tmp_path / "a.safetensors"; b = tmp_path / "b.safetensors"
+    v = np.array([1.0, 2.0], dtype=np.float32)
+    _st(str(a), {"w": ("F32", v)})
+    # bf16 of [1.0, 2.0] = 0x3F80, 0x4000
+    bf = np.array([0x3F80, 0x4000], dtype="<u2")
+    _st(str(b), {"w": ("BF16", bf)})
+    d = V.safetensors_value_diff(str(a), str(b))
+    assert d["w"]["comparable"] is True
+    assert d["w"]["max_abs_diff"] == 0.0   # 1.0/2.0 exactly representable in bf16
+    assert d["_bytes_equal"] is False       # F32 bytes != BF16 bytes
