@@ -61,3 +61,20 @@ def test_header_diff_reports_dtype_order_metadata_changes():
 def test_header_diff_propagates_parse_error():
     d = D.header_diff({"error": "bad"}, {"tensors": {}, "metadata": None, "order": []})
     assert d["error_a"] == "bad"
+
+def test_json_structural_diff_flatten_and_byte_identical(tmp_path):
+    a = tmp_path / "a.json"; b = tmp_path / "b.json"
+    a.write_text('{"architectures": ["LlamaForCausalLM"], "n": {"x": 1, "y": 2}}')
+    b.write_text('{"architectures": ["Gemma3ForCausalLM"], "n": {"x": 1}, "z": 3}')
+    d = D.json_structural_diff(str(a), str(b))
+    assert d["changed"]["architectures"] == [["LlamaForCausalLM"], ["Gemma3ForCausalLM"]]
+    assert d["only_a_paths"] == ["n.y"]
+    assert d["only_b_paths"] == ["z"]
+    assert d["byte_identical"] is False
+
+def test_json_structural_diff_identical(tmp_path):
+    a = tmp_path / "a.json"; b = tmp_path / "b.json"
+    a.write_text('{"k": 1}'); b.write_text('{"k": 1}')
+    d = D.json_structural_diff(str(a), str(b))
+    assert d["byte_identical"] is True
+    assert d["changed"] == {}

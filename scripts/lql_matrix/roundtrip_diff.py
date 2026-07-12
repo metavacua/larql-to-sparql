@@ -79,3 +79,35 @@ def header_diff(ha, hb):
         "metadata_a": ha["metadata"],
         "metadata_b": hb["metadata"],
     }
+
+
+def _flatten(obj, prefix=""):
+    out = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            out.update(_flatten(v, f"{prefix}.{k}" if prefix else str(k)))
+    else:
+        out[prefix] = obj
+    return out
+
+
+def json_structural_diff(path_a, path_b):
+    try:
+        raw_a = open(path_a, "rb").read()
+        obj_a = json.loads(raw_a.decode("utf-8"))
+    except (OSError, ValueError) as e:
+        return {"error_a": f"{type(e).__name__}: {e}"}
+    try:
+        raw_b = open(path_b, "rb").read()
+        obj_b = json.loads(raw_b.decode("utf-8"))
+    except (OSError, ValueError) as e:
+        return {"error_b": f"{type(e).__name__}: {e}"}
+    fa, fb = _flatten(obj_a), _flatten(obj_b)
+    a, b = set(fa), set(fb)
+    changed = {p: [fa[p], fb[p]] for p in sorted(a & b) if fa[p] != fb[p]}
+    return {
+        "only_a_paths": sorted(a - b),
+        "only_b_paths": sorted(b - a),
+        "changed": changed,
+        "byte_identical": raw_a == raw_b,
+    }
