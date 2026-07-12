@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Python 3.12.** `roundtrip_diff.py` and `roundtrip_matrix.py`: **stdlib only** (`hashlib, struct, json, os, pathlib, sys`). `roundtrip_value.py`: stdlib + **numpy**. `pytest` is test-only.
+- **Python 3.12.** `roundtrip_diff.py`: **stdlib only, numpy-free** (`hashlib, struct, json, os, sys`) — importable without numpy, matching the `tensor_presence.py` precedent. `roundtrip_value.py`: stdlib + **numpy** (the value layer). `roundtrip_matrix.py`: stdlib for its own logic, but composes `roundtrip_value`, so it transitively requires numpy. `pytest` is test-only.
 - **No larql code changes. No edits to `conformance.py`.** New files only.
 - **Output is pure measurement:** every emitted field is a measured quantity or a machine-checkable predicate. **No** `expected`, `matches_expected`, `cause`, `verdict`, or meaning-named categories. Interpretation is **metalinguistic** — it lives at a different level (how *we* read the emitted relations), not inside this instrument.
 - **No canonicalize-to-match / no reward-hacking.** Canonicalized comparison (if computed) is recorded as its own measured predicate alongside the raw one — never used to suppress a raw difference.
