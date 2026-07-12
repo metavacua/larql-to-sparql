@@ -43,12 +43,19 @@ def read_safetensors_header(path):
             if len(raw_len) != 8:
                 return {"error": "truncated header length"}
             (hlen,) = struct.unpack("<Q", raw_len)
+            filesize = os.fstat(f.fileno()).st_size
+            if hlen > filesize - 8:
+                return {"error": "header length exceeds file size"}
             hdr = json.loads(f.read(hlen).decode("utf-8"))
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, MemoryError) as e:
         return {"error": f"{type(e).__name__}: {e}"}
+    if not isinstance(hdr, dict):
+        return {"error": "header is not a JSON object"}
     metadata = hdr.pop("__metadata__", None)
     tensors = {}
     for name, spec in hdr.items():
+        if not isinstance(spec, dict):
+            return {"error": f"tensor spec for {name} is not an object"}
         tensors[name] = {
             "dtype": spec.get("dtype"),
             "shape": spec.get("shape"),
@@ -93,12 +100,14 @@ def _flatten(obj, prefix=""):
 
 def json_structural_diff(path_a, path_b):
     try:
-        raw_a = open(path_a, "rb").read()
+        with open(path_a, "rb") as f:
+            raw_a = f.read()
         obj_a = json.loads(raw_a.decode("utf-8"))
     except (OSError, ValueError) as e:
         return {"error_a": f"{type(e).__name__}: {e}"}
     try:
-        raw_b = open(path_b, "rb").read()
+        with open(path_b, "rb") as f:
+            raw_b = f.read()
         obj_b = json.loads(raw_b.decode("utf-8"))
     except (OSError, ValueError) as e:
         return {"error_b": f"{type(e).__name__}: {e}"}

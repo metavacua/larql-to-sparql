@@ -45,6 +45,29 @@ def test_read_safetensors_header_malformed_returns_error(tmp_path):
     h = D.read_safetensors_header(str(p))
     assert "error" in h
 
+def test_read_safetensors_header_non_dict_header_returns_error(tmp_path):
+    p = tmp_path / "list_header.safetensors"
+    blob = _json.dumps([1, 2, 3]).encode("utf-8")
+    with open(str(p), "wb") as f:
+        f.write(struct.pack("<Q", len(blob)))
+        f.write(blob)
+    h = D.read_safetensors_header(str(p))
+    assert "error" in h
+
+def test_read_safetensors_header_non_dict_tensor_spec_returns_error(tmp_path):
+    p = tmp_path / "bad_spec.safetensors"
+    _write_safetensors(str(p), {"a.weight": 5})
+    h = D.read_safetensors_header(str(p))
+    assert "error" in h
+
+def test_read_safetensors_header_oversized_length_returns_error(tmp_path):
+    p = tmp_path / "oversized.safetensors"
+    with open(str(p), "wb") as f:
+        f.write(struct.pack("<Q", 2**60))
+        f.write(b"{}")
+    h = D.read_safetensors_header(str(p))
+    assert "error" in h
+
 def test_header_diff_reports_dtype_order_metadata_changes():
     ha = {"tensors": {"w": {"dtype": "F32", "shape": [4], "data_offsets": [0, 16]},
                       "lm": {"dtype": "F32", "shape": [4], "data_offsets": [16, 32]}},
