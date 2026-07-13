@@ -68,8 +68,13 @@ command = "python3 -m pytest -W error"
 wrapper = "larql-probe safe --cpus 2 -- "
 
 [x.scope]
-# This loop's subject: the roundtrip quantified-difference MEASUREMENT ENGINE
-# (branch smollm135-roundtrip-catalogue) and the open design signal — the differ's
-# silent-degrade disposition muting a Larql/LQL anomaly on CI, and the local-vs-CI
-# scope conflation in the spec/plan.
-branch = "smollm135-roundtrip-catalogue"
+# This loop's subject: extend the GitHub Actions WORKFLOW `.github/workflows/
+# lql-strategy-matrix.yml` to exercise the COMPILE half of the round-trip
+# (larql `compile` CLI + LQL `COMPILE … INTO MODEL`) on the vindex the workflow
+# ALREADY extracts for smol135 + variants, then byte-compare the reconstructed
+# model against the input model. The work is edits to the workflow + its helper
+# SCRIPTS (gen_legs/run_matrix/aggregate/…, and a differ helper), NOT a parallel
+# library. Prior parallel scripts (roundtrip_*.py) are legacy/reference — to be
+# reconciled or discarded during dev; nothing is assumed reusable.
+deliverable = ".github/workflows/lql-strategy-matrix.yml"
+branch = "smollm135-roundtrip-catalogue"  # created to edit that workflow safely

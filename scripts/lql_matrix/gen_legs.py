@@ -23,6 +23,7 @@ import json
 SAFETENSORS = [
     ("qwen05",    "Qwen/Qwen2.5-Coder-0.5B-Instruct"),
     ("smol135",   "HuggingFaceTB/SmolLM2-135M-Instruct"),
+    ("smol135base", "HuggingFaceTB/SmolLM2-135M"),
     ("smol360",   "HuggingFaceTB/SmolLM2-360M-Instruct"),
     ("qwen15",    "Qwen/Qwen2.5-1.5B-Instruct"),
     ("granite1b", "ibm-granite/granite-3.0-1b-a400m-instruct"),
@@ -35,10 +36,12 @@ GGUF = [("bitnetgguf", "microsoft/bitnet-b1.58-2B-4T-gguf", "microsoft/bitnet-b1
 
 
 def leg(name, hf, op, level="all", flags="", expect_quant="none",
-        source_kind="safetensors", corpus_model=None, tokenizer_repo=""):
+        source_kind="safetensors", corpus_model=None, tokenizer_repo="",
+        roundtrip=False):
     return {"name": name, "hf": hf, "corpus_model": corpus_model or hf,
             "source_kind": source_kind, "op": op, "level": level, "flags": flags,
-            "expect_quant": expect_quant, "tokenizer_repo": tokenizer_repo}
+            "expect_quant": expect_quant, "tokenizer_repo": tokenizer_repo,
+            "roundtrip": roundtrip}
 
 
 def main():
@@ -47,7 +50,9 @@ def main():
     # 1. NATIVE EXTRACTION — full level grid per model, native precision (f16).
     for mid, hf in SAFETENSORS:
         for lv in LEVELS:
-            legs.append(leg(f"{mid}.native.{lv}", hf, "extract", level=lv))
+            rt = mid in ("smol135", "smol135base") and lv in ("inference", "all")
+            legs.append(leg(f"{mid}.native.{lv}", hf, "extract", level=lv,
+                            roundtrip=rt))
 
     # 2. TRANSFORMATIONS — one all-level leg each (no level cross).
     #    q4k requantize per model (arch × quant coverage; re-catches the MoE panic #273).

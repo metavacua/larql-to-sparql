@@ -14,6 +14,8 @@ name: lql-strategy-matrix
 on:
   push:
     branches: [lql-strategy-matrix]
+  pull_request:
+    branches: [lql-strategy-matrix]
   workflow_dispatch:
     inputs:
       strict:
@@ -157,7 +159,7 @@ jobs:
           python-version: '3.12'
       - name: Pre-download source snapshot (${{ matrix.leg.hf }})
         run: |
-          python -m pip install --quiet huggingface_hub
+          python -m pip install --quiet huggingface_hub numpy
           python -c "from huggingface_hub import snapshot_download; snapshot_download('${HF}')"
 
       - name: Produce vindex (${{ matrix.leg.op }})
@@ -219,6 +221,25 @@ jobs:
           # tensor-presence witness (Q8): filename -> size for every vindex file
           python3 -c "import json,os,sys; d=sys.argv[1]; print(json.dumps({f: os.path.getsize(os.path.join(d,f)) for f in os.listdir(d)}) if os.path.isdir(d) else '{}')" \
             "$VINDEX" > "$MDIR/listing.json" 2>/dev/null || echo '{}' > "$MDIR/listing.json"
+
+      - name: Round-trip compile (${{ matrix.leg.name }})
+        if: ${{ matrix.leg.roundtrip == true }}
+        continue-on-error: true
+        run: |
+          BASE_DIR=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('${HF}'))")
+          python3 scripts/lql_matrix/roundtrip_compile.py --name "$NAME" --hf "$HF" \
+            --vindex "out/${NAME}.vindex" --larql-bin ./bin/larql --out-root "$(mktemp -d)" \
+            --produce-out "out/roundtrip-produce-${NAME}.jsonl" --diff-out "out/roundtrip-${NAME}.json"
+
+      - name: Upload round-trip results
+        if: ${{ always() && matrix.leg.roundtrip == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-${{ matrix.leg.name }}
+          retention-days: 1
+          path: |
+            out/roundtrip-${{ matrix.leg.name }}.json
+            out/roundtrip-produce-${{ matrix.leg.name }}.jsonl
 
       - name: Run LQL command corpus (${{ matrix.leg.name }})
         run: |
@@ -351,6 +372,30 @@ jobs:
           path: |
             conformance.md
             conformance.json
+
+  roundtrip:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Build round-trip catalogue
+        run: |
+          python3 scripts/lql_matrix/roundtrip_aggregate.py \
+            "artifacts/roundtrip-*/roundtrip-*.json" roundtrip-catalogue.json roundtrip-catalogue.md
+          cat roundtrip-catalogue.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload round-trip catalogue
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-catalogue
+          retention-days: 1
+          path: |
+            roundtrip-catalogue.json
+            roundtrip-catalogue.md
 
   inventory:
     needs: [matrix, conformance]

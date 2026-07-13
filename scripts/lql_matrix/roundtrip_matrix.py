@@ -1,27 +1,14 @@
-"""Round-trip quantified-difference matrix: active-model registry, comparison
-enumeration, and top-level combine over model-directory pairs. Emits raw
-measured differences only — no interpretation."""
+"""Round-trip quantified-difference matrix: structural+value diff over
+model-directory pairs, and the row/markdown rendering shared by the
+round-trip orchestrator (`roundtrip_compile.py`) and aggregator
+(`roundtrip_aggregate.py`). Emits raw measured differences only — no
+interpretation."""
 import json
 import os
 import sys
 
 import roundtrip_diff as D
 import roundtrip_value as V
-
-REGISTRY = [
-    {"id": "smol135", "active": True, "variants": [
-        {"variant": "instruct-bf16", "repo": "HuggingFaceTB/SmolLM2-135M-Instruct", "src_dtype": "BF16"},
-        {"variant": "base-f32", "repo": "HuggingFaceTB/SmolLM2-135M", "src_dtype": "F32"},
-    ]},
-    {"id": "qwen05", "active": False, "variants": []},
-    {"id": "smol360", "active": False, "variants": []},
-    {"id": "qwen15", "active": False, "variants": []},
-    {"id": "granite1b", "active": False, "variants": []},
-    {"id": "bitnet2b", "active": False, "variants": []},
-]
-
-DRIVERS = ("lql", "cli")
-INSERT_FORMS = ("knn", "compose")
 
 # Declared output schema: the ONLY top-level fields `to_rows` may add to a row
 # beyond the caller-supplied `meta`. This is the positive-existence contract —
@@ -48,34 +35,6 @@ ROW_SCHEMA = frozenset({
     # other files
     "size_a", "size_b",
 })
-
-
-def active_variants(registry=REGISTRY):
-    out = []
-    for m in registry:
-        if not m["active"]:
-            continue
-        for v in m["variants"]:
-            out.append((m["id"], v["variant"], v["repo"], v["src_dtype"]))
-    return out
-
-
-def _driver_rows(model_id, variant, driver, comparison_a, comparison_b):
-    """One mode-A row plus one mode-B row per INSERT form, for a driver."""
-    rows = [{"model": model_id, "variant": variant, "driver": driver,
-             "mode": "A", "insert_form": None, "comparison": comparison_a}]
-    for form in INSERT_FORMS:
-        rows.append({"model": model_id, "variant": variant, "driver": driver,
-                     "mode": "B", "insert_form": form, "comparison": comparison_b})
-    return rows
-
-
-def enumerate_comparisons(model_id, variant):
-    rows = []
-    for driver in DRIVERS:
-        rows += _driver_rows(model_id, variant, driver, "input_vs_A", "B_vs_A")
-    rows += _driver_rows(model_id, variant, "lql+cli", "lqlA_vs_cliA", "lqlB_vs_cliB")
-    return rows
 
 
 def diff_model_dirs(dir_a, dir_b):
