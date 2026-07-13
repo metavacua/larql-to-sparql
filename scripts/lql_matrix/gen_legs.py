@@ -19,6 +19,7 @@ Leg fields: name, hf, corpus_model, source_kind, op, level, flags, expect_quant,
 tokenizer_repo (only set for gguf legs).
 """
 import json
+import os
 
 SAFETENSORS = [
     ("qwen05",    "Qwen/Qwen2.5-Coder-0.5B-Instruct"),
@@ -44,7 +45,26 @@ def leg(name, hf, op, level="all", flags="", expect_quant="none",
             "roundtrip": roundtrip}
 
 
-def main():
+def _model_id(leg_name):
+    """The model id is the leg name's first dotted segment (e.g. 'smol135base'
+    from 'smol135base.native.all', 'qwen05' from 'qwen05.xform.q4k-sentinel-browse')."""
+    return leg_name.split(".", 1)[0]
+
+
+def _apply_model_filter(legs):
+    """Reversible model allowlist. If env LQL_MATRIX_ONLY is set to a
+    comma-separated list of model ids, keep ONLY legs for those models; unset
+    (the default) keeps the full matrix. Used to narrow a CI test run to the
+    round-trip-relevant models (smol135, smol135base) without deleting the full
+    model list from source — remove the env var to restore full coverage."""
+    only = os.environ.get("LQL_MATRIX_ONLY", "").strip()
+    if not only:
+        return legs
+    allowed = {m.strip() for m in only.split(",") if m.strip()}
+    return [lg for lg in legs if _model_id(lg["name"]) in allowed]
+
+
+def build_legs():
     legs = []
 
     # 1. NATIVE EXTRACTION — full level grid per model, native precision (f16).
@@ -82,7 +102,11 @@ def main():
                         expect_quant="none", source_kind="gguf",
                         corpus_model=tok, tokenizer_repo=tok))
 
-    print(json.dumps(legs))
+    return legs
+
+
+def main():
+    print(json.dumps(_apply_model_filter(build_legs())))
 
 
 if __name__ == "__main__":
