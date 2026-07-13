@@ -43,6 +43,24 @@ const SUBBLOCKS_PER_BLOCK: usize = 8;
 /// Sub-block size (matches Q4_K's per-32 nibble groups).
 const SUBBLOCK_SIZE: usize = 32;
 
+/// Runtime-checked replacement for the `out.len()==rows` / `q8k_x.qs.len()==cols`
+/// / `cols % ELEMS_PER_BLOCK==0` shape invariants every matvec kernel below
+/// used to rely on `debug_assert_eq!` alone for. Those compile to nothing in
+/// this workspace's release profile (`[profile.release]` never sets
+/// `debug-assertions`), so a caller-side length mismatch on `q8k_x.qs` fell
+/// straight through the NEON/scalar kernels' own bounds-checked slicing is
+/// fine on its own, but the hand-asm kernels (`q4k_q8k_matvec_asm*`,
+/// `q4k_q8k_gate_up_asm`, `q6k_q8k_matvec_asm`) take `q8k_x.qs.as_ptr()` as a
+/// bare pointer with no length of its own and no per-iteration bound in the
+/// `asm!` block - a real unguarded OOB read, not a debug-only guard.
+/// Callers zero-fill and return early when this is `false`, matching the
+/// `w.len() < rows * row_bytes` early-return already present in every one of
+/// these kernels.
+#[inline]
+fn q8k_shape_ok(out_len: usize, rows: usize, q8k_qs_len: usize, cols: usize) -> bool {
+    out_len == rows && q8k_qs_len == cols && cols % ELEMS_PER_BLOCK == 0
+}
+
 /// Quantised activation in Q8_K layout, one entry per super-block of `x`.
 ///
 /// `qs` packs all super-blocks contiguously: `qs[sb * 256 .. (sb+1) * 256]`
@@ -181,10 +199,7 @@ pub fn q4k_q8k_matvec_scalar(
     rows: usize,
     cols: usize,
 ) {
-    debug_assert_eq!(out.len(), rows);
-    debug_assert_eq!(q8k_x.qs.len(), cols);
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
-    if rows == 0 || cols == 0 {
+    if !q8k_shape_ok(out.len(), rows, q8k_x.qs.len(), cols) || rows == 0 || cols == 0 {
         for v in out.iter_mut() {
             *v = 0.0;
         }
@@ -314,10 +329,7 @@ pub fn q4k_q8k_matvec_neon(
 ) {
     use std::arch::aarch64::*;
 
-    debug_assert_eq!(out.len(), rows);
-    debug_assert_eq!(q8k_x.qs.len(), cols);
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
-    if rows == 0 || cols == 0 {
+    if !q8k_shape_ok(out.len(), rows, q8k_x.qs.len(), cols) || rows == 0 || cols == 0 {
         for v in out.iter_mut() {
             *v = 0.0;
         }
@@ -463,10 +475,7 @@ pub fn q4k_q8k_matvec_neon_2row(
 ) {
     use std::arch::aarch64::*;
 
-    debug_assert_eq!(out.len(), rows);
-    debug_assert_eq!(q8k_x.qs.len(), cols);
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
-    if rows == 0 || cols == 0 {
+    if !q8k_shape_ok(out.len(), rows, q8k_x.qs.len(), cols) || rows == 0 || cols == 0 {
         for v in out.iter_mut() {
             *v = 0.0;
         }
@@ -695,10 +704,7 @@ pub fn q4k_q8k_matvec_asm(
     rows: usize,
     cols: usize,
 ) {
-    debug_assert_eq!(out.len(), rows);
-    debug_assert_eq!(q8k_x.qs.len(), cols);
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
-    if rows == 0 || cols == 0 {
+    if !q8k_shape_ok(out.len(), rows, q8k_x.qs.len(), cols) || rows == 0 || cols == 0 {
         for v in out.iter_mut() {
             *v = 0.0;
         }
@@ -919,10 +925,7 @@ pub fn q4k_q8k_matvec_asm_v2(
     rows: usize,
     cols: usize,
 ) {
-    debug_assert_eq!(out.len(), rows);
-    debug_assert_eq!(q8k_x.qs.len(), cols);
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
-    if rows == 0 || cols == 0 {
+    if !q8k_shape_ok(out.len(), rows, q8k_x.qs.len(), cols) || rows == 0 || cols == 0 {
         for v in out.iter_mut() {
             *v = 0.0;
         }
@@ -1102,10 +1105,7 @@ pub fn q4k_q8k_matvec_asm_v3(
     rows: usize,
     cols: usize,
 ) {
-    debug_assert_eq!(out.len(), rows);
-    debug_assert_eq!(q8k_x.qs.len(), cols);
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
-    if rows == 0 || cols == 0 {
+    if !q8k_shape_ok(out.len(), rows, q8k_x.qs.len(), cols) || rows == 0 || cols == 0 {
         for v in out.iter_mut() {
             *v = 0.0;
         }
@@ -1394,11 +1394,9 @@ pub fn q4k_q8k_gate_up_neon(
 ) {
     use std::arch::aarch64::*;
 
-    debug_assert_eq!(gate_out.len(), rows);
-    debug_assert_eq!(up_out.len(), rows);
-    debug_assert_eq!(q8k_x.qs.len(), cols);
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
-    if rows == 0 || cols == 0 {
+    let shapes_ok = q8k_shape_ok(gate_out.len(), rows, q8k_x.qs.len(), cols)
+        && up_out.len() == rows;
+    if !shapes_ok || rows == 0 || cols == 0 {
         for v in gate_out.iter_mut() {
             *v = 0.0;
         }
@@ -1643,11 +1641,9 @@ pub fn q4k_q8k_gate_up_asm(
     rows: usize,
     cols: usize,
 ) {
-    debug_assert_eq!(gate_out.len(), rows);
-    debug_assert_eq!(up_out.len(), rows);
-    debug_assert_eq!(q8k_x.qs.len(), cols);
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
-    if rows == 0 || cols == 0 {
+    let shapes_ok = q8k_shape_ok(gate_out.len(), rows, q8k_x.qs.len(), cols)
+        && up_out.len() == rows;
+    if !shapes_ok || rows == 0 || cols == 0 {
         for v in gate_out.iter_mut() {
             *v = 0.0;
         }
@@ -1768,13 +1764,18 @@ pub fn q6k_q8k_matvec_scalar(
     rows: usize,
     cols: usize,
 ) {
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
     let n_blocks = cols / ELEMS_PER_BLOCK;
     let row_bytes = n_blocks * Q6K_BLOCK_BYTES;
     for v in out.iter_mut() {
         *v = 0.0;
     }
-    if rows == 0 || cols == 0 || w.len() < rows * row_bytes {
+    if rows == 0
+        || cols == 0
+        || cols % ELEMS_PER_BLOCK != 0
+        || out.len() != rows
+        || q8k_x.qs.len() != cols
+        || w.len() < rows * row_bytes
+    {
         return;
     }
     for (r, out_r) in out.iter_mut().enumerate().take(rows) {
@@ -1835,13 +1836,18 @@ pub fn q6k_q8k_matvec_neon(
 ) {
     use std::arch::aarch64::*;
 
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
     let n_blocks = cols / ELEMS_PER_BLOCK;
     let row_bytes = n_blocks * Q6K_BLOCK_BYTES;
     for v in out.iter_mut() {
         *v = 0.0;
     }
-    if rows == 0 || cols == 0 || w.len() < rows * row_bytes {
+    if rows == 0
+        || cols == 0
+        || cols % ELEMS_PER_BLOCK != 0
+        || out.len() != rows
+        || q8k_x.qs.len() != cols
+        || w.len() < rows * row_bytes
+    {
         return;
     }
 
@@ -2056,13 +2062,18 @@ pub fn q6k_q8k_matvec_asm(
     rows: usize,
     cols: usize,
 ) {
-    debug_assert_eq!(cols % ELEMS_PER_BLOCK, 0);
     let n_blocks = cols / ELEMS_PER_BLOCK;
     let row_bytes = n_blocks * Q6K_BLOCK_BYTES;
     for v in out.iter_mut() {
         *v = 0.0;
     }
-    if rows == 0 || cols == 0 || w.len() < rows * row_bytes {
+    if rows == 0
+        || cols == 0
+        || cols % ELEMS_PER_BLOCK != 0
+        || out.len() != rows
+        || q8k_x.qs.len() != cols
+        || w.len() < rows * row_bytes
+    {
         return;
     }
 

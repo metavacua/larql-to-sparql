@@ -351,8 +351,16 @@ pub async fn handle_chat_completions(
         .into_response());
     }
 
+    // Race the blocking generation against `state.infer_timeout`, mirroring
+    // `run_infer_with_timeout` (routes/infer.rs, BUG-infer-deadlock §5.6).
+    // Without this, a stuck/slow chat completion holds `LoadedModel.weights`'
+    // write guard for as long as the spawned thread runs, and every other
+    // OpenAI-route request queues on that guard indefinitely. On timeout we
+    // drop the JoinHandle and respond 504; the spawned thread finishes (or
+    // doesn't) in the background, same tradeoff /v1/infer already accepts.
     let logprobs_requested = req.logprobs.unwrap_or(false);
-    let output = tokio::task::spawn_blocking(move || -> Result<_, ServerError> {
+    let started = std::time::Instant::now();
+    let handle = tokio::task::spawn_blocking(move || -> Result<_, ServerError> {
         run_chat_completion(
             &model_arc,
             &messages,
@@ -361,9 +369,27 @@ pub async fn handle_chat_completions(
             &stop_strings,
             constrained_schema,
         )
-    })
-    .await
-    .map_err(|e| ServerError::Internal(e.to_string()))??;
+    });
+    let timeout = state.infer_timeout;
+    let output = if timeout.is_zero() {
+        handle.await.map_err(|e| ServerError::Internal(e.to_string()))??
+    } else {
+        match tokio::time::timeout(timeout, handle).await {
+            Ok(join_result) => join_result.map_err(|e| ServerError::Internal(e.to_string()))??,
+            Err(_elapsed) => {
+                tracing::warn!(
+                    target: "larql_server::openai::chat",
+                    "chat completion timed out after {:.1}s; dropping in-flight task and \
+                     responding 504 (background thread will finish on its own)",
+                    started.elapsed().as_secs_f64(),
+                );
+                return Err(OpenAIError::from(ServerError::Timeout(format!(
+                    "chat completion exceeded server-side timeout of {}s",
+                    timeout.as_secs(),
+                ))));
+            }
+        }
+    };
 
     let logprobs = if logprobs_requested && !tools_active {
         Some(build_chat_logprobs(&output.tokens))

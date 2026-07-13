@@ -252,22 +252,47 @@ pub async fn handle_completions(
         .into_response());
     }
 
-    // Non-streaming: the existing buffered path.
+    // Non-streaming: the existing buffered path. Racing the blocking
+    // generation against `state.infer_timeout` mirrors
+    // `run_infer_with_timeout` (routes/infer.rs, BUG-infer-deadlock §5.6):
+    // without it, a stuck/slow generation call holds `LoadedModel.weights`'
+    // write guard for as long as the spawned thread runs, and every other
+    // OpenAI-route request queues on that guard indefinitely. On timeout we
+    // drop the JoinHandle and respond 504; the spawned thread finishes (or
+    // doesn't) in the background, same tradeoff /v1/infer already accepts.
     let logprobs_requested = req.logprobs;
-    let (choices, prompt_tokens, completion_tokens) =
-        tokio::task::spawn_blocking(move || -> Result<_, ServerError> {
-            run_completions_loop(
-                &model_arc,
-                &prompts,
-                max_tokens,
-                sampling_params,
-                &stop_strings,
-                echo,
-                logprobs_requested,
-            )
-        })
-        .await
-        .map_err(|e| ServerError::Internal(e.to_string()))??;
+    let started = std::time::Instant::now();
+    let handle = tokio::task::spawn_blocking(move || -> Result<_, ServerError> {
+        run_completions_loop(
+            &model_arc,
+            &prompts,
+            max_tokens,
+            sampling_params,
+            &stop_strings,
+            echo,
+            logprobs_requested,
+        )
+    });
+    let timeout = state.infer_timeout;
+    let (choices, prompt_tokens, completion_tokens) = if timeout.is_zero() {
+        handle.await.map_err(|e| ServerError::Internal(e.to_string()))??
+    } else {
+        match tokio::time::timeout(timeout, handle).await {
+            Ok(join_result) => join_result.map_err(|e| ServerError::Internal(e.to_string()))??,
+            Err(_elapsed) => {
+                tracing::warn!(
+                    target: "larql_server::openai::completions",
+                    "completion timed out after {:.1}s; dropping in-flight task and \
+                     responding 504 (background thread will finish on its own)",
+                    started.elapsed().as_secs_f64(),
+                );
+                return Err(OpenAIError::from(ServerError::Timeout(format!(
+                    "completion exceeded server-side timeout of {}s",
+                    timeout.as_secs(),
+                ))));
+            }
+        }
+    };
 
     Ok(Json(CompletionsResponse {
         id: format!("cmpl-{}", new_id_suffix()),

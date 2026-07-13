@@ -346,7 +346,16 @@ where
         let base = out.as_mut_ptr() as usize;
         global().for_each_chunk(n, |ci| {
             let start = ci * chunk;
-            let len = chunk.min(total - start);
+            // `start < total` holds by construction for `ci < n` - but this
+            // feeds a raw `.add(start)` below with no bounds check of its
+            // own, so `saturating_sub` (not `-`) turns any violation of that
+            // invariant into an inert zero-length chunk instead of a wrapped
+            // `usize` producing a wild slice length (release builds have no
+            // overflow-checks).
+            let len = chunk.min(total.saturating_sub(start));
+            if len == 0 {
+                return;
+            }
             // SAFETY: chunk index `ci` owns the disjoint range
             // `[start, start+len)` of `out`; no two chunks overlap, and the
             // dispatch barrier keeps `out` borrowed for the whole call.
@@ -381,7 +390,11 @@ where
         let base_b = b.as_mut_ptr() as usize;
         global().for_each_chunk(n, |ci| {
             let start = ci * chunk;
-            let len = chunk.min(total - start);
+            // See the matching comment in `par_chunks_mut` above.
+            let len = chunk.min(total.saturating_sub(start));
+            if len == 0 {
+                return;
+            }
             // SAFETY: disjoint per-chunk ranges of `a` and `b` (separate
             // buffers); barrier keeps both borrowed for the call.
             let sa = unsafe { std::slice::from_raw_parts_mut((base_a as *mut T).add(start), len) };
@@ -584,5 +597,124 @@ mod tests {
                 assert_eq!(a.load(Ordering::Relaxed), round * (c as u64 + 1));
             }
         }
+    }
+
+    // ── SIGSEGV reproduction attempt (three crash reports, all localizing
+    // inside `par_chunks_mut`/`run_chunks`, fault addresses matching real
+    // model dimensions or `0x1`) ────────────────────────────────────────────
+
+    const RD_HIDDEN: usize = 2560;
+    const RD_INTER: usize = 10240;
+    const RD_Q_DIM: usize = 2048;
+    const RD_KV_DIM: usize = 1024;
+    const RD_ROWS_CHUNK: usize = 32;
+    const RD_ELEM_CHUNK: usize = 256;
+
+    fn rd_f32_encode(caller: u64, round: u64, tag: u64, idx: usize) -> f32 {
+        // Cheap, collision-resistant-enough encoding of (caller, round, tag,
+        // idx) into an f32 so a read of the wrong slot/epoch/caller's data is
+        // caught as a mismatch rather than silently looking plausible.
+        ((caller.wrapping_mul(998_244_353)
+            ^ round.wrapping_mul(1_000_003)
+            ^ tag.wrapping_mul(97)
+            ^ idx as u64)
+            % 1_000_000) as f32
+    }
+    fn rd_fill_chunk(chunk: &mut [f32], global_start: usize, caller: u64, round: u64, tag: u64) {
+        for (local_i, v) in chunk.iter_mut().enumerate() {
+            // Cheap but non-trivial busy-work per element (~tens of ns) so a
+            // chunk's dispatched duration is closer to the real matvec
+            // kernel's (many SDOTs per row) than a near-instant synthetic
+            // write - in case the bug is timing/duration-dependent (spin ->
+            // yield -> park transitions calibrated around real chunk cost).
+            let mut acc = 0.0f32;
+            for j in 0..64u32 {
+                acc = acc * 1.0000001 + (j as f32).sin();
+            }
+            *v = rd_f32_encode(caller, round, tag, global_start + local_i) + acc * 0.0;
+        }
+    }
+    fn rd_check(buf: &[f32], caller: u64, round: u64, tag: u64) {
+        for (i, &v) in buf.iter().enumerate() {
+            let want = rd_f32_encode(caller, round, tag, i);
+            assert_eq!(
+                v.to_bits(),
+                want.to_bits(),
+                "caller {caller} round {round} tag {tag} idx {i}: corrupted \
+                 (got {v}, want {want}) - buffer len {}",
+                buf.len()
+            );
+        }
+    }
+
+    /// One simulated decode step's worth of dispatches against `par_chunks_mut`
+    /// - the actual public entry point production uses, with the REAL
+    /// gemma-3-4b-it row counts (q_dim=2048, kv_dim=1024, hidden=2560,
+    /// intermediate=10240 - all exact multiples of their chunk sizes, same as
+    /// production, so this can't exercise the underflow this file already
+    /// hardened against; it's targeting a different bug). `caller` tags every
+    /// value so concurrent callers (simulating overlapping requests) can tell
+    /// their own data apart from a caller they got mixed up with.
+    fn rd_run(caller: u64, rounds: u64, layers: u64) {
+        let mut q = vec![0.0f32; RD_Q_DIM];
+        let mut k = vec![0.0f32; RD_KV_DIM];
+        let mut v = vec![0.0f32; RD_KV_DIM];
+        let mut o = vec![0.0f32; RD_HIDDEN];
+        let mut gate = vec![0.0f32; RD_INTER];
+        let mut up = vec![0.0f32; RD_INTER];
+        let mut activated = vec![0.0f32; RD_INTER];
+        let mut down = vec![0.0f32; RD_HIDDEN];
+
+        for round in 0..rounds {
+            for layer in 0..layers {
+                let tag = round * layers + layer;
+                for (buf, sub) in [
+                    (&mut q, 0u64),
+                    (&mut k, 1),
+                    (&mut v, 2),
+                    (&mut o, 3),
+                    (&mut gate, 4),
+                    (&mut up, 5),
+                    (&mut down, 7),
+                ] {
+                    let t = tag.wrapping_mul(8) + sub;
+                    par_chunks_mut(buf, RD_ROWS_CHUNK, |ci, chunk| {
+                        rd_fill_chunk(chunk, ci * RD_ROWS_CHUNK, caller, round, t)
+                    });
+                    rd_check(buf, caller, round, t);
+                }
+                // Elementwise activation: 256-chunked, INTER-sized - the
+                // production shape at kquant_forward/cached.rs:869.
+                let t = tag.wrapping_mul(8) + 6;
+                par_chunks_mut(&mut activated, RD_ELEM_CHUNK, |ci, chunk| {
+                    rd_fill_chunk(chunk, ci * RD_ELEM_CHUNK, caller, round, t)
+                });
+                rd_check(&activated, caller, round, t);
+            }
+        }
+    }
+
+    /// Single sequential caller, at production scale (34 layers x 400
+    /// simulated tokens). `--test-threads` contention from other tests
+    /// sharing `global()` is part of the reproduction attempt - do not run
+    /// this test in isolation only.
+    #[test]
+    fn stress_realistic_decode_shape_no_corruption() {
+        rd_run(0, 40, 34);
+    }
+
+    /// Genuinely concurrent callers (unlike `concurrent_dispatchers_stay_
+    /// consistent` above, which uses one FIXED dispatch size for every
+    /// thread) - each thread runs its own independent `rd_run`-shaped decode
+    /// loop against the SAME shared `global()` pool at the SAME time, so
+    /// `dispatch_lock` has to actually serialize dispatchers with DIFFERENT
+    /// `(total, chunk)` shapes mid-flight, not just identical ones.
+    #[test]
+    fn stress_concurrent_realistic_decode_shape_no_corruption() {
+        std::thread::scope(|s| {
+            for caller in 0..6u64 {
+                s.spawn(move || rd_run(caller, 8, 34));
+            }
+        });
     }
 }
