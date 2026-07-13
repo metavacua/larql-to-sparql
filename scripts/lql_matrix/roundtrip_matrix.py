@@ -8,7 +8,11 @@ import os
 import sys
 
 import roundtrip_diff as D
-import roundtrip_value as V
+# roundtrip_value (numpy) is imported lazily inside diff_model_dirs — the only
+# path that decodes tensor values. This keeps the pure row/markdown rendering
+# (render_markdown, ROW_SCHEMA, to_rows) importable without numpy, so the peer
+# aggregate job (roundtrip_aggregate.py), which only reshapes JSON, needs no
+# numpy. Regression: roundtrip_matrix_test.test_aggregate_path_imports_without_numpy.
 
 # Declared output schema: the ONLY top-level fields `to_rows` may add to a row
 # beyond the caller-supplied `meta`. This is the positive-existence contract —
@@ -38,6 +42,7 @@ ROW_SCHEMA = frozenset({
 
 
 def diff_model_dirs(dir_a, dir_b):
+    import roundtrip_value as V  # lazy: numpy only needed to decode tensor values
     man_a, man_b = D.file_manifest(dir_a), D.file_manifest(dir_b)
     bij = D.manifest_bijection(man_a, man_b)
     files = {}

@@ -1,7 +1,36 @@
 # roundtrip_matrix_test.py
 import json
+import os
+import subprocess
+import sys
 
 import roundtrip_matrix as M
+
+
+def test_aggregate_path_imports_without_numpy(tmp_path):
+    # Regression for the CI `roundtrip` job failure (run 29221308111): the peer
+    # aggregate job has no numpy, and must not need it — it only reshapes JSON
+    # and renders markdown via roundtrip_matrix.render_markdown. Block numpy in
+    # a subprocess and assert the aggregator still produces its outputs (i.e.
+    # importing roundtrip_matrix must not eagerly pull numpy via roundtrip_value).
+    src = tmp_path / "roundtrip-x.json"
+    src.write_text(json.dumps({"leg": "smol135.native.inference",
+                               "comparisons": [{"model": "smol135",
+                                                "file": "model.safetensors",
+                                                "sha256_equal": False}]}))
+    oj, om = tmp_path / "cat.json", tmp_path / "cat.md"
+    code = ("import sys; sys.modules['numpy'] = None\n"
+            "import roundtrip_aggregate as A\n"
+            f"A.main({str(src)!r}, {str(oj)!r}, {str(om)!r})\n")
+    here = os.path.dirname(os.path.abspath(__file__))
+    r = subprocess.run([sys.executable, "-c", code], cwd=here,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    # render_markdown ran (the row reached the rendered table)
+    assert "model.safetensors" in om.read_text(encoding="utf-8")
+    # the leg tag survives into the flattened catalogue rows
+    rows = json.loads(oj.read_text(encoding="utf-8"))
+    assert rows and rows[0]["leg"] == "smol135.native.inference"
 
 
 def test_diff_model_dirs_combines_structural_and_value(tmp_path):
