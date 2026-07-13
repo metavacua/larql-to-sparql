@@ -19,10 +19,12 @@ Leg fields: name, hf, corpus_model, source_kind, op, level, flags, expect_quant,
 tokenizer_repo (only set for gguf legs).
 """
 import json
+import os
 
 SAFETENSORS = [
     ("qwen05",    "Qwen/Qwen2.5-Coder-0.5B-Instruct"),
     ("smol135",   "HuggingFaceTB/SmolLM2-135M-Instruct"),
+    ("smol135base", "HuggingFaceTB/SmolLM2-135M"),
     ("smol360",   "HuggingFaceTB/SmolLM2-360M-Instruct"),
     ("qwen15",    "Qwen/Qwen2.5-1.5B-Instruct"),
     ("granite1b", "ibm-granite/granite-3.0-1b-a400m-instruct"),
@@ -35,19 +37,42 @@ GGUF = [("bitnetgguf", "microsoft/bitnet-b1.58-2B-4T-gguf", "microsoft/bitnet-b1
 
 
 def leg(name, hf, op, level="all", flags="", expect_quant="none",
-        source_kind="safetensors", corpus_model=None, tokenizer_repo=""):
+        source_kind="safetensors", corpus_model=None, tokenizer_repo="",
+        roundtrip=False):
     return {"name": name, "hf": hf, "corpus_model": corpus_model or hf,
             "source_kind": source_kind, "op": op, "level": level, "flags": flags,
-            "expect_quant": expect_quant, "tokenizer_repo": tokenizer_repo}
+            "expect_quant": expect_quant, "tokenizer_repo": tokenizer_repo,
+            "roundtrip": roundtrip}
 
 
-def main():
+def _model_id(leg_name):
+    """The model id is the leg name's first dotted segment (e.g. 'smol135base'
+    from 'smol135base.native.all', 'qwen05' from 'qwen05.xform.q4k-sentinel-browse')."""
+    return leg_name.split(".", 1)[0]
+
+
+def _apply_model_filter(legs):
+    """Reversible model allowlist. If env LQL_MATRIX_ONLY is set to a
+    comma-separated list of model ids, keep ONLY legs for those models; unset
+    (the default) keeps the full matrix. Used to narrow a CI test run to the
+    round-trip-relevant models (smol135, smol135base) without deleting the full
+    model list from source — remove the env var to restore full coverage."""
+    only = os.environ.get("LQL_MATRIX_ONLY", "").strip()
+    if not only:
+        return legs
+    allowed = {m.strip() for m in only.split(",") if m.strip()}
+    return [lg for lg in legs if _model_id(lg["name"]) in allowed]
+
+
+def build_legs():
     legs = []
 
     # 1. NATIVE EXTRACTION — full level grid per model, native precision (f16).
     for mid, hf in SAFETENSORS:
         for lv in LEVELS:
-            legs.append(leg(f"{mid}.native.{lv}", hf, "extract", level=lv))
+            rt = mid in ("smol135", "smol135base") and lv in ("inference", "all")
+            legs.append(leg(f"{mid}.native.{lv}", hf, "extract", level=lv,
+                            roundtrip=rt))
 
     # 2. TRANSFORMATIONS — one all-level leg each (no level cross).
     #    q4k requantize per model (arch × quant coverage; re-catches the MoE panic #273).
@@ -77,7 +102,11 @@ def main():
                         expect_quant="none", source_kind="gguf",
                         corpus_model=tok, tokenizer_repo=tok))
 
-    print(json.dumps(legs))
+    return legs
+
+
+def main():
+    print(json.dumps(_apply_model_filter(build_legs())))
 
 
 if __name__ == "__main__":

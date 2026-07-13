@@ -40,8 +40,12 @@ def load(results_glob):
         d = Path(rf).parent
         names_here = []
         try:
-            text = Path(rf).read_text(encoding="utf-8")
-        except OSError:
+            # errors="replace": a malformed-UTF-8 artifact (plausible from a corrupt or
+            # OOM-truncated produce) must not crash the checker — the worst inputs are
+            # exactly the ones the oracle exists to report on. except Exception guards
+            # UnicodeDecodeError (a ValueError, not OSError) and any other read failure.
+            text = Path(rf).read_text(encoding="utf-8", errors="replace")
+        except Exception:
             continue
         for line in text.splitlines():
             line = line.strip()
@@ -169,6 +173,20 @@ def inv_produce(legs):
     return out
 
 
+def inv_masked_error(legs):
+    """Every non-crash cell that surfaced an error. larql lql exits 0 on all in-band
+    errors (repl.rs run_batch swallows them), so without this the CI is blind to them.
+    There is NO 'expected error' exemption — every surfaced error is a violation.
+    Crashes are owned by inv_no_crash and skipped here to avoid double-counting."""
+    out = []
+    for name, lg in legs.items():
+        for cid, row in lg.cells.items():
+            if row.get("err_signal") and not _is_crash(row):
+                detail = (row.get("err_line") or "error surfaced with exit 0").strip()[:120]
+                out.append(Violation("masked-error", name, cid, detail))
+    return out
+
+
 def inv_descriptor_match(legs):
     out = []
     for name, lg in legs.items():
@@ -248,7 +266,8 @@ def inv_diagnostic(legs):
     return out
 
 
-INVARIANTS = [inv_completeness, inv_produce, inv_no_crash, inv_descriptor_match, inv_cross_check, inv_diagnostic]
+INVARIANTS = [inv_completeness, inv_produce, inv_no_crash, inv_masked_error,
+              inv_descriptor_match, inv_cross_check, inv_diagnostic]
 
 
 _SRC_FMT = {"extract": "safetensors", "gguf-to-vindex": "gguf",

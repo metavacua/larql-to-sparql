@@ -80,6 +80,26 @@ def test_produce_failure_is_distinct_produce_violation_not_hollow():
     assert [v.leg for v in comp] == ["granite"]
 
 
+def test_masked_error_flags_every_exit0_error_not_crashes():
+    # No "expected error" category: every surfaced error that isn't a crash is a
+    # violation (larql exits 0 on all of them, so the CI is otherwise blind).
+    lg = make_leg("lg", cells={
+        "patch.begin": _cell("patch.begin", bucket="ok", exit_code=0, err_signal=1,
+                             err_line="Error: Parse error: expected string literal, got Semicolon"),
+        "infer.browse": _cell("infer.browse", bucket="ok", exit_code=0, err_signal=1,
+                             err_line="Error: Execution error: INFER requires model weights"),
+        "stats": _cell("stats", stdout="(24 layers, 5K features, m)", bucket="ok",
+                       exit_code=0, err_signal=0),                       # clean → not flagged
+        "infer.panic": _cell("infer.panic", bucket="err", exit_code=101, err_signal=1,
+                             err_line="thread panicked at ffn/sparse_compute.rs"),  # crash → no-crash owns it
+    })
+    vs = C.inv_masked_error({"lg": lg})
+    flagged = {v.cell for v in vs}
+    assert flagged == {"patch.begin", "infer.browse"}   # both exit-0 errors, NO exemption
+    assert all(v.invariant == "masked-error" for v in vs)
+    assert "Parse error" in next(v for v in vs if v.cell == "patch.begin").detail
+
+
 def test_produce_crash_left_to_no_crash_not_double_reported():
     # a produce CRASH (137) is already handled by inv_no_crash; inv_produce must
     # not also report it (avoid double-counting the same failure).
@@ -212,6 +232,19 @@ def test_run_strict_fails_on_violation(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "load", lambda g: {"lg": make_leg()})
     assert C.run("x", str(tmp_path/"c.md"), str(tmp_path/"c.json"), strict=True) == 1
     assert C.run("x", str(tmp_path/"c.md"), str(tmp_path/"c.json"), strict=False) == 0
+
+
+def test_load_tolerates_invalid_utf8_and_does_not_crash(tmp_path):
+    # A results file with invalid UTF-8 bytes must NOT crash the checker (design
+    # constraint: "conformance.py never crashes on missing/partial artifacts").
+    # read_text(encoding="utf-8") without errors="replace" raises UnicodeDecodeError
+    # (a ValueError, not OSError) — the gemini PR finding.
+    d = tmp_path / "results-bad"
+    d.mkdir()
+    (d / "results-bad.jsonl").write_bytes(
+        b'{"type":"meta","level":"bad"}\n\xff\xfe not utf-8 \x80\x81\n')
+    legs = C.load(str(tmp_path / "results-*/results-*.jsonl"))  # must not raise
+    assert "bad" in legs
 
 
 def test_non_dict_sidecar_does_not_crash(tmp_path):

@@ -17,7 +17,8 @@ def main():
     d = {"name": name, "expect_quant": expect, "produced": os.path.isdir(vindex)}
     idx_path = os.path.join(vindex, "index.json")
     try:
-        idx = json.load(open(idx_path, encoding="utf-8"))
+        with open(idx_path, encoding="utf-8") as f:
+            idx = json.load(f)
         d.update({
             "family": idx.get("family"),
             "dtype": idx.get("dtype"),

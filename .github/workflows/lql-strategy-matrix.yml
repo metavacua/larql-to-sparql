@@ -14,6 +14,8 @@ name: lql-strategy-matrix
 on:
   push:
     branches: [lql-strategy-matrix]
+  pull_request:
+    branches: [lql-strategy-matrix]
   workflow_dispatch:
     inputs:
       strict:
@@ -43,6 +45,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - id: gen
+        # TEMPORARY (round-trip CI validation): narrow the matrix to the
+        # round-trip-relevant models only. gen_legs.py keeps the full model list;
+        # this env var filters it. Remove the `env:` block to restore full coverage.
+        env:
+          LQL_MATRIX_ONLY: "smol135,smol135base"
         run: |
           legs=$(python3 scripts/lql_matrix/gen_legs.py)
           echo "legs=$legs" >> "$GITHUB_OUTPUT"
@@ -157,7 +164,7 @@ jobs:
           python-version: '3.12'
       - name: Pre-download source snapshot (${{ matrix.leg.hf }})
         run: |
-          python -m pip install --quiet huggingface_hub
+          python -m pip install --quiet huggingface_hub numpy
           python -c "from huggingface_hub import snapshot_download; snapshot_download('${HF}')"
 
       - name: Produce vindex (${{ matrix.leg.op }})
@@ -220,6 +227,25 @@ jobs:
           python3 -c "import json,os,sys; d=sys.argv[1]; print(json.dumps({f: os.path.getsize(os.path.join(d,f)) for f in os.listdir(d)}) if os.path.isdir(d) else '{}')" \
             "$VINDEX" > "$MDIR/listing.json" 2>/dev/null || echo '{}' > "$MDIR/listing.json"
 
+      - name: Round-trip compile (${{ matrix.leg.name }})
+        if: ${{ matrix.leg.roundtrip == true }}
+        continue-on-error: true
+        run: |
+          BASE_DIR=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('${HF}'))")
+          python3 scripts/lql_matrix/roundtrip_compile.py --name "$NAME" --hf "$HF" \
+            --vindex "out/${NAME}.vindex" --larql-bin ./bin/larql --out-root "$(mktemp -d)" \
+            --produce-out "out/roundtrip-produce-${NAME}.jsonl" --diff-out "out/roundtrip-${NAME}.json"
+
+      - name: Upload round-trip results
+        if: ${{ always() && matrix.leg.roundtrip == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-${{ matrix.leg.name }}
+          retention-days: 1
+          path: |
+            out/roundtrip-${{ matrix.leg.name }}.json
+            out/roundtrip-produce-${{ matrix.leg.name }}.jsonl
+
       - name: Run LQL command corpus (${{ matrix.leg.name }})
         run: |
           VINDEX="out/${NAME}.vindex"
@@ -254,12 +280,14 @@ jobs:
       fail-fast: false
       matrix:
         model:
-          - { id: qwen05,    hf: "Qwen/Qwen2.5-Coder-0.5B-Instruct" }
+          # TEMPORARY (round-trip CI validation): only smol135 is exercised for
+          # the model-lifecycle corpus. Uncomment the others to restore full coverage.
           - { id: smol135,   hf: "HuggingFaceTB/SmolLM2-135M-Instruct" }
-          - { id: smol360,   hf: "HuggingFaceTB/SmolLM2-360M-Instruct" }
-          - { id: qwen15,    hf: "Qwen/Qwen2.5-1.5B-Instruct" }
-          - { id: granite1b, hf: "ibm-granite/granite-3.0-1b-a400m-instruct" }
-          - { id: bitnet2b,  hf: "microsoft/bitnet-b1.58-2B-4T" }
+          # - { id: qwen05,    hf: "Qwen/Qwen2.5-Coder-0.5B-Instruct" }
+          # - { id: smol360,   hf: "HuggingFaceTB/SmolLM2-360M-Instruct" }
+          # - { id: qwen15,    hf: "Qwen/Qwen2.5-1.5B-Instruct" }
+          # - { id: granite1b, hf: "ibm-granite/granite-3.0-1b-a400m-instruct" }
+          # - { id: bitnet2b,  hf: "microsoft/bitnet-b1.58-2B-4T" }
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -351,6 +379,30 @@ jobs:
           path: |
             conformance.md
             conformance.json
+
+  roundtrip:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Build round-trip catalogue
+        run: |
+          python3 scripts/lql_matrix/roundtrip_aggregate.py \
+            "artifacts/roundtrip-*/roundtrip-*.json" roundtrip-catalogue.json roundtrip-catalogue.md
+          cat roundtrip-catalogue.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload round-trip catalogue
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-catalogue
+          retention-days: 1
+          path: |
+            roundtrip-catalogue.json
+            roundtrip-catalogue.md
 
   inventory:
     needs: [matrix, conformance]
