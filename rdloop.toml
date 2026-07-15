@@ -1,0 +1,64 @@
+# rdloop.toml — Research-Development-Loop manifest for larql-to-sparql.
+# Zero ambient authority: every capability is DENIED unless explicitly granted here.
+# Scaffolded 2026-07-15 for the "self-playing self-learning LARQL REPL LM" task
+# (research-development-loop skill, Ralph-loop session). Derived from repo facts
+# (git remotes, gh/larql-probe presence, Cargo workspace) plus the sibling
+# example-manifest.metavacua.toml already scoped to this repo. PENDING USER REVIEW —
+# see the pause-for-review question in the conversation before this is treated as final.
+
+[project]
+name = "larql-to-sparql"
+target = "x86_64-unknown-linux-gnu"
+docs_dir = "docs"
+vcs = "git"
+
+[capabilities]
+# Repo root only — no writes outside the working tree.
+filesystem = ["."]
+# HF for model/vindex metadata lookups (read-only in practice; no pull performed by this loop
+# unless a later, separately-confirmed step needs it). GitHub API for issue tracker access.
+network = ["api.github.com", "huggingface.co", "cloud.debian.org"]
+# cloud.debian.org added 2026-07-15: ADR-2 (local QEMU/KVM microVM) needs a guest disk image;
+# Debian's official cloud image is the standard, well-supported source for qemu+cloud-init.
+# larql-probe is the mandatory containment wrapper (user's global CLAUDE.md policy) for any
+# command that loads/runs a local model (`larql run/extract/infer`, *.gguf, ollama, llama.cpp,
+# llama_cpp/transformers/from_pretrained). It is granted here so the wrapper itself is usable —
+# this does NOT grant unwrapped inference; see [x.inference] below.
+subprocess = ["cargo", "git", "gh", "make", "larql-probe", "date", "qemu-system-x86_64", "qemu-img", "cloud-localds", "kvm-ok"]
+clock = true
+random = false
+threads = true
+gpu = false
+
+[dependencies]
+standard = "cargo"
+manifest = "Cargo.toml"
+toolchain = "rust-toolchain.toml"
+
+[resources]
+# Conservative ceiling on this dev machine; serialize_tasks=true means no concurrent
+# resource-heavy subprocess (e.g. two cargo builds, or a build alongside a larql-probe run).
+memory_budget_mb = 4096
+serialize_tasks = true
+
+[issues]
+tracker = "github"
+write_repos = ["metavacua/larql-to-sparql", "metavacua/goose"]
+read_repos = ["metavacua/larql-to-sparql", "chrishayuk/larql", "metavacua/goose", "metavacua/babel-harness"]
+
+[delegation]
+subagent = "general-purpose"
+
+[security]
+default_posture = "deny"
+write_allowed = ["metavacua/larql-to-sparql", "metavacua/goose"]
+# User-authorized 2026-07-15 mid-task: "Metavacua/goose can be used; branches and PRs can be
+# submitted there." metavacua/goose is a fork (aaif-goose/goose <- block/goose lineage), already
+# described in its own repo metadata as "candidate coding harness for larql-goose" — this is
+# pre-existing, named intent, not a new scope decision invented here.
+
+[x.inference]
+# Every actual local-model invocation in this loop's dev/test steps MUST be prefixed with this
+# wrapper. Design/spec/plan work itself makes no such calls; this exists so Phase 3/4 test
+# execution against SmolLM2-135M is containment-compliant by construction, not by discipline.
+wrapper = "larql-probe safe --mem 3072 --cpus 2 -- "

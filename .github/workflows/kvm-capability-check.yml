@@ -1,0 +1,70 @@
+# One-off diagnostic: does this org's GitHub-hosted runner support
+# /dev/kvm (hardware-accelerated virtualization)?
+#
+# Load-bearing for the larql-goose self-play VM boundary design
+# (docs/specs/2026-07-15-larql-goose-selfplay-design.md, ADR-2): local dev
+# hardware confirmed KVM works (see that doc's residual, K27-K30), but
+# GitHub-hosted Linux runners are commonly reported NOT to expose nested
+# virtualization by default. This workflow checks empirically rather than
+# assuming either way, cheaply (a few seconds of runner time), before any
+# larger CI pipeline is built around QEMU/KVM.
+#
+# workflow_dispatch only — this is a manual diagnostic, not a regression
+# gate; delete or fold into a real pipeline once the answer is known and
+# acted on.
+name: kvm-capability-check
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check-kvm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check /dev/kvm existence and permissions
+        run: |
+          echo "=== /dev/kvm ==="
+          ls -la /dev/kvm 2>&1 || echo "NOT PRESENT"
+
+      - name: Check CPU virtualization flags
+        run: |
+          echo "=== /proc/cpuinfo vmx/svm flags ==="
+          grep -oE "vmx|svm" /proc/cpuinfo | sort -u || echo "NONE FOUND"
+          echo "=== lscpu virtualization line ==="
+          lscpu | grep -i virtual || echo "NOT REPORTED"
+
+      - name: Install cpu-checker and run kvm-ok
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cpu-checker
+          echo "=== kvm-ok ==="
+          sudo kvm-ok 2>&1 || echo "kvm-ok reported failure (see output above)"
+
+      - name: Attempt a real KVM-accelerated boot smoke test
+        run: |
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils ovmf
+          if [ ! -e /dev/kvm ]; then
+            echo "SKIP: /dev/kvm does not exist, cannot test acceleration"
+            exit 0
+          fi
+          # Minimal boot: no disk, just confirm qemu can open /dev/kvm and
+          # initialize a VM (checked via -only-migratable + immediate quit,
+          # cheapest possible real KVM-path exercise without needing a full
+          # bootable image in this diagnostic-only workflow).
+          sudo chmod 666 /dev/kvm || true
+          timeout 20 qemu-system-x86_64 -enable-kvm -m 256 -nographic -no-reboot \
+            -kernel /dev/null 2>&1 | head -50 || true
+          echo "=== qemu accel query ==="
+          qemu-system-x86_64 -accel help 2>&1
+          echo "=== attempting -accel kvm probe ==="
+          timeout 10 qemu-system-x86_64 -enable-kvm -m 256 -nographic -no-reboot -S -monitor none -serial none -display none &
+          QEMU_PID=$!
+          sleep 3
+          if kill -0 $QEMU_PID 2>/dev/null; then
+            echo "KVM-accelerated QEMU process started and stayed alive for 3s — real acceleration usable"
+            kill $QEMU_PID 2>/dev/null || true
+          else
+            wait $QEMU_PID
+            echo "QEMU exited immediately (exit=$?) — check output above for the real reason (permission denied, KVM unavailable, etc.)"
+          fi

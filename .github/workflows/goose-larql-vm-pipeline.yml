@@ -1,0 +1,306 @@
+# Full pipeline: build larql-cli (this repo) + goose-cli (metavacua/goose,
+# feat/larql-local-inference-backend branch, which adds the larql
+# LocalInferenceBackend), extract a SmolLM2 vindex, bake everything into a
+# QEMU/KVM guest image, boot it, and run a real coding task through Goose
+# driven by SmolLM2 via the larql backend.
+#
+# This is the CI counterpart of docs/specs/2026-07-15-larql-goose-selfplay-design.md
+# (ADR-1: larql.rs LocalInferenceBackend; ADR-2: local QEMU/KVM VM boundary).
+# Moved here rather than iterated further on the local dev box per an explicit
+# decision this session: GitHub Actions minutes are free/unlimited for this
+# public repo and don't compete with the local host's own contended RAM/CPU.
+#
+# Trigger matches this repo's actual convention (shannon-verify.yml): push/PR
+# to main scoped by path, plus workflow_dispatch. All work for this project
+# lives on one branch (feat/larql-goose-selfplay) with one PR, not one branch
+# per workflow -- PR-triggered runs happen once that PR targets main.
+name: goose-larql-vm-pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/goose-larql-vm-pipeline.yml'
+      - 'crates/larql-cli/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/goose-larql-vm-pipeline.yml'
+      - 'crates/larql-cli/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # true (unlike lql-strategy-matrix.yml's discovery-matrix convention):
+  # this workflow verifies "does the current commit work," not a
+  # measure-every-run discovery experiment -- a superseded run testing
+  # pre-fix code has no ongoing value once a newer commit lands, so let
+  # a new push cancel it rather than run both to completion.
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: "1"
+  GOOSE_REF: feat/larql-local-inference-backend
+
+jobs:
+  build-larql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-larql-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-larql-
+      - name: Install BLAS
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas-dev
+      - name: Build larql-cli (release)
+        run: cargo build --release -p larql-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: larql-bin
+          path: target/release/larql
+          retention-days: 1
+          if-no-files-found: error
+
+  build-goose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: metavacua/goose
+          ref: ${{ env.GOOSE_REF }}
+          path: goose-fork
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            goose-fork/target
+          key: ${{ runner.os }}-cargo-goose-${{ hashFiles('goose-fork/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-goose-
+      - name: Install libclang (needed by llama-cpp-sys-2's bindgen build step)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libclang-dev
+      - name: Build goose-cli (debug, minimal features — local-inference + rustls-tls only)
+        working-directory: goose-fork
+        run: cargo build -p goose-cli --no-default-features --features local-inference,rustls-tls
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goose-bin
+          path: goose-fork/target/debug/goose
+          retention-days: 1
+          if-no-files-found: error
+
+  prepare-vindex:
+    needs: build-larql
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: larql-bin
+          path: bin
+      - run: chmod +x bin/larql
+      - name: Install runtime libs larql needs to RUN (not just build)
+        # Confirmed empirically: build-larql installs libopenblas-dev to
+        # *compile*, but this job runs on its own fresh runner and downloads
+        # only the binary artifact -- it needs the runtime .so present too,
+        # or the binary fails immediately with "cannot open shared object
+        # file: No such file or directory" (exit 127), exactly like the
+        # local VM-guest bug this session already found and fixed the same
+        # way (libopenblas0-pthread/libgfortran5/libquadmath0).
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0
+      - name: Extract SmolLM2-135M vindex (f16, no quant)
+        run: |
+          ./bin/larql extract HuggingFaceTB/SmolLM2-135M --level inference --f16 -o smollm2-135m.vindex
+          ./bin/larql show smollm2-135m.vindex
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smollm2-vindex
+          path: smollm2-135m.vindex/
+          retention-days: 1
+          if-no-files-found: error
+
+  vm-coding-task:
+    needs: [build-larql, build-goose, prepare-vindex]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Confirm KVM acceleration
+        run: |
+          ls -la /dev/kvm
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cpu-checker qemu-system-x86 qemu-utils cloud-image-utils libguestfs-tools
+          sudo kvm-ok
+          # /dev/kvm is root:kvm 660 by default; the runner's own user isn't
+          # necessarily in the kvm group even though the device exists --
+          # confirmed empirically ("Permission denied" initializing kvm).
+          sudo chmod 666 /dev/kvm
+
+      - uses: actions/download-artifact@v6
+        with: { name: larql-bin, path: bake/larql-data }
+      - uses: actions/download-artifact@v6
+        with: { name: goose-bin, path: bake/goose-data }
+      - uses: actions/download-artifact@v6
+        with: { name: smollm2-vindex, path: bake/larql-data/smollm2-135m.vindex }
+      - run: |
+          chmod +x bake/larql-data/larql bake/goose-data/goose
+          ls -la bake/larql-data bake/goose-data bake/larql-data/smollm2-135m.vindex
+
+      - name: Model registry entry (larql backend, id smollm2-135m-larql)
+        run: |
+          mkdir -p bake/goose-config
+          cat > bake/goose-config/registry.json <<'EOF'
+          {
+            "models": [
+              {
+                "id": "smollm2-135m-larql",
+                "repo_id": "local/smollm2-135m-larql",
+                "filename": "smollm2-135m.vindex",
+                "quantization": "none",
+                "local_path": "/opt/larql-data/smollm2-135m.vindex",
+                "source_url": "",
+                "backend_id": "larql",
+                "storage": "manual_path",
+                "settings": {},
+                "size_bytes": 516000000,
+                "mmproj_checked": false,
+                "shard_files": []
+              }
+            ]
+          }
+          EOF
+          cat > bake/goose-config/config.yaml <<'EOF'
+          GOOSE_TELEMETRY_ENABLED: false
+          extensions:
+            developer:
+              enabled: true
+              type: platform
+              name: developer
+              description: Write and edit files, and execute shell commands
+              display_name: Developer
+              bundled: true
+              available_tools: []
+          active_provider: local
+          providers:
+            local:
+              enabled: true
+              model: smollm2-135m-larql
+              configured: true
+          GOOSE_MODE: auto
+          EOF
+
+      - name: Download base cloud image
+        run: curl -fL -o base.qcow2 https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+
+      - name: Bake larql + goose + vindex + config into the guest image (no package install here)
+        run: |
+          qemu-img create -f qcow2 -b base.qcow2 -F qcow2 overlay.qcow2 8G
+          # --no-network: libguestfs's passt-based appliance networking fails
+          # at runtime on this exact GH-hosted runner regardless of whether
+          # passt is installed (confirmed empirically: "passt exited with
+          # status 1") -- none of these steps (copy-in/mkdir/chmod/ln) need
+          # network anyway. Runtime-lib installation (libopenblas/
+          # libgfortran/libquadmath, confirmed missing from the stock image)
+          # is deferred to the cloud-init runcmd at actual boot time instead,
+          # which goes over QEMU's own usermode networking (-netdev user) --
+          # a completely different, unaffected mechanism from libguestfs's
+          # broken appliance networking, and matches what a Debian-native
+          # apt-get install would pull vs. risking an Ubuntu-host-downloaded
+          # .deb's dependency/ABI mismatch against a Debian 12 guest.
+          sudo virt-customize --no-network -a overlay.qcow2 \
+            --mkdir /opt/larql-data \
+            --copy-in bake/larql-data/larql:/opt/larql-data \
+            --copy-in bake/larql-data/smollm2-135m.vindex:/opt/larql-data \
+            --chmod 0755:/opt/larql-data/larql \
+            --run-command 'ln -sf /opt/larql-data/larql /usr/local/bin/larql' \
+            --mkdir /opt/goose-data \
+            --copy-in bake/goose-data/goose:/opt/goose-data \
+            --chmod 0755:/opt/goose-data/goose \
+            --mkdir /root/.config/goose \
+            --copy-in bake/goose-config/config.yaml:/root/.config/goose \
+            --mkdir /root/.local/share/goose/models \
+            --copy-in bake/goose-config/registry.json:/root/.local/share/goose/models
+
+      - name: Cloud-init seed — run the real coding task
+        run: |
+          cat > user-data <<'EOF'
+          #cloud-config
+          write_files:
+            - path: /root/run_goose_test.sh
+              permissions: '0755'
+              content: |
+                #!/bin/bash
+                set -u
+                echo "=== installing runtime libs (real guest network, QEMU usermode) ===" > /dev/console
+                apt-get update -qq > /dev/console 2>&1
+                apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0 > /dev/console 2>&1
+                echo "=== runtime libs installed ===" > /dev/console
+                GOOSE_PROVIDER=local GOOSE_MODEL=smollm2-135m-larql LARQL_LOAD_TIMEOUT_SECS=150 \
+                  timeout 500 /opt/goose-data/goose run --no-session --quiet --text \
+                  "Write a Python function called add(a, b) that returns the sum of a and b. Output only the function code." \
+                  > /root/goose_stdout.log 2> /root/goose_stderr.log
+                GOOSE_EXIT=$?
+                echo "GOOSE_TEST_DONE exit=$GOOSE_EXIT" >> /root/goose_stderr.log
+                echo "=== GOOSE STDOUT ===" > /dev/console
+                cat /root/goose_stdout.log > /dev/console
+                echo "=== GOOSE STDERR ===" > /dev/console
+                cat /root/goose_stderr.log > /dev/console
+                echo "=== GOOSE DONE exit=$GOOSE_EXIT ===" > /dev/console
+                echo "GOOSE_TEST_DONE_MARKER" > /dev/console
+                poweroff
+          runcmd:
+            - /root/run_goose_test.sh
+          EOF
+          cat > meta-data <<'EOF'
+          instance-id: ci-goose-test-01
+          local-hostname: ci-goose-vm
+          EOF
+          cloud-localds seed.iso user-data meta-data
+
+      - name: Boot and run the coding task
+        run: |
+          # -netdev user + virtio-net-pci: QEMU's own built-in usermode
+          # networking (SLIRP), entirely separate from libguestfs's
+          # passt-based appliance networking that fails on this runner --
+          # this gives the guest real outbound network for cloud-init's
+          # apt-get install step. Local dev-box runs earlier this session
+          # never added this flag, so the guest never actually had a network
+          # device at all (explaining the systemd-networkd-wait-online
+          # timeouts seen there) -- correcting that here since this run
+          # actually needs working network, not just tolerating its absence.
+          timeout 700 qemu-system-x86_64 \
+            -enable-kvm -m 4096M -smp 2 -cpu host \
+            -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
+            -drive file=overlay.qcow2,if=virtio \
+            -drive file=seed.iso,if=virtio,format=raw \
+            -display none -serial file:console.log -no-reboot
+
+      - name: Assert the coding task actually produced real output
+        run: |
+          echo "=== console.log (full) ==="
+          cat console.log
+          grep -q "GOOSE_TEST_DONE_MARKER" console.log || { echo "FAIL: run never completed"; exit 1; }
+          grep -q "def add" console.log || { echo "FAIL: no 'def add' found in goose output — model did not produce the expected function"; exit 1; }
+          echo "PASS: goose, driven by SmolLM2-135M via the larql backend, produced a real add(a, b) function"
+
+      - name: Upload console log + goose output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: goose-coding-task-result
+          retention-days: 7
+          path: |
+            console.log
+            user-data
+            meta-data
