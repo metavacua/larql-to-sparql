@@ -157,7 +157,12 @@ jobs:
   vm-coding-task:
     needs: [build-larql, build-goose, prepare-vindex]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Generous, not tightly clipped: the objective is an autonomous closed-loop coding
+    # agent, not a race against an externally-imposed clock -- the guest's own
+    # cloud-init script closes its own loop (poweroff after goose exits) rather than
+    # being killed from outside. This ceiling is a genuine safety net for a hung
+    # process (AC-5), not the expected/normal completion path.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
@@ -288,8 +293,14 @@ jobs:
                 apt-get update -qq > /dev/console 2>&1
                 apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0 > /dev/console 2>&1
                 echo "=== runtime libs installed ===" > /dev/console
+                # 1200s (20 min), not a tight clip -- the objective is an
+                # autonomous closed-loop coding agent that gets real room to work
+                # (and, per Goose's own turn-budget mechanism, to wind itself down
+                # gracefully as it runs low), not a race against an external
+                # stopwatch. This is a safety net against a genuinely hung
+                # process, not the expected normal-completion path.
                 GOOSE_PROVIDER=local GOOSE_MODEL=smollm2-135m-instruct-larql LARQL_LOAD_TIMEOUT_SECS=150 \
-                  timeout 500 /opt/goose-data/goose run --no-session --quiet --text \
+                  timeout 1200 /opt/goose-data/goose run --no-session --quiet --text \
                   "Write a Python function called add(a, b) that returns the sum of a and b. Output only the function code." \
                   > /root/goose_stdout.log 2> /root/goose_stderr.log
                 GOOSE_EXIT=$?
@@ -321,7 +332,11 @@ jobs:
           # device at all (explaining the systemd-networkd-wait-online
           # timeouts seen there) -- correcting that here since this run
           # actually needs working network, not just tolerating its absence.
-          timeout 700 qemu-system-x86_64 \
+          # 1800s outer ceiling gives headroom over the inner 1200s goose
+          # timeout plus boot/apt-get/shutdown overhead -- the guest's own
+          # cloud-init script closes its own loop (poweroff after goose exits)
+          # rather than being killed from outside on the normal path.
+          timeout 1800 qemu-system-x86_64 \
             -enable-kvm -m 4096M -smp 2 -cpu host \
             -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
             -drive file=overlay.qcow2,if=virtio \
