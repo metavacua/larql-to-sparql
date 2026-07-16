@@ -326,11 +326,20 @@ jobs:
                 # coding agent needs real room to work, closing its own loop
                 # rather than racing an external stopwatch. Safety net against a
                 # genuinely hung process, not the expected normal-completion path.
+                # /grind (not a plain instruction): sets a persistent goal that
+                # re-nudges the agent every non-tool-call turn ("Keep working,
+                # the grind goal is not yet complete") until max_turns, unlike
+                # a plain prompt which exits after exactly one turn with no
+                # tool call (agent.rs's no_tools_called -> exit_chat path).
+                # Directly tests loop-continuation, not just single-turn output,
+                # per this project's own "get the loop to properly close rather
+                # than quit after one turn" priority -- combined here with the
+                # LARQL_SYSTEM prompt-construction fix (larql.rs) in the same run.
                 GOOSE_PROVIDER=local GOOSE_MODEL=smollm2-135m-instruct-larql \
                   LARQL_LOAD_TIMEOUT_SECS=150 \
                   LARQL_TOOL_CALL_CONVENTION=${{ matrix.leg.config == 'fenced-json' && 'fenced-json' || 'shell-command' }} \
                   timeout 1200 /opt/goose-data/goose run --no-session --quiet --text \
-                  "Run the shell command: echo TOOLCALL_SENTINEL_8f3a1c and show me its output." \
+                  "/grind Run the shell command: echo TOOLCALL_SENTINEL_8f3a1c and show me its output. Keep trying until you have actually run it and can show the real output." \
                   > /root/goose_stdout.log 2> /root/goose_stderr.log
                 GOOSE_EXIT=\$?
                 echo "GOOSE_TEST_DONE exit=\$GOOSE_EXIT" >> /root/goose_stderr.log
