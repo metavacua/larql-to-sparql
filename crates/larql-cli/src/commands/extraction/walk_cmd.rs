@@ -774,13 +774,18 @@ fn run_predict_inner(
     // chat_template.jinja, unknown family, etc.) -- never a regression for
     // a vindex without one.
     let wrapped_prompt = match args.index.as_deref() {
-        Some(vindex_path) => {
-            larql_inference::chat::render_user_prompt(vindex_path, weights.arch.family(), &args.prompt)
-                .unwrap_or_else(|e| {
-                    vlog!(verbose, "chat-template render failed ({e}), using raw prompt");
-                    args.prompt.clone()
-                })
-        }
+        Some(vindex_path) => larql_inference::chat::render_user_prompt(
+            vindex_path,
+            weights.arch.family(),
+            &args.prompt,
+        )
+        .unwrap_or_else(|e| {
+            vlog!(
+                verbose,
+                "chat-template render failed ({e}), using raw prompt"
+            );
+            args.prompt.clone()
+        }),
         None => args.prompt.clone(),
     };
 
@@ -1235,10 +1240,16 @@ fn sampling_config_from_env() -> larql_inference::layer_graph::generate::Samplin
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.0);
     let mut cfg = SamplingConfig::temperature(temperature);
-    if let Some(top_k) = std::env::var("LARQL_TOP_K").ok().and_then(|v| v.parse().ok()) {
+    if let Some(top_k) = std::env::var("LARQL_TOP_K")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
         cfg = cfg.with_top_k(top_k);
     }
-    if let Some(top_p) = std::env::var("LARQL_TOP_P").ok().and_then(|v| v.parse().ok()) {
+    if let Some(top_p) = std::env::var("LARQL_TOP_P")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
         cfg = cfg.with_top_p(top_p);
     }
     if let Some(freq) = std::env::var("LARQL_FREQUENCY_PENALTY")

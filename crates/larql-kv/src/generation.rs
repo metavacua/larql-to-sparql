@@ -297,6 +297,7 @@ pub const DEFAULT_SAMPLE_POOL: usize = 50;
 /// bit-for-bit (see `sampling.rs`'s own module doc) — this function exists
 /// so a caller can opt into real sampling without every existing
 /// `generate_with_engine` call site needing to change.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_with_engine_sampled<F>(
     engine: &mut crate::AnyEngine,
     weights: &ModelWeights,
@@ -1217,6 +1218,235 @@ mod tests {
             out.len() <= 2,
             "should break after decode failure, got {} tokens",
             out.len()
+        );
+    }
+
+    // ── generate_with_engine_sampled coverage ──────────────────────────────
+    //
+    // Mirrors the generate_with_engine coverage above (same StubEngine),
+    // plus a dedicated parity test for this module's own doc-comment claim
+    // that `SamplingConfig::greedy()` reproduces `generate_with_engine`
+    // bit-for-bit.
+
+    #[test]
+    fn generate_with_engine_sampled_empty_prompt_returns_empty() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let mut eng = crate::AnyEngine::Kv(Box::new(fresh_stub()));
+        let out = generate_with_engine_sampled(
+            &mut eng,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[],
+            5,
+            SamplingConfig::greedy(),
+            |_, _| {},
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn generate_with_engine_sampled_zero_max_returns_empty() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let mut eng = crate::AnyEngine::Kv(Box::new(fresh_stub()));
+        let out = generate_with_engine_sampled(
+            &mut eng,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1],
+            0,
+            SamplingConfig::greedy(),
+            |_, _| {},
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn generate_with_engine_sampled_max_one_returns_single_token() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let mut eng = crate::AnyEngine::Kv(Box::new(fresh_stub()));
+        let out = generate_with_engine_sampled(
+            &mut eng,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1],
+            1,
+            SamplingConfig::greedy(),
+            |_, _| {},
+        );
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn generate_with_engine_sampled_multi_step_fires_callback_per_token() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let mut eng = crate::AnyEngine::Kv(Box::new(fresh_stub()));
+        let mut callbacks = 0usize;
+        let out = generate_with_engine_sampled(
+            &mut eng,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1],
+            4,
+            SamplingConfig::greedy(),
+            |_, _| callbacks += 1,
+        );
+        assert_eq!(out.len(), callbacks);
+        assert!(out.len() <= 4);
+    }
+
+    #[test]
+    fn generate_with_engine_sampled_prefill_failure_returns_empty() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let mut stub = fresh_stub();
+        stub.fail_prefill = true;
+        let mut eng = crate::AnyEngine::Kv(Box::new(stub));
+        let out = generate_with_engine_sampled(
+            &mut eng,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32],
+            3,
+            SamplingConfig::greedy(),
+            |_, _| {},
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn generate_with_engine_sampled_decode_failure_breaks_loop_early() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let mut stub = fresh_stub();
+        stub.fail_decode_after = Some(1);
+        let mut eng = crate::AnyEngine::Kv(Box::new(stub));
+        let out = generate_with_engine_sampled(
+            &mut eng,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1],
+            5,
+            SamplingConfig::greedy(),
+            |_, _| {},
+        );
+        assert!(
+            out.len() <= 2,
+            "should break after decode failure, got {} tokens",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn generate_with_engine_sampled_greedy_matches_generate_with_engine() {
+        // Doc-comment parity contract: SamplingConfig::greedy() must
+        // reproduce generate_with_engine bit-for-bit. Two independent
+        // stub engines (StubEngine has internal mutable cache state, so
+        // one instance can't drive both calls) over the same prompt.
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+
+        let mut eng_a = crate::AnyEngine::Kv(Box::new(fresh_stub()));
+        let baseline = generate_with_engine(
+            &mut eng_a,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1],
+            4,
+            |_, _| {},
+        );
+
+        let mut eng_b = crate::AnyEngine::Kv(Box::new(fresh_stub()));
+        let sampled = generate_with_engine_sampled(
+            &mut eng_b,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1],
+            4,
+            SamplingConfig::greedy(),
+            |_, _| {},
+        );
+
+        assert_eq!(
+            baseline, sampled,
+            "SamplingConfig::greedy() must reproduce generate_with_engine bit-for-bit"
+        );
+    }
+
+    #[test]
+    fn generate_with_engine_sampled_frequency_penalty_can_diverge_from_greedy() {
+        // N5 regression: SamplingConfig::is_greedy() doesn't inspect
+        // frequency_penalty/presence_penalty, so a caller-side dispatch
+        // that branches only on is_greedy() would silently route a
+        // repetition-penalty-only config through the untouched argmax
+        // path. This asserts sampled_next_token's own penalty branch is
+        // reachable and has an observable effect at this layer,
+        // independent of any caller's dispatch logic.
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+
+        let mut eng_a = crate::AnyEngine::Kv(Box::new(fresh_stub()));
+        let baseline = generate_with_engine(
+            &mut eng_a,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1],
+            6,
+            |_, _| {},
+        );
+
+        let penalized_cfg = SamplingConfig::greedy().with_frequency_penalty(50.0);
+        assert!(
+            penalized_cfg.is_greedy(),
+            "sanity: is_greedy() ignores frequency_penalty by design — this is the N5 hazard \
+             itself: a caller branching only on is_greedy() would wrongly treat this config as \
+             plain argmax. has_repetition_penalty() is what must also be checked."
+        );
+        assert!(
+            penalized_cfg.has_repetition_penalty(),
+            "sanity: with_frequency_penalty(50.0) must register as a repetition penalty"
+        );
+        let mut eng_b = crate::AnyEngine::Kv(Box::new(fresh_stub()));
+        let penalized = generate_with_engine_sampled(
+            &mut eng_b,
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1],
+            6,
+            penalized_cfg,
+            |_, _| {},
+        );
+
+        assert!(
+            baseline.len() >= 2 && penalized.len() >= 2,
+            "need at least 2 tokens from each run to compare a repeat"
+        );
+        assert_ne!(
+            baseline, penalized,
+            "a strong frequency_penalty must change the generated sequence \
+             relative to greedy — otherwise sampled_next_token's history \
+             threading (generated_so_far) isn't actually taking effect"
         );
     }
 

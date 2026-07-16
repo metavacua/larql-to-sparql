@@ -58,7 +58,7 @@ const SUBBLOCK_SIZE: usize = 32;
 /// these kernels.
 #[inline]
 fn q8k_shape_ok(out_len: usize, rows: usize, q8k_qs_len: usize, cols: usize) -> bool {
-    out_len == rows && q8k_qs_len == cols && cols % ELEMS_PER_BLOCK == 0
+    out_len == rows && q8k_qs_len == cols && cols.is_multiple_of(ELEMS_PER_BLOCK)
 }
 
 /// Quantised activation in Q8_K layout, one entry per super-block of `x`.
