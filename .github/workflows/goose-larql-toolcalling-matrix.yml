@@ -1,4 +1,4 @@
-# Strategy matrix: 6 approaches x 11 legs for adding/improving tool-calling in the
+# Strategy matrix: 6 approaches x 13 legs for adding/improving tool-calling in the
 # larql-driven Goose coding agent, plus one prerequisite decode-path-parity leg
 # (residual Q5: does larql run's cached-KV-decode path diverge from larql lql
 # INFER's full-reforward path on identical input, independent of the
@@ -25,8 +25,27 @@
 # Legs 1-2 (emulate-stream-harness, IMPLEMENTED this session -- see
 # crates/goose-local-inference/src/larql_tool_emulation.rs in metavacua/goose) run a
 # real `goose run` coding task inside the QEMU/KVM VM boundary and assert a real
-# ToolRequest actually dispatched (a distinctive sentinel echoed back through the
-# ACTUALLY-EXECUTED shell tool, not just text resembling a shell command).
+# ToolRequest actually dispatched (a proof-of-exec value only readable via the
+# ACTUALLY-EXECUTED shell tool, not just text resembling a shell command -- an
+# earlier in-prompt sentinel design was a false-positive: the sentinel string was
+# embedded in the prompt itself, so it passed even when the model only echoed the
+# prompt back and the run timed out with no real tool dispatch at all).
+#
+# Legs 1a-2a (sampled variants, same emulate-stream-harness approach) A/B test
+# whether decoding strategy, not tool-call-convention or chat-template rendering,
+# is the actual blocker. Residual Q5's de-confounded run (LARQL_RAW_PROMPT=1)
+# confirmed the cached-KV-decode engine is correct (matches INFER's full-reforward
+# top-1 exactly) and --verbose confirmed the chat-template render is well-formed
+# ChatML with the correct assistant generation-prompt suffix -- yet the model still
+# echoed the user's turn verbatim under greedy decoding on that same well-formed
+# prompt. Small-LM echo/repetition under greedy decoding is a documented failure
+# mode (arxiv 2504.20131), so these two legs set LARQL_TEMPERATURE/LARQL_TOP_P on
+# the `goose run` invocation -- confirmed to propagate through to the spawned
+# `larql chat` subprocess (goose-local-inference/src/larql.rs's Command::new never
+# calls .env_clear(), so the child inherits the full parent environment) -- to test
+# that hypothesis directly, side by side with the existing greedy baseline legs
+# rather than replacing them (this project's own "matrix multiple approaches
+# instead of guessing one fix" rule).
 #
 # emulate-buffered-harness (previously legs 3-4) is dropped from this matrix: it was
 # never implemented (tracked as plan Task 3, not started), and a leg whose only
@@ -75,7 +94,7 @@ env:
   TOOLCALL_MODEL: HuggingFaceTB/SmolLM2-135M-Instruct
 
 jobs:
-  # Enumerate the 10 legs (ADR-6's table). Hand-authored, not a generator script (ADR-4):
+  # Enumerate the 13 legs (ADR-6's table, plus the sampled-* A/B pair). Hand-authored, not a generator script (ADR-4):
   # the leg count is fixed and small enough to review directly in this file.
   plan:
     runs-on: ubuntu-latest
@@ -87,8 +106,10 @@ jobs:
           cat > legs.json <<'EOF'
           [
             {"leg_id": "smol135.decode-path.infer-vs-run",                "approach_id": "decode-path-parity",        "kind": "cli-measurement", "config": "compare", "script": "run_infer_vs_run_comparison.sh"},
-            {"leg_id": "smol135.emulate-stream.shell-conv",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "shell-command"},
-            {"leg_id": "smol135.emulate-stream.fenced-tool",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "fenced-json"},
+            {"leg_id": "smol135.emulate-stream.shell-conv",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "shell-command", "sampling": "greedy"},
+            {"leg_id": "smol135.emulate-stream.fenced-tool",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "fenced-json", "sampling": "greedy"},
+            {"leg_id": "smol135.emulate-stream.sampled-shell-conv",       "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "shell-command", "sampling": "temp0.7-topp0.9"},
+            {"leg_id": "smol135.emulate-stream.sampled-fenced-tool",      "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "fenced-json", "sampling": "temp0.7-topp0.9"},
             {"leg_id": "smol135.native-template.compact-tools",           "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "compact-tools", "script": ""},
             {"leg_id": "smol135.native-template.full-schema",             "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "full-schema", "script": ""},
             {"leg_id": "smol135.patch-chain.tool-open-tag",                "approach_id": "patch-chain-single-token",  "kind": "cli-measurement", "config": "tool-open-tag", "script": "run_patch_chain.sh"},
@@ -353,9 +374,17 @@ jobs:
                 # content requires the shell command to have actually
                 # executed; the model has no way to produce that exact string
                 # by echoing or hallucinating the prompt.
+                # LARQL_TEMPERATURE/LARQL_TOP_P: empty string on the greedy-baseline
+                # legs, which sampling_config_from_env() treats identically to unset
+                # (str::parse fails on "", .ok() turns that into None -- see
+                # walk_cmd.rs). Set only on the sampled-* legs, testing whether
+                # decoding strategy (not tool-call convention or chat-template
+                # rendering, both already cleared by Q5) is the actual blocker.
                 GOOSE_PROVIDER=local GOOSE_MODEL=smollm2-135m-instruct-larql \
                   LARQL_LOAD_TIMEOUT_SECS=150 \
                   LARQL_TOOL_CALL_CONVENTION=${{ matrix.leg.config == 'fenced-json' && 'fenced-json' || 'shell-command' }} \
+                  LARQL_TEMPERATURE=${{ matrix.leg.sampling == 'temp0.7-topp0.9' && '0.7' || '' }} \
+                  LARQL_TOP_P=${{ matrix.leg.sampling == 'temp0.7-topp0.9' && '0.9' || '' }} \
                   timeout 1200 /opt/goose-data/goose run --no-session --quiet --text \
                   "/grind Run the shell command: cat /root/.proof_of_exec and show me its output. Keep trying until you have actually run it and can show the real output." \
                   > /root/goose_stdout.log 2> /root/goose_stderr.log
