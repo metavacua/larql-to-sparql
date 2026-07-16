@@ -123,7 +123,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/huggingface/hub
-          key: ${{ runner.os }}-hf-smollm2-135m
+          key: ${{ runner.os }}-hf-smollm2-135m-instruct
           restore-keys: |
             ${{ runner.os }}-hf-smollm2-
 
@@ -141,16 +141,16 @@ jobs:
         # resolve_model_path expects (snapshots/<rev>/...).
         run: |
           pip install --quiet huggingface_hub
-          python -c "from huggingface_hub import snapshot_download; snapshot_download('HuggingFaceTB/SmolLM2-135M')"
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('HuggingFaceTB/SmolLM2-135M-Instruct')"
 
-      - name: Extract SmolLM2-135M vindex (f16 is the extract default, no --f16 flag exists -- confirmed via docs/cli.md after --f16 errored as an unexpected argument)
+      - name: Extract SmolLM2-135M-Instruct vindex (f16 is the extract default, no --f16 flag exists -- confirmed via docs/cli.md after --f16 errored as an unexpected argument; Instruct not base -- the base model ships no chat_template, so larql's wrap_chat_prompt falls through to raw passthrough and the tiny base LM degenerates into echoing the prompt back verbatim, confirmed empirically)
         run: |
-          ./bin/larql extract HuggingFaceTB/SmolLM2-135M --level inference -o smollm2-135m.vindex
-          ./bin/larql show smollm2-135m.vindex
+          ./bin/larql extract HuggingFaceTB/SmolLM2-135M-Instruct --level inference -o smollm2-135m-instruct.vindex
+          ./bin/larql show smollm2-135m-instruct.vindex
       - uses: actions/upload-artifact@v4
         with:
           name: smollm2-vindex
-          path: smollm2-135m.vindex/
+          path: smollm2-135m-instruct.vindex/
           retention-days: 1
           if-no-files-found: error
 
@@ -177,23 +177,23 @@ jobs:
       - uses: actions/download-artifact@v6
         with: { name: goose-bin, path: bake/goose-data }
       - uses: actions/download-artifact@v6
-        with: { name: smollm2-vindex, path: bake/larql-data/smollm2-135m.vindex }
+        with: { name: smollm2-vindex, path: bake/larql-data/smollm2-135m-instruct.vindex }
       - run: |
           chmod +x bake/larql-data/larql bake/goose-data/goose
-          ls -la bake/larql-data bake/goose-data bake/larql-data/smollm2-135m.vindex
+          ls -la bake/larql-data bake/goose-data bake/larql-data/smollm2-135m-instruct.vindex
 
-      - name: Model registry entry (larql backend, id smollm2-135m-larql)
+      - name: Model registry entry (larql backend, id smollm2-135m-instruct-larql)
         run: |
           mkdir -p bake/goose-config
           cat > bake/goose-config/registry.json <<'EOF'
           {
             "models": [
               {
-                "id": "smollm2-135m-larql",
-                "repo_id": "local/smollm2-135m-larql",
-                "filename": "smollm2-135m.vindex",
+                "id": "smollm2-135m-instruct-larql",
+                "repo_id": "local/smollm2-135m-instruct-larql",
+                "filename": "smollm2-135m-instruct.vindex",
                 "quantization": "none",
-                "local_path": "/opt/larql-data/smollm2-135m.vindex",
+                "local_path": "/opt/larql-data/smollm2-135m-instruct.vindex",
                 "source_url": "",
                 "backend_id": "larql",
                 "storage": "manual_path",
@@ -220,7 +220,7 @@ jobs:
           providers:
             local:
               enabled: true
-              model: smollm2-135m-larql
+              model: smollm2-135m-instruct-larql
               configured: true
           GOOSE_MODE: auto
           EOF
@@ -263,7 +263,7 @@ jobs:
             --run-command 'resize2fs /dev/sda1' \
             --mkdir /opt/larql-data \
             --copy-in bake/larql-data/larql:/opt/larql-data \
-            --copy-in bake/larql-data/smollm2-135m.vindex:/opt/larql-data \
+            --copy-in bake/larql-data/smollm2-135m-instruct.vindex:/opt/larql-data \
             --chmod 0755:/opt/larql-data/larql \
             --run-command 'ln -sf /opt/larql-data/larql /usr/local/bin/larql' \
             --mkdir /opt/goose-data \
@@ -288,7 +288,7 @@ jobs:
                 apt-get update -qq > /dev/console 2>&1
                 apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0 > /dev/console 2>&1
                 echo "=== runtime libs installed ===" > /dev/console
-                GOOSE_PROVIDER=local GOOSE_MODEL=smollm2-135m-larql LARQL_LOAD_TIMEOUT_SECS=150 \
+                GOOSE_PROVIDER=local GOOSE_MODEL=smollm2-135m-instruct-larql LARQL_LOAD_TIMEOUT_SECS=150 \
                   timeout 500 /opt/goose-data/goose run --no-session --quiet --text \
                   "Write a Python function called add(a, b) that returns the sum of a and b. Output only the function code." \
                   > /root/goose_stdout.log 2> /root/goose_stderr.log
@@ -334,7 +334,7 @@ jobs:
           cat console.log
           grep -q "GOOSE_TEST_DONE_MARKER" console.log || { echo "FAIL: run never completed"; exit 1; }
           grep -q "def add" console.log || { echo "FAIL: no 'def add' found in goose output — model did not produce the expected function"; exit 1; }
-          echo "PASS: goose, driven by SmolLM2-135M via the larql backend, produced a real add(a, b) function"
+          echo "PASS: goose, driven by SmolLM2-135M-Instruct via the larql backend, produced a real add(a, b) function"
 
       - name: Upload console log + goose output
         if: always()
