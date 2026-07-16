@@ -38,10 +38,17 @@ echo "$infer_out"
 # behavior (what larql chat / the Goose backend actually invokes by
 # default), captured separately so a degenerate echo-completion under
 # templating isn't silently lost, but also never confused with the
-# decode-path-parity question above.
-templated_run_out=$("$larql_bin" run "$vindex_dir" "$PROMPT" -n 5 2>&1)
+# decode-path-parity question above. --verbose surfaces the actual
+# rendered/wrapped prompt (via walk_cmd.rs's `vlog!("Prompt: {:?} ...")`)
+# so a future read of this leg's log can tell a malformed chat-template
+# render apart from a small-model capability limit -- the first CI run
+# of this leg showed sensible raw-prompt completion ("Paris. Paris is
+# the...") but pure echo under the default chat-templated path, and
+# without seeing the actual wrapped string those two explanations can't
+# be told apart from the log alone.
+templated_run_out=$("$larql_bin" run "$vindex_dir" "$PROMPT" -n 5 --verbose 2>&1)
 templated_run_ec=$?
-echo "=== larql run (cached KV-decode, default chat-templated prompt -- informational, not part of the parity verdict) ==="
+echo "=== larql run (cached KV-decode, default chat-templated prompt, --verbose -- informational, not part of the parity verdict) ==="
 echo "$templated_run_out"
 
 if [ "$infer_ec" -ne 0 ] && echo "$infer_out" | grep -qi "requires model weights"; then
@@ -54,8 +61,17 @@ else
   # Extract just the first predicted/generated token from each for a direct,
   # minimal comparison (matches how chrishayuk/larql#177 characterized its
   # own divergence: top-1 parity, not full-text equality).
-  run_first_word=$(echo "$run_out" | tr -s ' \n' '\n' | grep -v '^$' | head -1)
-  infer_first_tok=$(echo "$infer_out" | grep -A1 "Predictions" | tail -1 | awk '{print $2}')
+  #
+  # `run` prints generated tokens back-to-back with no separator, so a
+  # trailing-punctuation token (e.g. ".") glues onto the end of the
+  # word before it ("Paris." from "Paris" + "."). The first CI run of
+  # this de-confounded comparison hit exactly that: run printed "Paris."
+  # and reported "divergence_found" against INFER's "Paris", even though
+  # the first generated token was in fact "Paris" -- a false divergence
+  # from this extraction being punctuation-sensitive, not a decode bug.
+  # Strip trailing punctuation before comparing.
+  run_first_word=$(echo "$run_out" | tr -s ' \n' '\n' | grep -v '^$' | head -1 | sed 's/[.,!?;:]*$//')
+  infer_first_tok=$(echo "$infer_out" | grep -A1 "Predictions" | tail -1 | awk '{print $2}' | sed 's/[.,!?;:]*$//')
   if [ "$run_first_word" = "$infer_first_tok" ]; then
     outcome="no_divergence"
     detail="with prompt-treatment held constant (LARQL_RAW_PROMPT=1), run's first generated token ('$run_first_word') matches INFER's top-1 prediction ('$infer_first_tok') -- no evidence of a cached-decode-path bug independent of chat-template/decoding-strategy hypotheses for this prompt"
