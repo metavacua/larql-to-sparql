@@ -315,6 +315,9 @@ jobs:
           cat > user-data <<EOF
           #cloud-config
           write_files:
+            - path: /root/.proof_of_exec
+              permissions: '0600'
+              content: REAL_EXEC_PROOF_9f2b7d1a4c
             - path: /root/run_goose_test.sh
               permissions: '0755'
               content: |
@@ -337,11 +340,24 @@ jobs:
                 # per this project's own "get the loop to properly close rather
                 # than quit after one turn" priority -- combined here with the
                 # LARQL_SYSTEM prompt-construction fix (larql.rs) in the same run.
+                #
+                # The proof value lives ONLY in /root/.proof_of_exec, never in
+                # this prompt string -- a prior version asked the model to
+                # `echo TOOLCALL_SENTINEL_...` with that same literal sentinel
+                # embedded in the prompt text, so a pure echo/copy of the
+                # prompt (no tool dispatch at all) made the sentinel appear in
+                # the transcript regardless of whether the shell command ever
+                # ran. Confirmed false-positive: a real run timed out
+                # (exit=124) after only echoing the prompt back, and the old
+                # grep-based check still reported "pass". Reading the file's
+                # content requires the shell command to have actually
+                # executed; the model has no way to produce that exact string
+                # by echoing or hallucinating the prompt.
                 GOOSE_PROVIDER=local GOOSE_MODEL=smollm2-135m-instruct-larql \
                   LARQL_LOAD_TIMEOUT_SECS=150 \
                   LARQL_TOOL_CALL_CONVENTION=${{ matrix.leg.config == 'fenced-json' && 'fenced-json' || 'shell-command' }} \
                   timeout 1200 /opt/goose-data/goose run --no-session --quiet --text \
-                  "/grind Run the shell command: echo TOOLCALL_SENTINEL_8f3a1c and show me its output. Keep trying until you have actually run it and can show the real output." \
+                  "/grind Run the shell command: cat /root/.proof_of_exec and show me its output. Keep trying until you have actually run it and can show the real output." \
                   > /root/goose_stdout.log 2> /root/goose_stderr.log
                 GOOSE_EXIT=\$?
                 echo "GOOSE_TEST_DONE exit=\$GOOSE_EXIT" >> /root/goose_stderr.log
@@ -373,7 +389,7 @@ jobs:
             -drive file=seed.iso,if=virtio,format=raw \
             -display none -serial file:console.log -no-reboot
 
-      - name: Assert a real tool dispatch happened (sentinel echoed back via actual execution)
+      - name: Assert a real tool dispatch happened (proof value only readable via actual execution)
         if: matrix.leg.kind == 'vm-coding-task'
         run: |
           mkdir -p out
@@ -381,12 +397,17 @@ jobs:
           outcome="fail"
           detail="GOOSE_TEST_DONE_MARKER not found — run never completed"
           if grep -q "GOOSE_TEST_DONE_MARKER" console.log; then
-            if grep -q "TOOLCALL_SENTINEL_8f3a1c" console.log; then
+            # REAL_EXEC_PROOF_9f2b7d1a4c lives only in /root/.proof_of_exec on
+            # the guest, never in the prompt text sent to the model (see the
+            # cloud-init step above for why the prior in-prompt sentinel was
+            # a false-positive-prone design). Its presence in the transcript
+            # can only come from the shell command actually having run.
+            if grep -q "REAL_EXEC_PROOF_9f2b7d1a4c" console.log; then
               outcome="pass"
-              detail="sentinel found in transcript — real shell-tool dispatch confirmed"
+              detail="proof-of-exec value found in transcript — real shell-tool dispatch confirmed"
             else
               outcome="fail"
-              detail="run completed but sentinel never appeared — no real tool dispatch"
+              detail="run completed but proof-of-exec value never appeared — no real tool dispatch"
             fi
           fi
           printf '{"leg_id":"%s","approach_id":"%s","outcome":"%s","detail":"%s"}\n' \
