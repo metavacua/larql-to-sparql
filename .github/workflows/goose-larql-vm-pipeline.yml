@@ -249,7 +249,18 @@ jobs:
           # broken appliance networking, and matches what the guest's own
           # native apt-get install would pull for its actual (Ubuntu 24.04)
           # userspace, rather than baking in a host-downloaded .deb.
+          #
+          # Ubuntu cloud images ship with a small root filesystem that's only
+          # grown to fill the disk by cloud-init's growpart module on first
+          # real boot -- but we're baking offline before boot, so without
+          # growing it here first, copying in goose+larql+the vindex
+          # (~500MB+) overflows it (confirmed empirically: "No space left on
+          # device" copying files well under the overlay's 8G virtual size).
+          # growpart/resize2fs run first so the later copy-in steps land on
+          # an already-grown filesystem.
           sudo virt-customize --no-network -a overlay.qcow2 \
+            --run-command 'growpart /dev/sda 1' \
+            --run-command 'resize2fs /dev/sda1' \
             --mkdir /opt/larql-data \
             --copy-in bake/larql-data/larql:/opt/larql-data \
             --copy-in bake/larql-data/smollm2-135m.vindex:/opt/larql-data \
