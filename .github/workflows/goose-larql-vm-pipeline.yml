@@ -226,7 +226,13 @@ jobs:
           EOF
 
       - name: Download base cloud image
-        run: curl -fL -o base.qcow2 https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+        # Ubuntu 24.04 (noble), not Debian 12 -- matching ubuntu-latest's own
+        # glibc. Confirmed empirically: goose/larql are built on ubuntu-latest
+        # (glibc 2.39), but a Debian 12 bookworm guest only has glibc 2.36 --
+        # goose failed to even start ("version `GLIBC_2.38' not found").
+        # Ubuntu cloud images ship as qcow2 despite the .img extension
+        # (confirmed via magic bytes: QFI\xfb).
+        run: curl -fL -o base.qcow2 https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
 
       - name: Bake larql + goose + vindex + config into the guest image (no package install here)
         run: |
@@ -240,9 +246,9 @@ jobs:
           # is deferred to the cloud-init runcmd at actual boot time instead,
           # which goes over QEMU's own usermode networking (-netdev user) --
           # a completely different, unaffected mechanism from libguestfs's
-          # broken appliance networking, and matches what a Debian-native
-          # apt-get install would pull vs. risking an Ubuntu-host-downloaded
-          # .deb's dependency/ABI mismatch against a Debian 12 guest.
+          # broken appliance networking, and matches what the guest's own
+          # native apt-get install would pull for its actual (Ubuntu 24.04)
+          # userspace, rather than baking in a host-downloaded .deb.
           sudo virt-customize --no-network -a overlay.qcow2 \
             --mkdir /opt/larql-data \
             --copy-in bake/larql-data/larql:/opt/larql-data \
