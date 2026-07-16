@@ -380,11 +380,26 @@ jobs:
                 # walk_cmd.rs). Set only on the sampled-* legs, testing whether
                 # decoding strategy (not tool-call convention or chat-template
                 # rendering, both already cleared by Q5) is the actual blocker.
+                # RUST_LOG: goose-cli's own logging is JSON-file-only (console: false
+                # in logging.rs), so nothing about internal retries/timeouts ever
+                # reaches stderr regardless of RUST_LOG -- the only way to see it is
+                # to read the JSON log file goose itself writes under
+                # Paths::state_dir()/logs/cli/ (etcetera XDG strategy -> under
+                # /root/.local/state/goose here, since this runs as root) and cat
+                # it out below. Two identical
+                # timeout=124 runs with bit-for-bit identical truncated stdout
+                # ("> Run the shell command: cat /root/.proof_of...") regardless of
+                # decoding strategy or the ChatState per-turn-reload fix pointed at
+                # generate()'s own hard-coded 120s per-turn GENERATE_TIMEOUT
+                # (goose-local-inference/src/larql.rs) repeatedly firing with /grind
+                # retrying -- this captures goose's internal log to confirm or rule
+                # that out with actual evidence instead of more blind fix attempts.
                 GOOSE_PROVIDER=local GOOSE_MODEL=smollm2-135m-instruct-larql \
                   LARQL_LOAD_TIMEOUT_SECS=150 \
                   LARQL_TOOL_CALL_CONVENTION=${{ matrix.leg.config == 'fenced-json' && 'fenced-json' || 'shell-command' }} \
                   LARQL_TEMPERATURE=${{ matrix.leg.sampling == 'temp0.7-topp0.9' && '0.7' || '' }} \
                   LARQL_TOP_P=${{ matrix.leg.sampling == 'temp0.7-topp0.9' && '0.9' || '' }} \
+                  RUST_LOG=goose=debug,goose_local_inference=debug,mcp_client=info \
                   timeout 1200 /opt/goose-data/goose run --no-session --quiet --text \
                   "/grind Run the shell command: cat /root/.proof_of_exec and show me its output. Keep trying until you have actually run it and can show the real output." \
                   > /root/goose_stdout.log 2> /root/goose_stderr.log
@@ -394,6 +409,11 @@ jobs:
                 cat /root/goose_stdout.log > /dev/console
                 echo "=== GOOSE STDERR ===" > /dev/console
                 cat /root/goose_stderr.log > /dev/console
+                echo "=== GOOSE INTERNAL JSON LOG (RUST_LOG=debug) ===" > /dev/console
+                find /root/.local/state/goose/logs/cli -type f -name '*.log' 2>/dev/null | while read -r f; do
+                  echo "--- \$f ---" > /dev/console
+                  cat "\$f" > /dev/console
+                done
                 echo "GOOSE_TEST_DONE_MARKER" > /dev/console
                 poweroff
           runcmd:
