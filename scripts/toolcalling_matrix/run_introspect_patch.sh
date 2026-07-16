@@ -78,10 +78,7 @@ if [ "$config" = "circuit-ablate-apply" ]; then
   outcome="${outcome}_partial_pipeline"
 fi
 
-python3 -c "
-import json
-json.dump({
-  'leg_id': '$leg_id', 'approach_id': '$approach_id', 'outcome': '$outcome',
-  'detail': '''$detail''', 'ranked_feature_count': $ranked_count,
-}, open('$out_json', 'w'))
-"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$script_dir/write_leg_result.py" \
+  --leg-id "$leg_id" --approach-id "$approach_id" --outcome "$outcome" --detail "$detail" \
+  --extra "{\"ranked_feature_count\": $ranked_count}" --out "$out_json"

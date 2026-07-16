@@ -31,9 +31,22 @@ def load_chat_template(model: str) -> str | None:
 
 TOOL_REFERENCE_MARKERS = ["tools", "tool_call", "tool_calls", "function_call"]
 
+# Stricter markers than TOOL_REFERENCE_MARKERS: a template can mention "tools"
+# only to say none are available, without being able to actually iterate a
+# tool's JSON-schema parameters. This is what distinguishes leg 6
+# (full-schema -- does the template render *per-tool parameter schemas*, not
+# just a bare name/description list) from leg 5 (compact-tools -- does it
+# reference tool-calling at all). Without this, --schema-mode was accepted
+# but never affected the check, so both legs always produced the same result.
+SCHEMA_ITERATION_MARKERS = ["parameters", "arguments", ".function", "tool.function"]
 
-def proxy_supports_tool_calling(template_src: str) -> bool:
-    return any(marker in template_src for marker in TOOL_REFERENCE_MARKERS)
+
+def proxy_supports_tool_calling(template_src: str, schema_mode: str) -> bool:
+    if not any(marker in template_src for marker in TOOL_REFERENCE_MARKERS):
+        return False
+    if schema_mode == "full-schema":
+        return any(marker in template_src for marker in SCHEMA_ITERATION_MARKERS)
+    return True
 
 
 def main() -> int:
@@ -56,7 +69,12 @@ def main() -> int:
             "capability from).",
         }
     else:
-        proxy_positive = proxy_supports_tool_calling(template)
+        proxy_positive = proxy_supports_tool_calling(template, args.schema_mode)
+        bar = (
+            "reference tool-calling AND appear to iterate per-tool parameter schemas"
+            if args.schema_mode == "full-schema"
+            else "reference a tool-calling construct at all"
+        )
         result = {
             "leg_id": args.leg_id,
             "approach_id": args.approach_id,
@@ -65,8 +83,7 @@ def main() -> int:
                 f"schema_mode={args.schema_mode}. PROXY check only (see script "
                 "docstring) — the real llama.cpp capability-detection dry-run this "
                 "would need to faithfully answer Q5 is not run here. Raw template "
-                f"{'DOES' if proxy_positive else 'does NOT'} reference a tool-calling "
-                "construct in its source."
+                f"{'DOES' if proxy_positive else 'does NOT'} {bar}."
             ),
         }
 

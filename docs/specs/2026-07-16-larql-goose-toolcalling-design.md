@@ -215,10 +215,12 @@ workspace "larql-goose-toolcalling" "Tool-calling for the larql-driven Goose cod
 ### ADR-4: Strategy-matrix shape follows `lql-strategy-matrix.yml` exactly, not a new pattern
 
 - **Status**: Accepted
-- **Context**: This repo already has one battle-tested strategy-matrix CI convention
+- **Context**: This same GitHub repo already has one battle-tested strategy-matrix CI convention
   (`plan`→`build`→`matrix[max-parallel:12,fail-fast:false]`→`aggregate`/`conformance`, residual
-  K45). Inventing a second, different shape for this project would fragment conventions for no
-  benefit.
+  K45) — on its own separate, not-yet-merged `lql-strategy-matrix` branch, not on `main` or this
+  branch (confirmed: `git cat-file -e origin/main:.github/workflows/lql-strategy-matrix.yml`
+  fails). Inventing a second, different shape for this project would still fragment conventions
+  for no benefit once that branch merges, so it's worth matching now rather than later.
 - **Decision**: `goose-larql-toolcalling-matrix.yml` reuses the same job DAG shape: a `plan` job
   emits the 12-leg JSON (hand-authored list, not a generator script, since the leg count is fixed
   and small — see ADR-6), a `build` job compiles `larql-cli` and `goose-cli` once, a `matrix` job

@@ -1,8 +1,10 @@
 # Strategy matrix: 6 approaches x 12 legs for adding/improving tool-calling in the
 # larql-driven Goose coding agent. This is the CI counterpart of
 # docs/specs/2026-07-16-larql-goose-toolcalling-design.md (ADR-4: shape follows
-# lql-strategy-matrix.yml's plan/build/matrix/aggregate convention exactly; ADR-6: the
-# 12-leg table).
+# lql-strategy-matrix.yml's plan/build/matrix/aggregate convention (ADR-6: the 12-leg
+# table); that file lives on this same GitHub repo's separate, not-yet-merged
+# lql-strategy-matrix branch, not on main or this branch -- confirmed via
+# `git cat-file -e origin/main:.github/workflows/lql-strategy-matrix.yml` (missing).
 #
 # Legs 1-2 (emulate-stream-harness, IMPLEMENTED this session -- see
 # crates/goose-local-inference/src/larql_tool_emulation.rs in metavacua/goose) run a
@@ -69,14 +71,14 @@ jobs:
             {"leg_id": "smol135.emulate-stream.fenced-tool",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "fenced-json"},
             {"leg_id": "smol135.emulate-buffered.openai-json",            "approach_id": "emulate-buffered-harness",  "kind": "not-implemented", "config": "openai-json"},
             {"leg_id": "smol135.emulate-buffered.xml-function",           "approach_id": "emulate-buffered-harness",  "kind": "not-implemented", "config": "xml-function"},
-            {"leg_id": "smol135.native-template.compact-tools",           "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "compact-tools"},
-            {"leg_id": "smol135.native-template.full-schema",             "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "full-schema"},
-            {"leg_id": "smol135.patch-chain.tool-open-tag",                "approach_id": "patch-chain-single-token",  "kind": "cli-measurement", "config": "tool-open-tag"},
-            {"leg_id": "smol135.patch-chain.json-key-tokens",              "approach_id": "patch-chain-single-token",  "kind": "cli-measurement", "config": "json-key-tokens"},
-            {"leg_id": "smol135.patch-ensemble.trigger-5prompt-shared-slot", "approach_id": "patch-ensemble-trigger",  "kind": "cli-measurement", "config": "shared-slot"},
-            {"leg_id": "smol135.patch-ensemble.trigger-multi-layer-slots",  "approach_id": "patch-ensemble-trigger",  "kind": "cli-measurement", "config": "multi-layer-slots"},
-            {"leg_id": "smol135.introspect-patch.walk-rank-only",          "approach_id": "introspect-then-patch",    "kind": "cli-measurement", "config": "walk-rank-only"},
-            {"leg_id": "smol135.introspect-patch.circuit-ablate-apply",    "approach_id": "introspect-then-patch",    "kind": "cli-measurement", "config": "circuit-ablate-apply"}
+            {"leg_id": "smol135.native-template.compact-tools",           "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "compact-tools", "script": ""},
+            {"leg_id": "smol135.native-template.full-schema",             "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "full-schema", "script": ""},
+            {"leg_id": "smol135.patch-chain.tool-open-tag",                "approach_id": "patch-chain-single-token",  "kind": "cli-measurement", "config": "tool-open-tag", "script": "run_patch_chain.sh"},
+            {"leg_id": "smol135.patch-chain.json-key-tokens",              "approach_id": "patch-chain-single-token",  "kind": "cli-measurement", "config": "json-key-tokens", "script": "run_patch_chain.sh"},
+            {"leg_id": "smol135.patch-ensemble.trigger-5prompt-shared-slot", "approach_id": "patch-ensemble-trigger",  "kind": "cli-measurement", "config": "shared-slot", "script": "run_patch_ensemble.sh"},
+            {"leg_id": "smol135.patch-ensemble.trigger-multi-layer-slots",  "approach_id": "patch-ensemble-trigger",  "kind": "cli-measurement", "config": "multi-layer-slots", "script": "run_patch_ensemble.sh"},
+            {"leg_id": "smol135.introspect-patch.walk-rank-only",          "approach_id": "introspect-then-patch",    "kind": "cli-measurement", "config": "walk-rank-only", "script": "run_introspect_patch.sh"},
+            {"leg_id": "smol135.introspect-patch.circuit-ablate-apply",    "approach_id": "introspect-then-patch",    "kind": "cli-measurement", "config": "circuit-ablate-apply", "script": "run_introspect_patch.sh"}
           ]
           EOF
           legs=$(python3 -c "import json; print(json.dumps(json.load(open('legs.json'))))")
@@ -190,13 +192,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # not-implemented legs (3-4) just write a static JSON and touch no
+      # binary/vindex/runtime-lib at all -- skip these downloads/installs
+      # for them rather than paying for artifacts and packages that go unused.
       - uses: actions/download-artifact@v6
+        if: matrix.leg.kind != 'not-implemented'
         with: { name: larql-bin, path: bin }
       - run: chmod +x bin/larql
-      - name: Install runtime libs larql needs to RUN
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0
+        if: matrix.leg.kind != 'not-implemented'
       - uses: actions/download-artifact@v6
+        if: matrix.leg.kind != 'not-implemented'
         with: { name: smollm2-vindex, path: smollm2-135m-instruct.vindex }
+      - name: Install runtime libs larql needs to RUN
+        if: matrix.leg.kind != 'not-implemented'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0
 
       # ---- kind: not-implemented (legs 3-4) ----
       - name: Record not-yet-implemented outcome
@@ -212,7 +221,9 @@ jobs:
         if: matrix.leg.kind == 'vm-coding-task'
         run: |
           ls -la /dev/kvm
-          sudo apt-get update -qq
+          # No `apt-get update` here -- the "Install runtime libs" step just
+          # above already refreshed the package index on this same runner;
+          # re-running it is a redundant network round-trip.
           sudo apt-get install -y -qq cpu-checker qemu-system-x86 qemu-utils cloud-image-utils libguestfs-tools
           sudo kvm-ok
           sudo chmod 666 /dev/kvm
@@ -392,32 +403,12 @@ jobs:
             --out out/result-${{ matrix.leg.leg_id }}.json
           cat out/result-${{ matrix.leg.leg_id }}.json
 
-      - name: patch-chain-single-token measurement (legs 7-8)
-        if: matrix.leg.kind == 'cli-measurement' && matrix.leg.approach_id == 'patch-chain-single-token'
+      - name: LARQL-native measurement (legs 7-12 -- one generic step, dispatched by matrix.leg.script)
+        if: matrix.leg.kind == 'cli-measurement' && matrix.leg.script != ''
         run: |
           mkdir -p out
-          chmod +x scripts/toolcalling_matrix/run_patch_chain.sh
-          scripts/toolcalling_matrix/run_patch_chain.sh \
-            "${{ matrix.leg.leg_id }}" "${{ matrix.leg.approach_id }}" "${{ matrix.leg.config }}" \
-            ./bin/larql smollm2-135m-instruct.vindex out/result-${{ matrix.leg.leg_id }}.json
-          cat out/result-${{ matrix.leg.leg_id }}.json
-
-      - name: patch-ensemble-trigger measurement (legs 9-10)
-        if: matrix.leg.kind == 'cli-measurement' && matrix.leg.approach_id == 'patch-ensemble-trigger'
-        run: |
-          mkdir -p out
-          chmod +x scripts/toolcalling_matrix/run_patch_ensemble.sh
-          scripts/toolcalling_matrix/run_patch_ensemble.sh \
-            "${{ matrix.leg.leg_id }}" "${{ matrix.leg.approach_id }}" "${{ matrix.leg.config }}" \
-            ./bin/larql smollm2-135m-instruct.vindex out/result-${{ matrix.leg.leg_id }}.json
-          cat out/result-${{ matrix.leg.leg_id }}.json
-
-      - name: introspect-then-patch measurement (legs 11-12)
-        if: matrix.leg.kind == 'cli-measurement' && matrix.leg.approach_id == 'introspect-then-patch'
-        run: |
-          mkdir -p out
-          chmod +x scripts/toolcalling_matrix/run_introspect_patch.sh
-          scripts/toolcalling_matrix/run_introspect_patch.sh \
+          chmod +x scripts/toolcalling_matrix/${{ matrix.leg.script }}
+          scripts/toolcalling_matrix/${{ matrix.leg.script }} \
             "${{ matrix.leg.leg_id }}" "${{ matrix.leg.approach_id }}" "${{ matrix.leg.config }}" \
             ./bin/larql smollm2-135m-instruct.vindex out/result-${{ matrix.leg.leg_id }}.json
           cat out/result-${{ matrix.leg.leg_id }}.json

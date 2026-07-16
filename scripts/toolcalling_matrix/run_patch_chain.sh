@@ -57,10 +57,7 @@ else
   fi
 fi
 
-python3 -c "
-import json
-json.dump({
-  'leg_id': '$leg_id', 'approach_id': '$approach_id', 'outcome': '$outcome',
-  'detail': '''$detail''', 'steps_attempted': $total,
-}, open('$out_json', 'w'))
-"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$script_dir/write_leg_result.py" \
+  --leg-id "$leg_id" --approach-id "$approach_id" --outcome "$outcome" --detail "$detail" \
+  --extra "{\"steps_attempted\": $total}" --out "$out_json"
