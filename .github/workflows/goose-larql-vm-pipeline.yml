@@ -118,9 +118,9 @@ jobs:
         # local VM-guest bug this session already found and fixed the same
         # way (libopenblas0-pthread/libgfortran5/libquadmath0).
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0
-      - name: Extract SmolLM2-135M vindex (f16, no quant)
+      - name: Extract SmolLM2-135M vindex (f16 is the extract default, no --f16 flag exists -- confirmed via docs/cli.md after --f16 errored as an unexpected argument)
         run: |
-          ./bin/larql extract HuggingFaceTB/SmolLM2-135M --level inference --f16 -o smollm2-135m.vindex
+          ./bin/larql extract HuggingFaceTB/SmolLM2-135M --level inference -o smollm2-135m.vindex
           ./bin/larql show smollm2-135m.vindex
       - uses: actions/upload-artifact@v4
         with:
