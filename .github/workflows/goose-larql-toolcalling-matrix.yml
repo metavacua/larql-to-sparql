@@ -348,6 +348,26 @@ jobs:
                 apt-get update -qq > /dev/console 2>&1
                 apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0 > /dev/console 2>&1
                 echo "=== runtime libs installed ===" > /dev/console
+                # Bare `larql chat` smoke test, bypassing goose entirely: goose's
+                # own subprocess handling (goose-local-inference/src/larql.rs)
+                # pipes the child's stdout/stderr internally and never forwards
+                # them to this VM's console, so a prior run's JSON log (RUST_LOG=
+                # debug) showed the model load itself finishing in ~1.1s, then
+                # ZERO further log activity for the remaining ~1197s until the
+                # outer timeout killed the whole process -- ruling out slow
+                # model-loading and a visibly-repeating retry loop, but leaving
+                # "is the larql-chat subprocess itself stuck/slow" vs "is goose's
+                # own stdio piping/orchestration the actual bug" unresolved. This
+                # invokes the exact same binary+vindex goose spawns, directly,
+                # with a bounded timeout, so its raw output is visible here.
+                echo "=== bare larql chat smoke test (bypassing goose) ===" > /dev/console
+                BARE_START=\$(date +%s)
+                echo "What is 2+2?" | timeout 90 /opt/larql-data/larql chat /opt/larql-data/smollm2-135m-instruct.vindex > /root/bare_chat.log 2>&1
+                BARE_EC=\$?
+                BARE_ELAPSED=\$(( \$(date +%s) - BARE_START ))
+                echo "bare larql chat: exit=\$BARE_EC elapsed=\${BARE_ELAPSED}s" > /dev/console
+                cat /root/bare_chat.log > /dev/console
+                echo "=== end bare larql chat smoke test ===" > /dev/console
                 # 1200s (20 min), not a tight clip: an autonomous closed-loop
                 # coding agent needs real room to work, closing its own loop
                 # rather than racing an external stopwatch. Safety net against a
