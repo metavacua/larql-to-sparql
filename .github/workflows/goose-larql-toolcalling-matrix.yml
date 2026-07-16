@@ -1,8 +1,18 @@
-# Strategy matrix: 6 approaches x 12 legs for adding/improving tool-calling in the
-# larql-driven Goose coding agent. This is the CI counterpart of
-# docs/specs/2026-07-16-larql-goose-toolcalling-design.md (ADR-4: shape follows
-# lql-strategy-matrix.yml's plan/build/matrix/aggregate convention (ADR-6: the 12-leg
-# table); that file lives on this same GitHub repo's separate, not-yet-merged
+# Strategy matrix: 5 approaches x 10 legs for adding/improving tool-calling in the
+# larql-driven Goose coding agent. Single workflow for the whole larql+goose+VM
+# pipeline -- previously split across this file and a separate
+# goose-larql-vm-pipeline.yml, each with its own build-larql/build-goose/
+# prepare-vindex jobs; both targeted `main`, so any PR touching either would run
+# the entire build-to-vindex-extraction pipeline twice for no reason. Consolidated
+# into this one file instead of trimming the duplication down. kvm-capability-check.yml
+# (a one-off diagnostic whose own header said to delete it once KVM support was
+# confirmed and folded into a real pipeline -- both now true) was deleted for the
+# same reason.
+#
+# This is the CI counterpart of docs/specs/2026-07-16-larql-goose-toolcalling-design.md
+# (ADR-4: shape follows lql-strategy-matrix.yml's plan/build/matrix/aggregate
+# convention; ADR-6: the leg table, since reduced from 12 to 10 -- see below).
+# lql-strategy-matrix.yml lives on this same GitHub repo's separate, not-yet-merged
 # lql-strategy-matrix branch, not on main or this branch -- confirmed via
 # `git cat-file -e origin/main:.github/workflows/lql-strategy-matrix.yml` (missing).
 #
@@ -12,24 +22,27 @@
 # ToolRequest actually dispatched (a distinctive sentinel echoed back through the
 # ACTUALLY-EXECUTED shell tool, not just text resembling a shell command).
 #
-# Legs 3-4 (emulate-buffered-harness) are NOT YET IMPLEMENTED — this workflow says so
-# plainly (a labeled, honest placeholder outcome) rather than fabricating a result or
-# silently omitting the leg. Tracked as Task 3 in
-# docs/plans/2026-07-16-larql-goose-toolcalling.md.
+# emulate-buffered-harness (previously legs 3-4) is dropped from this matrix: it was
+# never implemented (tracked as plan Task 3, not started), and a leg whose only
+# output is a static "not_implemented" placeholder tests nothing -- reducing the
+# matrix is more honest than keeping TODO-shaped legs around. Implement it for real
+# first, then add it back as a leg.
 #
-# Legs 5-6 (native-template-wiring) measure whether SmolLM2-135M-Instruct's own chat
-# template satisfies Goose's native-tool-calling-support predicate at all (residual Q5)
-# — a cheap, VM-free template-render check, not a live agent run, since the wiring to
-# actually USE native tool-calling in larql.rs is an explicit follow-on (plan Task 4).
+# Legs 3-4 (native-template-wiring, previously 5-6) measure whether
+# SmolLM2-135M-Instruct's own chat template satisfies Goose's native-tool-calling-
+# support predicate at all (residual Q5) — a cheap, VM-free template-render check,
+# not a live agent run, since the wiring to actually USE native tool-calling in
+# larql.rs is an explicit follow-on (plan Task 4).
 #
-# Legs 7-12 (patch-chain-single-token, patch-ensemble-trigger, introspect-then-patch)
-# are LARQL-CLI-only discovery/measurement legs per ADR-3 — their outcome is data, not
-# a pass/fail gate (this workflow's `aggregate` job reports them descriptively, matching
-# lql-strategy-matrix.yml's conformance.py convention). Leg 12's causal-ablation half
-# (`larql dev ov-rd`) is scoped down honestly to circuit-discover clustering only this
-# phase — ov-rd's own README states it is experimental and scoped to one research line,
-# and fabricating unverified ablation-flag syntax would risk a misleadingly "green" CI
-# leg for a step that never really ran the described technique.
+# Legs 5-10 (patch-chain-single-token, patch-ensemble-trigger, introspect-then-patch,
+# previously 7-12) are LARQL-CLI-only discovery/measurement legs per ADR-3 — their
+# outcome is data, not a pass/fail gate (this workflow's `aggregate` job reports them
+# descriptively, matching lql-strategy-matrix.yml's conformance.py convention). The
+# last leg's causal-ablation half (`larql dev ov-rd`) is scoped down honestly to
+# circuit-discover clustering only this phase — ov-rd's own README states it is
+# experimental and scoped to one research line, and fabricating unverified
+# ablation-flag syntax would risk a misleadingly "green" CI leg for a step that never
+# really ran the described technique.
 name: goose-larql-toolcalling-matrix
 
 on:
@@ -56,7 +69,7 @@ env:
   TOOLCALL_MODEL: HuggingFaceTB/SmolLM2-135M-Instruct
 
 jobs:
-  # Enumerate the 12 legs (ADR-6's table). Hand-authored, not a generator script (ADR-4):
+  # Enumerate the 10 legs (ADR-6's table). Hand-authored, not a generator script (ADR-4):
   # the leg count is fixed and small enough to review directly in this file.
   plan:
     runs-on: ubuntu-latest
@@ -69,8 +82,6 @@ jobs:
           [
             {"leg_id": "smol135.emulate-stream.shell-conv",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "shell-command"},
             {"leg_id": "smol135.emulate-stream.fenced-tool",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "fenced-json"},
-            {"leg_id": "smol135.emulate-buffered.openai-json",            "approach_id": "emulate-buffered-harness",  "kind": "not-implemented", "config": "openai-json"},
-            {"leg_id": "smol135.emulate-buffered.xml-function",           "approach_id": "emulate-buffered-harness",  "kind": "not-implemented", "config": "xml-function"},
             {"leg_id": "smol135.native-template.compact-tools",           "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "compact-tools", "script": ""},
             {"leg_id": "smol135.native-template.full-schema",             "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "full-schema", "script": ""},
             {"leg_id": "smol135.patch-chain.tool-open-tag",                "approach_id": "patch-chain-single-token",  "kind": "cli-measurement", "config": "tool-open-tag", "script": "run_patch_chain.sh"},
@@ -186,35 +197,19 @@ jobs:
     # Generous, not tightly clipped, for the vm-coding-task legs -- the objective is
     # an autonomous closed-loop coding agent that gets real room to work, closing its
     # own loop (guest cloud-init poweroff after goose exits) rather than being raced
-    # against an external clock. cli-measurement/not-implemented legs finish in
-    # seconds regardless; this ceiling is a safety net, not the normal path.
+    # against an external clock. cli-measurement legs finish in seconds regardless;
+    # this ceiling is a safety net, not the normal path.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
-      # not-implemented legs (3-4) just write a static JSON and touch no
-      # binary/vindex/runtime-lib at all -- skip these downloads/installs
-      # for them rather than paying for artifacts and packages that go unused.
       - uses: actions/download-artifact@v6
-        if: matrix.leg.kind != 'not-implemented'
         with: { name: larql-bin, path: bin }
       - run: chmod +x bin/larql
-        if: matrix.leg.kind != 'not-implemented'
       - uses: actions/download-artifact@v6
-        if: matrix.leg.kind != 'not-implemented'
         with: { name: smollm2-vindex, path: smollm2-135m-instruct.vindex }
       - name: Install runtime libs larql needs to RUN
-        if: matrix.leg.kind != 'not-implemented'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0
-
-      # ---- kind: not-implemented (legs 3-4) ----
-      - name: Record not-yet-implemented outcome
-        if: matrix.leg.kind == 'not-implemented'
-        run: |
-          mkdir -p out
-          printf '{"leg_id":"%s","approach_id":"%s","outcome":"not_implemented","detail":"emulate-buffered-harness (de-gating native_tool_parsing.rs or forking its buffered JSON/XML parser) is tracked as Task 3 in docs/plans/2026-07-16-larql-goose-toolcalling.md and was not implemented this phase — reported honestly rather than fabricated or silently skipped."}\n' \
-            "${{ matrix.leg.leg_id }}" "${{ matrix.leg.approach_id }}" > out/result-${{ matrix.leg.leg_id }}.json
-          cat out/result-${{ matrix.leg.leg_id }}.json
 
       # ---- kind: vm-coding-task (legs 1-2) ----
       - name: Confirm KVM acceleration
@@ -399,7 +394,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: native-template measurement (legs 5-6)
+      - name: native-template measurement (legs 3-4)
         if: matrix.leg.kind == 'cli-measurement' && matrix.leg.approach_id == 'native-template-wiring'
         run: |
           mkdir -p out
@@ -412,7 +407,7 @@ jobs:
             --out out/result-${{ matrix.leg.leg_id }}.json
           cat out/result-${{ matrix.leg.leg_id }}.json
 
-      - name: LARQL-native measurement (legs 7-12 -- one generic step, dispatched by matrix.leg.script)
+      - name: LARQL-native measurement (legs 5-10 -- one generic step, dispatched by matrix.leg.script)
         if: matrix.leg.kind == 'cli-measurement' && matrix.leg.script != ''
         run: |
           mkdir -p out

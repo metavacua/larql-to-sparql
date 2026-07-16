@@ -42,8 +42,7 @@ jobs:
           sudo kvm-ok
           # /dev/kvm is root:kvm 660 by default; the runner's own user isn't
           # necessarily in the kvm group even though the device exists --
-          # confirmed empirically ("Permission denied" initializing kvm)
-          # in the kvm-capability-check workflow's own probe.
+          # confirmed empirically ("Permission denied" initializing kvm).
           sudo chmod 666 /dev/kvm
 
       - name: Install VM toolchain

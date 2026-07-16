@@ -4,7 +4,7 @@
 - **Source residual**: `docs/specs/2026-07-16-larql-goose-toolcalling-research-residual.md`
 - **Manifest**: `rdloop.toml`
 - **Date**: 2026-07-16
-- **Repos touched**: `metavacua/larql-to-sparql` (**Repo A**, checked out at cwd — the 12-leg CI
+- **Repos touched**: `metavacua/larql-to-sparql` (**Repo A**, checked out at cwd — the 10-leg CI
   workflow lives here) and `metavacua/goose` (**Repo B**, local clone at
   `~/work/metavacua-goose`, `feat/larql-local-inference-backend` branch — the new tool-call
   emulation module lives here). Every task states which repo its Files live in.
@@ -57,7 +57,7 @@
 T1 (the emulation parser module) gates T2/T3 (its two config variants) since they're the same
 module with a mode toggle. T4 (native-template measurement), T5 (LARQL-native CLI measurement
 scripts), and T6 (CI workflow skeleton) are independent of T1 and of each other. T7 (assemble the
-full 12-leg matrix) needs all of T2/T3/T4/T5/T6 done. T8 (run it) and T9 (aggregate/report) both
+full 10-leg matrix) needs all of T2/T3/T4/T5/T6 done. T8 (run it) and T9 (aggregate/report) both
 need T7 but not each other, so they parallelize on GitHub's side (the workflow's own
 `matrix`/`aggregate` jobs), not in this task graph.
 
@@ -201,7 +201,7 @@ reported as success" concern, carried forward from the 2026-07-15 design).
 
 **Repo**: A. **AC**: AC-3, AC-6. **ADR**: ADR-4.
 **Files**: new `.github/workflows/goose-larql-toolcalling-matrix.yml`.
-**Interfaces**: `plan` job emitting the hand-authored 12-leg JSON (ADR-6's table, literal — no
+**Interfaces**: `plan` job emitting the hand-authored 10-leg JSON (ADR-6's table, literal — no
 generator script, per ADR-4's rationale); `build` job compiling `larql-cli` and `goose-cli` once
 each, uploaded as artifacts; `matrix` job with `strategy.max-parallel: 12`, `fail-fast: false`,
 `matrix.leg: fromJSON(needs.plan.outputs.legs)`; `aggregate` job rendering
@@ -245,7 +245,7 @@ T1-T5 artifacts/scripts).
 
 **Repo**: A. **AC**: AC-3, AC-4, AC-5, AC-6. **ADR**: ADR-3, ADR-4.
 
-- [ ] Re-run after T7's fixes until all 12 legs complete (not necessarily all "pass" — legs 7-12
+- [ ] Re-run after T7's fixes until all 10 legs complete (not necessarily all "pass" — legs 5-10
       completing with an honest negative/partial finding satisfies AC-4).
 - [ ] Download and review the `aggregate` job's `$GITHUB_STEP_SUMMARY` output.
 
@@ -268,7 +268,7 @@ T1-T5 artifacts/scripts).
 |---|---|---|
 | AC-1 (ungated, mlx-independent parser) | T1 | T1's unit test + `cargo check --features local-inference,rustls-tls` |
 | AC-2 (correct `ToolRequest` shape, no bespoke dispatch) | T1, T2, T3 | T1/T3's unit tests; T2's integration test |
-| AC-3 (exactly 12 legs enumerated) | T6, T7 | T7's `plan` job leg-count assertion |
+| AC-3 (exactly 10 legs enumerated) | T6, T7 | T7's `plan` job leg-count assertion |
 | AC-4 (LARQL-native legs recorded as discovery, not gated) | T5, T8, T9 | T5's script-level `outcome` field; T9's residual update |
 | AC-5 (real dispatch verified, liveness bounded) | T2, T7, T8 | T2's integration test; T7's dry-run assertion |
 | AC-6 (`fail-fast: false`, one leg's failure doesn't block siblings) | T6, T7 | T7's dry-run confirms sibling legs complete despite one failure |

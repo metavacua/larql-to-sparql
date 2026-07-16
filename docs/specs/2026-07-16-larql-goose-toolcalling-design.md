@@ -44,9 +44,13 @@ that a "find the responsible feature, then patch it" pipeline does not exist tod
 This design does not pick one approach and discard the rest. It formalizes **six** distinct,
 independently-motivated technical approaches (harness-level emulation, two variants; native
 chat-template wiring; and three LARQL-native approaches spanning patch-chaining, patch-ensemble
-trigger generalization, and introspect-then-patch) and commits to testing all of them empirically,
-in parallel, via a CI strategy matrix — following this repo's own established convention
+trigger generalization, and introspect-then-patch), and matrixes five of them empirically, in
+parallel, via a CI strategy matrix — following this repo's own established convention
 (`lql-strategy-matrix.yml`, residual K45) rather than inventing a new experimental harness shape.
+The sixth (`emulate-buffered-harness`) is deferred rather than matrixed with placeholder legs: a
+leg whose only output is a static "not implemented" result tests nothing, so it stays out of the
+matrix until it has a real implementation (plan Task 3), consistent with reducing CI surface area
+to what's actually meaningful rather than padding the leg count.
 The lowest-risk approach is also implemented as working code in this same phase, so the project
 has a real, demonstrable tool-calling capability regardless of how the higher-risk legs turn out.
 
@@ -95,7 +99,7 @@ has a real, demonstrable tool-calling capability regardless of how the higher-ri
   system SHALL emit a `MessageContent::ToolRequest` with a validated tool name and coerced
   arguments, and SHALL NOT emit the matched raw text as plain assistant prose.
 - **AC-3** (event-driven): WHEN the strategy-matrix's `plan` job runs, THE system SHALL enumerate
-  exactly the 12 legs defined in §5 ADR-6's table as JSON, consumed by `fromJSON` in the `matrix`
+  exactly the 10 legs defined in §5 ADR-6's table as JSON, consumed by `fromJSON` in the `matrix`
   job, matching this repo's `gen_legs.py`-style leg schema (residual K45).
   *(closes the "about a dozen runners per push" resource constraint.)*
 - **AC-4** (event-driven): WHEN any of the three LARQL-native matrix legs (patch-chaining,
@@ -127,7 +131,7 @@ workspace "larql-goose-toolcalling" "Tool-calling for the larql-driven Goose cod
       replyParts = container "reply_parts::categorize_tool_requests" "Existing dispatch consumer, backend-agnostic" "Rust"
     }
     larqlChat = softwareSystem "larql chat" "Unmodified LARQL CLI subprocess, one line in / one response out per turn"
-    matrix = softwareSystem "goose-larql-toolcalling-matrix.yml" "GitHub Actions strategy matrix, 12 legs, max-parallel 12"
+    matrix = softwareSystem "goose-larql-toolcalling-matrix.yml" "GitHub Actions strategy matrix, 10 legs, max-parallel 12"
     patchTooling = softwareSystem "LARQL patch/introspection tooling" "PatchedVindex overlay, walk/circuit-discover/ov-rd (existing, in larql-canonical)"
 
     larqlBackend -> larqlChat "writes prompt line to stdin, reads full response from stdout"
@@ -157,7 +161,7 @@ workspace "larql-goose-toolcalling" "Tool-calling for the larql-driven Goose cod
   different risk profiles (K37-K44).
 - **Decision**: Six approaches are matrixed: `emulate-stream-harness`, `emulate-buffered-harness`,
   `native-template-wiring`, `patch-chain-single-token`, `patch-ensemble-trigger`,
-  `introspect-then-patch`. See ADR-6's leg table for the full 12-leg breakdown.
+  `introspect-then-patch`. See ADR-6's leg table for the full 10-leg breakdown.
 - **Consequences**: More CI surface area than a single-approach plan, bounded by the 12-runner
   cap (ADR-6). Three of the six approaches (the LARQL-native ones) are explicitly
   discovery-only and may report negative/inconclusive results — this is expected and is itself
@@ -222,7 +226,7 @@ workspace "larql-goose-toolcalling" "Tool-calling for the larql-driven Goose cod
   fails). Inventing a second, different shape for this project would still fragment conventions
   for no benefit once that branch merges, so it's worth matching now rather than later.
 - **Decision**: `goose-larql-toolcalling-matrix.yml` reuses the same job DAG shape: a `plan` job
-  emits the 12-leg JSON (hand-authored list, not a generator script, since the leg count is fixed
+  emits the 10-leg JSON (hand-authored list, not a generator script, since the leg count is fixed
   and small — see ADR-6), a `build` job compiles `larql-cli` and `goose-cli` once, a `matrix` job
   runs each leg with `max-parallel: 12` / `fail-fast: false`, and an `aggregate` job renders a
   `$GITHUB_STEP_SUMMARY` report, matching `aggregate.py`'s descriptive-only stance.
@@ -251,25 +255,27 @@ workspace "larql-goose-toolcalling" "Tool-calling for the larql-driven Goose cod
 - **Alternatives considered**: None seriously — this follows directly from the precedent already
   set and accepted implicitly by continuing the project.
 
-### ADR-6: The 12-leg matrix table
+### ADR-6: The 10-leg matrix table
+
+Reduced from an original 12: `emulate-buffered-harness`'s two legs were dropped rather than kept
+as placeholders (see the workflow file's own header comment) — the approach is still a legitimate
+candidate per ADR-1, just not matrixed until it has a real implementation (plan Task 3).
 
 | # | leg_id | approach_id | config |
 |---|---|---|---|
 | 1 | `smol135.emulate-stream.shell-conv` | emulate-stream-harness | `$ command` convention (verbatim llamacpp pattern), `ForceEmulated` |
 | 2 | `smol135.emulate-stream.fenced-tool` | emulate-stream-harness | ` ```tool_call{...}``` ` fenced-JSON convention instead |
-| 3 | `smol135.emulate-buffered.openai-json` | emulate-buffered-harness | de-gated `message_from_native_tool_text`, OpenAI `tool_calls` JSON branch, whole-response parse |
-| 4 | `smol135.emulate-buffered.xml-function` | emulate-buffered-harness | same de-gated parser, `<function=name>` XML branch |
-| 5 | `smol135.native-template.compact-tools` | native-template-wiring | `compact_tools_json`, `ToolCallingMode::Auto`, measures Q5 |
-| 6 | `smol135.native-template.full-schema` | native-template-wiring | full JSON-schema tool defs instead of compact form |
-| 7 | `smol135.patch-chain.tool-open-tag` | patch-chain-single-token | chain targets only the opening `<tool_call>` tag tokens |
-| 8 | `smol135.patch-chain.json-key-tokens` | patch-chain-single-token | chain extends to following `{"name":` tokens |
-| 9 | `smol135.patch-ensemble.trigger-5prompt-shared-slot` | patch-ensemble-trigger | 5 phrasings, one shared `(layer,feature)` slot |
-| 10 | `smol135.patch-ensemble.trigger-multi-layer-slots` | patch-ensemble-trigger | same 5 phrasings, one distinct slot each |
-| 11 | `smol135.introspect-patch.walk-rank-only` | introspect-then-patch | contrastive `walk` ranking only, no patch applied (cheapest) |
-| 12 | `smol135.introspect-patch.circuit-ablate-apply` | introspect-then-patch | full pipeline: `circuit-discover` + `ov-rd` ablation + overlay apply |
+| 3 | `smol135.native-template.compact-tools` | native-template-wiring | `compact_tools_json`, `ToolCallingMode::Auto`, measures Q5 |
+| 4 | `smol135.native-template.full-schema` | native-template-wiring | full JSON-schema tool defs instead of compact form |
+| 5 | `smol135.patch-chain.tool-open-tag` | patch-chain-single-token | chain targets only the opening `<tool_call>` tag tokens |
+| 6 | `smol135.patch-chain.json-key-tokens` | patch-chain-single-token | chain extends to following `{"name":` tokens |
+| 7 | `smol135.patch-ensemble.trigger-5prompt-shared-slot` | patch-ensemble-trigger | 5 phrasings, one shared `(layer,feature)` slot |
+| 8 | `smol135.patch-ensemble.trigger-multi-layer-slots` | patch-ensemble-trigger | same 5 phrasings, one distinct slot each |
+| 9 | `smol135.introspect-patch.walk-rank-only` | introspect-then-patch | contrastive `walk` ranking only, no patch applied (cheapest) |
+| 10 | `smol135.introspect-patch.circuit-ablate-apply` | introspect-then-patch | full pipeline: `circuit-discover` + `ov-rd` ablation + overlay apply |
 
-Legs 1-6 assert against a live `goose run` coding task inside the VM boundary (ADR-2 of the
-2026-07-15 design doc). Legs 7-12 are LARQL-CLI-only measurement legs (no VM, no Goose) — they
+Legs 1-4 assert against a live `goose run` coding task inside the VM boundary (ADR-2 of the
+2026-07-15 design doc). Legs 5-10 are LARQL-CLI-only measurement legs (no VM, no Goose) — they
 exercise `larql lql`/`larql walk`/`larql circuit-discover`/`larql dev ov-rd` directly against a
 SmolLM2-135M-Instruct vindex, per ADR-3's discovery-only framing, and do not require the VM
 boundary since they never run an inference-serving process outside contained `larql-cli`
@@ -279,7 +285,7 @@ subcommands.
 
 - Q5-Q8 (research residual) remain open; the plan doc sequences the matrix legs that resolve
   them empirically rather than resolving them by further reading.
-- The plan doc must decide concrete pass/observe criteria text for each of legs 7-12's "raw
+- The plan doc must decide concrete pass/observe criteria text for each of legs 5-10's "raw
   mechanical outcome" logging (AC-4), analogous to `lql-strategy-matrix.yml`'s bucket taxonomy
   (`ok`/`timeout`/`crash`/`err`) — this design intentionally leaves the exact bucket vocabulary to
   the plan phase rather than over-specifying it here.
