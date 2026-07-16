@@ -118,6 +118,31 @@ jobs:
         # local VM-guest bug this session already found and fixed the same
         # way (libopenblas0-pthread/libgfortran5/libquadmath0).
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0
+
+      - name: Cache HF model snapshot
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/huggingface/hub
+          key: ${{ runner.os }}-hf-smollm2-135m
+          restore-keys: |
+            ${{ runner.os }}-hf-smollm2-
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Pre-download HF model snapshot
+        # `larql extract <MODEL_ID>` resolves the ID via `resolve_model_path`,
+        # which only looks at an already-populated HF cache and never
+        # triggers a download itself (same root cause already documented in
+        # shannon-verify.yml -- confirmed here too: extract failed with
+        # "Error: not a directory: HuggingFaceTB/SmolLM2-135M" on a clean
+        # runner). snapshot_download populates the cache layout
+        # resolve_model_path expects (snapshots/<rev>/...).
+        run: |
+          pip install --quiet huggingface_hub
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('HuggingFaceTB/SmolLM2-135M')"
+
       - name: Extract SmolLM2-135M vindex (f16 is the extract default, no --f16 flag exists -- confirmed via docs/cli.md after --f16 errored as an unexpected argument)
         run: |
           ./bin/larql extract HuggingFaceTB/SmolLM2-135M --level inference -o smollm2-135m.vindex
