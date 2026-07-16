@@ -760,14 +760,38 @@ fn run_predict_inner(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let verbose = args.verbose;
 
+    // Chat-template wrapping (the same `render_user_prompt` the remote-MoE
+    // and Metal-dense predict paths already apply -- this default dense CPU
+    // path, the one `larql run`/`larql chat` actually exercises for a plain
+    // vindex with no --moe-shards/--ffn-remote/--metal, previously tokenized
+    // `args.prompt` completely raw, with no chat template at all. Confirmed
+    // via SmolLM2-135M-Instruct's own chat_template.jinja: an instruct model
+    // given text with none of its trained-on <|im_start|>/<|im_end|> turn
+    // structure is operating far outside its instruction-tuning
+    // distribution, which plausibly explains persistent degenerate
+    // (echo/copy) completions seen from this exact path. `render_user_prompt`
+    // itself no-ops back to the raw string on any failure (missing
+    // chat_template.jinja, unknown family, etc.) -- never a regression for
+    // a vindex without one.
+    let wrapped_prompt = match args.index.as_deref() {
+        Some(vindex_path) => {
+            larql_inference::chat::render_user_prompt(vindex_path, weights.arch.family(), &args.prompt)
+                .unwrap_or_else(|e| {
+                    vlog!(verbose, "chat-template render failed ({e}), using raw prompt");
+                    args.prompt.clone()
+                })
+        }
+        None => args.prompt.clone(),
+    };
+
     let encoding = tokenizer
-        .encode(args.prompt.as_str(), true)
+        .encode(wrapped_prompt.as_str(), true)
         .map_err(|e| format!("tokenize error: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
     vlog!(
         verbose,
         "Prompt: {:?} ({} tokens)",
-        args.prompt,
+        wrapped_prompt,
         token_ids.len()
     );
 
@@ -1135,18 +1159,41 @@ fn generate_stream(
         },
     };
     let mut engine = kind.build(backend);
-    let generated = larql_kv::generation::generate_with_engine(
-        &mut engine,
-        weights,
-        tokenizer,
-        ffn,
-        initial_ids,
-        max_tokens,
-        |_id, tok| {
-            print!("{tok}");
-            let _ = stdout.flush();
-        },
-    );
+    let sampling = sampling_config_from_env();
+    // `is_greedy()` alone doesn't check frequency_penalty/presence_penalty
+    // (it only looks at temperature/top_k/top_p) -- a repetition-penalty-only
+    // config (LARQL_FREQUENCY_PENALTY set, temperature left at 0) would
+    // otherwise silently dispatch to the untouched greedy path below, never
+    // reaching the sampler that would apply it. Confirmed via absence-detection
+    // this session before any test exercised that combination.
+    let generated = if sampling.is_greedy() && !sampling.has_repetition_penalty() {
+        larql_kv::generation::generate_with_engine(
+            &mut engine,
+            weights,
+            tokenizer,
+            ffn,
+            initial_ids,
+            max_tokens,
+            |_id, tok| {
+                print!("{tok}");
+                let _ = stdout.flush();
+            },
+        )
+    } else {
+        larql_kv::generation::generate_with_engine_sampled(
+            &mut engine,
+            weights,
+            tokenizer,
+            ffn,
+            initial_ids,
+            max_tokens,
+            sampling,
+            |_id, tok| {
+                print!("{tok}");
+                let _ = stdout.flush();
+            },
+        )
+    };
     println!();
     if verbose {
         // Honest reporting: the backend is `backend.name()` but the
@@ -1163,6 +1210,56 @@ fn generate_stream(
         );
     }
     generated
+}
+
+/// Builds a `SamplingConfig` from env vars, defaulting to greedy (the
+/// pre-existing, always-on behavior) when none are set — additive-only,
+/// zero behavior change for any caller that doesn't opt in.
+///
+///   LARQL_TEMPERATURE       f32, e.g. "0.7"  (0 or unset = greedy)
+///   LARQL_TOP_P             f32, e.g. "0.9"  (nucleus threshold)
+///   LARQL_TOP_K             usize, e.g. "40" (restrict to top-k before top-p)
+///   LARQL_FREQUENCY_PENALTY f32, e.g. "0.5"  (OpenAI-style, penalizes by count)
+///   LARQL_PRESENCE_PENALTY  f32, e.g. "0.5"  (OpenAI-style, penalizes any repeat)
+///   LARQL_SAMPLE_SEED       u64             (reproducible sampling for evals)
+///
+/// Frequency/presence penalties apply even under an otherwise-greedy
+/// temperature (see `SamplingConfig::greedy().with_frequency_penalty(...)` in
+/// `sampling.rs`) — deterministic but repetition-resistant, a real middle
+/// ground between pure argmax and full stochastic sampling.
+fn sampling_config_from_env() -> larql_inference::layer_graph::generate::SamplingConfig {
+    use larql_inference::layer_graph::generate::SamplingConfig;
+
+    let temperature: f32 = std::env::var("LARQL_TEMPERATURE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
+    let mut cfg = SamplingConfig::temperature(temperature);
+    if let Some(top_k) = std::env::var("LARQL_TOP_K").ok().and_then(|v| v.parse().ok()) {
+        cfg = cfg.with_top_k(top_k);
+    }
+    if let Some(top_p) = std::env::var("LARQL_TOP_P").ok().and_then(|v| v.parse().ok()) {
+        cfg = cfg.with_top_p(top_p);
+    }
+    if let Some(freq) = std::env::var("LARQL_FREQUENCY_PENALTY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg = cfg.with_frequency_penalty(freq);
+    }
+    if let Some(pres) = std::env::var("LARQL_PRESENCE_PENALTY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg = cfg.with_presence_penalty(pres);
+    }
+    if let Some(seed) = std::env::var("LARQL_SAMPLE_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg = cfg.with_seed(seed);
+    }
+    cfg
 }
 
 fn is_stop_token(s: &str) -> bool {

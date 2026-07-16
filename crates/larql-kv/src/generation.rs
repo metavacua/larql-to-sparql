@@ -38,6 +38,7 @@ use larql_inference::forward::ple::{apply_per_layer_embedding, precompute_per_la
 use larql_inference::forward::{
     embed_tokens_pub, hidden_to_raw_logits, logits_to_predictions_pub, run_ffn,
 };
+use larql_inference::layer_graph::generate::{Sampler, SamplingConfig};
 use larql_inference::ModelWeights;
 use ndarray::Array2;
 
@@ -272,6 +273,83 @@ where
             Some(t) => t,
             None => break,
         };
+        on_token(id, &tok_str);
+        generated.push(id);
+        if is_stop_token_str(&tok_str) {
+            break;
+        }
+        current_id = id;
+    }
+
+    generated
+}
+
+/// Candidate pool size for [`generate_with_engine_sampled`]'s top-k sampling
+/// — large enough to give the sampler real alternatives to the argmax on a
+/// vocab of a few tens of thousands, small enough that computing/converting
+/// this many `logits_to_predictions_pub` hits per step stays cheap.
+pub const DEFAULT_SAMPLE_POOL: usize = 50;
+
+/// Like [`generate_with_engine`] but additive, not a replacement: draws each
+/// token from `sampling`'s distribution over the top
+/// [`DEFAULT_SAMPLE_POOL`]-ish candidates instead of always taking the
+/// argmax. `SamplingConfig::greedy()` here reproduces `generate_with_engine`
+/// bit-for-bit (see `sampling.rs`'s own module doc) — this function exists
+/// so a caller can opt into real sampling without every existing
+/// `generate_with_engine` call site needing to change.
+pub fn generate_with_engine_sampled<F>(
+    engine: &mut crate::AnyEngine,
+    weights: &ModelWeights,
+    tokenizer: &larql_inference::tokenizers::Tokenizer,
+    ffn: &dyn FfnBackend,
+    prompt_ids: &[u32],
+    max_new_tokens: usize,
+    sampling: SamplingConfig,
+    mut on_token: F,
+) -> Vec<u32>
+where
+    F: FnMut(u32, &str),
+{
+    if max_new_tokens == 0 || prompt_ids.is_empty() {
+        return Vec::new();
+    }
+    let mut sampler = Sampler::new(sampling);
+    let pool = DEFAULT_SAMPLE_POOL;
+
+    // ── Phase 1: prefill ──
+    let last_hidden = match engine.prefill(weights, ffn, prompt_ids) {
+        Ok(h) => h,
+        Err(_) => return Vec::new(),
+    };
+
+    let first = match sampled_next_token(weights, tokenizer, &last_hidden, &mut sampler, pool, &[])
+    {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+    on_token(first.0, &first.1);
+
+    let mut generated = Vec::with_capacity(max_new_tokens);
+    generated.push(first.0);
+    if is_stop_token_str(&first.1) {
+        return generated;
+    }
+    if max_new_tokens == 1 {
+        return generated;
+    }
+
+    // ── Phase 2: decode loop ──
+    let mut current_id = first.0;
+    for _step in 1..max_new_tokens {
+        let h_step = match engine.decode_step(weights, ffn, current_id) {
+            Ok(h) => h,
+            Err(_) => break,
+        };
+        let (id, tok_str) =
+            match sampled_next_token(weights, tokenizer, &h_step, &mut sampler, pool, &generated) {
+                Some(t) => t,
+                None => break,
+            };
         on_token(id, &tok_str);
         generated.push(id);
         if is_stop_token_str(&tok_str) {
@@ -636,6 +714,50 @@ fn argmax_next_token(
     let id = *result.token_ids.first()?;
     let (decoded, _) = result.predictions.first()?.clone();
     Some((id, decoded))
+}
+
+/// Like [`argmax_next_token`] but draws from `pool_size` candidates via
+/// `sampler` instead of always taking the top-1. `logits_to_predictions_pub`
+/// returns already-softmaxed probabilities (over the full vocab, before
+/// truncation to `pool_size`) — `Sampler::sample_from_topk` expects
+/// logit-like scores (it re-applies temperature + softmax internally), so
+/// each probability is converted back via `ln()` before handing it to the
+/// sampler. This recovers the same relative ordering/ratios `Sampler` would
+/// see from raw logits — softmax is invariant to the additive constant
+/// `ln` vs. true logits differ by (the vocab-wide normalizer), and that
+/// constant cancels out in a second softmax over the same candidate set.
+fn sampled_next_token(
+    weights: &ModelWeights,
+    tokenizer: &larql_inference::tokenizers::Tokenizer,
+    h_single: &Array2<f32>,
+    sampler: &mut Sampler,
+    pool_size: usize,
+    generated_so_far: &[u32],
+) -> Option<(u32, String)> {
+    let _t_lmhead = std::time::Instant::now();
+    let result = logits_to_predictions_pub(weights, h_single, tokenizer, pool_size.max(1), 1.0);
+    larql_inference::decode_stages::record_lmhead(_t_lmhead.elapsed().as_nanos());
+    if result.token_ids.is_empty() {
+        return None;
+    }
+    let hits: Vec<(u32, f32)> = result
+        .token_ids
+        .iter()
+        .zip(result.predictions.iter())
+        .map(|(&id, (_, prob))| (id, (*prob).max(1e-12).ln() as f32))
+        .collect();
+    // With history: frequency/presence penalties only ever have an effect
+    // via this call (empty history is a no-op per sample_from_topk_with_history),
+    // so the plain `sample_from_topk` would silently make LARQL_FREQUENCY_PENALTY/
+    // LARQL_PRESENCE_PENALTY do nothing.
+    let picked_id = sampler.sample_from_topk_with_history(&hits, generated_so_far)?;
+    let decoded = result
+        .token_ids
+        .iter()
+        .position(|&id| id == picked_id)
+        .and_then(|idx| result.predictions.get(idx))
+        .map(|(s, _)| s.clone())?;
+    Some((picked_id, decoded))
 }
 
 /// `LARQL_Q4K_LM_HEAD=1` routes the resident-path lm_head matvec through

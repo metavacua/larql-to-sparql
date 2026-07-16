@@ -1,5 +1,11 @@
-# Strategy matrix: 5 approaches x 10 legs for adding/improving tool-calling in the
-# larql-driven Goose coding agent. Single workflow for the whole larql+goose+VM
+# Strategy matrix: 6 approaches x 11 legs for adding/improving tool-calling in the
+# larql-driven Goose coding agent, plus one prerequisite decode-path-parity leg
+# (residual Q5: does larql run's cached-KV-decode path diverge from larql lql
+# INFER's full-reforward path on identical input, independent of the
+# chat-template/decoding-strategy hypotheses -- see
+# docs/specs/2026-07-16-larql-goose-toolcalling-research-residual.md's D
+# section, which orders this leg's answer as a precondition for interpreting
+# every other leg's result). Single workflow for the whole larql+goose+VM
 # pipeline -- previously split across this file and a separate
 # goose-larql-vm-pipeline.yml, each with its own build-larql/build-goose/
 # prepare-vindex jobs; both targeted `main`, so any PR touching either would run
@@ -80,6 +86,7 @@ jobs:
         run: |
           cat > legs.json <<'EOF'
           [
+            {"leg_id": "smol135.decode-path.infer-vs-run",                "approach_id": "decode-path-parity",        "kind": "cli-measurement", "config": "compare", "script": "run_infer_vs_run_comparison.sh"},
             {"leg_id": "smol135.emulate-stream.shell-conv",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "shell-command"},
             {"leg_id": "smol135.emulate-stream.fenced-tool",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "fenced-json"},
             {"leg_id": "smol135.native-template.compact-tools",           "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "compact-tools", "script": ""},
