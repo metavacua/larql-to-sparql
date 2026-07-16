@@ -388,6 +388,29 @@ jobs:
                 echo "bare larql chat (long prompt): exit=\$LONG_EC elapsed=\${LONG_ELAPSED}s" > /dev/console
                 cat /root/bare_chat_long.log > /dev/console
                 echo "=== end long-prompt smoke test ===" > /dev/console
+                # Third bare smoke test: same long tool-augmented prompt, but this
+                # time with LARQL_SYSTEM set -- the one remaining structural gap
+                # between the two smoke tests above and goose's real invocation.
+                # goose ALWAYS sets LARQL_SYSTEM at spawn (its own tiny-model system
+                # prompt, larql.rs's tiny_model_prompt()). Inside render_user_prompt
+                # (larql-inference/src/chat/mod.rs in the larql repo),
+                # user_system.is_some() routes EVERY turn onto the multi-message
+                # chat-template path (render_chat_template_multi) instead of the
+                # simple single-turn wrap_chat_prompt the two smoke tests above
+                # exercised (neither set LARQL_SYSTEM). If there's a hang or
+                # infinite loop specific to that multi-message render path, or to
+                # how it interacts with a long single user turn, this is the last
+                # remaining difference that could explain it.
+                export LARQL_SYSTEM=\$'You are goose, an AI coding assistant. Answer directly and briefly, do not list test cases, do not explain your plan, do not ask clarifying questions unless the request is genuinely ambiguous.\n\nThe OS is linux, the shell is bin-bash, and the working directory is root.\n\nWhen asked to write code, output ONLY the code itself.\n\nFor any other question, answer in one or two sentences.'
+                echo "=== bare larql chat smoke test with LARQL_SYSTEM + long prompt ===" > /dev/console
+                SYS_START=\$(date +%s)
+                echo "\$TOOL_PROMPT" | timeout 90 /opt/larql-data/larql chat /opt/larql-data/smollm2-135m-instruct.vindex > /root/bare_chat_sys.log 2>&1
+                SYS_EC=\$?
+                SYS_ELAPSED=\$(( \$(date +%s) - SYS_START ))
+                echo "bare larql chat (LARQL_SYSTEM + long prompt): exit=\$SYS_EC elapsed=\${SYS_ELAPSED}s" > /dev/console
+                cat /root/bare_chat_sys.log > /dev/console
+                echo "=== end LARQL_SYSTEM smoke test ===" > /dev/console
+                unset LARQL_SYSTEM
                 # 1200s (20 min), not a tight clip: an autonomous closed-loop
                 # coding agent needs real room to work, closing its own loop
                 # rather than racing an external stopwatch. Safety net against a
