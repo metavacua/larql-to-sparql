@@ -287,8 +287,8 @@ pub async fn handle_completions(
                     started.elapsed().as_secs_f64(),
                 );
                 return Err(OpenAIError::from(ServerError::Timeout(format!(
-                    "completion exceeded server-side timeout of {}s",
-                    timeout.as_secs(),
+                    "completion exceeded server-side timeout of {:.1}s",
+                    timeout.as_secs_f64(),
                 ))));
             }
         }

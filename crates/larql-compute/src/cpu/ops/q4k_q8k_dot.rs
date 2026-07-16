@@ -1394,8 +1394,8 @@ pub fn q4k_q8k_gate_up_neon(
 ) {
     use std::arch::aarch64::*;
 
-    let shapes_ok = q8k_shape_ok(gate_out.len(), rows, q8k_x.qs.len(), cols)
-        && up_out.len() == rows;
+    let shapes_ok =
+        q8k_shape_ok(gate_out.len(), rows, q8k_x.qs.len(), cols) && up_out.len() == rows;
     if !shapes_ok || rows == 0 || cols == 0 {
         for v in gate_out.iter_mut() {
             *v = 0.0;
@@ -1641,8 +1641,8 @@ pub fn q4k_q8k_gate_up_asm(
     rows: usize,
     cols: usize,
 ) {
-    let shapes_ok = q8k_shape_ok(gate_out.len(), rows, q8k_x.qs.len(), cols)
-        && up_out.len() == rows;
+    let shapes_ok =
+        q8k_shape_ok(gate_out.len(), rows, q8k_x.qs.len(), cols) && up_out.len() == rows;
     if !shapes_ok || rows == 0 || cols == 0 {
         for v in gate_out.iter_mut() {
             *v = 0.0;
@@ -1769,11 +1769,9 @@ pub fn q6k_q8k_matvec_scalar(
     for v in out.iter_mut() {
         *v = 0.0;
     }
-    if rows == 0
+    if !q8k_shape_ok(out.len(), rows, q8k_x.qs.len(), cols)
+        || rows == 0
         || cols == 0
-        || cols % ELEMS_PER_BLOCK != 0
-        || out.len() != rows
-        || q8k_x.qs.len() != cols
         || w.len() < rows * row_bytes
     {
         return;
@@ -1841,11 +1839,9 @@ pub fn q6k_q8k_matvec_neon(
     for v in out.iter_mut() {
         *v = 0.0;
     }
-    if rows == 0
+    if !q8k_shape_ok(out.len(), rows, q8k_x.qs.len(), cols)
+        || rows == 0
         || cols == 0
-        || cols % ELEMS_PER_BLOCK != 0
-        || out.len() != rows
-        || q8k_x.qs.len() != cols
         || w.len() < rows * row_bytes
     {
         return;
@@ -2067,11 +2063,9 @@ pub fn q6k_q8k_matvec_asm(
     for v in out.iter_mut() {
         *v = 0.0;
     }
-    if rows == 0
+    if !q8k_shape_ok(out.len(), rows, q8k_x.qs.len(), cols)
+        || rows == 0
         || cols == 0
-        || cols % ELEMS_PER_BLOCK != 0
-        || out.len() != rows
-        || q8k_x.qs.len() != cols
         || w.len() < rows * row_bytes
     {
         return;
