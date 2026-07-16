@@ -404,6 +404,11 @@ fn run_chat(
             .and_then(|n| n.to_str())
             .unwrap_or("model")
     );
+    // Load once, outside the loop -- see ChatState's own doc comment for why
+    // this matters: the previous per-line `walk_cmd::run(walk_args)` call
+    // reloaded the vindex's weight tensors from scratch on every turn.
+    let mut state = walk_cmd::ChatState::load(vindex_path, args.verbose)
+        .map_err(|e| format!("failed to load model: {e}"))?;
     let stdin = io::stdin();
     let mut out = io::stderr();
     loop {
@@ -425,7 +430,7 @@ fn run_chat(
         }
 
         let walk_args = build_walk_args(vindex_path, prompt, args);
-        if let Err(e) = walk_cmd::run(walk_args) {
+        if let Err(e) = state.run_turn(&walk_args) {
             eprintln!("Error: {e}");
         }
     }

@@ -453,6 +453,98 @@ fn run_with_vindex_weights(
     run_predict_inner(&weights, &tokenizer, args, index)
 }
 
+/// Model state loaded once for the interactive `larql chat` REPL, reused
+/// across every turn.
+///
+/// Before this existed, `run_chat`'s loop called the top-level `run()` (via
+/// `walk_cmd::run`) fresh for every line of stdin input, which re-ran
+/// `VectorIndex::load_vindex` + `load_model_weights_with_opts` from scratch
+/// per turn — a full reload of the vindex's weight tensors (hundreds of MB)
+/// on every single conversational turn. Under a `/grind`-driven multi-turn
+/// session (Goose re-nudging every non-tool-call turn) this reload cost
+/// compounds across turns and, on slower/virtualized disk, can consume the
+/// entire wall-clock budget before the model ever finishes even one
+/// response. `ChatState::load` does the load once; `run_turn` reuses it.
+/// (BitNet's own chat loop in `run_bitnet` already worked this way — this
+/// brings the dense/Q4K path to the same shape, not a novel design.)
+enum ChatModel {
+    Dense {
+        weights: ModelWeights,
+        tokenizer: tokenizers::Tokenizer,
+    },
+    Q4K {
+        weights: ModelWeights,
+        tokenizer: tokenizers::Tokenizer,
+    },
+}
+
+pub struct ChatState {
+    vindex_path: PathBuf,
+    index: VectorIndex,
+    model: ChatModel,
+}
+
+impl ChatState {
+    /// Load the vindex index + model weights once. Mirrors `run()`'s index
+    /// load and `run_with_vindex_weights`'s weight load/quant dispatch
+    /// exactly, just without the per-call `run_predict_inner` at the end.
+    pub fn load(
+        vindex_path: &std::path::Path,
+        verbose: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let index = if verbose {
+            let mut cb = VerboseLoadCallbacks;
+            VectorIndex::load_vindex(vindex_path, &mut cb)?
+        } else {
+            let mut cb = SilentLoadCallbacks;
+            VectorIndex::load_vindex(vindex_path, &mut cb)?
+        };
+
+        let mut cb: Box<dyn IndexLoadCallbacks> = if verbose {
+            Box::new(VerboseLoadCallbacks)
+        } else {
+            Box::new(SilentLoadCallbacks)
+        };
+        let cfg = larql_vindex::load_vindex_config(vindex_path)?;
+        let model = if cfg.quant == larql_vindex::QuantFormat::Q4K {
+            let weights = larql_vindex::load_model_weights_kquant(vindex_path, &mut *cb)?;
+            let tokenizer = load_vindex_tokenizer(vindex_path)?;
+            ChatModel::Q4K { weights, tokenizer }
+        } else {
+            let weights = larql_vindex::load_model_weights_with_opts(
+                vindex_path,
+                &mut *cb,
+                larql_vindex::LoadWeightsOptions::default(),
+            )?;
+            let tokenizer = load_vindex_tokenizer(vindex_path)?;
+            ChatModel::Dense { weights, tokenizer }
+        };
+
+        Ok(ChatState {
+            vindex_path: vindex_path.to_path_buf(),
+            index,
+            model,
+        })
+    }
+
+    /// Run one turn against the already-loaded model/index. Same dispatch
+    /// `run_with_vindex_weights` does per call, minus the reload.
+    pub fn run_turn(&mut self, args: &WalkArgs) -> Result<(), Box<dyn std::error::Error>> {
+        match &mut self.model {
+            ChatModel::Dense { weights, tokenizer } => {
+                run_predict_inner(weights, tokenizer, args, &self.index)
+            }
+            ChatModel::Q4K { weights, tokenizer } => {
+                if args.ffn_remote.is_some() {
+                    run_predict_q4k_remote(weights, tokenizer, args, &self.vindex_path)
+                } else {
+                    run_predict_q4k(weights, tokenizer, args, &self.index)
+                }
+            }
+        }
+    }
+}
+
 /// Build the Metal compute backend for `--metal`, or a clear error when the
 /// crate was built without the `gpu` feature (or off macOS). Split by `cfg`
 /// so the gpu-off build rejects through a normal `Result` — a diverging
@@ -1355,4 +1447,31 @@ fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>
         }
     }
     Ok(layers)
+}
+
+#[cfg(test)]
+mod chat_state_tests {
+    use super::ChatState;
+    use std::path::PathBuf;
+
+    // ChatState::load fixtures require a real on-disk vindex (weight tensors
+    // in the loader's exact binary format) that this crate has no synthetic
+    // builder for -- the behavioral claim this refactor makes (load once,
+    // not once per turn) is validated by CI's actual VM-coding-task legs,
+    // not a local unit test. This test covers the one thing cheaply
+    // testable without real weight fixtures: a missing vindex path fails
+    // cleanly through ChatState::load instead of panicking, matching how
+    // the pre-refactor per-turn `walk_cmd::run` path already failed on a
+    // bad path (VectorIndex::load_vindex's own error, unchanged by this
+    // refactor).
+    #[test]
+    fn load_nonexistent_vindex_path_errors_cleanly() {
+        let bogus = PathBuf::from("/this/path/does/not/exist/for/chat/state/test");
+        // ChatState has no Debug impl (holds ModelWeights/VectorIndex), so
+        // match instead of unwrap_err().
+        match ChatState::load(&bogus, false) {
+            Err(e) => assert!(!e.to_string().is_empty()),
+            Ok(_) => panic!("expected an error loading a nonexistent vindex path"),
+        }
+    }
 }
