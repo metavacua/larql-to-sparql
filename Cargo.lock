@@ -2149,6 +2149,7 @@ dependencies = [
  "larql-compute",
  "larql-compute-metal",
  "larql-core",
+ "larql-hilbert",
  "larql-inference",
  "larql-kv",
  "larql-lql",
@@ -2212,6 +2213,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "larql-hilbert"
+version = "0.1.0"
+dependencies = [
+ "ndarray",
+ "num-complex",
 ]
 
 [[package]]

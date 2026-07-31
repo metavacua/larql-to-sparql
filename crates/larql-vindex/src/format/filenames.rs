@@ -20,6 +20,10 @@ pub const WEIGHT_MANIFEST_JSON: &str = "weight_manifest.json";
 pub const KNN_STORE_BIN: &str = "knn_store.bin";
 pub const MODEL_WEIGHTS_BIN: &str = "model_weights.bin";
 
+// ── Canonical form sidecar ──────────────────────────────────────────────
+pub const CANONICAL_META_JSON: &str = "canonical_meta.json";
+pub const HILBERTIAN_META_JSON: &str = "hilbertian_meta.json";
+
 // ── Labels / clustering sidecars ───────────────────────────────────────
 pub const RELATION_CLUSTERS_JSON: &str = "relation_clusters.json";
 pub const FEATURE_CLUSTERS_JSONL: &str = "feature_clusters.jsonl";
@@ -323,6 +327,8 @@ mod tests {
             WEIGHT_MANIFEST_JSON,
             KNN_STORE_BIN,
             MODEL_WEIGHTS_BIN,
+            CANONICAL_META_JSON,
+            HILBERTIAN_META_JSON,
             RELATION_CLUSTERS_JSON,
             FEATURE_CLUSTERS_JSONL,
             FEATURE_LABELS_JSON,
@@ -537,5 +543,24 @@ mod tests {
         std::fs::remove_file(dir.path().join(LEGACY_DOWN_FEATURES_Q4K_BIN)).unwrap();
         std::fs::write(dir.path().join(DOWN_FEATURES_KQUANT_BIN), b"x").unwrap();
         assert!(has_kquant_down_features(dir.path()));
+    }
+
+    #[test]
+    fn canonical_meta_json_is_unique() {
+        let existing = [
+            INDEX_JSON, TOKENIZER_JSON, TOKENIZER_CONFIG_JSON, GENERATION_CONFIG_JSON,
+            WEIGHT_MANIFEST_JSON, EMBEDDINGS_BIN, NORMS_BIN, GATE_VECTORS_BIN, DOWN_META_BIN,
+        ];
+        for name in existing {
+            assert_ne!(CANONICAL_META_JSON, name,
+                "CANONICAL_META_JSON collides with {name}");
+        }
+        assert_eq!(CANONICAL_META_JSON, "canonical_meta.json");
+    }
+
+    #[test]
+    fn hilbertian_meta_json_is_distinct_from_canonical() {
+        assert_ne!(HILBERTIAN_META_JSON, CANONICAL_META_JSON);
+        assert_eq!(HILBERTIAN_META_JSON, "hilbertian_meta.json");
     }
 }
