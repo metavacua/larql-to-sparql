@@ -90,7 +90,11 @@ pub fn compute_codebook(samples: &[f32], n_levels: usize, max_iters: usize) -> C
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_quantize_dequantize_roundtrip() {
         let cb = Codebook {
             boundaries: vec![-0.5, 0.0, 0.5],
@@ -103,7 +107,8 @@ mod tests {
         assert_eq!(quantize_scalar(0.9, &cb), 3);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_lloyd_max_convergence() {
         use rand::prelude::*;
         use rand_distr::Normal;

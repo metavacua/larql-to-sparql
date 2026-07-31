@@ -798,7 +798,7 @@ fn decode_f8_e8m0(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use std::fs;

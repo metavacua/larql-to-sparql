@@ -106,6 +106,15 @@ pub use cpu::ops::moe::{quantize_x_to_q8k, Q8KActivation};
 pub use cpu::ops::vector::{cosine, dot, norm};
 pub use cpu::CpuBackend;
 
+/// Portable no_std slice-based linalg (`&[f32]` interface, no BLAS).
+///
+/// Complements the BLAS-backed `dot`/`norm`/`cosine` at the crate root
+/// (which take `&ArrayView1<f32>`). Use this module in code that must
+/// compile for wasm32v1-none or any target without a BLAS backend.
+pub mod linalg {
+    pub use larql_wasm32v1_none_lib::linalg::{cosine, dot, norm};
+}
+
 /// Read and clear the per-stage timings stored after the most recent
 /// Metal decode step. Returns `None` when `LARQL_PROFILE_SPLIT` is unset
 /// or no step has run yet. Used by the generate loop to accumulate
@@ -200,7 +209,11 @@ pub fn cpu_backend() -> Box<dyn ComputeBackend> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cpu_backend_exposes_cpu_backend_capabilities() {
         let backend = cpu_backend();
 
@@ -209,7 +222,8 @@ mod tests {
         assert!(backend.supports(Capability::QuantMatVec));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn default_backend_is_usable_through_prelude_traits() {
         fn assert_compute_backend<T: prelude::ComputeBackend + ?Sized>(backend: &T) {
             assert!(backend.supports(prelude::Capability::QuantMatVec));

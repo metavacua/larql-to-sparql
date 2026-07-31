@@ -187,17 +187,23 @@ pub fn split_gate_up_experts(
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e8m0_zero() {
         assert_eq!(e8m0_to_f32(0), 0.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e8m0_one() {
         assert_eq!(e8m0_to_f32(127), 1.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e8m0_powers_of_two() {
         assert_eq!(e8m0_to_f32(128), 2.0);
         assert_eq!(e8m0_to_f32(126), 0.5);
@@ -205,25 +211,29 @@ mod tests {
         assert_eq!(e8m0_to_f32(125), 0.25);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e8m0_nan() {
         assert!(e8m0_to_f32(255).is_nan());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn table_positive() {
         assert_eq!(MXFP4_TABLE[0], 0.0);
         assert_eq!(MXFP4_TABLE[2], 1.0);
         assert_eq!(MXFP4_TABLE[7], 6.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn table_negative() {
         assert_eq!(MXFP4_TABLE[10], -1.0);
         assert_eq!(MXFP4_TABLE[15], -6.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_all_ones() {
         let blocks = vec![0x22u8; 16]; // lo=2(1.0), hi=2(1.0)
         let scales = vec![127u8]; // scale=1.0
@@ -234,7 +244,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_with_scale() {
         let blocks = vec![0x22u8; 16];
         let scales = vec![128u8]; // scale=2.0
@@ -244,7 +255,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_negative() {
         let blocks = vec![0xAAu8; 16]; // lo=10(-1.0), hi=10(-1.0)
         let scales = vec![127u8];
@@ -254,7 +266,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_zero_scale() {
         let blocks = vec![0xFFu8; 16];
         let scales = vec![0u8];
@@ -264,7 +277,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_mixed_nibbles() {
         let blocks = vec![0x37u8; 16]; // lo=7(6.0), hi=3(1.5)
         let scales = vec![127u8];
@@ -273,7 +287,8 @@ mod tests {
         assert!((result[1] - 1.5).abs() < 1e-6);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_two_groups() {
         let blocks = vec![0x22u8; 32]; // 2 groups
         let scales = vec![127u8, 128u8]; // [1.0, 2.0]
@@ -283,7 +298,8 @@ mod tests {
         assert!((result[32] - 2.0).abs() < 1e-6);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_two_experts() {
         let blocks = vec![0x22u8; 32];
         let scales = vec![127u8, 128u8];
@@ -295,7 +311,8 @@ mod tests {
 
     // ── Bounds-check rejection ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_expert_rejects_short_blocks() {
         // Need 16 bytes; give 8.
         match dequantize_expert(&[0u8; 8], &[127], 1, 1) {
@@ -306,7 +323,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_expert_rejects_short_scales() {
         // Need 2 scales for (out_features=1, groups=2); give 1.
         match dequantize_expert(&[0u8; 32], &[127], 1, 2) {
@@ -317,7 +335,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_all_experts_rejects_short_blocks() {
         // 2 experts × 16 bytes = 32; give 20.
         match dequantize_all_experts(&[0u8; 20], &[127, 128], 2, 1, 1) {
@@ -328,7 +347,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_all_experts_rejects_short_scales() {
         match dequantize_all_experts(&[0u8; 32], &[127], 2, 1, 1) {
             Err(ModelError::Parse(msg)) => {
@@ -338,7 +358,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_zero_experts_ok() {
         let results = dequantize_all_experts(&[], &[], 0, 1, 1).unwrap();
         assert!(results.is_empty());
@@ -346,7 +367,8 @@ mod tests {
 
     // ── split_gate_up_experts ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn split_gate_up_even_split() {
         // 1 expert, out_features=2 (half=1), 1 group → 32 elements total.
         // gate = first 32 values (scale 1.0, nibble 2 → 1.0 each).
@@ -362,7 +384,8 @@ mod tests {
         assert!(ups[0].iter().all(|&v| (v - 2.0).abs() < 1e-6));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn split_gate_up_two_experts() {
         // 2 experts, out_features=2, 1 group each.
         // Expert 0 scale=1.0, expert 1 scale=2.0 (both use nibble 2 = 1.0).
@@ -376,7 +399,8 @@ mod tests {
         assert!(ups[1].iter().all(|&v| (v - 2.0).abs() < 1e-6));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequant_all_experts_slices_scales_per_expert() {
         // Regression: each expert gets its own scale slice. Give expert 0 a
         // zero scale (all outputs 0) and expert 1 a 2.0 scale (nibble 2 → 2.0).

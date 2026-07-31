@@ -65,7 +65,11 @@ pub fn wht(x: &[f32]) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_wht_self_inverse() {
         let x: Vec<f32> = (0..128).map(|i| (i as f32 - 64.0) / 100.0).collect();
         let y = wht(&x);
@@ -76,7 +80,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_wht_preserves_norm() {
         let x: Vec<f32> = (0..256).map(|i| (i as f32 * 0.01) - 1.28).collect();
         let norm_x: f32 = x.iter().map(|v| v * v).sum::<f32>().sqrt();

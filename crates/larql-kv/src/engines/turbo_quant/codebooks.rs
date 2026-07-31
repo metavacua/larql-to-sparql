@@ -78,21 +78,27 @@ fn make_gaussian_codebook(n_levels: usize, sigma: f32) -> Codebook {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_codebook_d256_4bit_has_16_centroids() {
         let cb = get_codebook(256, 4);
         assert_eq!(cb.centroids.len(), 16);
         assert_eq!(cb.boundaries.len(), 15);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_codebook_d128_3bit_has_8_centroids() {
         let cb = get_codebook(128, 3);
         assert_eq!(cb.centroids.len(), 8);
         assert_eq!(cb.boundaries.len(), 7);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_codebook_centroids_sorted() {
         for dim in [128, 256] {
             for bits in [3, 4] {
@@ -104,7 +110,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_codebook_symmetric() {
         let cb = get_codebook(256, 4);
         let n = cb.centroids.len();

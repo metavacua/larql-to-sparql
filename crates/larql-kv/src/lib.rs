@@ -260,7 +260,11 @@ impl EngineKind {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_kind_from_name_roundtrip() {
         for name in &[
             "markov-rs",
@@ -289,7 +293,8 @@ mod tests {
         assert!(EngineKind::from_name("").is_none());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_kind_from_name_with_params() {
         match EngineKind::from_name("markov-rs:window=1024") {
             Some(EngineKind::MarkovResidual {
@@ -319,7 +324,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_info_summary_with_config() {
         let info = EngineInfo {
             name: "markov-rs".into(),
@@ -333,7 +339,8 @@ mod tests {
         assert!(s.contains("window=512"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_info_summary_no_config() {
         let info = EngineInfo {
             name: "test".into(),
@@ -353,6 +360,9 @@ mod compliance_tests {
     use super::*;
     use larql_compute::cpu_backend;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn all_kinds() -> Vec<EngineKind> {
         vec![
             EngineKind::MarkovResidual { window_size: None },
@@ -370,7 +380,8 @@ mod compliance_tests {
         ]
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn all_engines_memory_zero_before_prefill() {
         for kind in all_kinds() {
             let engine = kind.clone().build(cpu_backend());
@@ -383,7 +394,8 @@ mod compliance_tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn all_engines_have_valid_name() {
         let expected = [
             "markov-rs",
@@ -399,7 +411,8 @@ mod compliance_tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn all_engines_info_has_nonempty_fields() {
         for kind in all_kinds() {
             let name = kind.display_name();
@@ -410,7 +423,8 @@ mod compliance_tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn all_engines_window_tokens_zero_before_prefill() {
         for kind in all_kinds() {
             let engine = kind.clone().build(cpu_backend());
@@ -423,7 +437,8 @@ mod compliance_tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn all_engines_cold_bytes_zero_before_prefill() {
         for kind in all_kinds() {
             let engine = kind.clone().build(cpu_backend());
@@ -436,7 +451,8 @@ mod compliance_tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn all_engines_stage_summary_none_before_decode() {
         for kind in all_kinds() {
             let engine = kind.clone().build_with_profiling(cpu_backend(), true);
@@ -448,7 +464,8 @@ mod compliance_tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn from_name_unknown_param_ignored_defaults_apply() {
         match EngineKind::from_name("unlimited-context:unknown=42") {
             Some(EngineKind::UnlimitedContext { window_size: 512 }) => {}
@@ -456,7 +473,8 @@ mod compliance_tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn from_name_all_engines_parseable() {
         let specs = [
             ("markov-rs", "markov-rs"),
@@ -512,7 +530,8 @@ mod compliance_tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn default_q4k_methods_fallback_to_f32() {
         let weights = larql_inference::test_utils::make_test_weights();
         let index = larql_inference::test_utils::make_test_vindex(&weights);
@@ -539,7 +558,8 @@ mod compliance_tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn default_window_tokens_and_cold_bytes_are_zero() {
         // Both have default impls returning 0; exercises the trait defaults
         // for an engine that doesn't override them.

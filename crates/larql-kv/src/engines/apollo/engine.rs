@@ -399,6 +399,9 @@ mod tests {
     use super::*;
     use crate::engines::apollo::store::{ArchConfig, StoreManifest};
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     /// Build a minimal in-memory ApolloStore with synthetic data.
     fn mk_store(windows: usize, window_size: usize, hidden: usize) -> ApolloStore {
         let window_tokens: Vec<Vec<u32>> = (0..windows)
@@ -461,21 +464,24 @@ mod tests {
 
     // ── Construction ─────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn new_engine_has_no_store() {
         let engine = ApolloEngine::new(InjectionConfig::default());
         assert!(!engine.has_store());
         assert!(engine.routing().is_empty());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn with_store_attaches_store() {
         let store = mk_store(2, 8, 16);
         let engine = ApolloEngine::new(InjectionConfig::default()).with_store(store);
         assert!(engine.has_store());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn build_routing_index_populates_index() {
         let store = mk_store(3, 8, 16);
         let mut engine = ApolloEngine::new(InjectionConfig::default()).with_store(store);
@@ -485,7 +491,8 @@ mod tests {
 
     // ── EngineInfo ────────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn info_no_store_shows_zero_windows() {
         let engine = ApolloEngine::new(InjectionConfig::default());
         let info = engine.info();
@@ -494,7 +501,8 @@ mod tests {
         assert!(info.config.contains("inject_layer=30"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn info_with_store_shows_window_count() {
         let engine = mk_engine_with_store(3);
         let info = engine.info();
@@ -510,7 +518,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn info_shows_compressed_path_when_boundaries_present() {
         let engine = mk_engine_with_store(2);
         let info = engine.info();
@@ -521,7 +530,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn info_shows_uncompressed_path_when_no_boundaries() {
         let store = mk_store(2, 8, 16);
         // Remove boundaries
@@ -534,20 +544,23 @@ mod tests {
 
     // ── retrieve_entries ─────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn retrieve_returns_err_when_no_store() {
         let engine = ApolloEngine::new(InjectionConfig::default());
         assert!(engine.retrieve_entries(&[1], &[0]).is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn retrieve_empty_query_returns_empty() {
         let engine = mk_engine_with_store(2);
         let entries = engine.retrieve_entries(&[], &[0]).unwrap();
         assert!(entries.is_empty());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn retrieve_seed_token_matched() {
         let engine = mk_engine_with_store(2);
         // token_id=42 is in window 0 with coefficient 5.0
@@ -559,7 +572,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn retrieve_proximity_neighbour_included() {
         // token 43 is at position 11 — adjacent to token 42 at position 10.
         // Querying [42] should include 43 via proximity (radius=10).
@@ -571,7 +585,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn retrieve_scoped_to_candidate_windows() {
         // token 99 is only in window 1; asking for window 0 should not return it.
         let engine = mk_engine_with_store(2);
@@ -582,7 +597,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn retrieve_backfills_to_top_k() {
         // Query with no matching seeds → backfill to top_k by coefficient.
         let engine = mk_engine_with_store(2);
@@ -594,13 +610,15 @@ mod tests {
 
     // ── memory_bytes ─────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn memory_bytes_zero_without_store() {
         let engine = ApolloEngine::new(InjectionConfig::default());
         assert_eq!(engine.memory_bytes(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn memory_bytes_nonzero_with_store() {
         let engine = mk_engine_with_store(3);
         assert!(engine.memory_bytes() > 0);
@@ -608,7 +626,8 @@ mod tests {
 
     // ── store() getter ───────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn store_getter_none_until_attached() {
         let engine = ApolloEngine::new(InjectionConfig::default());
         assert!(engine.store().is_none());
@@ -618,7 +637,8 @@ mod tests {
 
     // ── KvEngine name() ──────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn name_returns_apollo() {
         let engine = ApolloEngine::new(InjectionConfig::default());
         assert_eq!(engine.name(), "apollo");
@@ -705,7 +725,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn prefill_compressed_returns_hidden_state() {
         let weights = larql_inference::test_utils::make_test_weights();
         let mut engine = mk_apollo_for_synthetic_weights(&weights);
@@ -714,7 +735,8 @@ mod tests {
         assert_eq!(h.shape(), &[1, weights.hidden_size]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn decode_step_after_compressed_prefill_grows_context() {
         let weights = larql_inference::test_utils::make_test_weights();
         let mut engine = mk_apollo_for_synthetic_weights(&weights);
@@ -723,7 +745,8 @@ mod tests {
         assert_eq!(h.shape(), &[1, weights.hidden_size]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn prefill_uncompressed_path_when_no_boundaries() {
         let weights = larql_inference::test_utils::make_test_weights();
         let mut store = mk_store_in_vocab(2, 4, weights.hidden_size, weights.vocab_size);
@@ -742,7 +765,8 @@ mod tests {
         assert_eq!(h.shape(), &[1, weights.hidden_size]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn prefill_returns_none_without_routing_or_store() {
         let weights = larql_inference::test_utils::make_test_weights();
         // No store → routing won't initialize from store.
@@ -752,7 +776,8 @@ mod tests {
 
     // ── query_greedy ─────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn query_greedy_returns_trace_with_top1_token() {
         let weights = larql_inference::test_utils::make_test_weights();
         let engine = mk_apollo_for_synthetic_weights(&weights);
@@ -763,7 +788,8 @@ mod tests {
         assert!(trace.top1_logit.is_finite());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn query_greedy_returns_none_without_routing() {
         let weights = larql_inference::test_utils::make_test_weights();
         let engine = ApolloEngine::new(InjectionConfig::default());

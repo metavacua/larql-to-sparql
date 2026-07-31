@@ -16,6 +16,9 @@ rayon = "1.10"
 # Wire-format constants (Q4_K_BLOCK_ELEMS, etc.) for padding decisions.
 # Tests/benches depend on it too — keep both lists in sync.
 larql-models = { path = "../larql-models" }
+# Portable no_std slice-based linalg (dot/norm/cosine without BLAS).
+# Exposed under larql_compute::linalg alongside the BLAS-backed crate-root ops.
+larql-wasm32v1-none-lib = { path = "../larql-wasm32v1-none-lib" }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
@@ -41,7 +44,6 @@ openblas-src = { version = "0.10", features = ["system"] }
 # Android: Minimal blas-src without external dependencies.
 blas-src = { version = "0.10", default-features = false }
 
-
 [features]
 default = []
 metal = ["dep:metal", "dep:objc"]
@@ -52,7 +54,13 @@ metal = ["dep:metal", "dep:objc"]
 # devloop (`cargo test -p larql-compute --features metal`) still runs
 # them — the two axes are independent on purpose.
 heavy_tests = []
+# Enable wasm_bindgen_test runner for in-browser unit-test runs.
+browser-tests = []
 # cuda = []  # Future: CUDA backend
+# Required by examples that use `extern crate blas_src`. Cargo skips
+# examples whose required-features are not active, so wasm-pack (which
+# never enables `native`) won't attempt to compile them.
+native = []
 
 [build-dependencies]
 cc = "1.0"
@@ -61,9 +69,48 @@ cc = "1.0"
 libc = "0.2"
 
 [dev-dependencies]
-criterion = "0.5"
 serde_json = "1"
 memmap2 = "0.9"
+wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = "0.5"
+
+[[example]]
+name = "compare_decode"
+required-features = ["native"]
+
+[[example]]
+name = "compare_formats"
+required-features = ["native"]
+
+[[example]]
+name = "compare_generation"
+required-features = ["native"]
+
+[[example]]
+name = "compare_ollama"
+required-features = ["native"]
+
+[[example]]
+name = "compare_pipeline"
+required-features = ["native"]
+
+[[example]]
+name = "demo_architecture"
+required-features = ["native"]
+
+[[example]]
+name = "demo_basic"
+required-features = ["native"]
+
+[[example]]
+name = "demo_ridge_solve"
+required-features = ["native"]
+
+[[example]]
+name = "diag_profile_kernels"
+required-features = ["native"]
 
 [[bench]]
 name = "matmul"
@@ -87,3 +134,9 @@ harness = false
 # `[lints]` table — the only place that reliably wires through.
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = [] }
+
+[target.'cfg(all(target_arch = "wasm32", not(target_os = "wasi")))'.dependencies]
+getrandom = { workspace = true }
+
+[package.metadata.wasm]
+split-candidate = true

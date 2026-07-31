@@ -173,6 +173,9 @@ mod tests {
     use super::*;
     use crate::MoeLayerWeights;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn make_moe<'a>(
         hidden: usize,
         inter: usize,
@@ -212,7 +215,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_moe_zero_input_produces_zero() {
         let hidden = 8;
         let inter = 4;
@@ -234,7 +238,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cache_eviction_no_panic() {
         // Insert 70 unique heap allocations to trigger LRU eviction (default cap = 64).
         // Keeps all Vecs alive simultaneously so the allocator gives unique addresses.
@@ -252,7 +257,8 @@ mod tests {
         assert_eq!(_bufs.len(), 70);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cache_hit_returns_same_arc() {
         // Same byte slice pointer → second call hits the cache, no new allocation.
         let data = vec![0x80u8, 0x3Fu8, 0x80u8, 0x3Fu8]; // BF16 1.0 × 2
@@ -265,7 +271,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn router_input_scalar_zero_is_applied() {
         let hidden = 4;
         let num_experts = 2;
@@ -307,7 +314,8 @@ mod tests {
         assert!(zero_scale_weights.iter().all(|w| (*w - 0.5).abs() < 1e-6));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn top_k_softmax_policy_keeps_raw_selected_weight() {
         let num_experts = 2;
         let h = [1.0f32, 0.0];
@@ -345,7 +353,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_moe_identity_expert() {
         // Construct a single expert that acts as identity via gate≫0, up=1, down=identity
         // This verifies the full path runs without panics.
@@ -406,7 +415,8 @@ mod tests {
     /// are 2*128*256 = 65536 elements = 256 super-blocks per gate+up entry).
     /// The test confirms `cpu_moe_forward` produces a finite, non-NaN output
     /// when the format dispatch routes to the Q4_K dequantiser.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cpu_moe_forward_q4k_dispatch() {
         use crate::cpu::ops::q4_common::quantize_q4_k;
 
@@ -477,7 +487,8 @@ mod tests {
     /// is zero and expert 1's gate is non-zero — output should be non-zero
     /// (proves the router selected expert 1 AND the indexing pulled the right
     /// per-expert byte slice).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn per_expert_indexing_routes_correctly() {
         let hidden = 4;
         let inter = 2;
@@ -569,7 +580,8 @@ mod tests {
     /// The fixture chooses non-trivial `pre_experts_norm` weights so raw-h
     /// and h_norm produce **different** logits, then asserts the two paths
     /// pick the **same** top-K (i.e., both route on the same input).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cpu_moe_forward_uses_same_router_input_as_cpu_moe_route() {
         // 4-expert, top-2 fixture. Use non-uniform `pre_experts_norm` so
         // h_norm differs from h enough to sometimes flip the top-K choice
@@ -675,7 +687,8 @@ mod tests {
     /// numbers were misleading (0.10 ms cpu_moe_forward floor was the
     /// buggy old code silently returning empty buffers). We now test
     /// behaviour, not just timing.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn experts_gate_up_indexed_by_expert_id_not_topk_position() {
         let hidden = 4;
         let inter = 2;

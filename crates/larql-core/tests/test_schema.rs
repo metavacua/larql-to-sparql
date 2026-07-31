@@ -1,8 +1,12 @@
+#[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use std::collections::HashSet;
 
 use larql_core::core::schema::{RelationMeta, Schema, TypeRule};
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_empty_schema() {
     let s = Schema::new();
     assert!(s.names().is_empty());
@@ -10,7 +14,8 @@ fn test_empty_schema() {
     assert!(s.get("anything").is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_add_and_get() {
     let mut s = Schema::new();
     s.add(RelationMeta {
@@ -28,7 +33,8 @@ fn test_add_and_get() {
     assert!(meta.reversible);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_type_inference_outgoing() {
     let mut s = Schema::new();
     s.add_type_rule(TypeRule {
@@ -42,7 +48,8 @@ fn test_type_inference_outgoing() {
     assert_eq!(s.infer_type(&out, &inp), Some("country".to_string()));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_type_inference_incoming() {
     let mut s = Schema::new();
     s.add_type_rule(TypeRule {
@@ -56,7 +63,8 @@ fn test_type_inference_incoming() {
     assert_eq!(s.infer_type(&out, &inp), Some("city".to_string()));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_type_inference_no_match() {
     let mut s = Schema::new();
     s.add_type_rule(TypeRule {
@@ -70,7 +78,8 @@ fn test_type_inference_no_match() {
     assert_eq!(s.infer_type(&out, &inp), None);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_type_inference_first_match_wins() {
     let mut s = Schema::new();
     s.add_type_rule(TypeRule {
@@ -90,7 +99,8 @@ fn test_type_inference_first_match_wins() {
     assert_eq!(s.infer_type(&out, &inp), Some("person".to_string()));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_schema_json_roundtrip() {
     let mut s = Schema::new();
     s.add(RelationMeta {

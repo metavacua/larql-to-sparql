@@ -33,9 +33,6 @@ ndarray = "0.16"
 # Parallelism for the walk loop (per-feature work is embarrassingly parallel).
 rayon = "1.10"
 
-# Tokenizer
-tokenizers = "0.21"
-
 # Used by `residual_diff::capture` to drive the backend-side per-layer
 # dump hooks into a private dir per call. dev-only would force every
 # crate consumer to pull tempfile in just to use the in-memory diff API.
@@ -48,13 +45,8 @@ tempfile = "3"
 minijinja = { version = "2", features = ["loader"] }
 minijinja-contrib = { version = "2", features = ["pycompat"] }
 
-# Remote FFN backend (RemoteWalkBackend → POST /v1/walk-ffn)
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# Remote FFN backend and gRPC client — non-wasm only; see [target.'cfg(not(target_arch = "wasm32"))'].
 half = "2"
-
-# gRPC expert client (RemoteMoeBackend → ExpertService via tonic)
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
-tonic = { version = "0.13", features = ["tls-ring", "tls-webpki-roots"] }
 prost = "0.13"
 larql-router-protocol = { path = "../larql-router-protocol" }
 async-stream = "0.3"
@@ -72,7 +64,6 @@ wasmtime-wasi = { version = ">=36.0.7", optional = true }
 # Portable 64-bit atomics (software fallback on arm32 / other targets without
 # native 64-bit atomic ops).
 portable-atomic = "1"
-
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
@@ -92,6 +83,16 @@ openblas-src = { version = "0.10", features = ["system"] }
 # Android: Minimal blas-src without external dependencies.
 blas-src = { version = "0.10", default-features = false }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Tokenizer — onig/Oniguruma backend; not wasm-safe (wasm32 uses unstable_wasm below).
+tokenizers = "0.21"
+# Blocking HTTP with ring-based TLS — incompatible with wasm32.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# Async runtime with thread pool — mio/epoll not available on wasm32.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
+# gRPC client with ring TLS — incompatible with wasm32.
+tonic = { version = "0.13", features = ["tls-ring", "tls-webpki-roots"] }
+
 [features]
 default = []
 metal = ["larql-compute/metal"]
@@ -99,6 +100,8 @@ metal = ["larql-compute/metal"]
 # wasmi remains the active backend regardless; this feature only gates the
 # preserved loader_jit/caller_jit modules for REUSE compliance.
 expert-jit = ["dep:wasmtime", "dep:wasmtime-wasi"]
+# Opt-in gate for the Firefox browser-based wasm_bindgen_test runner.
+browser-tests = []
 
 [[example]]
 name = "cpu_gpu_diag"
@@ -116,12 +119,52 @@ required-features = ["metal"]
 name = "stage_bisect"
 required-features = ["metal"]
 
+# These examples use `extern crate blas_src` which is a native-only dep
+# (not present in the wasm32 target dep graph). Gate them so `cargo test
+# --target wasm32-unknown-unknown` skips compiling them.
+[[example]]
+name = "bench_seqlen"
+required-features = ["metal"]
+
+[[example]]
+name = "moe_grid_generate"
+required-features = ["metal"]
+
+[[example]]
+name = "test_q4_projection_cosine"
+required-features = ["metal"]
+
+[[example]]
+name = "test_q4_accuracy"
+required-features = ["metal"]
+
+[[example]]
+name = "remote_walk_parity"
+required-features = ["metal"]
+
+[[example]]
+name = "q4k_remote_parity"
+required-features = ["metal"]
+
 [dev-dependencies]
 assert_approx_eq = "1"
 tempfile = "3"
-criterion = { version = "0.5", features = ["html_reports"] }
 larql-kv = { path = "../larql-kv" }
+wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
 name = "wire_codec"
 harness = false
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }
+# Tokenizer with fancy-regex backend — no Oniguruma C bindings.
+tokenizers = { version = "0.21", default-features = false, features = ["unstable_wasm"] }
+# Async HTTP without blocking API or ring TLS (uses browser fetch).
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+[package.metadata.wasm]
+split-candidate = true

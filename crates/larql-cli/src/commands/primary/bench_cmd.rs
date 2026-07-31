@@ -363,6 +363,7 @@ pub fn run(args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(ref ffn_url) = args.ffn {
         if let Some(ref wire_list) = args.wire {
             // Wire format comparison: run once per requested format.
@@ -385,6 +386,7 @@ pub fn run(args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(ref shards_str) = args.moe_shards {
         if args.bench_grid {
             // Grid scaling sweep: run with 1..N shards from the shard map.
@@ -874,6 +876,7 @@ fn run_engine_q4k(
 /// Reports overall tok/s plus a breakdown:
 ///   ffn-rtt  — time spent in the remote FFN closure (all layers summed)
 ///   attn+    — remainder = local attn + norm + lm_head + embed
+#[cfg(not(target_arch = "wasm32"))]
 fn run_remote_ffn_bench(
     vindex_path: &std::path::Path,
     args: &BenchArgs,
@@ -1054,6 +1057,7 @@ fn run_remote_ffn_bench(
 /// Reports overall tok/s plus a breakdown:
 ///   expert-rtt  — time spent in remote expert dispatch per token
 ///   attn+       — remainder = local attn + router + dense FFN
+#[cfg(not(target_arch = "wasm32"))]
 fn run_remote_moe_bench(
     vindex_path: &std::path::Path,
     args: &BenchArgs,

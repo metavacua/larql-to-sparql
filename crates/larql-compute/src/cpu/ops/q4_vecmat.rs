@@ -30,7 +30,11 @@ mod tests {
 
     use super::super::q4_common::quantize_q4_0;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_vecmat_produces_output() {
         let hidden = 256;
         let inter = 128;
@@ -46,7 +50,8 @@ mod tests {
         assert!(result.iter().any(|&v| v.abs() > 0.01));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_vecmat_zero_activation() {
         let hidden = 256;
         let inter = 64;

@@ -190,6 +190,7 @@ impl Session {
                 out.push("For WALK/DESCRIBE/SELECT/INSERT: EXTRACT into a vindex first.".into());
                 Ok(out)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Backend::Remote { .. } => self.remote_stats(),
             Backend::None => Err(LqlError::NoBackend),
         }

@@ -102,7 +102,11 @@ mod tests {
     use super::*;
     use crate::cpu::ops::q4_common::quantize_q6_k;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6k_produces_nonzero() {
         let hidden = 256;
         let rows = 4;
@@ -120,14 +124,16 @@ mod tests {
 
     // ── local f16_to_f32 edge cases ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_to_f32_neg_zero() {
         // bits=0x8000: sign=1, exp=0, mant=0 → negative zero
         let v = super::f16_to_f32(0x8000);
         assert!(v == 0.0 && v.is_sign_negative(), "0x8000 should be -0.0");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_to_f32_subnormal_positive() {
         // bits=0x0001: sign=0, exp=0, mant=1 → smallest positive subnormal ≈ 5.96e-8
         let v = super::f16_to_f32(0x0001);
@@ -137,7 +143,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_to_f32_subnormal_negative() {
         // bits=0x8001: sign=1, exp=0, mant=1 → smallest negative subnormal
         let v = super::f16_to_f32(0x8001);
@@ -147,14 +154,16 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_to_f32_neg_infinity() {
         // bits=0xFC00: sign=1, exp=31, mant=0 → negative infinity
         let v = super::f16_to_f32(0xFC00);
         assert!(v == f32::NEG_INFINITY, "0xFC00 should be -inf, got {v}");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_to_f32_nan() {
         // bits=0x7C01: sign=0, exp=31, mant=1 → NaN
         let v = super::f16_to_f32(0x7C01);

@@ -1,0 +1,159 @@
+# larql-browser-cli WASM CI
+#
+# Builds and tests the in-browser CLI crate against wasm32-unknown-unknown.
+# Two modes:
+#   serial   — stable Rust, single-threaded, wasm-pack test --node
+#   parallel — nightly + atomics flags, wasm-pack test --firefox --headless --features parallel
+#
+# fail-fast is false: all failures must be visible as empirical evidence.
+
+name: larql-browser-cli-wasm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-browser-cli/**'
+      - 'crates/larql-lql/**'
+      - 'crates/larql-inference/**'
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-browser-cli-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-browser-cli/**'
+      - 'crates/larql-lql/**'
+      - 'crates/larql-inference/**'
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-browser-cli-wasm.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: wasm · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: serial
+            toolchain: stable
+            rustflags: ''
+          - name: parallel
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.121
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Install geckodriver
+        run: |
+          VER=$(curl -fsSL https://api.github.com/repos/mozilla/geckodriver/releases/latest \
+            | grep '"tag_name"' | head -1 | sed -E 's/.*"(v[^"]+)".*/\1/')
+          curl -fsSL "https://github.com/mozilla/geckodriver/releases/download/${VER}/geckodriver-${VER}-linux64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin/
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cargo-browser-cli-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cargo-browser-cli-${{ matrix.mode.name }}-
+
+      - name: Format check
+        run: cargo fmt -p larql-browser-cli -- --check
+
+      - name: Check
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-browser-cli --target wasm32-unknown-unknown
+
+      - name: Clippy
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo clippy -p larql-browser-cli --target wasm32-unknown-unknown -- -D warnings
+
+      - name: cargo test · wasm32 · node (dynamic)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo test -p larql-browser-cli --target wasm32-unknown-unknown
+
+      - name: cargo test · wasm32 · firefox (static)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo test -p larql-browser-cli --target wasm32-unknown-unknown --features browser-tests
+
+  # ── Coverage: tests/wasm.rs (Node.js) only ────────────────────────────────
+  # wasm.rs configures run_in_node_experimental → Node.js → .profraw writable.
+  # browser.rs (feature=browser-tests) configures run_in_browser → coverage-hostile.
+  coverage:
+    name: coverage · wasm32 · node
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.121
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cov-larql-browser-cli-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cov-larql-browser-cli-
+
+      - name: Coverage summary (wasm32 · Node.js · dynamic)
+        run: cargo llvm-cov --target wasm32-unknown-unknown --package larql-browser-cli --summary-only

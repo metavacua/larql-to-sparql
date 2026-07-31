@@ -8,11 +8,13 @@
 //! production dispatch.
 
 pub mod graph_backend;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod moe_remote;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
 pub mod sparse;
 pub mod sparse_compute;
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 pub mod weight;
 
@@ -52,7 +54,9 @@ pub trait FfnBackend {
 
 // ── Re-exports ──
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use moe_remote::{MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig};
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote::{
     LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteLatencyStats, RemoteWalkBackend,
     WirePreference,
@@ -118,7 +122,7 @@ pub fn gelu_tanh(x: f32) -> f32 {
     0.5 * x * (1.0 + (c * (x + 0.044715 * x * x * x)).tanh())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod router_tests {
     use super::*;
     use crate::test_utils::make_test_weights;

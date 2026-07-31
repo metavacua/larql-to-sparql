@@ -1,0 +1,184 @@
+# larql-server WASM CI
+#
+# Demonstrates that larql-server-wasm is a proper and strict compile-time and
+# runtime SUBSET of larql-server.
+#
+# Structure (per matrix mode):
+#
+#   1. cargo check / clippy   — compile-time subset verification (must pass)
+#   2. wasm-pack test --lib   — runtime subset verification: every wasm32-
+#                               accessible module with non-trivial code must
+#                               have non-trivial wasm runtime tests that PASS
+#   3. counterwit­ness step    — wasm-pack test without --lib exposes compile
+#                               errors from integration tests that reference
+#                               native-only modules (axum, tokio, band_utils,
+#                               routes, session…). These errors are the
+#                               expected empirical signal of the native-only
+#                               boundary. continue-on-error: true preserves
+#                               them as CI evidence while allowing the job to
+#                               report the subset tests above as green.
+#
+# fail-fast is false: all cells of the matrix must remain visible.
+
+name: larql-server-wasm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-server/**'
+      - 'crates/larql-router-protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-server-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-server/**'
+      - 'crates/larql-router-protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-server-wasm.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: wasm · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    # Longer timeout: protobuf-src compiles protoc from source on Linux.
+    timeout-minutes: 35
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: serial
+            toolchain: stable
+            rustflags: ''
+          - name: parallel
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.121
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Install geckodriver
+        run: |
+          VER=$(curl -fsSL https://api.github.com/repos/mozilla/geckodriver/releases/latest \
+            | grep '"tag_name"' | head -1 | sed -E 's/.*"(v[^"]+)".*/\1/')
+          curl -fsSL "https://github.com/mozilla/geckodriver/releases/download/${VER}/geckodriver-${VER}-linux64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin/
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cargo-server-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cargo-server-${{ matrix.mode.name }}-
+
+      - name: Format check
+        run: cargo fmt -p larql-server -- --check
+
+      - name: Check
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-server --target wasm32-unknown-unknown
+
+      - name: Clippy
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo clippy -p larql-server --target wasm32-unknown-unknown -- -D warnings
+
+      # ── Step 2: Runtime subset verification ──────────────────────────────────
+      # --lib restricts compilation to the library crate only (no tests/).
+      # Every module that compiles for wasm32 must have passing wasm runtime
+      # tests; failures here mean the subset is broken and must be fixed.
+
+      # lib inline tests (cache.rs, etag.rs) configure run_in_node_experimental
+      # → Node.js (dynamic WASM32). Browser mode is omitted: the inline tests
+      # are not browser-configured and wasm-certify Level 2a covers Firefox.
+      - name: cargo test · wasm32 · lib (dynamic)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo test -p larql-server --target wasm32-unknown-unknown --lib
+
+      # ── Step 3: Counterwit­ness — native-only boundary signal ─────────────────
+      # Without --lib, cargo test also compiles tests/ integration tests. Those
+      # files import native-only modules (axum, tokio, session, band_utils…)
+      # and produce compile errors (E0432 / E0433). This is the empirical signal
+      # that documents the compile-time boundary: a hard failure, not a soft advisory.
+
+      - name: counterwit­ness · integration-test boundary (compile errors = hard fail)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo test -p larql-server --target wasm32-unknown-unknown
+
+  # ── Coverage: lib inline tests (Node.js) ──────────────────────────────────
+  # cache.rs and etag.rs configure run_in_node_experimental → Node.js →
+  # .profraw can be written. Integration tests (tests/) import native deps
+  # and are excluded with --lib.
+  coverage:
+    name: coverage · wasm32 · node
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.121
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cov-larql-server-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cov-larql-server-
+
+      - name: Coverage summary (wasm32 · Node.js · dynamic · lib)
+        run: cargo llvm-cov --target wasm32-unknown-unknown --package larql-server --lib --summary-only

@@ -10,9 +10,11 @@ pub mod convert_cmd;
 pub mod embedding_jump_cmd;
 pub mod extract_index_cmd;
 pub mod ffn_bottleneck_cmd;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffn_latency_cmd;
 pub mod ffn_overlap_cmd;
 pub mod fingerprint_extract_cmd;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod hf_cmd;
 pub mod index_gates_cmd;
 pub mod kg_bench_cmd;

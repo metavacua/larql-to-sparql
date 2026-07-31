@@ -61,11 +61,13 @@ enum Commands {
     Chat(ChatArgs),
 
     /// Download a vindex from HuggingFace and cache it locally.
+    #[cfg(not(target_arch = "wasm32"))]
     Pull(pull_cmd::PullArgs),
 
     /// Manage HuggingFace *model* repos (safetensors + tokenizer + config).
     /// Companion to `pull` (which is vindex-only). Use `model pull` to
     /// stage a raw HF model for `convert safetensors-to-vindex`.
+    #[cfg(not(target_arch = "wasm32"))]
     Model(model_cmd::ModelArgs),
 
     /// Register a local vindex directory with the cache so `run` / `list`
@@ -82,6 +84,7 @@ enum Commands {
     Slice(slice_cmd::SliceArgs),
 
     /// Publish a vindex to HuggingFace — full vindex plus slice siblings.
+    #[cfg(not(target_arch = "wasm32"))]
     Publish(publish_cmd::PublishArgs),
 
     /// Remove a cached vindex.
@@ -129,6 +132,7 @@ enum Commands {
     /// Convert between model formats (GGUF ↔ vindex, safetensors → vindex).
     Convert(convert_cmd::ConvertArgs),
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[command(next_help_heading = "Build")]
     /// HuggingFace Hub: upload a vindex.
     Hf(hf_cmd::HfArgs),
@@ -260,6 +264,7 @@ enum DevCommand {
     Bfs(bfs_cmd::BfsArgs),
 
     /// Measure round-trip latency breakdown against a remote FFN server.
+    #[cfg(not(target_arch = "wasm32"))]
     FfnLatency(ffn_latency_cmd::FfnLatencyArgs),
 }
 
@@ -536,12 +541,15 @@ fn real_main() -> i32 {
         Commands::Chat(args) => run_cmd::run(args.into()),
         Commands::Bench(args) => bench_cmd::run(args),
         Commands::Shannon(cmd) => shannon_cmd::run(cmd),
+        #[cfg(not(target_arch = "wasm32"))]
         Commands::Pull(args) => pull_cmd::run(args),
+        #[cfg(not(target_arch = "wasm32"))]
         Commands::Model(args) => model_cmd::run(args),
         Commands::Link(args) => link_cmd::run(args),
         Commands::List(args) => list_cmd::run(args),
         Commands::Show(args) => show_cmd::run(args),
         Commands::Slice(args) => slice_cmd::run(args),
+        #[cfg(not(target_arch = "wasm32"))]
         Commands::Publish(args) => publish_cmd::run(args),
         Commands::Rm(args) => rm_cmd::run(args),
 
@@ -551,6 +559,7 @@ fn real_main() -> i32 {
         Commands::Build(args) => build_cmd::run(args),
         Commands::Compile(args) => compile_cmd::run(args),
         Commands::Convert(args) => convert_cmd::run(args),
+        #[cfg(not(target_arch = "wasm32"))]
         Commands::Hf(args) => hf_cmd::run(args),
         Commands::Verify(args) => verify_cmd::run(args),
         Commands::Diag(args) => diag_cmd::run(args),
@@ -619,6 +628,7 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
         DevCommand::BottleneckTest(a) => bottleneck_test_cmd::run(a),
         DevCommand::EmbeddingJump(a) => embedding_jump_cmd::run(a),
         DevCommand::Bfs(a) => bfs_cmd::run(a),
+        #[cfg(not(target_arch = "wasm32"))]
         DevCommand::FfnLatency(a) => ffn_latency_cmd::run(a),
     }
 }

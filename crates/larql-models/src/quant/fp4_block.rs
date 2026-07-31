@@ -320,9 +320,13 @@ pub fn decode_fp8_layer(bytes: &[u8], num_features: usize, hidden: usize, out: &
 mod tests {
     use super::*;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     /// The required round-trip invariant from FP4_FORMAT_SPEC §12.
     /// Independent of the walk kernel, deterministic, failure-diagnostic.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_block_round_trip_gaussian() {
         // Gaussian-ish distribution, zero mean unit std — typical of FFN
         // feature activations rather than of learned weights, but a
@@ -352,7 +356,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_block_round_trip_pathological_ratio() {
         // Pathological: one sub-block has magnitudes O(100), others O(0.01).
         // Ratio ~10,000 — well beyond the R=16 lossless threshold.
@@ -383,7 +388,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_block_all_zeros() {
         let values = vec![0.0f32; 256];
         let block = encode_fp4_block(&values);
@@ -393,12 +399,14 @@ mod tests {
         assert!(decoded.iter().all(|&x| x == 0.0));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_block_size_is_137_bytes() {
         assert_eq!(FP4_BLOCK_BYTES, 137);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp8_block_round_trip_gaussian() {
         let values: Vec<f32> = (0..256).map(|i| (i as f32 - 128.0) / 40.0).collect();
         let block = encode_fp8_block(&values);
@@ -419,12 +427,14 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp8_block_size_is_257_bytes() {
         assert_eq!(FP8_BLOCK_BYTES, 257);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp8_block_all_zeros() {
         let values = vec![0.0f32; 256];
         let block = encode_fp8_block(&values);
@@ -441,7 +451,8 @@ mod tests {
     /// (2⁻⁹ ≈ 1.95e-3), flushing the scale to zero and returning the
     /// all-zero block. Fix: use block_scale = block_max. This test pins
     /// the fix at typical-FFN magnitude levels.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp8_block_small_magnitude_like_ffn_down() {
         // Synthetic distribution in the range of actual Gemma 3 4B down
         // features: block_max ≈ 0.04, typical values ≈ 0.01–0.04.
@@ -470,7 +481,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_feature_round_trip_2560() {
         // Gemma 3 4B hidden size — 10 blocks per feature.
         let hidden = 2560;
@@ -490,7 +502,8 @@ mod tests {
         assert!(max_err < 0.3, "max err {max_err}");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp8_feature_round_trip_2560() {
         let hidden = 2560;
         let values: Vec<f32> = (0..hidden)
@@ -510,7 +523,8 @@ mod tests {
         assert!(max_err < 0.05, "max err {max_err}");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_layer_round_trip_small() {
         // 4 features × 512 hidden (2 blocks per feature).
         let num_features = 4;
@@ -534,7 +548,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp8_layer_round_trip_small() {
         let num_features = 4;
         let hidden = 512;
@@ -567,7 +582,8 @@ mod tests {
     /// gate — ratios in [2, 4), all normally-distributed magnitudes — and
     /// verify that under the FP4 encoder the worst per-element error is
     /// well inside the walk kernel's BLAS-1 saxpy tolerance.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_block_typical_4b_distribution() {
         use std::f32::consts::TAU;
         // Synthesize a block with per-sub-block max/min ratio ≈ 3.
@@ -605,7 +621,8 @@ mod tests {
     /// A block with one zero sub-block and seven non-zero sub-blocks.
     /// The zero sub-block's scale is 0 in E4M3, but the block scale is
     /// non-zero — the decoder must handle a zero sub-block cleanly.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_block_mixed_zero_and_nonzero_sub_blocks() {
         let mut values = vec![0.5f32; 256];
         // Sub-block 3 (elements 96..128) is all zero.
@@ -632,7 +649,8 @@ mod tests {
     /// A block with NaN input — FP4 has no NaN representation, so the
     /// NaN input must be replaced with 0 inside the quantiser. The
     /// decode should not produce NaN.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_block_nan_input_maps_to_zero_element() {
         let mut values = vec![0.5f32; 256];
         values[42] = f32::NAN;
@@ -660,7 +678,8 @@ mod tests {
     /// other sub-blocks get sub_scale ≈ 0.1. Outlier reconstruction
     /// should be tight; the rest should also reconstruct at their
     /// sub-block scales.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_block_single_outlier_preserved() {
         let mut values = vec![0.1f32; 256];
         values[128] = 1.0; // 10× outlier
@@ -687,7 +706,8 @@ mod tests {
 
     /// FP8 block with all values at E4M3's saturation boundary.
     /// encode(448) then decode should round-trip exactly.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp8_block_saturation_values_round_trip() {
         let values = vec![448.0f32; 256];
         let block = encode_fp8_block(&values);
@@ -700,7 +720,8 @@ mod tests {
 
     /// FP8 block with all values below the smallest subnormal (2⁻⁹).
     /// Everything should flush to zero on the block-scale round.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp8_block_below_subnormal_flushes_to_zero() {
         let values = vec![1e-12f32; 256];
         let block = encode_fp8_block(&values);
@@ -714,7 +735,8 @@ mod tests {
 
     /// A 1-element difference from all-zero — verify we don't get a
     /// divide-by-zero or catastrophic amplification.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_block_sparse_single_element() {
         let mut values = vec![0.0f32; 256];
         values[0] = 1.0;

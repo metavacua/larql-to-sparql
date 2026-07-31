@@ -25,14 +25,19 @@ pub fn geglu_silu_alloc(gate: &[f32], up: &[f32]) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn silu_basic() {
         assert!((silu(0.0) - 0.0).abs() < 1e-6);
         assert!(silu(10.0) > 9.99); // silu(x) ≈ x for large x
         assert!(silu(-10.0).abs() < 0.001); // silu(x) ≈ 0 for large negative x
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn geglu_basic() {
         let gate = vec![0.0, 1.0, -1.0, 5.0];
         let up = vec![1.0, 2.0, 3.0, 4.0];
@@ -44,7 +49,8 @@ mod tests {
         assert!(result[3] > 19.0); // silu(5)*4 ≈ 5*4 = 20
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn geglu_in_place() {
         let gate = vec![1.0; 32];
         let up = vec![2.0; 32];

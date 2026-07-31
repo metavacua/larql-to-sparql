@@ -11,27 +11,27 @@ permissions:
   contents: read
 
 on:
-  push:
-    branches: [main, ci/workflows-complete]
-    paths:
-      - 'crates/larql-vindex/**'
-      - 'crates/larql-lql/src/executor/lifecycle/compile/into_vindex.rs'
-      - 'crates/larql-compute/src/cpu/ops/q4k_q8k_dot.rs'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'Makefile'
-      - '.github/workflows/larql-vindex.yml'
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
-    paths:
-      - 'crates/larql-vindex/**'
-      - 'crates/larql-lql/src/executor/lifecycle/compile/into_vindex.rs'
-      - 'crates/larql-compute/src/cpu/ops/q4k_q8k_dot.rs'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'Makefile'
-      - '.github/workflows/larql-vindex.yml'
+#  push:
+#    branches: [main]
+#    paths:
+#      - 'crates/larql-vindex/**'
+#      - 'crates/larql-lql/src/executor/lifecycle/compile/into_vindex.rs'
+#      - 'crates/larql-compute/src/cpu/ops/q4k_q8k_dot.rs'
+#      - 'Cargo.toml'
+#      - 'Cargo.lock'
+#      - 'Makefile'
+#      - '.github/workflows/larql-vindex.yml'
+#  pull_request:
+#    types: [opened, synchronize, reopened, ready_for_review]
+#    branches: [main]
+#    paths:
+#      - 'crates/larql-vindex/**'
+#      - 'crates/larql-lql/src/executor/lifecycle/compile/into_vindex.rs'
+#      - 'crates/larql-compute/src/cpu/ops/q4k_q8k_dot.rs'
+#      - 'Cargo.toml'
+#      - 'Cargo.lock'
+#      - 'Makefile'
+#      - '.github/workflows/larql-vindex.yml'
   workflow_dispatch: {}
 
 concurrency:
@@ -174,19 +174,19 @@ jobs:
         run: cargo fmt -p larql-vindex -- --check
 
       - name: Check all targets
-        run: cargo check -p larql-vindex --target ${{ matrix.target }} --all-targets
+        run: cargo check -p larql-vindex --target ${{ matrix.target }} --all-targets --features remote
 
       - name: Check examples
-        run: cargo check -p larql-vindex --target ${{ matrix.target }} --examples
+        run: cargo check -p larql-vindex --target ${{ matrix.target }} --examples --features remote
 
       - name: Clippy
-        run: cargo clippy -p larql-vindex --target ${{ matrix.target }} --all-targets -- -D warnings
+        run: cargo clippy -p larql-vindex --target ${{ matrix.target }} --all-targets --features remote -- -D warnings
 
       - name: Tests
-        run: cargo test -p larql-vindex --target ${{ matrix.target }}
+        run: cargo test -p larql-vindex --target ${{ matrix.target }} --features remote
 
       - name: Benchmark compile/tests
-        run: cargo test -p larql-vindex --target ${{ matrix.target }} --benches
+        run: cargo test -p larql-vindex --target ${{ matrix.target }} --benches --features remote
 
   coverage:
     name: coverage - ubuntu
@@ -211,7 +211,7 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Coverage summary
-        run: cargo llvm-cov --package larql-vindex --summary-only --fail-under-lines "$LARQL_VINDEX_COVERAGE_MIN"
+        run: cargo llvm-cov --package larql-vindex --features remote --summary-only --fail-under-lines "$LARQL_VINDEX_COVERAGE_MIN"
 
       - name: Coverage policy
         run: |

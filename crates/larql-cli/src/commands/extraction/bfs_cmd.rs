@@ -117,17 +117,24 @@ pub fn run(args: BfsArgs) -> Result<(), Box<dyn std::error::Error>> {
         };
         Box::new(larql_core::engine::mock_provider::MockProvider::with_knowledge(knowledge))
     } else {
-        let endpoint = args
-            .endpoint
-            .as_deref()
-            .unwrap_or("http://localhost:11434/v1");
-        let model = args
-            .model
-            .as_deref()
-            .ok_or("--model required when not using --mock")?;
-        Box::new(larql_core::engine::http_provider::HttpProvider::new(
-            endpoint, model,
-        ))
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let endpoint = args
+                .endpoint
+                .as_deref()
+                .unwrap_or("http://localhost:11434/v1");
+            let model = args
+                .model
+                .as_deref()
+                .ok_or("--model required when not using --mock")?;
+            Box::new(larql_core::engine::http_provider::HttpProvider::new(
+                endpoint, model,
+            )) as Box<dyn ModelProvider>
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Err("HTTP provider is not available in WASM builds; use --mock".into());
+        }
     };
 
     let seeds: Vec<String> = args

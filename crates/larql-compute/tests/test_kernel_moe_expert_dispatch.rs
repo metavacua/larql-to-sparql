@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 #![cfg(all(feature = "metal", target_os = "macos"))]
 
 extern crate blas_src;

@@ -488,7 +488,11 @@ mod tests {
     use super::*;
     use crate::core::enums::SourceType;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_roundtrip_basic() {
         let mut graph = Graph::new();
         graph.add_edge(Edge::new("France", "capital-of", "Paris").with_confidence(0.9));
@@ -508,7 +512,8 @@ mod tests {
         assert!(loaded.exists("Japan", "capital-of", "Tokyo"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_roundtrip_with_metadata() {
         let mut graph = Graph::new();
         graph.add_edge(
@@ -528,7 +533,8 @@ mod tests {
         assert_eq!(meta.get("feature").unwrap(), &serde_json::json!(9515));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_roundtrip_with_injection() {
         let mut graph = Graph::new();
         let mut edge = Edge::new("A", "rel", "B").with_confidence(0.5);
@@ -545,7 +551,8 @@ mod tests {
         assert!((score - 0.75).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_roundtrip_with_metadata_and_injection() {
         let mut graph = Graph::new();
         let mut edge = Edge::new("X", "rel", "Y")
@@ -569,7 +576,8 @@ mod tests {
         assert!((score - 0.5).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_roundtrip_empty_graph() {
         let graph = Graph::new();
         let bytes = to_packed_bytes(&graph).unwrap();
@@ -577,7 +585,8 @@ mod tests {
         assert_eq!(loaded.edge_count(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_roundtrip_source_types() {
         let mut graph = Graph::new();
         graph.add_edge(Edge::new("A", "r", "B").with_source(SourceType::Parametric));
@@ -601,7 +610,8 @@ mod tests {
         assert!(sources.contains(&SourceType::Unknown));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_string_interning() {
         let mut graph = Graph::new();
         // "capital-of" appears 3 times but should be interned once
@@ -615,7 +625,8 @@ mod tests {
         assert!(bytes.len() < json_bytes.len());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_confidence_precision() {
         let mut graph = Graph::new();
         graph.add_edge(Edge::new("A", "rel", "B").with_confidence(0.123456789));
@@ -628,14 +639,16 @@ mod tests {
         assert!((conf - 0.123456789).abs() < 0.001);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_invalid_magic() {
         let bytes = vec![0u8; 40];
         let result = from_packed_bytes(&bytes);
         assert!(result.is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_invalid_string_table_offset_returns_error() {
         let graph = Graph::new();
         let mut bytes = to_packed_bytes(&graph).unwrap();
@@ -646,7 +659,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_truncated_edge_section_returns_error() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&MAGIC);
@@ -660,7 +674,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_out_of_range_string_index_returns_error() {
         let mut graph = Graph::new();
         graph.add_edge(Edge::new("A", "rel", "B"));
@@ -671,7 +686,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_invalid_metadata_range_returns_error() {
         let mut graph = Graph::new();
         graph.add_edge(Edge::new("A", "rel", "B").with_metadata("key", serde_json::json!("v")));
@@ -683,7 +699,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_invalid_source_tag_returns_error() {
         let mut graph = Graph::new();
         graph.add_edge(Edge::new("A", "rel", "B"));
@@ -694,7 +711,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_invalid_metadata_json_returns_error() {
         let mut graph = Graph::new();
         graph.add_edge(Edge::new("A", "rel", "B").with_metadata("key", serde_json::json!("v")));
@@ -705,7 +723,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_short_injection_payload_returns_error() {
         let mut graph = Graph::new();
         let mut edge = Edge::new("A", "rel", "B");
@@ -718,7 +737,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_unsupported_flags_return_error() {
         let graph = Graph::new();
         let mut bytes = to_packed_bytes(&graph).unwrap();
@@ -729,6 +749,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn test_file_roundtrip() {
         let mut graph = Graph::new();
         graph.add_edge(Edge::new("A", "rel", "B").with_confidence(0.9));

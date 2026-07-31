@@ -737,6 +737,9 @@ impl From<bool> for Activation {
 mod tests {
     use super::*;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn minimal_qw(data: &[u8]) -> QuantWeight<'_> {
         QuantWeight {
             data,
@@ -775,13 +778,15 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn activation_from_bool() {
         assert_eq!(Activation::from(true), Activation::GeluTanh);
         assert_eq!(Activation::from(false), Activation::Silu);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn is_gated_matches_ffn_type() {
         let norms = [1.0f32; 4];
         let gated = minimal_layer(&[], &norms, FfnType::Gated, None);
@@ -790,7 +795,8 @@ mod tests {
         assert!(!standard.is_gated());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn is_hybrid_moe_reflects_option() {
         let norms = [1.0f32; 4];
         let no_moe = minimal_layer(&[], &norms, FfnType::Gated, None);
@@ -820,7 +826,8 @@ mod tests {
         assert!(with_moe.is_hybrid_moe());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn quant_format_equality() {
         assert_eq!(QuantFormat::Q4_K, QuantFormat::Q4_K);
         assert_ne!(QuantFormat::Q4_K, QuantFormat::Q6_K);
@@ -829,7 +836,8 @@ mod tests {
 
     /// Pin the Q4_K-family taxonomy. Adding a new format requires
     /// updating exactly one of these classifiers.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn quant_format_classifiers() {
         // Q4_K family (256-element super-blocks)
         assert!(QuantFormat::Q4_K.is_q4k_family());
@@ -849,7 +857,8 @@ mod tests {
         assert!(!QuantFormat::Q6_K.is_q4kf());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn quant_format_reports_packed_matrix_bytes() {
         assert_eq!(QuantFormat::Q4_0.packed_matrix_bytes(2, 32), Some(36));
         assert_eq!(QuantFormat::Q4_K.packed_matrix_bytes(2, 256), Some(288));
@@ -861,7 +870,8 @@ mod tests {
     /// `..Default::default()` must work with stack-local borrowed data —
     /// the compiler reborrows the `'static` defaults at the caller's
     /// shorter lifetime. Pin the pattern.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn default_layer_accepts_local_borrows_via_spread() {
         let data: Vec<u8> = vec![0, 1, 2];
         let norms: Vec<f32> = vec![1.0; 4];
@@ -893,7 +903,8 @@ mod tests {
         assert_eq!(layer.head_dim, 4);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn layer_spec_views_preserve_flat_field_values() {
         let data: Vec<u8> = vec![0, 1, 2, 3];
         let norms: Vec<f32> = vec![1.0; 8];

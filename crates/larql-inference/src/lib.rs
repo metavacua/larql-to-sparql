@@ -98,10 +98,11 @@ pub use capture::{
 pub use chat::{wrap_chat_prompt, wrap_prompt_raw, wrap_with_vindex_template, ChatWrap};
 pub use error::InferenceError;
 pub use ffn::graph_backend::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
+pub use ffn::{BackendFfn, FfnBackend, LayerFfnRouter, SparseFfn, WeightFfn};
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn::{
-    BackendFfn, FfnBackend, LayerFfnRouter, LayerShardedBackend, MoeRouterWeights, RemoteFfnConfig,
-    RemoteFfnError, RemoteLatencyStats, RemoteMoeBackend, RemoteMoeError, RemoteWalkBackend,
-    ShardConfig, SparseFfn, WeightFfn, WirePreference,
+    LayerShardedBackend, MoeRouterWeights, RemoteFfnConfig, RemoteFfnError, RemoteLatencyStats,
+    RemoteMoeBackend, RemoteMoeError, RemoteWalkBackend, ShardConfig, WirePreference,
 };
 // Crate-root forward re-exports — kept for any name with external use OR
 // in-crate examples/tests/benches that already import from the root. The
@@ -132,17 +133,17 @@ pub use forward::{
 // `GridGenerateResult`, `ChatMLRenderer`, `GemmaRenderer`, `LayerOutput`,
 // `Llama3Renderer`, `PerLayerGraph`, `TurnRenderer`. They remain reachable
 // via `larql_inference::layer_graph::*`.
+#[cfg(not(target_arch = "wasm32"))]
+pub use layer_graph::grid::{
+    generate_with_remote_ffn, generate_with_remote_ffn_batch, generate_with_remote_moe,
+    generate_with_remote_moe_batch,
+};
 pub use layer_graph::{
     build_adaptive_graph,
     detect_template,
     generate,
     generate_streaming,
     generate_with_sampling,
-    // Expert grid generation
-    grid::{
-        generate_with_remote_ffn, generate_with_remote_ffn_batch, generate_with_remote_moe,
-        generate_with_remote_moe_batch,
-    },
     hybrid::predict_hybrid,
     predict_honest,
     predict_pipeline,

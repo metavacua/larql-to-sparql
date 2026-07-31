@@ -1,0 +1,29 @@
+[package]
+name = "larql-vindex-wasm32uu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Browser/Node.js WASM bindings for vindex gate-KNN — standalone, no OS deps"
+keywords = ["wasm", "vindex", "knowledge-graph", "webassembly"]
+categories = ["wasm", "web-programming"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde        = { version = "1", features = ["derive"] }
+serde_json   = { workspace = true }
+# Pure gate-KNN compute + f16 decode from the no_std portable core.
+# serde feature enables derives on StorageDtype (used in JSON config parsing).
+larql-wasm32v1-none-lib = { path = "../larql-wasm32v1-none-lib", features = ["serde"] }
+
+[target.'cfg(all(target_arch = "wasm32", not(target_os = "wasi")))'.dependencies]
+getrandom_03 = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm]
+split-candidate = true

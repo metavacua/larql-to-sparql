@@ -200,9 +200,13 @@ mod tests {
     use larql_inference::forward::hidden_to_raw_logits;
     use larql_inference::test_utils::make_test_weights;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     // ── empty_prior ───────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn empty_prior_shape_per_layer() {
         let weights = make_test_weights();
         let prior = empty_prior(&weights);
@@ -216,7 +220,8 @@ mod tests {
 
     // ── rs_extend_from_checkpoint ─────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn extend_empty_tokens_returns_none() {
         let weights = make_test_weights();
         let prior = empty_prior(&weights);
@@ -224,7 +229,8 @@ mod tests {
         assert!(result.is_none(), "empty token_ids should return None");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn extend_wrong_prior_len_returns_none() {
         let weights = make_test_weights();
         // prior has 0 layers but model has 2 — mismatch
@@ -232,7 +238,8 @@ mod tests {
         assert!(result.is_none(), "prior length mismatch should return None");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn extend_single_token_from_empty_prior() {
         let weights = make_test_weights();
         let prior = empty_prior(&weights);
@@ -242,7 +249,8 @@ mod tests {
         assert!(output.last_hidden.iter().all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn extend_kv_cache_grows_with_each_token() {
         let weights = make_test_weights();
         let prior = empty_prior(&weights);
@@ -256,7 +264,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn extend_checkpoint_is_last_row_of_kv_cache() {
         let weights = make_test_weights();
         let prior = empty_prior(&weights);
@@ -282,7 +291,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn extend_abs_start_shifts_rope() {
         let weights = make_test_weights();
         let prior = empty_prior(&weights);
@@ -298,7 +308,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn extend_output_logits_are_finite() {
         let weights = make_test_weights();
         let prior = empty_prior(&weights);
@@ -307,7 +318,8 @@ mod tests {
         assert!(logits.iter().all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn extend_seeded_from_checkpoint_matches_empty_start() {
         // Extending from a non-empty checkpoint should not panic and should be finite.
         let weights = make_test_weights();

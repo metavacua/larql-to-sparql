@@ -1,8 +1,12 @@
+#[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use larql_core::*;
 
 // ── Shortest path ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_shortest_path_direct() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("A", "r", "B").with_confidence(0.9));
@@ -14,7 +18,8 @@ fn test_shortest_path_direct() {
     assert_eq!(path[0].object, "B");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_shortest_path_multi_hop() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("A", "r", "B").with_confidence(0.9));
@@ -25,7 +30,8 @@ fn test_shortest_path_multi_hop() {
     assert_eq!(path.len(), 2);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_shortest_path_prefers_high_confidence() {
     let mut g = Graph::new();
     // Direct route: low confidence
@@ -40,7 +46,8 @@ fn test_shortest_path_prefers_high_confidence() {
     assert_eq!(path.len(), 2);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_shortest_path_returns_selected_multiedge() {
     let mut g = Graph::new();
     // Both edges reach B, but the first inserted edge is more expensive.
@@ -53,7 +60,8 @@ fn test_shortest_path_returns_selected_multiedge() {
     assert_eq!(path[0].relation, "fast");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_shortest_path_no_route() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("A", "r", "B").with_confidence(0.9));
@@ -62,7 +70,8 @@ fn test_shortest_path_no_route() {
     assert!(shortest_path(&g, "A", "D").is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_shortest_path_same_node() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("A", "r", "B").with_confidence(0.9));
@@ -74,7 +83,8 @@ fn test_shortest_path_same_node() {
 
 // ── Merge ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_merge_graphs() {
     let mut g1 = Graph::new();
     g1.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -89,7 +99,8 @@ fn test_merge_graphs() {
     assert!(g1.exists("Germany", "capital-of", "Berlin"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_merge_empty_into_existing() {
     let mut g1 = Graph::new();
     g1.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -100,7 +111,8 @@ fn test_merge_empty_into_existing() {
     assert_eq!(g1.edge_count(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_merge_into_empty() {
     let mut g1 = Graph::new();
     let mut g2 = Graph::new();

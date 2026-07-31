@@ -3,9 +3,12 @@
 use crate::executor::Session;
 use crate::parser;
 
+#[cfg(not(target_arch = "wasm32"))]
 use rustyline::error::ReadlineError;
+#[cfg(not(target_arch = "wasm32"))]
 use rustyline::DefaultEditor;
 
+#[cfg(not(target_arch = "wasm32"))]
 const BANNER: &str = r#"
    ╦   ╔═╗ ╦═╗ ╔═╗ ╦
    ║   ╠═╣ ╠╦╝ ║═╬╗║
@@ -13,19 +16,24 @@ const BANNER: &str = r#"
    Lazarus Query Language v0.1
 "#;
 
+#[cfg(not(target_arch = "wasm32"))]
 const PROMPT: &str = "larql> ";
+#[cfg(not(target_arch = "wasm32"))]
 const CONTINUATION: &str = "   ... ";
 
 /// History file location — stored in ~/.larql_history
+#[cfg(not(target_arch = "wasm32"))]
 fn history_path() -> Option<std::path::PathBuf> {
     dirs_or_home().map(|d| d.join(".larql_history"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dirs_or_home() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME").map(std::path::PathBuf::from)
 }
 
 /// Run the interactive REPL.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_repl() {
     println!("{BANNER}");
 
@@ -141,7 +149,11 @@ pub fn run_repl() {
     println!("Goodbye.");
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn run_repl() {}
+
 /// Basic fallback REPL without line editing (used if rustyline fails).
+#[cfg(not(target_arch = "wasm32"))]
 fn run_repl_basic() {
     use std::io::{self, BufRead, Write};
 
@@ -253,6 +265,7 @@ pub fn run_batch(input: &str) -> Result<Vec<String>, Box<dyn std::error::Error>>
     Ok(all_output)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_complete_statement(s: &str) -> bool {
     s.ends_with(';')
 }
@@ -289,6 +302,7 @@ fn split_statements(input: &str) -> Vec<String> {
     stmts
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn print_help() {
     println!(
         r#"
@@ -330,7 +344,7 @@ LQL Commands:
     );
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 

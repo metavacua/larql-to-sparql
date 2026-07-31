@@ -10,7 +10,11 @@ use super::config_io::{
 };
 use super::*;
 
-#[test]
+#[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_gemma3() {
     let config = serde_json::json!({
         "model_type": "gemma3",
@@ -40,7 +44,8 @@ fn test_detect_gemma3() {
     assert!(!arch.is_sliding_window_layer(5));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_llama() {
     let config = serde_json::json!({
         "model_type": "llama",
@@ -58,7 +63,8 @@ fn test_detect_llama() {
     assert!(arch.attn_q_norm_key(0).is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_tinymodel() {
     let config = serde_json::json!({
         "model_type": "tinymodel",
@@ -91,7 +97,8 @@ fn test_detect_tinymodel() {
     assert!(!arch.has_post_norms());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_tinymodel_full_key_coverage() {
     let config = serde_json::json!({
         "model_type": "tinymodel",
@@ -121,7 +128,8 @@ fn test_tinymodel_full_key_coverage() {
     assert!(arch.attn_k_norm_key(0).is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_gemma4_key_formats() {
     let config = serde_json::json!({
         "model_type": "gemma4",
@@ -169,7 +177,8 @@ fn test_gemma4_key_formats() {
     assert_eq!(arch.bos_token_id(), Some(2));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bos_token_id_gemma4_only() {
     // Only Gemma 4 advertises an explicit BOS id — every other
     // architecture's tokenizer.json already includes BOS in its
@@ -201,7 +210,8 @@ fn test_bos_token_id_gemma4_only() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_mistral() {
     let config = serde_json::json!({
         "model_type": "mistral",
@@ -213,7 +223,8 @@ fn test_detect_mistral() {
     assert_eq!(arch.family(), "mistral");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_qwen2() {
     let config = serde_json::json!({
         "model_type": "qwen2",
@@ -225,7 +236,8 @@ fn test_detect_qwen2() {
     assert_eq!(arch.family(), "qwen2");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_qwen3() {
     let config = serde_json::json!({
         "model_type": "qwen3",
@@ -238,7 +250,8 @@ fn test_detect_qwen3() {
     assert!(!arch.is_moe());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_qwen3_moe_30b() {
     // Matches Qwen/Qwen3-30B-A3B config.json
     let config = serde_json::json!({
@@ -274,7 +287,8 @@ fn test_detect_qwen3_moe_30b() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_gpt2() {
     // GPT-2 small config. Architecture must dispatch to Gpt2Arch with
     // LayerNorm + Standard (non-gated) FFN + GELU-tanh activation.
@@ -337,7 +351,8 @@ fn test_detect_gpt2() {
     assert_eq!(arch.position_embed_key(), Some("wpe.weight"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_non_gpt2_archs_have_no_fused_qkv_or_position_embed() {
     // Defaults must remain None for everyone else, otherwise the loader
     // would try to split projections that are already separate.
@@ -352,7 +367,8 @@ fn test_non_gpt2_archs_have_no_fused_qkv_or_position_embed() {
     assert!(arch.position_embed_key().is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_unknown_defaults_to_generic() {
     let config = serde_json::json!({
         "model_type": "some_unknown_model",
@@ -364,7 +380,8 @@ fn test_detect_unknown_defaults_to_generic() {
     assert_eq!(arch.family(), "generic");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_tensor_keys() {
     let config = serde_json::json!({"model_type": "gemma3_text"});
     let arch = detect_from_json(&config);
@@ -384,7 +401,8 @@ fn test_tensor_keys() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_llama2() {
     // Real Llama 2 7B config — no head_dim, no rope_theta, no GQA
     let config = serde_json::json!({
@@ -425,7 +443,8 @@ fn test_detect_llama2() {
     assert_eq!(arch.final_norm_key(), "norm.weight");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_llama3() {
     // Real Llama 3 8B config — no head_dim, GQA (8 KV heads), higher rope_theta
     let config = serde_json::json!({
@@ -448,7 +467,8 @@ fn test_detect_llama3() {
     assert!(arch.rope_scaling_type().is_none()); // no scaling in base Llama 3
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_llama31() {
     // Real Llama 3.1 8B config — uses "rope_type" instead of "type"
     let config = serde_json::json!({
@@ -472,7 +492,8 @@ fn test_detect_llama31() {
     assert_eq!(arch.rope_scaling_factor(), 8.0);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_mistral_7b() {
     // Real Mistral 7B config — no head_dim, GQA, sliding window
     let config = serde_json::json!({
@@ -492,7 +513,8 @@ fn test_detect_mistral_7b() {
     assert_eq!(arch.sliding_window_size(), Some(4096));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_deepseek_v2() {
     let config = serde_json::json!({
         "model_type": "deepseek_v2",
@@ -554,7 +576,8 @@ fn test_detect_deepseek_v2() {
     assert_eq!(arch.rope_scaling_factor(), 40.0);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_deepseek_v3() {
     let config = serde_json::json!({
         "model_type": "deepseek_v3",
@@ -575,7 +598,8 @@ fn test_detect_deepseek_v3() {
     assert_eq!(arch.num_shared_experts(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_non_moe_model_defaults() {
     let config = serde_json::json!({
         "model_type": "llama",
@@ -596,7 +620,8 @@ fn test_non_moe_model_defaults() {
 
 // ── Tests against real HuggingFace configs ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_real_llama32_3b() {
     // Exact config from meta-llama/Llama-3.2-3B-Instruct
     let config = serde_json::json!({
@@ -630,7 +655,8 @@ fn test_real_llama32_3b() {
     assert_eq!(arch.rope_scaling_factor(), 32.0);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_real_llama32_1b() {
     // Exact config from meta-llama/Llama-3.2-1B — head_dim=64 (not 128!)
     let config = serde_json::json!({
@@ -657,7 +683,8 @@ fn test_real_llama32_1b() {
     assert_eq!(arch.rope_scaling_type(), Some("llama3"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_real_mistral_7b_v03() {
     // Exact config from mistralai/Mistral-7B-Instruct-v0.3 — head_dim null
     let config = serde_json::json!({
@@ -680,7 +707,8 @@ fn test_real_mistral_7b_v03() {
     assert!(arch.sliding_window_size().is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_real_tinyllama() {
     // Exact config from TinyLlama/TinyLlama-1.1B-Chat-v1.0
     let config = serde_json::json!({
@@ -701,7 +729,8 @@ fn test_real_tinyllama() {
     assert_eq!(arch.config().rope_base, 10_000.0);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_real_mixtral_8x7b() {
     // Exact config from mistralai/Mixtral-8x7B-Instruct-v0.1
     let config = serde_json::json!({
@@ -745,7 +774,8 @@ fn test_real_mixtral_8x7b() {
     assert_eq!(arch.attn_q_key(0), "layers.0.self_attn.q_proj.weight");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_real_starcoder2_3b() {
     // Exact config from bigcode/starcoder2-3b
     let config = serde_json::json!({
@@ -768,7 +798,8 @@ fn test_real_starcoder2_3b() {
     assert!(!arch.is_moe());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_real_granite_2b() {
     // Exact config from ibm-granite/granite-3.1-2b-base
     let config = serde_json::json!({
@@ -789,7 +820,8 @@ fn test_real_granite_2b() {
     assert!(!arch.is_moe());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_real_granitemoe() {
     // Exact config from ibm-granite/granite-3.0-1b-a400m-instruct
     let config = serde_json::json!({
@@ -811,7 +843,8 @@ fn test_real_granitemoe() {
     assert_eq!(arch.config().num_experts_per_token, Some(8));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_real_qwen2_moe() {
     // Exact config from Qwen/Qwen1.5-MoE-A2.7B-Chat
     let config = serde_json::json!({
@@ -831,7 +864,8 @@ fn test_real_qwen2_moe() {
     assert_eq!(arch.family(), "qwen2_moe");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_gemma4_31b() {
     // Real Gemma 4 31B config — matches actual HuggingFace config.json
     let config = serde_json::json!({
@@ -948,7 +982,8 @@ fn test_detect_gemma4_31b() {
     assert!(!arch.has_per_layer_embeddings());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_gemma4_e2b() {
     // Real E2B config with PLE, KV sharing, global_head_dim, layer_types
     let config = serde_json::json!({
@@ -1047,7 +1082,7 @@ fn test_detect_gemma4_e2b() {
     assert!(!arch.v_shares_k(0));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn test_detect_gemma4_real_config() {
     // Test against the actual HuggingFace config.json if available
     let config_path = std::env::var("HOME").ok().map(|h| {
@@ -1102,7 +1137,8 @@ fn test_detect_gemma4_real_config() {
     assert_eq!(arch.rope_base_for_layer(5), 1_000_000.0);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_gemma4_26b_a4b() {
     // Gemma 4 26B A4B — hybrid dense-MLP + MoE per layer.
     // Architecture: 30 layers, hidden=2816, dense_intermediate=9216,
@@ -1204,7 +1240,8 @@ fn test_detect_gemma4_26b_a4b() {
     assert_eq!(arch.bos_token_id(), Some(2));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_empty_config_has_zero_topology_not_a_silent_default() {
     // `detect_from_json` is infallible to keep in-memory test ergonomics
     // simple, but it must NOT invent topology values. A guess-default
@@ -1239,7 +1276,7 @@ fn expect_detect_err(model_dir: &std::path::Path) -> ModelError {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn detect_architecture_errors_when_config_json_is_missing() {
     let tmp = tempfile::tempdir().unwrap();
     // No config.json at all — the failure mode reported in issue #22
@@ -1254,7 +1291,7 @@ fn detect_architecture_errors_when_config_json_is_missing() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn detect_architecture_errors_when_required_fields_are_missing() {
     let tmp = tempfile::tempdir().unwrap();
     // config.json exists but is empty — previously the silent
@@ -1274,7 +1311,7 @@ fn detect_architecture_errors_when_required_fields_are_missing() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn detect_architecture_reports_only_the_missing_required_fields() {
     let tmp = tempfile::tempdir().unwrap();
     // Two of three required fields present — only the one absent
@@ -1296,7 +1333,7 @@ fn detect_architecture_reports_only_the_missing_required_fields() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn detect_architecture_accepts_nested_text_config() {
     let tmp = tempfile::tempdir().unwrap();
     // Multimodal layout (Gemma 3 IT): required fields live under
@@ -1319,7 +1356,7 @@ fn detect_architecture_accepts_nested_text_config() {
     assert_eq!(arch.config().intermediate_size, 10240);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn detect_architecture_accepts_flat_config() {
     let tmp = tempfile::tempdir().unwrap();
     // Text-only model with required fields at the top level (no
@@ -1340,7 +1377,7 @@ fn detect_architecture_accepts_flat_config() {
     assert_eq!(arch.config().intermediate_size, 11008);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn detect_architecture_falls_back_to_top_level_when_text_config_omits_field() {
     let tmp = tempfile::tempdir().unwrap();
     // Mixed layout: `text_config` carries some required fields, the
@@ -1364,7 +1401,7 @@ fn detect_architecture_falls_back_to_top_level_when_text_config_omits_field() {
     assert_eq!(arch.config().intermediate_size, 10240);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn detect_architecture_validated_propagates_missing_config_error() {
     // The validated entrypoint is what the streaming extractor calls
     // (`build_streaming_index` in larql-vindex). It must surface the
@@ -1377,7 +1414,8 @@ fn detect_architecture_validated_propagates_missing_config_error() {
     assert!(matches!(err, ModelError::ConfigMissing(_)));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_deepseek_v4() {
     // DeepSeek-V4 detection routes via the explicit `model_type ==
     // "deepseek_v4"` arm in detect.rs (added in PR #76). Distinct from
@@ -1490,7 +1528,8 @@ fn test_detect_deepseek_v4() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_detect_deepseek_v4_defaults_when_optional_fields_missing() {
     // V4's MoE / MLA defaults fire when the upstream config omits the
     // expert-count / lora-rank fields. Pin those defaults so accidental

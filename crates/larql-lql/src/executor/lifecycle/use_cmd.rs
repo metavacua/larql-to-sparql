@@ -15,10 +15,22 @@ impl Session {
         match target {
             UseTarget::Vindex(path_str) => {
                 // Resolve hf:// paths to local cache
+                #[cfg(not(target_arch = "wasm32"))]
                 let path = if larql_vindex::is_hf_path(path_str) {
                     larql_vindex::resolve_hf_vindex(path_str)
                         .map_err(|e| LqlError::exec("HuggingFace download failed", e))?
                 } else {
+                    let p = PathBuf::from(path_str);
+                    if !p.exists() {
+                        return Err(LqlError::Execution(format!(
+                            "vindex not found: {}",
+                            p.display()
+                        )));
+                    }
+                    p
+                };
+                #[cfg(target_arch = "wasm32")]
+                let path = {
                     let p = PathBuf::from(path_str);
                     if !p.exists() {
                         return Err(LqlError::Execution(format!(
@@ -133,7 +145,12 @@ impl Session {
                 self.auto_patch = false;
                 Ok(out)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             UseTarget::Remote(url) => self.exec_use_remote(url),
+            #[cfg(target_arch = "wasm32")]
+            UseTarget::Remote(_) => Err(LqlError::Execution(
+                "remote backends are not supported in WASM builds".into(),
+            )),
         }
     }
 }

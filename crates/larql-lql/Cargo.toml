@@ -13,8 +13,6 @@ larql-inference = { path = "../larql-inference" }
 larql-models = { path = "../larql-models" }
 larql-vindex = { path = "../larql-vindex" }
 ndarray = "0.16"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-rustyline = "15"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,8 +23,13 @@ default = []
 # Mirrors the features in those crates so workspace tests can be built
 # with `--features metal` from this package.
 metal = ["larql-compute/metal", "larql-inference/metal", "larql-vindex/metal"]
+# Opt-in gate for the Firefox browser-based wasm_bindgen_test runner.
+browser-tests = []
 
 [dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = "0.5"
 # Mocked HTTP server for testing the Remote backend's forwarders
 # without spinning up a real `larql-server`. Each test wires a
@@ -45,3 +48,14 @@ harness = false
 [[bench]]
 name = "compile"
 harness = false
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rustyline = "15"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+[package.metadata.wasm]
+split-candidate = true

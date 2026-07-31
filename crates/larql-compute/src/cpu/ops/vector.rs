@@ -34,40 +34,49 @@ mod tests {
     use super::*;
     use ndarray::Array1;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dot_basic() {
         let a = Array1::from_vec(vec![1.0, 2.0, 3.0]);
         let b = Array1::from_vec(vec![4.0, 5.0, 6.0]);
         assert!((dot(&a.view(), &b.view()) - 32.0).abs() < 1e-5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dot_orthogonal() {
         let a = Array1::from_vec(vec![1.0, 0.0]);
         let b = Array1::from_vec(vec![0.0, 1.0]);
         assert!((dot(&a.view(), &b.view()) - 0.0).abs() < 1e-5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn norm_unit() {
         let a = Array1::from_vec(vec![3.0, 4.0]);
         assert!((norm(&a.view()) - 5.0).abs() < 1e-5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cosine_identical() {
         let a = Array1::from_vec(vec![1.0, 2.0, 3.0]);
         assert!((cosine(&a.view(), &a.view()) - 1.0).abs() < 1e-5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cosine_orthogonal() {
         let a = Array1::from_vec(vec![1.0, 0.0]);
         let b = Array1::from_vec(vec![0.0, 1.0]);
         assert!((cosine(&a.view(), &b.view()) - 0.0).abs() < 1e-5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cosine_opposite() {
         let a = Array1::from_vec(vec![1.0, 0.0]);
         let b = Array1::from_vec(vec![-1.0, 0.0]);

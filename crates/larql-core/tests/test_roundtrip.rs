@@ -1,3 +1,6 @@
+#[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use larql_core::*;
 
 fn sample_graph() -> Graph {
@@ -41,7 +44,8 @@ fn assert_graphs_equal(a: &Graph, b: &Graph) {
 
 // ── JSON roundtrip ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_json_value_roundtrip() {
     let g = sample_graph();
     let json = g.to_json_value();
@@ -49,7 +53,8 @@ fn test_json_value_roundtrip() {
     assert_graphs_equal(&g, &restored);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_json_bytes_roundtrip() {
     let g = sample_graph();
     let bytes = to_bytes(&g, Format::Json).unwrap();
@@ -58,6 +63,7 @@ fn test_json_bytes_roundtrip() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_json_file_roundtrip() {
     let g = sample_graph();
     let path = std::env::temp_dir().join("test_roundtrip.larql.json");
@@ -67,7 +73,8 @@ fn test_json_file_roundtrip() {
     std::fs::remove_file(&path).ok();
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_json_preserves_confidence() {
     let g = sample_graph();
     let json = g.to_json_value();
@@ -91,7 +98,8 @@ fn test_json_preserves_confidence() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_json_preserves_source() {
     let g = sample_graph();
     let json = g.to_json_value();
@@ -104,7 +112,8 @@ fn test_json_preserves_source() {
     assert_eq!(germany_cap[0].source, SourceType::Wikidata);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_json_preserves_metadata() {
     let g = sample_graph();
     let json = g.to_json_value();
@@ -115,7 +124,8 @@ fn test_json_preserves_metadata() {
     assert_eq!(meta["model"], "gemma-3");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_json_format_structure() {
     let g = sample_graph();
     let json = g.to_json_value();
@@ -136,7 +146,8 @@ fn test_json_format_structure() {
 
 // ── MessagePack roundtrip ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg(feature = "msgpack")]
 fn test_msgpack_bytes_roundtrip() {
     let g = sample_graph();
@@ -146,6 +157,7 @@ fn test_msgpack_bytes_roundtrip() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg(feature = "msgpack")]
 fn test_msgpack_file_roundtrip() {
     let g = sample_graph();
@@ -156,7 +168,8 @@ fn test_msgpack_file_roundtrip() {
     std::fs::remove_file(&path).ok();
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg(feature = "msgpack")]
 fn test_msgpack_preserves_confidence() {
     let g = sample_graph();
@@ -176,7 +189,8 @@ fn test_msgpack_preserves_confidence() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg(feature = "msgpack")]
 fn test_msgpack_smaller_than_json() {
     let g = sample_graph();
@@ -192,7 +206,8 @@ fn test_msgpack_smaller_than_json() {
 
 // ── Cross-format ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg(feature = "msgpack")]
 fn test_json_to_msgpack_roundtrip() {
     let g = sample_graph();
@@ -205,7 +220,8 @@ fn test_json_to_msgpack_roundtrip() {
 
 // ── Format detection ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_format_from_path() {
     assert_eq!(Format::from_path("graph.larql.json"), Some(Format::Json));
     assert_eq!(Format::from_path("graph.json"), Some(Format::Json));
@@ -232,7 +248,8 @@ fn test_format_from_path() {
 
 // ── Empty graph ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_empty_graph_roundtrip() {
     let g = Graph::new();
     let json = g.to_json_value();

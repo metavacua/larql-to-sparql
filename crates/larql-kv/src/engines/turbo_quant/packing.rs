@@ -86,7 +86,11 @@ fn unpack_3bit(data: &[u8], count: usize) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_4bit_roundtrip() {
         let indices: Vec<u8> = (0..256).map(|i| (i % 16) as u8).collect();
         let mut packed = Vec::new();
@@ -95,7 +99,8 @@ mod tests {
         assert_eq!(indices, unpacked);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_3bit_roundtrip() {
         let indices: Vec<u8> = (0..256).map(|i| (i % 8) as u8).collect();
         let mut packed = Vec::new();
@@ -104,14 +109,16 @@ mod tests {
         assert_eq!(indices, unpacked);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_4bit_packed_size() {
         assert_eq!(packed_size(256, 4), 128);
         assert_eq!(packed_size(255, 4), 128);
         assert_eq!(packed_size(1, 4), 1);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_3bit_packed_size() {
         assert_eq!(packed_size(8, 3), 3);
         assert_eq!(packed_size(256, 3), 96);

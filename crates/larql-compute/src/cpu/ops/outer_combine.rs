@@ -88,7 +88,11 @@ fn rms_f32(x: &[f32], eps: f32) -> f32 {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn outer_post_norm_residual_matches_handwritten_metal_logic() {
         // Reference: handwritten copy of Metal's `apply_outer_norm`
         // applied to the same inputs. Any divergence here means the
@@ -122,7 +126,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn outer_post_norm_residual_skips_norm_when_weight_none() {
         // No outer norm → output is just `h_post_attn + h1_plus_h2`.
         // Mirrors Metal's `if let Some(outer_w) = outer_w` guard —
@@ -135,7 +140,8 @@ mod tests {
         assert_eq!(got, vec![1.1, 2.2, 3.3]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn norm_offset_is_added_to_each_weight() {
         // Gemma 2/3 ships RMSNorm weights as (learned - 1.0) so the
         // forward pass must add `norm_offset = 1.0` per element.
@@ -152,7 +158,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn apply_layer_scalar_in_place_skips_identity_and_zero() {
         let mut h = vec![1.0f32, 2.0, 3.0];
         let original = h.clone();
@@ -164,7 +171,8 @@ mod tests {
         assert_eq!(h, original, "layer_scalar=0.0 must skip (would collapse)");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn apply_layer_scalar_in_place_multiplies() {
         let mut h = vec![1.0f32, 2.0, 3.0];
         apply_layer_scalar_in_place(&mut h, 2.5);

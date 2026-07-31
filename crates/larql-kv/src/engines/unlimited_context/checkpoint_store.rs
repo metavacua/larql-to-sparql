@@ -67,6 +67,9 @@ mod tests {
     use super::*;
     use ndarray::Array2;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn mk_kv(layers: usize, kv_dim: usize) -> Vec<SharedKV> {
         (0..layers)
             .map(|l| {
@@ -81,7 +84,8 @@ mod tests {
             .collect()
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn save_and_load_roundtrip() {
         let mut store = CheckpointStore::new();
         let kv = mk_kv(4, 8);
@@ -94,7 +98,8 @@ mod tests {
         assert_eq!(loaded[0].0.shape(), &[1, 8]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn evict_removes_window() {
         let mut store = CheckpointStore::new();
         store.save(0, mk_kv(2, 4), 0);
@@ -106,7 +111,8 @@ mod tests {
         assert!(store.contains(1));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn total_bytes_scales_with_layers_and_dim() {
         let mut store = CheckpointStore::new();
         store.save(0, mk_kv(4, 8), 0);
@@ -114,20 +120,22 @@ mod tests {
         assert_eq!(store.total_bytes(), 4 * 2 * 8 * 4);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn is_empty_on_new_store() {
         let store = CheckpointStore::new();
         assert!(store.is_empty());
         assert_eq!(store.len(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn load_missing_returns_none() {
         let store = CheckpointStore::new();
         assert!(store.load(42).is_none());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[should_panic]
     fn save_rejects_multi_row_kv_in_debug() {
         let mut store = CheckpointStore::new();

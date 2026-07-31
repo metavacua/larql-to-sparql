@@ -1036,10 +1036,14 @@ mod tests {
     use super::*;
     use crate::cpu::ops::q4_common::{q4k_matvec_into, quantize_q4_k, quantize_q6_k};
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     /// Q8_K round-trip should reconstruct within 0.5% of absmax (1 LSB on
     /// the 127-step scale).  Sums must equal the literal i32 sums of the
     /// quantised values per sub-block.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_quantize_round_trip_within_quant_step() {
         let x: Vec<f32> = (0..256).map(|i| (i as f32 / 128.0 - 1.0) * 5.0).collect();
         let q = quantize_x_to_q8k(&x);
@@ -1064,7 +1068,8 @@ mod tests {
     }
 
     /// Q8_K of all-zeros should produce zero scale + all-zero sums.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_zero_input_clean() {
         let x = vec![0.0f32; 256];
         let q = quantize_x_to_q8k(&x);
@@ -1078,7 +1083,8 @@ mod tests {
     /// the f32 dot `q4_common::q4k_matvec_into`, the other quantises x to
     /// Q8_K and runs the integer-dot reference.  Difference should be on
     /// the order of `‖w‖ · ε_q8 · ‖x‖`, well below 1e-3 for typical inputs.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_matvec_matches_f32_cached_within_q8_noise() {
         // Single super-block, single row matrix.
         let cols = 256;
@@ -1114,7 +1120,8 @@ mod tests {
 
     /// Multi-block matrix: hidden=512 = 2 super-blocks per row.  Stresses
     /// the per-super-block aggregation (`acc += ...` summed over 2+ blocks).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_matvec_multi_block_within_noise() {
         let cols = 512; // 2 super-blocks
         let rows = 16;
@@ -1147,7 +1154,8 @@ mod tests {
     /// from the noise tests above to catch byte-ordering / lane-mapping
     /// bugs that happen to vanish on regular ramps.
     #[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_matvec_neon_matches_scalar_bit_exact() {
         let cols = 1024; // 4 super-blocks — exercises sb-loop + g-loop
         let rows = 7; // odd row count — exercises tail handling
@@ -1188,7 +1196,8 @@ mod tests {
     /// `quantize_x_to_q8k_into` must produce the same `qs`, `d`, `sums` as
     /// the allocating `quantize_x_to_q8k` for any well-sized input — both
     /// also handle resize correctly when reused across different sizes.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_in_place_matches_alloc_version() {
         let x: Vec<f32> = (0..512).map(|i| (i as f32 * 0.013).sin() * 3.0).collect();
         let alloc_q = quantize_x_to_q8k(&x);
@@ -1217,7 +1226,8 @@ mod tests {
     /// instruction scheduling differs.  Test on both even and odd row
     /// counts so the tail-handling path is exercised.
     #[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_matvec_2row_matches_single_row_bit_exact() {
         for &rows in &[2usize, 4, 7, 11, 16, 17] {
             let cols = 1024;
@@ -1251,7 +1261,8 @@ mod tests {
     /// Fused gate+up must produce bit-exact outputs equal to two separate
     /// matvec calls — both compile down to the same i32 dot math; only the
     /// instruction interleaving differs.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_gate_up_fused_matches_separate_matvecs() {
         let cols = 1024;
         let rows = 11;
@@ -1296,7 +1307,8 @@ mod tests {
     }
 
     /// Empty / degenerate dims should produce zeros without panic.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_matvec_zero_dims_returns_zero() {
         let q = Q8KActivation {
             qs: vec![],
@@ -1310,7 +1322,8 @@ mod tests {
 
     /// Misaligned col count (not a multiple of 256) should fail safely
     /// (leave caller-visible zeros, like the scalar `q4k_matvec_into`).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_matvec_short_weight_buffer_returns_zero() {
         let cols = 256;
         let rows = 2;
@@ -1322,7 +1335,8 @@ mod tests {
         assert!(out.iter().all(|&v| v == 0.0));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6k_q8k_matvec_matches_q6k_f32_dispatch_within_noise() {
         let cols = 512;
         let rows = 5;
@@ -1348,7 +1362,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6k_q8k_public_entrypoint_matches_scalar() {
         let cols = 256;
         let rows = 3;
@@ -1369,7 +1384,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6k_q8k_zero_dims_and_short_weights_zero_output() {
         let q = Q8KActivation::with_capacity(0);
         let mut out = vec![1.0f32; 4];
@@ -1385,7 +1401,8 @@ mod tests {
 
     /// AVX2 must produce bit-identical output to the scalar reference.
     #[cfg(target_arch = "x86_64")]
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8k_matvec_avx2_matches_scalar() {
         if !is_x86_feature_detected!("avx2") {
             return; // Skip on hardware without AVX2.

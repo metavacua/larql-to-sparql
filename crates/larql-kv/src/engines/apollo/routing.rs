@@ -106,6 +106,9 @@ mod tests {
     use super::*;
     use crate::engines::apollo::store::{ArchConfig, StoreManifest};
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn mk_store(per_window_tokens: Vec<Vec<u32>>) -> ApolloStore {
         ApolloStore {
             manifest: StoreManifest {
@@ -126,14 +129,16 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn empty_index_is_zero_bytes() {
         let r = RoutingIndex::new();
         assert!(r.is_empty());
         assert_eq!(r.total_bytes(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn resolve_ranks_matching_windows_first() {
         // window 0 contains token 42 twice, window 1 contains it once, window
         // 2 doesn't. Query on 42 should rank 0 > 1 > (2 dropped).
@@ -146,7 +151,8 @@ mod tests {
         assert_eq!(res, vec![0, 1]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn resolve_ignores_ubiquitous_terms() {
         // Token 99 appears in every window — df == N, so it's skipped.
         // Token 7 only in window 1, so query {99, 7} should pick window 1.
@@ -159,7 +165,8 @@ mod tests {
         assert_eq!(res[0], 1);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn resolve_empty_query_returns_nothing() {
         let store = mk_store(vec![vec![1, 2, 3]]);
         let idx = RoutingIndex::from_store(&store);

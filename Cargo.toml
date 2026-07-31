@@ -19,6 +19,20 @@ members = [
     "crates/larql-boundary",
     # portable (extract to sibling repos later, names stable)
     "crates/model-compute",
+    # WASM bindings for browser/Node.js (serial + parallel variants)
+    "crates/larql-wasm",
+    # Browser CLI — LQL session and inference surface compiled to WASM
+    "crates/larql-browser-cli",
+    # VIndex WASM32 bindings — compressed subgraph KNN in the browser
+    "crates/larql-vindex-wasm32uu",
+    # VIndex subcrate trio (split from larql-vindex by capability tier)
+    "crates/larql-vindex-wasi",
+    "crates/larql-vindex-os",
+    # no_std portable core (wasm32v1-none tier) + compile oracle binary
+    "crates/larql-wasm32v1-none-lib",
+    "crates/larql-wasm32v1-none-bin",
+    # Build and certification automation (not in default-members)
+    "crates/xtask",
 ]
 default-members = [
     "crates/larql-models",
@@ -56,6 +70,8 @@ repository = "https://github.com/chrishayuk/chuk-larql-rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+getrandom    = { version = "0.2", features = ["js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 [profile.dev]
 debug = "line-tables-only"

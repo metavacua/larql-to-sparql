@@ -299,6 +299,9 @@ fn parse_shape(header: &str) -> Option<Vec<usize>> {
 mod tests {
     use super::*;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     /// Build a minimal .npy v1.0 blob for an f32 1D array of given values.
     fn synth_f32_1d(values: &[f32]) -> Vec<u8> {
         let header = format!(
@@ -327,7 +330,8 @@ mod tests {
         out
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_1d_f32_roundtrip() {
         let vals = [1.0f32, 2.0, 3.0, -4.5, 0.125];
         let blob = synth_f32_1d(&vals);
@@ -335,19 +339,22 @@ mod tests {
         assert_eq!(parsed, vals.to_vec());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_shape_handles_multiple_dims() {
         let hdr = "{'shape': (1, 1, 2560), 'fortran_order': False}";
         assert_eq!(parse_shape(hdr), Some(vec![1, 1, 2560]));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_shape_handles_trailing_comma() {
         let hdr = "{'shape': (3585, ), 'fortran_order': False}";
         assert_eq!(parse_shape(hdr), Some(vec![3585]));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dtype_mismatch_reports_what_was_found() {
         let vals = [1.0f32, 2.0];
         let blob = synth_f32_1d(&vals);
@@ -406,14 +413,16 @@ mod tests {
         out
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn read_u32_1d_roundtrip() {
         let vals = [1u32, 7, 42, 999, u32::MAX];
         let blob = synth_u32_1d(&vals);
         assert_eq!(read_u32_1d(&blob).unwrap(), vals.to_vec());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn read_f32_flat_2d_roundtrip() {
         let vals = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let blob = synth_f32_flat(&vals, 2, 3);
@@ -424,13 +433,15 @@ mod tests {
 
     // ── Error paths ───────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_header_rejects_short_input() {
         let err = parse_header(&[0u8; 5]).unwrap_err();
         assert!(matches!(err, NpyError::TruncatedHeader));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_header_rejects_bad_magic() {
         let mut bad = vec![0u8; 16];
         bad[..6].copy_from_slice(b"\x00WRONG");
@@ -438,7 +449,8 @@ mod tests {
         assert!(matches!(err, NpyError::BadMagic));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_header_rejects_v2() {
         let mut blob = vec![0u8; 16];
         blob[..6].copy_from_slice(b"\x93NUMPY");
@@ -451,7 +463,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_header_truncated_after_header_len() {
         // Magic + ver + a header_len that points past the buffer end.
         let mut blob = Vec::new();
@@ -464,7 +477,8 @@ mod tests {
         assert!(matches!(err, NpyError::TruncatedHeader));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_header_invalid_utf8_in_header() {
         let mut blob = Vec::new();
         blob.extend_from_slice(b"\x93NUMPY");
@@ -477,7 +491,8 @@ mod tests {
         assert!(matches!(err, NpyError::InvalidUtf8(_)));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn read_f32_1d_data_length_mismatch() {
         let mut blob = synth_f32_1d(&[1.0f32, 2.0, 3.0]);
         // Drop two bytes from the data tail.
@@ -493,7 +508,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn read_f32_1d_rejects_2d() {
         // 2D blob handed to a 1D reader → ParseField on shape.
         let blob = synth_f32_flat(&[1.0f32, 2.0, 3.0, 4.0], 2, 2);
@@ -504,7 +520,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn read_u32_1d_rejects_2d() {
         let header = "{'descr': '<u4', 'fortran_order': False, 'shape': (2, 2), }".to_string();
         let mut padded = header.into_bytes();
@@ -531,7 +548,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fortran_order_rejected() {
         let header = "{'descr': '<f4', 'fortran_order': True, 'shape': (2,), }".to_string();
         let mut padded = header.into_bytes();
@@ -555,13 +573,15 @@ mod tests {
 
     // ── Header field-parsing helpers ──────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_field_value_quoted_string() {
         let h = "{'descr': '<f4', 'fortran_order': False}";
         assert_eq!(parse_field_value(h, "descr"), Some("<f4".into()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_field_value_double_quoted_string() {
         let h = "{\"descr\": \"<f4\", \"fortran_order\": False}";
         // double-quoted name lookup works for the specific quoting we use
@@ -571,7 +591,8 @@ mod tests {
         assert_eq!(parse_field_value(h, "descr"), None);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_field_value_list_literal() {
         let h = "{'descr': [('token_id', '<u4'), ('coef', '<f4')], 'shape': (3,)}";
         let descr = parse_field_value(h, "descr").unwrap();
@@ -580,26 +601,30 @@ mod tests {
         assert!(descr.contains("token_id"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_field_value_tuple_literal() {
         let h = "{'shape': (3, 4, 5), 'fortran_order': False}";
         let val = parse_field_value(h, "shape").unwrap();
         assert_eq!(val, "(3, 4, 5)");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_field_value_bare_token() {
         let h = "{'fortran_order': False, 'descr': '<f4'}";
         assert_eq!(parse_field_value(h, "fortran_order"), Some("False".into()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_field_value_missing_field() {
         let h = "{'descr': '<f4'}";
         assert!(parse_field_value(h, "shape").is_none());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_bool_field_true_false_invalid() {
         let h_t = "{'fortran_order': True}";
         let h_f = "{'fortran_order': False}";
@@ -611,19 +636,22 @@ mod tests {
         assert_eq!(parse_bool_field(h_m, "fortran_order"), None);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_shape_no_match() {
         let h = "{'descr': '<f4', 'fortran_order': False}";
         assert_eq!(parse_shape(h), None);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_shape_unparseable_dim() {
         let h = "{'shape': (3, abc, 5)}";
         assert!(parse_shape(h).is_none());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parse_shape_zero_dim_ok() {
         let h = "{'shape': (0,)}";
         assert_eq!(parse_shape(h), Some(vec![0]));

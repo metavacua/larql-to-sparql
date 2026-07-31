@@ -248,7 +248,10 @@ pub fn resolve_shorthand_from(
 pub fn resolve_model(model: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // 1. hf:// URI — defer to the vindex crate. Downloads if not cached.
     if model.starts_with("hf://") {
+        #[cfg(not(target_arch = "wasm32"))]
         return Ok(larql_vindex::resolve_hf_vindex(model)?);
+        #[cfg(target_arch = "wasm32")]
+        return Err("HuggingFace paths are not supported in WASM builds".into());
     }
 
     // 2. Already a local directory.
@@ -267,7 +270,13 @@ pub fn resolve_model(model: &str) -> Result<PathBuf, Box<dyn std::error::Error>>
         if let Some(hit) = cache.iter().find(|c| c.repo == model) {
             return Ok(hit.snapshot.clone());
         }
+        #[cfg(not(target_arch = "wasm32"))]
         return Ok(larql_vindex::resolve_hf_vindex(&format!("hf://{model}"))?);
+        #[cfg(target_arch = "wasm32")]
+        return Err(format!(
+            "HuggingFace repo '{model}' requires network access (not available in WASM)"
+        )
+        .into());
     }
 
     // 4. Plain name — look up by cache shorthand.

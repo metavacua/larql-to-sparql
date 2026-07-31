@@ -1,0 +1,165 @@
+# larql-wasm WASM CI
+#
+# larql-wasm IS the browser/Node.js WASM binding crate. All tests are tagged
+# #[wasm_bindgen_test].
+#
+# Serial tests (tests/serial.rs) configure run_in_node_experimental and run
+# under Node.js with stable Rust.
+#
+# Parallel tests (tests/parallel.rs) require a real browser environment:
+# wasm-bindgen-rayon spawns Web Workers and references the browser `self`
+# global, which Node.js does not expose.  They run under headless Firefox with
+# nightly + atomics target features (SharedArrayBuffer).
+
+name: larql-wasm-wasm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-wasm/**'
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-wasm-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-wasm/**'
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-wasm-wasm.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: wasm · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: serial
+            toolchain: stable
+            rustflags: ''
+          - name: parallel
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.121
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Install geckodriver
+        run: |
+          VER=$(curl -fsSL https://api.github.com/repos/mozilla/geckodriver/releases/latest \
+            | grep '"tag_name"' | head -1 | sed -E 's/.*"(v[^"]+)".*/\1/')
+          curl -fsSL "https://github.com/mozilla/geckodriver/releases/download/${VER}/geckodriver-${VER}-linux64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin/
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cargo-larql-wasm-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cargo-larql-wasm-${{ matrix.mode.name }}-
+
+      - name: Format check
+        run: cargo fmt -p larql-wasm -- --check
+
+      - name: Check
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-wasm --target wasm32-unknown-unknown ${{ matrix.mode.features }}
+
+      - name: Clippy
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo clippy -p larql-wasm --target wasm32-unknown-unknown ${{ matrix.mode.features }} -- -D warnings
+
+      # Serial: serial.rs configures run_in_node_experimental → Node.js (dynamic WASM32).
+      - name: cargo test · wasm32 · node (dynamic)
+        if: matrix.mode.name == 'serial'
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo test -p larql-wasm --target wasm32-unknown-unknown
+
+      # Parallel: parallel.rs has no configure macro (defaults to browser) and
+      # uses wasm-bindgen-rayon Web Workers → Firefox required (static WASM32).
+      - name: cargo test · wasm32 · firefox (static)
+        if: matrix.mode.name == 'parallel'
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo test -p larql-wasm --target wasm32-unknown-unknown --features parallel
+
+  # ── Coverage: serial/Node.js only ─────────────────────────────────────────
+  # serial.rs configures run_in_node_experimental → Node.js → .profraw can be
+  # written to the host filesystem. parallel.rs requires a browser sandbox
+  # (Web Workers) → coverage-hostile by design; omitted here.
+  coverage:
+    name: coverage · wasm32 · node
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.121
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cov-larql-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cov-larql-wasm-
+
+      - name: Coverage summary (wasm32 · Node.js · dynamic)
+        run: cargo llvm-cov --target wasm32-unknown-unknown --package larql-wasm --summary-only

@@ -9,8 +9,11 @@ pub mod cache;
 pub mod diag_cmd;
 pub mod link_cmd;
 pub mod list_cmd;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod model_cmd;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod publish_cmd;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod pull_cmd;
 pub mod rm_cmd;
 pub mod run_cmd;

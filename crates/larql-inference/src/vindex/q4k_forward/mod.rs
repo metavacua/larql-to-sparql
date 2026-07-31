@@ -18,10 +18,11 @@ mod tensors;
 mod walk_ffn;
 
 pub(crate) use generation::generate_q4k_cpu_constrained_streaming_sampled_with_eos;
+#[cfg(not(target_arch = "wasm32"))]
+pub use generation::generate_q4k_cpu_remote;
 pub use generation::{
     generate_q4k_cpu, generate_q4k_cpu_constrained, generate_q4k_cpu_constrained_streaming,
-    generate_q4k_cpu_constrained_streaming_sampled, generate_q4k_cpu_remote, is_end_of_turn,
-    predict_q4k,
+    generate_q4k_cpu_constrained_streaming_sampled, is_end_of_turn, predict_q4k,
 };
 pub use hidden::predict_q4k_hidden;
 pub use hooks::predict_q4k_hidden_hooked;

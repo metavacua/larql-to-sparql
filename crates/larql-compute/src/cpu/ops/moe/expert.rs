@@ -12,6 +12,26 @@ use crate::cpu::ops::q4k_q8k_dot::{
     q4k_q8k_matvec_into, quantize_x_to_q8k, quantize_x_to_q8k_into, Q8KActivation,
 };
 use crate::options;
+
+// Timing abstraction: on non-wasm32 we use std::time::Instant; on
+// wasm32-unknown-unknown Instant panics at runtime, so we supply a
+// zero-cost no-op stub that satisfies the type-checker without executing
+// any real syscall.  timing=false in all wasm32 test runs so these stubs
+// are dead code — they just let the timing branches compile.
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+#[derive(Copy, Clone)]
+struct Instant;
+#[cfg(target_arch = "wasm32")]
+impl Instant {
+    fn now() -> Self {
+        Self
+    }
+    fn elapsed(self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+}
 // `q4k_q8k_gate_up_into` exists for future kernel exploration but is not
 // wired into the hot path — see comment in `run_single_expert_q4k_q8k_into`.
 
@@ -233,7 +253,7 @@ pub fn run_single_expert_into<'s>(
             options::env_flag(options::ENV_MOE_EXPERT_TIMING);
     }
     let timing = EXPERT_TIMING.with(|t| *t);
-    let mut t = std::time::Instant::now();
+    let mut t = Instant::now();
 
     // Q4_K direct matvec is available via `LARQL_Q4K_DIRECT=1` but stays
     // OFF by default — on Apple Silicon the scalar inner loop loses to
@@ -267,7 +287,7 @@ pub fn run_single_expert_into<'s>(
     };
     let t_cache_gu = if timing { Some(t.elapsed()) } else { None };
     if timing {
-        t = std::time::Instant::now();
+        t = Instant::now();
     }
 
     if q4k_path {
@@ -279,12 +299,12 @@ pub fn run_single_expert_into<'s>(
         q4k_matvec_into(&mut scratch.gate_out, h_norm, gate_bytes, inter, hidden);
         let t_gate = if timing { Some(t.elapsed()) } else { None };
         if timing {
-            t = std::time::Instant::now();
+            t = Instant::now();
         }
         q4k_matvec_into(&mut scratch.up_out, h_norm, up_bytes, inter, hidden);
         let t_up = if timing { Some(t.elapsed()) } else { None };
         if timing {
-            t = std::time::Instant::now();
+            t = Instant::now();
         }
         for j in 0..inter {
             let g = scratch.gate_out[j];
@@ -296,7 +316,7 @@ pub fn run_single_expert_into<'s>(
         }
         let t_act = if timing { Some(t.elapsed()) } else { None };
         if timing {
-            t = std::time::Instant::now();
+            t = Instant::now();
         }
         q4k_matvec_into(
             &mut scratch.out,
@@ -331,13 +351,13 @@ pub fn run_single_expert_into<'s>(
     matmul_vec_into(&mut scratch.gate_out, h_norm, gate_w, inter, hidden);
     let t_gate = if timing { Some(t.elapsed()) } else { None };
     if timing {
-        t = std::time::Instant::now();
+        t = Instant::now();
     }
 
     matmul_vec_into(&mut scratch.up_out, h_norm, up_w, inter, hidden);
     let t_up = if timing { Some(t.elapsed()) } else { None };
     if timing {
-        t = std::time::Instant::now();
+        t = Instant::now();
     }
 
     // Build inner activation at `inter_padded`; padding columns
@@ -353,7 +373,7 @@ pub fn run_single_expert_into<'s>(
     }
     let t_act = if timing { Some(t.elapsed()) } else { None };
     if timing {
-        t = std::time::Instant::now();
+        t = Instant::now();
     }
 
     let down_w = try_cached_dequant(down_bytes, format, hidden * inter_padded)
@@ -366,7 +386,7 @@ pub fn run_single_expert_into<'s>(
     }
     let t_cache_dn = if timing { Some(t.elapsed()) } else { None };
     if timing {
-        t = std::time::Instant::now();
+        t = Instant::now();
     }
 
     matmul_vec_into(
@@ -461,7 +481,7 @@ pub fn run_single_expert_q4k_q8k_into<'s>(
     let gate_bytes = &gate_up_bytes[..half];
     let up_bytes = &gate_up_bytes[half..2 * half];
 
-    let mut t = std::time::Instant::now();
+    let mut t = Instant::now();
     // Back-to-back gate + up matvecs.  Tried fused-gate+up via
     // `q4k_q8k_gate_up_into` (2026-05-01): bench was within noise on the
     // single-layer floor and ~4% slower on the 30-layer sweep — the M3 Max
@@ -473,13 +493,13 @@ pub fn run_single_expert_q4k_q8k_into<'s>(
     q4k_q8k_matvec_into(&mut scratch.gate_out, h_norm_q8k, gate_bytes, inter, hidden);
     let t_gate = if timing { Some(t.elapsed()) } else { None };
     if timing {
-        t = std::time::Instant::now();
+        t = Instant::now();
     }
 
     q4k_q8k_matvec_into(&mut scratch.up_out, h_norm_q8k, up_bytes, inter, hidden);
     let t_up = if timing { Some(t.elapsed()) } else { None };
     if timing {
-        t = std::time::Instant::now();
+        t = Instant::now();
     }
 
     // GELU/SiLU(gate) ⊙ up.  Padding columns (`inter..inter_padded`) stay
@@ -495,7 +515,7 @@ pub fn run_single_expert_q4k_q8k_into<'s>(
     }
     let t_act = if timing { Some(t.elapsed()) } else { None };
     if timing {
-        t = std::time::Instant::now();
+        t = Instant::now();
     }
 
     // Quantise the per-expert activation to Q8_K in-place into the
@@ -504,7 +524,7 @@ pub fn run_single_expert_q4k_q8k_into<'s>(
     quantize_x_to_q8k_into(&mut scratch.act_q8k, &scratch.act);
     let t_act_q8k = if timing { Some(t.elapsed()) } else { None };
     if timing {
-        t = std::time::Instant::now();
+        t = Instant::now();
     }
 
     // down matvec: out[hidden] = down_W[hidden, inter_padded] @ act
@@ -563,6 +583,9 @@ mod tests {
     use crate::cpu::ops::q4_common::quantize_q4_k;
     use crate::{Activation, QuantFormat};
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     // BF16 encoding for common values (little-endian: low byte first).
     fn bf16_bytes(v: f32) -> [u8; 2] {
         let bits = v.to_bits();
@@ -580,28 +603,32 @@ mod tests {
         v
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn zero_inter_returns_zero_vec() {
         let h = vec![1.0f32; 4];
         let out = run_single_expert(&h, &[], &[], 0, QuantFormat::BF16, Activation::Silu);
         assert_eq!(out, vec![0.0f32; 4]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn zero_hidden_returns_empty() {
         let h: Vec<f32> = vec![];
         let out = run_single_expert(&h, &[], &[], 0, QuantFormat::BF16, Activation::Silu);
         assert_eq!(out.len(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn pre_experts_norm_empty_weight_returns_input_copy() {
         let h = vec![1.0f32, -2.0, 3.5];
         let out = pre_experts_norm(&h, &[], 0.0, 1e-6);
         assert_eq!(out, h);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn pre_experts_norm_applies_weight_and_offset() {
         let h = vec![3.0f32, 4.0];
         let norm_w = vec![1.0f32, 2.0];
@@ -614,7 +641,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn nonzero_weights_produce_nonzero_output() {
         let hidden = 4;
         let inter = 2;
@@ -637,7 +665,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_into_matches_allocating_path() {
         let hidden = 4;
         let inter = 2;
@@ -669,7 +698,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_into_zeroes_output_for_empty_weights() {
         let hidden = 4;
         let inter = 2;
@@ -690,7 +720,8 @@ mod tests {
         assert_eq!(out, &[0.0, 0.0, 0.0, 0.0]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn quantize_h_norm_for_q4k_rejects_empty_or_misaligned_input() {
         assert!(quantize_h_norm_for_q4k(&[]).is_none());
         assert!(quantize_h_norm_for_q4k(&vec![1.0f32; 255]).is_none());
@@ -699,7 +730,8 @@ mod tests {
         assert_eq!(q8.qs.len(), 256);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_q4k_q8k_into_zeroes_output_for_short_gate_up() {
         let hidden = 256;
         let inter = 1;
@@ -713,7 +745,8 @@ mod tests {
         assert!(out.iter().all(|v| *v == 0.0));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_q4k_q8k_into_valid_weights_produces_finite_output() {
         let hidden = 256;
         let inter = 256;
@@ -745,7 +778,8 @@ mod tests {
         assert!(out.iter().any(|v| v.abs() > 1e-8), "got all-zero output");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_into_q4k_cached_dequant_path_runs() {
         let hidden = 256;
         let inter = 256;
@@ -776,7 +810,8 @@ mod tests {
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn with_norm_matches_manual_prenorm() {
         let hidden = 4;
         let inter = 2;
@@ -824,7 +859,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn gelu_tanh_differs_from_silu() {
         let hidden = 4;
         let inter = 2;

@@ -15,6 +15,7 @@
 mod cached;
 mod dense;
 pub mod generate;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod grid;
 pub mod hybrid;
 pub mod logits;
@@ -72,7 +73,7 @@ pub trait LayerGraph {
     fn name(&self) -> &str;
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use crate::ffn::WeightFfn;

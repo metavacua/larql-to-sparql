@@ -1,0 +1,120 @@
+# larql-kv WASM CI
+#
+# Mirrors larql-kv.yml for wasm32-unknown-unknown. Tests run with default
+# features (no blas on wasm32 — platform-gated). The 15 apollo/store.rs
+# tests that require tempfile/std::fs are excluded (native-only).
+# fail-fast is false intentionally: all failures must be visible.
+
+name: larql-kv-wasm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-kv/**'
+      - 'crates/larql-inference/**'
+      - 'crates/larql-compute/**'
+      - 'crates/larql-vindex/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-kv-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-kv/**'
+      - 'crates/larql-inference/**'
+      - 'crates/larql-compute/**'
+      - 'crates/larql-vindex/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-kv-wasm.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: wasm · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: serial
+            toolchain: stable
+            rustflags: ''
+          - name: parallel
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.121
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Install geckodriver
+        run: |
+          VER=$(curl -fsSL https://api.github.com/repos/mozilla/geckodriver/releases/latest \
+            | grep '"tag_name"' | head -1 | sed -E 's/.*"(v[^"]+)".*/\1/')
+          curl -fsSL "https://github.com/mozilla/geckodriver/releases/download/${VER}/geckodriver-${VER}-linux64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin/
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cargo-kv-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cargo-kv-${{ matrix.mode.name }}-
+
+      - name: Format check
+        run: cargo fmt -p larql-kv -- --check
+
+      - name: Check
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-kv --target wasm32-unknown-unknown
+
+      - name: Clippy
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo clippy -p larql-kv --target wasm32-unknown-unknown -- -D warnings
+
+      # larql-vindex no longer includes reqwest in its default wasm32 dep graph
+      # (reqwest is now optional, gated by the `remote` feature which larql-kv
+      # does not enable). Node.js can resolve all remaining WASM host imports.
+      - name: cargo test · wasm32 (dynamic)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo test -p larql-kv --target wasm32-unknown-unknown
+
+      - name: cargo test · wasm32 · firefox (static)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo test -p larql-kv --target wasm32-unknown-unknown --features browser-tests

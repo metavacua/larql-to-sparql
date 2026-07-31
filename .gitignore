@@ -4,6 +4,9 @@ coverage/
 **/*.rs.bk
 .cargo/
 
+# wasm-testgen: auto-generated structural test files (regenerated in CI)
+**/tests/wasm_generated.rs
+
 # Python / maturin
 .venv/
 __pycache__/

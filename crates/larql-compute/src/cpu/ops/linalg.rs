@@ -133,7 +133,11 @@ mod tests {
     use super::*;
     use ndarray::array;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_cholesky_2x2() {
         // A = [[4, 2], [2, 3]] → L = [[2, 0], [1, √2]]
         let a = array![[4.0, 2.0], [2.0, 3.0]];
@@ -144,7 +148,8 @@ mod tests {
         assert_eq!(l[[0, 1]], 0.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_cholesky_solve_identity() {
         let a = Array2::<f64>::eye(3);
         let l = cholesky(&a, 0.0).unwrap();
@@ -157,7 +162,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_cholesky_inverse() {
         let a = array![[4.0, 2.0], [2.0, 3.0]];
         let l = cholesky(&a, 0.0).unwrap();
@@ -176,7 +182,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_cholesky_with_ridge() {
         // Negative diagonal fails; ridge rescues it.
         let mut a = Array2::<f64>::eye(3);
@@ -186,13 +193,15 @@ mod tests {
         assert!(l[[0, 0]] > 0.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_cholesky_not_positive_definite() {
         let a = array![[-1.0, 0.0], [0.0, 1.0]];
         assert!(cholesky(&a, 0.0).is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_ridge_decomposition_round_trip() {
         // With orthonormal keys and small λ, ΔW @ k_i should reproduce t_i.
         let n = 4;
@@ -220,14 +229,16 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_ridge_decomposition_shape_mismatch() {
         let keys = Array2::<f32>::zeros((3, 4));
         let targets = Array2::<f32>::zeros((3, 5));
         assert!(ridge_decomposition_solve(&keys, &targets, 1e-3).is_err());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_ridge_decomposition_singular_keys_need_ridge() {
         // Two identical keys → K K^T is rank-1, singular. λ=0 should fail,
         // λ>0 should succeed (the ridge purpose).
@@ -239,7 +250,8 @@ mod tests {
         assert!(ridge_decomposition_solve(&keys, &targets, 1e-2).is_ok());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_ridge_decomposition_zero_keys() {
         // All-zero keys → KK^T = 0; ridge alone makes it solvable but
         // the resulting ΔW @ k_i is the zero vector, not the target.
@@ -258,7 +270,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_ridge_decomposition_realistic_shape() {
         // Gemma-ish: N=8 facts, d=128 (proxy for hidden_dim). Verify the
         // primitive scales and produces clean reconstruction at low ridge.

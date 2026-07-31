@@ -29,10 +29,16 @@ pub fn cpu_moe_forward(
     // Per-stage timing for bottleneck diagnosis.  Enable with
     // `LARQL_MOE_FWD_TIMING=1`.  Cached in TLS to avoid syscalls
     // per call on the hot path.
-    thread_local! {
-        static FWD_TIMING: bool = options::env_flag(options::ENV_MOE_FWD_TIMING);
-    }
-    let timing = FWD_TIMING.with(|t| *t);
+    #[cfg(not(target_arch = "wasm32"))]
+    let timing = {
+        thread_local! {
+            static FWD_TIMING: bool = options::env_flag(options::ENV_MOE_FWD_TIMING);
+        }
+        FWD_TIMING.with(|t| *t)
+    };
+    #[cfg(target_arch = "wasm32")]
+    let _timing = false;
+    #[cfg(not(target_arch = "wasm32"))]
     let t_start = std::time::Instant::now();
 
     let hidden = h.len();
@@ -112,6 +118,7 @@ pub fn cpu_moe_forward(
     // contributing zero.
     let inter_padded = moe.inter_padded();
 
+    #[cfg(not(target_arch = "wasm32"))]
     let t_pre_par = t_start.elapsed();
 
     // Q4_K direct-from-mmap path: quantise expert_input to Q8_K once per layer
@@ -123,9 +130,12 @@ pub fn cpu_moe_forward(
     let q4k_direct = matches!(format, crate::QuantFormat::Q4_K)
         && hidden.is_multiple_of(256)
         && !super::q4k_direct_disabled();
+    #[cfg(not(target_arch = "wasm32"))]
     let t_q8k_quant_start = std::time::Instant::now();
     let expert_input_q8k = q4k_direct.then(|| quantize_x_to_q8k(&expert_input));
+    #[cfg(not(target_arch = "wasm32"))]
     let t_q8k_quant = t_q8k_quant_start.elapsed();
+    #[cfg(not(target_arch = "wasm32"))]
     let t_par_start = std::time::Instant::now();
 
     // Per-rayon-thread scratch buffers (gate_out / up_out / act / act_q8k /
@@ -231,14 +241,19 @@ pub fn cpu_moe_forward(
             },
         );
 
+    #[cfg(not(target_arch = "wasm32"))]
     let t_par = t_par_start.elapsed();
+    #[cfg(not(target_arch = "wasm32"))]
     let t_sum = std::time::Duration::ZERO;
 
     // Post-experts output policy (Gemma 4: `post_feedforward_layernorm_2`)
+    #[cfg(not(target_arch = "wasm32"))]
     let t_post_start = std::time::Instant::now();
     let result = moe_post_expert_output(&expert_out, moe, norm_offset, eps);
+    #[cfg(not(target_arch = "wasm32"))]
     let t_post = t_post_start.elapsed();
 
+    #[cfg(not(target_arch = "wasm32"))]
     if timing {
         eprintln!(
             "[cpu_moe_forward] K={} pre_par={:.0}us q8k_quant={:.0}us \
@@ -273,6 +288,9 @@ mod tests {
     use super::*;
     use crate::cpu::ops::q4_common::quantize_q4_k;
     use crate::{Activation, QuantFormat};
+
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
     fn bf16_fill(len: usize, val: f32) -> Vec<u8> {
         let b = ((val.to_bits() >> 16) as u16).to_le_bytes();
@@ -314,7 +332,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn empty_selected_expert_weight_slices_are_skipped() {
         let hidden = 8;
         let inter = 2;
@@ -350,7 +369,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn selected_expert_with_missing_down_table_is_skipped() {
         let hidden = 8;
         let inter = 2;
@@ -393,7 +413,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_cached_dequant_fallback_runs_for_non_256_hidden() {
         let hidden = 128;
         let inter = 1;
@@ -429,7 +450,8 @@ mod tests {
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn zero_per_expert_scale_filters_selected_expert() {
         let hidden = 8;
         let inter = 2;

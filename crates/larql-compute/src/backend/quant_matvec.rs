@@ -284,6 +284,9 @@ mod tests {
     use super::*;
     use crate::CpuBackend;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     /// Pin the Q4_0/Q8_0 dispatch split: Q4_0 must continue to route
     /// through `q4_matvec`, and Q8_0 must route through the new
     /// `q8_matvec` (defaulting to `None`). Pre-2026-05-09 both formats
@@ -295,7 +298,8 @@ mod tests {
     /// (Q4_0 = 18 B/32 vals, Q8_0 = 34 B/32 vals); otherwise the FFI
     /// debug_assert in `cpu::ops::q4_matvec::dispatch_q8` catches the
     /// mismatch before we even reach the dispatch test.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_0_weights_do_not_silently_route_through_q4_kernel() {
         let backend = CpuBackend;
         let x = vec![0.1f32; 32];
@@ -330,7 +334,8 @@ mod tests {
 
     /// Same shape for the pre-quantised input variant
     /// (`quant_matvec_q8_input`).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn quant_matvec_q8_input_splits_q4_and_q8() {
         let backend = CpuBackend;
         let q8_x = vec![0i8; 32];
@@ -370,7 +375,8 @@ mod tests {
 
     /// Float-input formats stay `None` from the trait (the caller is
     /// expected to use a float matmul or dequantise first).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn float_input_formats_return_none() {
         let backend = CpuBackend;
         let weights = vec![0u8; 64];
