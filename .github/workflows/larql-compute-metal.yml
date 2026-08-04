@@ -83,3 +83,17 @@ jobs:
         run: |
           cargo install --locked cargo-llvm-cov
           make larql-compute-metal-coverage-summary
+
+      # Line-level detail for diagnosing a failed gate without a local
+      # Metal device: re-emit the run's profdata as lcov and attach it.
+      - name: Emit line-level lcov
+        if: always()
+        run: cargo llvm-cov report --package larql-compute-metal --lcov --output-path metal-coverage.lcov || true
+
+      - name: Upload lcov artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-coverage-lcov
+          path: metal-coverage.lcov
+          if-no-files-found: ignore
