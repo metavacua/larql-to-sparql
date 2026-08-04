@@ -11,6 +11,11 @@
 //! golden-value tests one place to aim at when a shader/layout change
 //! moves a stage's output.
 
+/// Byte length of a 4-byte scalar (`u32`/`f32`) passed by value through
+/// `set_bytes`. Metal's binding API takes a raw length, so this names
+/// the one size every scalar slot in this crate uses.
+pub(crate) const SCALAR_BYTES: u64 = 4;
+
 pub mod attention;
 pub mod ffn;
 pub mod input_norm;
@@ -21,3 +26,4 @@ pub mod qkv_proj;
 pub mod quant_matvec;
 pub mod residual;
 pub mod rope;
+pub mod sinks;

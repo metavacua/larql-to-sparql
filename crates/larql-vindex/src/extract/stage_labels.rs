@@ -21,6 +21,9 @@
 
 /// `loading` — opening + mmap'ing safetensors shards.
 pub const STAGE_LOADING: &str = "loading";
+/// `tensor_audit` — classify every source tensor as recognised,
+/// dropped by a named rule, or unrecognised. Runs before any write.
+pub const STAGE_TENSOR_AUDIT: &str = "tensor_audit";
 /// `gate_vectors` — write `gate_vectors.bin`.
 pub const STAGE_GATE_VECTORS: &str = "gate_vectors";
 /// `router_weights` — MoE router weights write.
@@ -63,6 +66,7 @@ mod tests {
     fn all_labels_unique() {
         let labels = [
             STAGE_LOADING,
+            STAGE_TENSOR_AUDIT,
             STAGE_GATE_VECTORS,
             STAGE_ROUTER_WEIGHTS,
             STAGE_EMBEDDINGS,

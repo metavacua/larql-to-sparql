@@ -79,6 +79,17 @@ pub const LEGACY_BLOCK_ELEMS: usize = 32;
 /// Elements per super-block for K-quants (Q4_K, Q6_K).
 pub const K_QUANT_BLOCK_ELEMS: usize = 256;
 
+/// Row stride, in elements, of a k-quant row-padded matrix with `cols`
+/// logical columns. The k-quant writers pad each row to the next
+/// super-block boundary (`pad_rows_to_block`) so every row starts on a
+/// block boundary; readers must index rows at THIS stride — decoding a
+/// row-padded slab at the unpadded width silently shifts every row
+/// after the first whenever `cols % 256 != 0` (e.g. GPT-OSS-20B
+/// hidden=2880, Gemma 3 1B hidden=1152).
+pub fn k_quant_padded_cols(cols: usize) -> usize {
+    cols.div_ceil(K_QUANT_BLOCK_ELEMS) * K_QUANT_BLOCK_ELEMS
+}
+
 /// Bytes per Q4_0 block (32 elements + f16 scale): 2 + 16.
 pub const Q4_0_BLOCK_BYTES: usize = 18;
 /// Elements per Q4_0 block.

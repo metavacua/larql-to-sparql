@@ -17,6 +17,7 @@ pub mod granite;
 pub mod llama;
 pub mod mistral;
 pub mod mixtral;
+pub mod olmoe;
 pub mod qwen;
 pub mod starcoder2;
 pub mod tinymodel;

@@ -661,14 +661,11 @@ struct DualFfn<'a> {
 
 impl<'a> FfnBackend for DualFfn<'a> {
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
-        self.forward_with_activation(layer, x).0
-    }
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
-        let (p_out, p_act) = self.primary.forward_with_activation(layer, x);
-        let (s_out, _) = self.secondary.forward_with_activation(layer, x);
+        let p_out = self.primary.forward(layer, x);
+        let s_out = self.secondary.forward(layer, x);
         let positions = diff_all_positions(&p_out, &s_out);
         self.diffs.borrow_mut().push((layer, positions));
-        (p_out, p_act)
+        p_out
     }
     fn name(&self) -> &str {
         "dual"

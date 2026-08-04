@@ -77,7 +77,7 @@ impl DecodeStateDump {
 /// canonical residual state (`MarkovResidualEngine::recompute_kv`).
 ///
 /// Engines that treat K/V as **canonical** (e.g. `TurboQuantEngine`'s
-/// compressed K/V, `UnlimitedContextEngine`'s in-window K/V) must
+/// compressed K/V, `WindowedCheckpointEngine`'s in-window K/V) must
 /// use `Full`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum StateDumpMask {

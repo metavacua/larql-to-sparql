@@ -24,6 +24,7 @@ use crate::architectures::granite::GraniteArch;
 use crate::architectures::llama::LlamaArch;
 use crate::architectures::mistral::MistralArch;
 use crate::architectures::mixtral::MixtralArch;
+use crate::architectures::olmoe::OlmoeArch;
 use crate::architectures::qwen::QwenArch;
 use crate::architectures::starcoder2::StarCoder2Arch;
 use crate::architectures::tinymodel::TinyModelArch;
@@ -32,11 +33,16 @@ use crate::validation::ConfigValidationError;
 
 mod config_io;
 mod parser;
+pub mod registry;
 
 use config_io::{
     config_path, read_config_json, require_config_fields, CONFIG_FILE_NAME, CONFIG_KEY_TEXT_CONFIG,
 };
 use parser::parse_model_config;
+
+pub use registry::{
+    find_architecture, ArchitectureEntry, AttentionKind, ModelTypeMatch, ARCHITECTURE_REGISTRY,
+};
 
 /// Error from model detection/config parsing.
 #[derive(Debug, thiserror::Error)]
@@ -125,6 +131,10 @@ pub fn detect_from_json(config: &serde_json::Value) -> Box<dyn ModelArchitecture
         "gpt_oss" => Box::new(GptOssArch::from_config(model_config)),
         // Qwen family (dense and MoE share same keys)
         t if t.starts_with("qwen") => Box::new(QwenArch::from_config(model_config)),
+        // OLMoE — Qwen3-MoE tensor layout, but sizes experts from
+        // `intermediate_size` (no `moe_intermediate_size` field) and does not
+        // renormalize top-k router probabilities.
+        "olmoe" => Box::new(OlmoeArch::from_config(model_config)),
         // DeepSeek-V4 (MoE + MLA + MXFP4 + HCA attention; new tensor naming)
         "deepseek_v4" => Box::new(DeepSeekV4Arch::from_config(model_config)),
         // DeepSeek V2/V3 family (MoE + MLA, model.* prefixed keys)

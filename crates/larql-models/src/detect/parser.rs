@@ -162,6 +162,14 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
     let moe_intermediate_size = text_config["moe_intermediate_size"]
         .as_u64()
         .map(|v| v as usize);
+    // GPT-OSS clamps both halves of the fused gate/up projection at ±this
+    // value before the GLU. Read rather than hardcoded: it is a published
+    // config field and a future checkpoint may pick a different bound.
+    let swiglu_limit = text_config["swiglu_limit"].as_f64();
+    // Whether the router renormalises its selected top-k probabilities.
+    // Read rather than assumed: the same architecture ships both settings, and
+    // the two differ by a rescale of the whole expert branch.
+    let norm_topk_prob = text_config["norm_topk_prob"].as_bool();
 
     // MLA fields
     let kv_lora_rank = text_config["kv_lora_rank"].as_u64().map(|v| v as usize);
@@ -323,6 +331,8 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         enable_moe_block,
         top_k_experts,
         moe_intermediate_size,
+        swiglu_limit,
+        norm_topk_prob,
         has_vision_config,
     }
 }

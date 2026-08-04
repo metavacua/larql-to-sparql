@@ -313,7 +313,7 @@ these are different engines from their standalone counterparts; see
 | `NoCacheEngine`          | `uniform(NoCache, Dense, DenseGraph)`           | `exact_logits`                 |
 | `MarkovResidualEngine`   | `uniform(MarkovResidual, Dense, DenseGraph)`    | `exact_logits` (cond.)         |
 | `UnlimitedContextEngine` | `uniform(Unlimited, Dense, DenseGraph)`         | `exact_logits` (in-window)     |
-| `TurboQuantEngine`       | `uniform(TurboQuant, Dense, DenseGraph)`        | `bounded_KL`                   |
+| `TurboQuantEngine`       | `uniform(TurboQuant, Dense, DenseGraph)`        | `codec_bounded_state`          |
 | `Apollo`                 | `uniform(Apollo, Dense, DenseGraph)`            | `task_level_retrieval`         |
 
 Per-layer compositions previously inexpressible:
@@ -578,7 +578,7 @@ its scope as "the top-level engine" was wrong.
   per-layer.
 - [`markov-residual-engine.md` §14](./markov-residual-engine.md),
   [`markov-residual-codec-engine.md` §14](./markov-residual-codec-engine.md),
-  [`unlimited-context-engine.md` §8](./unlimited-context-engine.md) —
+  [`windowed-checkpoint-engine.md` §8](./windowed-checkpoint-engine.md) —
   per-engine W10 opt-in tables; the mask cascade these refer to is the
   same mechanism LayerEngine reuses per layer.
 - `crates/larql-kv/examples/contract_classify_cached_ffn.rs` — the

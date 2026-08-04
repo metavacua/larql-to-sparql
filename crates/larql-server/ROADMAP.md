@@ -2094,7 +2094,7 @@ Implementation surface: ~1600 LOC across three new files
 (`src/routes/openai_embeddings.rs`, `src/routes/openai_completions.rs`,
 `src/routes/openai_chat.rs`) + reshape of `src/routes/models.rs` + 4
 routes wired into both single-model and multi-model routers + 23 unit
-tests + 19 integration tests + new live `examples/openai_demo.rs`
+tests + 19 integration tests + new live `crates/larql-demos/examples/server/openai_demo.rs`
 walkthrough that boots the server in-process via
 `tower::ServiceExt::oneshot` and exercises every endpoint.
 

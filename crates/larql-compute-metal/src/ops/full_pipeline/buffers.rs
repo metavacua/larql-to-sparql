@@ -253,6 +253,7 @@ mod tests {
             format: QuantFormat::Q4_K,
         };
         FullPipelineLayer {
+            attn_sinks: None,
             wq: q4w(),
             wk: q4w(),
             wv: q4w(),

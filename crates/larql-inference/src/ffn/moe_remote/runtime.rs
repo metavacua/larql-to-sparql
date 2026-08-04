@@ -34,8 +34,12 @@
 //!   `top_k` for the grid. Consumed by `grid/config.rs`.
 //! - [`ENV_MOE_NO_SPLIT`] = `LARQL_MOE_NO_SPLIT=1` — disable grid-side
 //!   split execution. Consumed by `grid/config.rs`.
-//! - [`ENV_SKIP_MOE`] = `SKIP_MOE=1` — bypass MoE entirely on the grid
-//!   (CPU dense fallback). Consumed by `grid/config.rs`.
+//! - `larql_compute::options::ENV_SKIP_MOE` = `LARQL_SKIP_MOE=1` — bypass MoE entirely on the grid
+//!   (CPU dense fallback). Consumed by `grid/config.rs` via
+//!   `larql_compute::options::skip_moe_enabled()`, which also honours the
+//!   historical unprefixed `SKIP_MOE` as a loud deprecated alias — one
+//!   canonical name for the local AND grid paths, so the DEC-0 "SKIP_MOE
+//!   ceiling" anchor measures the same thing whichever path runs.
 
 use std::sync::OnceLock;
 
@@ -60,8 +64,11 @@ pub const ENV_MOE_SHARD_TIMING: &str = "LARQL_MOE_SHARD_TIMING";
 pub const ENV_MOE_TOP_K: &str = "LARQL_MOE_TOP_K";
 /// `LARQL_MOE_NO_SPLIT=1`
 pub const ENV_MOE_NO_SPLIT: &str = "LARQL_MOE_NO_SPLIT";
-/// `SKIP_MOE=1` — bypasses MoE entirely on the grid path.
-pub const ENV_SKIP_MOE: &str = "SKIP_MOE";
+// `LARQL_SKIP_MOE` has no local const: the canonical name lives in
+// `larql_compute::options::ENV_SKIP_MOE` and the grid path reads it via
+// `larql_compute::options::skip_moe_enabled()` (which also honours the
+// historical unprefixed `SKIP_MOE` as a loud deprecated alias), so the
+// local and grid paths cannot drift again.
 
 /// Snapshot of the MoE runtime toggles, captured once per process. The
 /// grid-only vars (`MOE_TOP_K`, `MOE_NO_SPLIT`, `SKIP_MOE`) live on
@@ -160,6 +167,6 @@ mod tests {
         assert_eq!(ENV_MOE_SHARD_TIMING, "LARQL_MOE_SHARD_TIMING");
         assert_eq!(ENV_MOE_TOP_K, "LARQL_MOE_TOP_K");
         assert_eq!(ENV_MOE_NO_SPLIT, "LARQL_MOE_NO_SPLIT");
-        assert_eq!(ENV_SKIP_MOE, "SKIP_MOE");
+        assert_eq!(larql_compute::options::ENV_SKIP_MOE, "LARQL_SKIP_MOE");
     }
 }

@@ -56,6 +56,8 @@ kernel void attn_fused(
     constant float&     qk_offset  [[buffer(15)]],  // 1.0 on Gemma 2/3, 0.0 on Gemma 4
     constant float&     rope_base  [[buffer(16)]],
     constant uint&      rotary_dim [[buffer(17)]],
+    constant float*     sinks      [[buffer(18)]],  // per-Q-head attention sink logits
+    constant uint&      has_sinks  [[buffer(19)]],  // 0 = no sinks (slot is a placeholder)
     uint tg_id  [[threadgroup_position_in_grid]],
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]],
@@ -174,6 +176,9 @@ kernel void attn_fused(
     }
     float global_max = tg_red[0];
     for (uint i = 1u; i < n_sg; i++) global_max = max(global_max, tg_red[i]);
+    // The sink competes in the softmax, so it must join the max or
+    // exp(sink - max) overflows when the sink dominates.
+    if (has_sinks != 0u) global_max = max(global_max, sinks[head]);
 
     // ── Phase 6: softmax numerator + sum ──
     float local_sum = 0.0f;
@@ -190,6 +195,9 @@ kernel void attn_fused(
     }
     float global_sum = tg_red[0];
     for (uint i = 1u; i < n_sg; i++) global_sum += tg_red[i];
+    // Denominator only: the sink has no output slot, so the emitted
+    // weights deliberately sum to less than one.
+    if (has_sinks != 0u) global_sum += exp(sinks[head] - global_max);
     float inv_sum = 1.0f / global_sum;
 
     for (uint t = t_start + tid; t < T; t += tg_sz) {

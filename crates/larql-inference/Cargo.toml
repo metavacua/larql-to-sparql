@@ -22,6 +22,7 @@ larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-core = { path = "../larql-core" }
 larql-vindex = { path = "../larql-vindex" }
+larql-execution = { path = "../larql-execution" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -106,10 +107,6 @@ required-features = ["gpu"]
 
 [[example]]
 name = "decode_vs_prefill"
-required-features = ["gpu"]
-
-[[example]]
-name = "residual_diff"
 required-features = ["gpu"]
 
 [[example]]

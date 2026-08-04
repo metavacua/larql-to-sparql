@@ -102,7 +102,7 @@ pub enum RowLocation {
 /// - **Canonical**: discarding it loses the conversation. Examples:
 ///   `MarkovResidualEngine`'s residual stream, `TurboQuantEngine`'s
 ///   compressed K/V (destructive), `StandardEngine`'s K/V tensors,
-///   `UnlimitedContextEngine`'s in-window K/V.
+///   `WindowedCheckpointEngine`'s in-window K/V.
 /// - **Derivative**: discardable. The engine can rebuild it from
 ///   canonical state + model weights without changing its output
 ///   distribution. Example: `MarkovResidualEngine`'s hot K/V cache

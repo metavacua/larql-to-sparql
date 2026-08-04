@@ -19,6 +19,7 @@
 use clap::{Parser, Subcommand};
 
 mod anyres_tiler;
+mod backend_select;
 mod commands;
 mod formatting;
 mod image_input;
@@ -92,6 +93,16 @@ enum Commands {
     /// Benchmark decode throughput on a real vindex (Metal / CPU / Ollama).
     Bench(bench::BenchArgs),
 
+    /// DEC residual-replay loadgen — capture real per-layer residuals, then
+    /// replay batch × wire × dispatch sweeps against an expert server
+    /// (docs/dec-funnel.md).
+    DecBench(dec_bench::DecBenchArgs),
+
+    /// K3 serving ledger — miss budget, weight touch, dense-precision
+    /// frontier and speculative block economics, derived from the
+    /// checkpoint's own tensor table (docs/dec-funnel.md).
+    K3Ledger(k3_ledger::K3LedgerArgs),
+
     /// Split-axis accuracy suite — parametric vs in-context vs conflict,
     /// scored with top-1 match and Shannon bits-per-token.
     Accuracy(accuracy_cmd::AccuracyArgs),
@@ -150,6 +161,27 @@ enum Commands {
     #[command(next_help_heading = "Build")]
     /// Cross-backend numerical parity diff (CPU vs Metal vs reference).
     Parity(parity::ParityArgs),
+
+    #[command(next_help_heading = "Build")]
+    /// Expert-selection locality over a routing trace: does speculative
+    /// decoding amortise the expert bank, and can a hot cache work?
+    /// Collect the trace with `LARQL_MOE_ROUTE_TRACE=<path> larql shannon score`.
+    MoeLocality(moe_locality::MoeLocalityArgs),
+
+    // ── Factory (docs/vindex-factory.md) ─────────────────────────────
+    #[command(next_help_heading = "Factory", subcommand)]
+    /// Vindex Factory recipe tooling — validate a recipe, compute its
+    /// build_id (docs/vindex-factory.md).
+    Recipe(recipe_cmd::RecipeCommand),
+
+    #[command(next_help_heading = "Factory")]
+    /// Print this release's capability manifest as JSON — which
+    /// architectures it recognises and what each one supports.
+    Capabilities,
+
+    #[command(next_help_heading = "Factory", subcommand)]
+    /// Render a Hub model card for a build (docs/vindex-factory.md §9).
+    Card(card_cmd::CardCommand),
 
     // ── Query (legacy, pre-LQL graph-file surface) ──────────────────
     #[command(next_help_heading = "Query")]
@@ -534,6 +566,9 @@ fn main() {
         .expect("spawn larql-main thread")
         .join()
         .expect("larql-main thread panicked");
+    // Flush the latent-mask channel survival counts, if that probe was
+    // collecting them. No-op unless `LARQL_MOE_LATENT_STATS` is set.
+    larql_compute::cpu::ops::moe::latent_mask::dump_stats();
     std::process::exit(code);
 }
 
@@ -547,6 +582,8 @@ fn real_main() -> i32 {
         Commands::Run(args) => run_cmd::run(args),
         Commands::Chat(args) => run_cmd::run(args.into()),
         Commands::Bench(args) => bench::run(args),
+        Commands::DecBench(args) => dec_bench::run(args),
+        Commands::K3Ledger(args) => k3_ledger::run(args),
         Commands::Accuracy(args) => accuracy_cmd::run(args),
         Commands::Shannon(cmd) => shannon_cmd::run(cmd),
         Commands::Pull(args) => pull_cmd::run(args),
@@ -568,6 +605,7 @@ fn real_main() -> i32 {
         Commands::Verify(args) => verify_cmd::run(args),
         Commands::Diag(args) => diag_cmd::run(args),
         Commands::Parity(args) => parity::run(args),
+        Commands::MoeLocality(args) => moe_locality::run(args),
 
         // ── Query (legacy graph-file surface) ──
         Commands::Query(args) => query_cmd::run(args),
@@ -591,6 +629,11 @@ fn real_main() -> i32 {
             }
             Err(e) => Err(e),
         },
+
+        // ── Factory ──
+        Commands::Recipe(cmd) => recipe_cmd::run(cmd),
+        Commands::Capabilities => capabilities_cmd::run(),
+        Commands::Card(cmd) => card_cmd::run(cmd),
 
         // ── Serve (exec into larql-server) ──
         Commands::Serve(args) => run_serve(args),

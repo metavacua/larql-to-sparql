@@ -200,6 +200,35 @@ impl ModelWeights {
         Some((gu, dn))
     }
 
+    /// Return the gate+up and down byte slices for the lowest-numbered FFN
+    /// entry this process actually holds at `layer`, or `None` if the layer
+    /// has no per-layer entries.
+    ///
+    /// Use this (never a hard-coded entry 0) when probing "some expert's"
+    /// bytes: a shard started with a non-zero expert range (e.g.
+    /// `--experts 64-127`) has `layers/{layer}/64/gate_up` but not
+    /// `layers/{layer}/0/gate_up`, so an entry-0 probe reports `None` on a
+    /// perfectly healthy shard — same failure mode `has_per_layer_ffn`
+    /// was fixed for. Scans both `packed_byte_ranges` (production mmaps)
+    /// and `raw_bytes` (tests / in-memory tensors), mirroring the lookup
+    /// order of `get_packed_bytes`.
+    pub fn first_layer_entry_bytes(&self, layer: usize) -> Option<(&[u8], &[u8])> {
+        let prefix = format!("layers/{layer}/");
+        let suffix = format!("/{PER_LAYER_FFN_GATE_UP}");
+        let entry = self
+            .packed_byte_ranges
+            .keys()
+            .chain(self.raw_bytes.keys())
+            .filter_map(|k| {
+                k.strip_prefix(&prefix)?
+                    .strip_suffix(&suffix)?
+                    .parse::<usize>()
+                    .ok()
+            })
+            .min()?;
+        self.get_layer_entry_bytes(layer, entry)
+    }
+
     /// Whether FFN weights are stored in the per-layer format (`layers/`).
     ///
     /// Checks for any key with the `"layers/"` prefix rather than the
@@ -437,5 +466,38 @@ mod weights_view_tests {
 
         let via_from: WeightsView = (&weights).into();
         assert_eq!(via_from.tensor("k").unwrap(), &w);
+    }
+
+    /// A shard owning a non-zero expert range (e.g. `--experts 64-127`) has
+    /// no entry 0 — probing `get_layer_entry_bytes(l, 0)` returns `None` on
+    /// a healthy shard. `first_layer_entry_bytes` must find the first OWNED
+    /// entry instead (the /v1/stats `per_expert_bytes` probe regression).
+    #[test]
+    fn first_layer_entry_bytes_finds_first_owned_entry_on_nonzero_shard() {
+        let mut weights = make_test_weights();
+        // Shard owns experts 64 and 65 at layer 0; nothing at entry 0.
+        for entry in [64usize, 65] {
+            weights.raw_bytes.insert(
+                per_layer_ffn_key(0, entry, PER_LAYER_FFN_GATE_UP),
+                vec![entry as u8; 8],
+            );
+            weights.raw_bytes.insert(
+                per_layer_ffn_key(0, entry, PER_LAYER_FFN_DOWN),
+                vec![entry as u8; 4],
+            );
+        }
+
+        // Entry-0 probe: the pre-fix behaviour — None on a healthy shard.
+        assert!(weights.get_layer_entry_bytes(0, 0).is_none());
+
+        // Fixed probe: lowest owned entry (64), both components resolved.
+        let (gu, dn) = weights
+            .first_layer_entry_bytes(0)
+            .expect("shard owns entries at layer 0");
+        assert_eq!(gu, &[64u8; 8][..]);
+        assert_eq!(dn, &[64u8; 4][..]);
+
+        // A layer with no entries at all is still None.
+        assert!(weights.first_layer_entry_bytes(1).is_none());
     }
 }

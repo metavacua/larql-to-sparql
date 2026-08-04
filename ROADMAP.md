@@ -269,6 +269,261 @@ accrete features while the MoE path (the actual bet) stays thin.
 
 ---
 
+## VINDEX3 — successor serving container (added 2026-08-02)
+
+**Thesis: the format boundary is the place to make sparse serving predictable.**
+VINDEX2 can *observe* which pages faulted; VINDEX3 can *state* what an operation
+will read before it runs. That is the difference between paging a multi-terabyte
+model and planning one.
+
+Spec: [`crates/larql-vindex/docs/vindex3-format-spec.md`](crates/larql-vindex/docs/vindex3-format-spec.md)
+(draft-2). Experimental programme: [`docs/vindex3-experiments.md`](docs/vindex3-experiments.md),
+registry programme `vindex2`. Generations are named so the number equals
+`index.json.version`: schemas 1–2 → VINDEX2, schema 3 → VINDEX3.
+
+**Coexistence, not migration.** One binary serves both generations, dispatched
+solely on `index.json.version`. VINDEX2 keeps its loader, its weight objects and
+its production behaviour untouched; VINDEX3 keeps its catalogue, profile, route
+and authority model until binding. The shared layer is execution and
+orchestration, never physical storage. **`extract` must keep defaulting to
+VINDEX2** until V2-1 acceptance passes — a silent default change would evaporate
+E0's premise.
+
+### Shipped
+
+| Commit | Milestone |
+|---|---|
+| `f13bf385` | Reference MoE execution — fixture A matches an independent oracle below 1e-6, fused and decomposed agreeing at every checkpoint |
+| `dd2017db` | Real Gemma semantic routing parity over real VINDEX2 bytes |
+| `f5dd256e` | Production router kernel bound — bit-identical routing ladder |
+| *(pending)* | **The container itself** — fixture A written to disk as `index.json` schema 3 + `moe_manifest.json` + a LYRW v2 bank, opened, bound and executed bit-identically; `show`/`verify` dispatch on generation |
+
+Three properties established, each independently useful:
+
+1. **Bound reference execution is numerically correct** (fixture A vs oracle).
+2. **Resolution does not leak into decode** — 64× population costs ~1.9×, which
+   is the router term and nothing more.
+3. **The bound plan predicts its physical page working set exactly** — 200 pages
+   predicted, 200 resident, zero overshoot, 1.63% of a 192 MiB layer after one
+   token. Residency becomes computable rather than observable, which is what
+   placement, prefetch and remote transfer all need.
+
+Plus two defects fixed that were not VINDEX3's: `larql verify` rendered findings
+in `HashMap` order and so disagreed with itself between runs; the separate-tensor
+MoE extractor wrote no expert store.
+
+### Two ladders, deliberately separate
+
+VINDEX3 has an **execution** half and a **container** half, and they were built
+in that order. Every parity result before the container existed bound its
+operands out of a VINDEX2 file — so what was proven was the executor, not the
+format:
+
+```text
+proven first   the VINDEX3 executor, fed VINDEX2 operands, matches production
+proven second  a VINDEX3 container can be written, opened, bound and executed
+```
+
+Keeping the ladders apart matters because a green execution ladder says nothing
+about whether a VINDEX3 *file* exists, and for a long time none did.
+
+```text
+container ladder
+[x] c0  write index.json schema 3 + moe_manifest.json + LYRW v2 bank
+[x] c1  detect_generation reports V3 from a real directory, not a JSON literal
+[x] c2  open, validate the manifest, resolve storage keys to files
+[x] c3  bind from container-resolved regions and execute — bit-identical
+[x] c4  fused and decomposed storage agree under one programme id
+[x] c5  structural verify with {layer, entry, role} defects; CLI dual-generation
+[ ] c6  fixtures B–D (GPT-OSS, Inkling, Mini-K3) — proves nothing is hard-coded
+[ ] c7  WALK/DESCRIBE parity over in-place bank regions
+[ ] c8  a real Gemma MoE layer written as a VINDEX3 container
+[ ] c9  every Gemma layer — the first real model that *is* a VINDEX3 container
+```
+
+Gate status, stated precisely: **V2-0 and V2-1 are closed for the rows fixture
+A can carry**, not in full. Outstanding on V2-0 are profile-authority
+derivation and variant-selection refusal; on V2-1, the "not hard-coded" row
+(needs fixtures differing on expert count, top-K and shared banks) and
+WALK/DESCRIBE parity. `extract` therefore still defaults to VINDEX2, and must
+until those close.
+
+### The rung ladder to the first VINDEX3 Gemma token
+
+```text
+[x] rung 0   fixture A through the generic reference path
+[x] rung 0.5 real Gemma routing parity, VINDEX3 bound over VINDEX2 bytes
+[x] rung 1   production router kernel bound, bit-identical
+[ ] rung 2   production Q4_K x Q8_K expert kernel bound
+[ ] rung 3   full-layer residual delta parity
+[ ] rung 4   every MoE layer, then final logits
+[ ] rung 5   greedy token parity through normal `larql run` dispatch
+```
+
+Rung 2 begins with **Q8_K activation identity, checked before any expert runs** —
+a difference there contaminates all eight expert comparisons and makes every
+later diagnostic noise.
+
+### What's next (set 2026-08-02, after PR #197)
+
+Ordered by what unblocks what, not by size. Each item states the condition that
+closes it, so "done" is not a judgement call.
+
+**1. `layer_ffn_or_moe` — the other five engines. CLOSED 2026-08-02.**
+`layer_ffn_or_moe` returns `Result<Array2<f32>, BoxRefusal>`, all ten call
+sites propagate, and the gate in `larql-kv/tests/strict_refusal/engines.rs`
+runs **eight** expert-routing engines × prefill/decode × three `RefusalKind`s.
+The baseline tag may now say engine-wide.
+
+The rewind half came out better than the prediction. The prediction was that
+residual-canonical engines could rewind where K/V-canonical ones could not; the
+answer is that **all of them can**, by two different mechanisms, and
+`engine_state.rs` proves it in the strong form — the retried token is
+bit-identical to never having refused, for every one of the eight:
+
+```text
+residual-canonical   markov-rs, markov-rs-codec, boundary-per-layer
+                     → the step writes `stored` only after the last fallible
+                       call; `hot_kv` is a droppable derivative, taken up
+                       front and left None on the error path
+K/V-canonical        standard, turbo-quant, windowed-checkpoint
+                     → the cache grows before the FFN can refuse, so the step
+                       truncates its appends: `truncate_kv` on the handle,
+                       `CompressedLayer::truncate_rows` byte-exactly (rows are
+                       appended at fixed offsets and never re-encoded, so the
+                       codec is lossy against its *input*, not against what
+                       was stored), `truncate_kv_rows` on the window shadow
+```
+
+Two engines stopped taking their store by value (`store.take()` → `as_mut()`),
+which also removed a latent bug: any failure used to leave `self.store` as
+`None`, so the *next* call reported "decode_step called before prefill" — a
+dead engine wearing a misleading message.
+
+Exactly one case genuinely cannot rewind, and now says so:
+`windowed-checkpoint` archives a window and saves its boundary checkpoint when
+the window fills, so a refusal *after* a close returns
+`EngineError::StateInvalidated` rather than a retryable refusal. Same for a
+`standard` window already at capacity — append-then-evict leaves the row count
+unchanged while the oldest row is gone.
+
+**1b. `no-cache` and `apollo` — the dense-only forwards. CLOSED 2026-08-02.**
+Found while closing item 1: neither consulted `forward_moe_full_layer` at all,
+so on a hybrid-MoE arch both ran the dense half of every layer and returned an
+apparently valid answer. That is a *worse* failure than a degraded one — a
+different model wearing the same answer shape, undetectable downstream — so it
+was treated as a semantic disqualification rather than as missing propagation.
+The two needed different corrections because the seam is in a different place:
+
+```text
+no-cache   forwards through `kv_prefill_run`, which *takes* an FfnBackend
+           → gave it real dispatch. That helper is also the oracle the
+             dispatch ring is compared against, so an oracle that skipped the
+             expert half would have made every MoE parity comparison agree
+             about the wrong answer.
+apollo     forwards through `forward_from_layer` / `forward_raw_logits`, which
+           live in larql-compute *below* the FfnBackend seam and construct
+           their own dense `ViewFfn` — no caller-supplied backend can reach
+           them → refuses the architecture up front, `RefusalKind::Unsupported`
+             (operands fine, this executor cannot serve them, pick another).
+```
+
+Real dispatch stays preferable for apollo, and means threading an `FfnBackend`
+through `forward_layer_range` — a change to the forward, not to the engine.
+Until then it is not usable as an apparently conformant MoE engine, which is
+the point.
+
+Two more transactional bugs fell out, both of the kind only a refusal can
+expose. `no-cache` pushed the decode token onto its list *before* the
+re-forward could refuse, so a caller who fixed the cause and retried would
+have forwarded the same token twice — the exact double-append the contract
+exists to prevent; the token list is its entire continuation state, so the
+push is now undone on failure. And `kv_decode_step_run` appended each layer's
+K/V before the FFN could refuse, so the oracle itself is now transactional:
+truncate back to the entry lengths, or report `StateInvalidated` when the
+cache is windowed at capacity and eviction has already discarded a row.
+
+*Standing:* every `EngineKind` variant is now classified and gated —
+`RoutesExperts` (nine, sweeping prefill/decode × three kinds) or
+`NoExpertSeam` (apollo, refusing the architecture with an executing route, so
+the refusal provably comes from the engine and not the route).
+
+**2. Variant-selection refusal.** Closes V2-0 outright.
+`Vindex3Index::declares_profile` is a name check; §9.1 wants a profile that
+selects an absent variant to fail naming the region set, the requested variant
+and the variants physically present. Self-contained — no new execution path.
+
+**3. WALK/DESCRIBE parity.** Closes V2-1 except shared banks. Gate KNN over
+in-place bank regions must return identical top-K to a v1-style extracted
+`gate_vectors.bin` control on fixture A. This is the row that keeps "the model
+IS the database" true of VINDEX3 rather than only of VINDEX2.
+
+**4. A real Gemma layer as a VINDEX3 container** (container ladder c8/c9). The
+first real model that *is* a VINDEX3 container rather than one bound over
+VINDEX2 bytes. c8 is one layer; c9 is all of them, at which point `extract`
+gaining a VINDEX3 mode becomes a question rather than a violation.
+
+**Not on the critical path, but adjacent and cheap to start: the continuation-
+state intervention harness.** `larql-kv` already owns incremental decode with
+real K/V continuity, explicit next-token forcing, and a state-policy taxonomy
+that names exactly the question a persistence experiment asks — which parts of
+a continuation are carried by the emitted token, the residual, and the K/V
+history. What is missing is causal read/write access to that state during a
+decode step.
+
+PR #197 set the precedent for how that should look. `KvDispatch::truncate_kv`
+is a research/recovery capability declared on the trait, implemented on CPU,
+defaulting to *unsupported* rather than silently copying to host — which is the
+shape a `MutableKvView` / `KvIntervention` seam should follow, at the layer
+where attention appends and reads, never by exposing `KvHandle`'s
+representation.
+
+One trap is already known and should be inherited rather than rediscovered: a
+checkpoint that records cache *lengths* is not a checkpoint under a sliding
+window, because append-then-evict leaves the count unchanged while the oldest
+row is gone. `StandardEngine::rewind_is_sound` encodes that test; a fork API
+needs the same one or it will hand out silently wrong donor state under
+`markov-bounded`.
+
+### Standing method
+
+Established by repeated failure, not preference:
+
+- **Bind, never reconstruct.** A bridge that dequantises into an
+  incumbent-shaped temporary can reach numerical parity while proving nothing
+  about the binding architecture. `as_f32_slice()` hands over stored bytes or
+  refuses with a typed reason.
+- **Ladders, not end-to-end tolerances.** A single residual-delta tolerance
+  blends router accumulation order, softmax, renormalisation, activation
+  quantisation, integer rounding and reduction order; passing it establishes
+  nothing and failing it identifies nothing. The router ladder localised a
+  7e-4 disagreement to post-processing in one run — it was a missing bound
+  operand, not the BLAS-vs-index-order accumulation it would have been blamed on.
+- **Mutation-check every new test.** Several have passed for the wrong reason,
+  including one that could never have caught the bug it was named for.
+- **Suspect the instrument first.** This programme has produced roughly three
+  measurement defects per real code defect: a process-global allocation counter
+  under a parallel test runner, replay parameters defaulted instead of read from
+  the record, and a `\b` in a normaliser that BSD `sed` silently ignores.
+
+### Not discharged
+
+- **E0-FULL.** Decode rows and all 632 WALK ranking lines match; the remaining
+  12 rows need the prescribed baseline reconstruction (baseline binary at
+  `6eae5ea` → baseline extraction → current reader against that artifact).
+  Status stands at: E0-CI green, E0-FULL decode rows green, remaining rows not
+  discharged. A runner now exists (`scripts/e0-verify-goldens.sh`); before it,
+  the goldens were an assertion nobody made.
+- **OLMoE goldens** pin a decode panic that the separate-tensor MoE extractor fix
+  has since removed. They need a deliberate re-capture with the reason recorded.
+- **CLI generation dispatch** — `detect_generation` exists and is guarded by
+  E0-CI, but 15 call sites still assume VINDEX2.
+- **`extract --format vindex3`** — not needed until the container round-trip
+  rung, and doing it earlier would weaken the Gemma comparison by introducing
+  re-extraction as a second candidate cause.
+- **Mini-K3, Kimi-Linear, K3** — the conformance envelope beyond Gemma.
+
+---
 ## Query / Edit / Interpret — first-class functionality track (added 2026-05-28)
 
 **Thesis: the differentiated functionality is the database, not the tok/s.**
@@ -388,7 +643,7 @@ item, not just a competitive-parity item.
 - **Grid (CPU MoE on remote shards)**: 18.3 tok/s 1-shard / 17.3 tok/s 2-shard local-loopback. Multi-host LAN/cross-region scaling unblocked.
 - **Remote FFN (dense)**: `larql run --ffn URL` + `larql serve --ffn-only` wired end-to-end.
 - **gRPC grid**: 2-shard self-assembling grid live-validated on 26B A4B.
-- **4 KV-cache engines**: MarkovRS (287×), UnlimitedContext (254×), TurboQuant (4×), Apollo (20,000×) — all at ~95 tok/s on Gemma 3 4B Metal.
+- **4 KV-cache engines**: MarkovRS (287×), WindowedCheckpoint (254×), TurboQuant (4×), Apollo (20,000×) — all at ~95 tok/s on Gemma 3 4B Metal.
 - **Wire format negotiation** (2026-05-07): f16 is now the default for all grid traffic (50% bandwidth reduction). i8 symmetric quantised residuals available opt-in (`LARQL_I8_WIRE=1`, 75% reduction). Content-type negotiation via `Accept` header; f32 fallback for non-grid clients.
 - **Per-layer latency routing** (2026-05-07): `HeartbeatMsg.layer_stats` carries EMA avg_ms + p99_ms per layer; router routes to the server with lowest per-layer latency (falls back to requests_in_flight when no data yet).
 - **WebSocket token streaming** (2026-05-07): `WS /v1/stream` now supports `{"type":"generate","prompt":"...","max_tokens":N}` command with per-token frames and cancel support. SSE streaming on `/v1/chat/completions` was already fully wired.
@@ -411,6 +666,9 @@ item, not just a competitive-parity item.
 - **larql-router self-healing + HTTP/3 + hedged-dispatch phase** (2026-05-16): MoE expert routing (ADR-0018, per-(layer, expert-range) replication keys), Prometheus `/metrics` (ADR-0017), Phase 4 HTTP/3 shard transport behind `--http3-shards` / `--http3-port` (ADR-0019, h3 0.0.8 + h3-quinn 0.0.10 + h3-axum 0.2), hot-shard hysteresis (ADR-0014 amendment, `--hot-shard-demote-ratio` default 0.8), backpressure tier (ADR-0020 — `--saturation-ceiling N` filter in `route()` / `route_expert()`, dispatcher distinguishes 503 saturation from 400 no-owner via `has_owners_for()`, emits `Retry-After: 0.5`, bumps `larql_router_route_saturation_total`), long-running chaos test (`tests/test_grid_chaos.rs`, 5,000 random ticks × 2 variants, asserts ledger consistency + coverage floor + no `route()` panic), hedged dispatch (ADR-0021 — opt-in via `--hedge-after-ms M`, new `route_with_rank` / `route_expert_with_rank` grid APIs, `hedged_post_json` racing helper, dense + MoE fan-outs wired, `route_hedge_fires_total` / `route_hedge_wins_total` counters; supersedes the original "speculative next-layer prefetch" P1 framing — an audit falsified that framing since the router sees one batched call per token against a single input residual, so hedge-the-slow-primary is the legitimate router-layer optimisation). Concurrent-route bench (`bench_route_concurrent`, 2026-05-16) surfaced lock-contention plateau: pre-swap 1 = 5.6 → 4 = 8.7 → 8 = **4.0** → 16 = 3.6 Melem/s (8 workers *worse* than 1 — pathological). **Lock primitive swap** (2026-05-16): `tokio::sync::RwLock<GridState>` → `parking_lot::RwLock<GridState>` across larql-router and tests. Every grid critical section is short and sync (no `await` held under the lock), so synchronous is semantically correct and the compiler enforces it (parking_lot guards are `!Send`). Post-swap: 1 = 6.4 / 4 = 11.1 / 8 = 7.2 / 16 = 6.1 Melem/s — **+14% / +28% / +80% / +70%**, pathological 8-worker collapse eliminated. 220 tests still pass. Saturation-filter cost on the happy path: ~108 ns vs ~113 ns baseline (in noise); all-saturated short-circuit ~57 ns. Router test surface: 169 lib + 50 integration = **219 tests** (220 with `--features http3`). Coverage **~93%**. Five examples (`embed_grid`, `static_shards_server`, `admin_client`, `fanout_dispatch`, `saturation_backpressure`); criterion benches cover dense + MoE + saturation + concurrent-route. Multi-host deployment runbook at [`crates/larql-router/docs/multi-host-demo.md`](crates/larql-router/docs/multi-host-demo.md). Server-side `GET /v1/shard/{model}/{start}-{end}` audited + documented in [`crates/larql-server/docs/router-spec.md`](crates/larql-server/docs/router-spec.md) §4. ADRs: [0017](docs/adr/0017-prometheus-metrics.md), [0018](docs/adr/0018-moe-expert-routing.md), [0019](docs/adr/0019-http3-shard-transport.md), [0020](docs/adr/0020-route-backpressure-tier.md), [0021](docs/adr/0021-hedged-dispatch.md).
 - **Whole-codebase review** (2026-05-28): multi-agent deep review (17 crates, ~415K LOC; per-crate reader + adversarial verification). Clippy clean (2 trivial nits); exposure concentrated and thematic. ~7 verified high/medium items now tracked under "Codebase hardening (review 2026-05-28)" below and mirrored into crate-local roadmaps. Top two confirmed by hand: infallible `FfnBackend::forward` aborts serving on remote-shard blips; Metal KV append has no `pos<max_seq` clamp (GPU OOB past 4096 rows). Record: [`docs/audits/codebase-review-2026-05-28.md`](docs/audits/codebase-review-2026-05-28.md).
 - **Follow-up codebase review** (2026-06-12): working-tree diff review (C10 residency + FR3) plus fresh whole-workspace sweep with adversarial verification. Numeric core verified clean (asm kernels, int8 attention, GGUF loader overflow claims all refuted); verified exposure at the edges: `model_id` path traversal in shard loader, zero GPU-error checking across 77 Metal `wait_until_completed` sites, dispatch-geometry duplication back at 2 sites despite `KernelHandle`, corrupt-vindex panics (2026-05-28 item 1 still open), GIL never released in larql-python, 145 env flags / ~18 documented. Tracked under "Follow-up review (2026-06-12)" below; maintenance-debt recommendations under "Cleanup / consolidation track (added 2026-06-12)". Record: [`docs/audits/codebase-review-2026-06-12.md`](docs/audits/codebase-review-2026-06-12.md).
+- **Tagged release binaries + first tag `v0.1.0`** (2026-07-24/25, [ADR-0026](docs/adr/0026-tagged-release-binaries.md)): larql had no distribution artifact — every host started from `git clone` + a cold `cargo build --release`. `.github/workflows/release.yml` now cross-builds `larql` + `larql-server` for macOS-aarch64 / Linux-x86_64 / Windows-x86_64 on `v*` tags under a new `release-dist` profile (stripped, no line tables; the profiling-friendly `release` profile is untouched) and publishes one archive per platform to a GitHub Release. `needs: build` gates publication on all three legs, so a partial release is not reachable. **`v0.1.0` cut 2026-07-25; the workflow went green on its first run** — archives verified to contain both binaries, and the macOS one smoke-run (`larql 0.1.0`, `dec-bench` present, strip confirmed). The driver is a **hard policy, not an optimisation: GPU-provisioned hosts never build from source** — a cold build is 20–40 min of pure CPU work with the GPU idle, and the DEC funnel runs ~10 stages on ephemeral rented hosts. `scripts/lib/larql-binaries.sh` enforces it for the stage drivers (operator-supplied → reuse → fetch → build, with the build refusing and exiting non-zero when `nvidia-smi` is present unless explicitly overridden). DEC-0.5 keeps compiling only the criterion kernel bench — a bench target is not a shippable binary and that kernel is the stage's measurement object. Separately, all **18** workspace crate names are claimed on crates.io as `0.0.0` placeholders (17 + `larql-experts`, a nested workspace invisible to the `[workspace] members` sweep), verified against the registry API; this is squatting-prevention, **not** the crates.io publishing ADR-0026 still declines. (**19th name, `larql-factory`, claimed identically on 2026-07-29** — see the ADR-0026 addendum and the entry directly below.)
+- **Vindex Factory G0 slice + `larql recipe estimate`** (2026-07-29, [`docs/vindex-factory.md`](docs/vindex-factory.md)): new `larql-factory` crate — recipe schema (§4), `build_id` canonicaliser (§5), a structural validator covering every §6.1 PR-check gate that doesn't need network I/O, `larql capabilities` (§15.2, sourced from a new declarative architecture registry in `larql-models` rather than a hand-duplicated list — cross-checked by a test against the real `detect_from_json` dispatch), `larql card render` (§9), and `larql recipe estimate` (§6.1 step 4, the crate's first network I/O — upstream size + a coarse per-output byte model + an executor recommendation + a cost band priced against `docs/dec-funnel-v0.2.md` §7's existing rate basis rather than a fabricated duration prediction). Also lands previously-uncommitted OLMoE + GraniteMoE architecture support (a real prerequisite for the capability registry's claims about those two families). Every source file at or above the 90% coverage floor. Full detail in [`ROADMAP_STATUS.md`](ROADMAP_STATUS.md)'s "Recently shipped" entries. PR #192.
+- **`larql recipe build` — PREFLIGHT→RELEASE build driver** (2026-07-29, same spec, §7): the `larql-factory::build` module orchestrates FETCH → EXTRACT → SLICE → MANIFEST → VERIFY → PUBLISH → RELEASE as subprocess calls into this same `larql` binary, behind a `CommandRunner` trait (`SubprocessRunner` for real builds, a `MockRunner` in tests) so the whole pipeline's stage ordering and failure handling is unit-tested without spawning a process or touching credentials. FETCH scopes `HF_HUB_CACHE` per build — `resolve_model_path`'s cache lookup doesn't disambiguate by revision, so a shared cache could otherwise let EXTRACT silently build from the wrong commit. PUBLISH always goes `--private` first; RELEASE only flips a repo public once every output has verified (§8's "nothing goes public unverified"). Always returns a `BuildRecord` — JSON-printable whether the build passed or a specific stage failed, matching `dec-bench`'s `--output-file` pattern. **Scope, decided deliberately after tracing what actually exists in this codebase, not what the spec assumed**: MIRROR (R2) and REGISTER (chuk-experiments-server) aren't implemented — no R2/S3 client exists anywhere, MCP tools aren't callable from compiled Rust, and the spec's own text assumes both are the rig worker's job; `BuildRecord` is the hand-off point for an external wrapper, the way `dec0-loopback.sh` already wraps `dec-bench`'s JSON. VERIFY here is checksum integrity only (`larql verify`) — the numeric reconstruction/logit-match checks in §8.1 need per-architecture tensor-naming knowledge that isn't validatable without real model weights. Extended `larql-vindex`'s publish path with a `private: bool` option and a new `set_repo_visibility` capability (verified against the real HF OpenAPI spec) to make the private-then-public two-phase publish possible; new `larql hf visibility <repo> --public|--private` command. Wired in as `larql recipe build <FILE> [--scratch-dir DIR]`. Every new source file at or above the 90% coverage floor.
 
 ---
 
@@ -546,6 +804,827 @@ Ordered actions:
     graceful drain on shutdown (`bootstrap.rs:1255`); grid join stream has
     no malformed-message rate limit (`grid/service.rs:121`). [larql-server,
     larql-router]
+
+### DEC-readiness review (2026-07-22)
+
+Targeted review of the **DEC data-plane** ahead of the DEC funnel programme
+([`docs/dec-funnel.md`](docs/dec-funnel.md)) — the code the programme runs on
+rented x86 marketplace hosts, against non-Gemma models, over adversarial
+links. Four parallel readers (security, hardcoding/config, modularity,
+performance), verified findings only. Full record:
+[`docs/audits/dec-readiness-review-2026-07-22.md`](docs/audits/dec-readiness-review-2026-07-22.md).
+Verdict: structurally sound and the wire decoders are mostly hardened, but a
+**silent-corruption cluster** (produces a number, the number is a lie) is the
+dominant risk because the whole programme is a measurement exercise. The B-row
+f32/f16/i8 serving path is well-built; only the Q8K path — the wire DEC prefers
+— does not batch. Work through in the order below (roughly DEC-stage sequencing).
+
+**Batch A — silent corruption + the security HIGH (before any claim-bearing run): ✅ DONE (2026-07-22)**
+
+1. ✅ **Q8K batched compute** (P0, corrupts C1/C6, gates DEC-0) — `walk_ffn/q8k.rs:199`
+   ran B same-layer rows as B independent matvecs, each re-streaming the full
+   layer's weights, so the Q8K batch curve was ~linear by construction. Fixed:
+   the handler now groups request entries by layer; groups of >1 dequantise to
+   f32 and run ONE batched GEMM through `kquant_ffn_forward_layer` (preserving
+   the Q8K upload win, amortising weights across rows); singleton groups keep
+   the existing single-row Q4K×Q8K kernel unchanged (no batching problem there,
+   and it avoids dequantising gate/up on the latency-critical single-token
+   decode path). Numerical equivalence between the two paths is pinned by
+   `walk_ffn_kquant_layer_q8k_batched_gemm_matches_per_row_single_kernel`.
+   [larql-server, larql-inference]
+2. ✅ **Multi-layer decoder allocation bomb** (P0, security) — `Vec::with_capacity(n)`
+   from an attacker u32 → one 16-byte packet aborts the server
+   (`moe_remote/multi_layer_wire.rs:105,146,211,254,292`). Regression from the
+   repo's own `max_possible_entries` guard (PR 104). Fixed: mirrored the guard
+   at every task/result/expert-count allocation site, plus inside the shared
+   `read_f32_slice`/`read_i16_slice` helpers so `hidden`/`nb`-derived lengths
+   are bounded before any allocation, covering both `decode_multi_layer_request`
+   and the client-side `decode_multi_layer_response`. 8 new
+   `rejects_impossible_*_before_allocating` regression tests. [larql-inference]
+3. ✅ **Shard failure zero-fills FFN output** (P0, silent generation corruption) —
+   `sharded.rs:117` returned zeros on a panicked/unowned shard and decode
+   continued on a corrupt hidden state. Fixed: `forward_predispatch_all` now
+   panics loudly on an unowned layer or a shard's transport failure (propagating
+   the worker thread's panic via `resume_unwind` instead of swallowing it),
+   matching `RemoteWalkBackend::forward`'s existing panic-on-error convention.
+   [larql-inference]
+4. ✅ **Down-proj ignores its format tag on the Q8K fast path** (P0, gates
+   DEC-4/6) — `kquant_forward/walk_ffn.rs:135` fed `ffn[2].0` into a Q4_K-only
+   kernel without checking `ffn[2].1`; a non-Q4_K down slab (Inkling/K3) would
+   have decoded garbage. Fixed: the fast path now additionally gates on
+   `ffn[2].1 == "Q4_K"`, falling back to the format-aware `dequantize_matrix`
+   path otherwise. Fixed in both the `larql-inference` copy (the live serving
+   path) and the `larql-compute` twin (same bug, not yet wired to a serving
+   path — see item 4g). Regression:
+   `walk_ffn_kquant_layer_q8k_rejects_down_slab_with_non_q4k_format_tag`.
+   [larql-inference, larql-compute]
+5. ✅ **x86 scalar-fallback is silent** (P0 *observability*, gates DEC-0.5) —
+   `q4k_q8k_gate_up_into` (:1377) and `q6k_q8k_matvec_into` (:2119) have no AVX2
+   branch; the serving-path doc-comments falsely claimed "NEON/AVX2". Building
+   the AVX2 kernels remains **C-ladder** work (not done here). Fixed: added
+   `larql_compute::cpu::ops::q4k_q8k_dot::kernel_class_summary()`, logged once
+   at server startup (`larql-server/bootstrap.rs`), and corrected the false doc
+   comments on `q4k_q8k_gate_up_into` and the `q8k.rs` module doc — so no DEC
+   number is ever recorded on an unlogged scalar path. [larql-compute, larql-server]
+
+**Batch B — fleet/config landmines (before the x86 + Linux arms):**
+
+6. **`127.0.0.1` announce on `--join`** (P1, breaks multi-host grid) — refuse a
+   wildcard host without `--public-url`, or detect the outbound IP
+   (`bootstrap.rs:1222`). [larql-server]
+7. ✅ **Backend factory + capability dispatch** (P1, unblocks x86 + pre-work for
+   G-ladder) — DONE 2026-07-22 (except the capture-portability doc note, folded
+   into #8's script work). `larql_compute::backend::factory` adds
+   `BackendKind` (+`FromStr` for a future `--backend`/`DEC0_BACKEND` string) and
+   `backend_from_spec(kind, registry)` with injected constructors (ADR-019: the
+   trait crate names no backend crate); `larql-cli/src/backend_select.rs` builds
+   the registry once, and all 7 `if metal` cfg copy-paste sites collapse onto it
+   (`run_cmd.rs` ×2, `bench/remote_ffn_runtime.rs`, `bench/local_runtime.rs`,
+   `dec_bench/capture_runtime.rs`, `shannon_cmd.rs`, `walk_cmd.rs`). Semantics
+   tightened: an explicit `--metal` with no usable device now errors loudly
+   instead of silently benching on CPU. Dispatch de-`bool`ed: the remote-MoE
+   fork probes `supports(Capability::DecodeMoe)` on the constructed instance,
+   and run_cmd's experts module fixes TWO latent bugs — `metal_ready_for_q4`
+   probed `default_backend()` (always CPU post-ADR-019, so the check was
+   vacuous) and `Strategy::MetalQ4K` then ran `layer_graph::generate` on a
+   fresh `default_backend()` (CPU) — the constructed backend is now stored in
+   `Runtime` and probed via the canonical `PrefillQ4 && DecodeToken` pair.
+   [larql-cli, larql-compute]
+8. **`--metal` / `--backends metal` hardcoded for x86** (P1) — `DEC0_BACKEND`
+   env in `scripts/dec0-loopback.sh:80,97`, platform-conditional `--backends`
+   default (`bench/args.rs:26`). Couples to #7. [larql-cli]
+9. ✅ **`SKIP_MOE` vs `LARQL_SKIP_MOE` name split** (P1, corrupts the anchor's
+   ceiling arm) — DONE 2026-07-22. One canonical prefixed name for all three
+   unprefixed vars (`LARQL_SKIP_MOE`, `LARQL_SKIP_OUTER_NORM`,
+   `LARQL_DECODE_DEBUG`), read through shared accessors in
+   `larql_compute::options` (`skip_moe_enabled` / `skip_outer_norm_enabled` /
+   `decode_debug_enabled`) that honour the historical unprefixed names as
+   deprecated aliases with a one-time stderr warning. The grid path's
+   `GridRuntimeConfig` now reads the same accessor as the local path, so the
+   DEC-0 ceiling arm measures one thing regardless of which name the operator
+   types; dec-funnel.md DEC-0 anchor note updated to the canonical name
+   (README already used it). Alias behaviour pinned by
+   `unprefixed_legacy_aliases_still_enable_their_flags`.
+   [larql-inference, larql-compute, larql-compute-metal, docs]
+10. **DEC deployment auth posture** (P1, security) — the data plane is open
+    unless `--api-key` is set (`/v1/shard` streams the whole vindex as a tar);
+    router admin RPCs (`drain_server`/`assign_range`) and the grid port are
+    unauthenticated (`grid/service.rs:386,397,455`; overlaps 2026-06-12 item 1
+    follow-on). Decide: mandatory data-plane auth off-loopback, or private-network
+    binding as a documented DEC deployment rule. Constant-time the gRPC grid-key
+    compare (`service.rs:105`) while here. [larql-server, larql-router]
+11. **Timeout defaults + no-op grid-LAN timeout** (P2) — the 30/60/120s defaults
+    assume 26B+LAN and will 504 on Inkling cold-start (note at DEC-4/5
+    provisioning); `grid_lan_runtime.rs:179` timeout is a `let _ =` no-op (wire
+    it). Arch-tag the grid-regress baselines (`bench-grid-regress.sh:35`).
+    [larql-cli, larql-inference]
+
+**Batch C — structural pre-work (schedule per-ladder, not a DEC-0 blocker):**
+
+12. **Compute admission control** (P1, protects C3/DEC-2) — ~192 concurrent
+    multithreaded-BLAS `spawn_blocking` tasks at 4 clients × 48-layer fan-out
+    look like tier saturation but are oversubscription. Semaphore sized to
+    physical cores + `OPENBLAS_NUM_THREADS=1` for the serving build.
+    [larql-server]
+13. ✅ **q8k endpoint drain/heartbeat/latency blindness** (P1, breaks C7 router
+    demo) — DONE 2026-07-23, extended to the whole expert surface per the
+    expert-serving review (§1d): shared `track_model_request` helper
+    (`RifGuard` + `requests_total`) on the q8k walk-ffn handler AND all
+    expert endpoints (single/legacy-batch/layer-batch×2/multi-layer×2), with
+    `layer_latency_tracker.record` on q8k walk-ffn and the expert batch
+    handlers. See `docs/audits/expert-serving-review-2026-07-23.md`.
+    [larql-server]
+14. ✅ **dec_bench `Endpoint` seam + routing capture** (P1, gates the
+    routed-experts arm that gates the C1-on-MoE verdict) — DONE 2026-07-23,
+    preceded by a three-reader expert-serving review
+    (`docs/audits/expert-serving-review-2026-07-23.md`) whose Phase-A server
+    hardening + pre-measurement perf batch landed first (batch handlers 400
+    on unresolvable experts; q8k shape validation; owned-entry
+    `per_expert_bytes` probe; bulk LE codecs off the reactor thread; stale
+    parallelism docs corrected). Built: `Endpoint` enum (walk-ffn ×2 +
+    experts-multi-layer ×2 — path/frame/decoder/`server_ms`/denominator per
+    variant); capture `--routing` flag with additive pool sidecars
+    (`raw.bin`/`normed.bin`/`routing.bin`, manifest stays v1, the shipped
+    330M pool still replays the dense arms); routing computed at the capture
+    sink via the now-`pub` `build_moe_router_weights` + client router,
+    gated by a router twin-parity test (inference `route()` ≡ compute
+    policy pipeline, 4 shapes); per-point batch-aware denominators
+    (`weight_bytes_tok_naive` primary — server streams per-row, no
+    cross-row sharing — + `_union` as the DEC-3 bound) and
+    `dec/endpoint(_code)`/`dec/experts_union_frac`/`client_rayon_threads`
+    in the pulse/run record; warmup non-zero-response guard (§1a class).
+    [larql-cli, larql-inference, larql-server]
+15. **Server expert dispatcher** (P2, before G4 cuda-experts) — extract one
+    `run_experts(state, backend, …)` from the per-handler Metal/CPU branches
+    (`q8k.rs:107`, `grpc_expert.rs:178`, `expert/{layer,multi_layer}_batch.rs`).
+    [larql-server]
+16. ✅ **Wire consolidation** (P2) — DONE 2026-07-24, the trigger having arrived
+    early (DEC-1A's asymmetric codecs + timing field, not DEC-6a). The dense
+    binary frame is single-sourced in `larql-inference` `ffn/remote/codec.rs`
+    (encoder+decoder+constants; server `binary.rs` is a shim; router imports);
+    every CT string and `BATCH_MARKER` declared once; byte-identical wire
+    pinned by encode-decode-reencode tests; all allocation-bomb guards moved
+    verbatim; `call_q8k_layers` byte-counter gap fixed. Three extensions then
+    landed on the consolidated seam same-night (ADR-0025): the header-gated
+    `serve_us` timing trailer, independent inbound/return wire formats
+    (f16/i8 REQUEST encodings — previously f32-only — with `Content-Type`=in
+    / `Accept`=out decoupled), and the `dec-bench drift` C6 fidelity
+    instrument. [larql-inference, larql-server, larql-router, larql-cli]
+17. **MoE parity seams + hot-path cleanups** (P2) — make `build_moe_router_weights`
+    `pub` and share the combine math before the DEC-6b KDA/LatentMoE port
+    (`hidden.rs:93` vs `core.rs:111`); `model.patched` arc-swap so compute
+    doesn't hold the read lock across FFN (C3 shared-tier landmine); drop the
+    4–6 full-buffer request-lifecycle passes (`core.rs:48,235,284`,
+    `binary.rs:88`); gate `--release-mmap-after-request` on `requests_in_flight`;
+    persistent client fan-out pool. [larql-inference, larql-server]
+
+### Vindex + WalkFFN review (2026-07-30)
+
+Subsystem review of `larql-vindex` (~51K LOC) and the walk-FFN engine
+(`larql-inference/src/vindex/walk_ffn/`), merged with an external strategic
+review of the architecture and a kernel deep-dive. Full record:
+[`docs/audits/vindex-walkffn-review-2026-07-30.md`](docs/audits/vindex-walkffn-review-2026-07-30.md).
+Verdict: both subsystems structurally healthy (the storage layer and spec
+crate are defensive engineering done right; the trait-dispatch refactor
+paid off — FP4 cost zero kernel code), but four high-severity runtime bugs,
+a silent-wrong-numerics cluster in the quantized walk paths (same
+"produces a number, the number is a lie" theme as the DEC review), and
+**no walk-vs-dense numerical parity test anywhere in the tree**.
+
+**Status 2026-08-01: PROGRAMME CLOSED — 24 of 24.** Tiers 0–1 in full (2026-07-30,
+incl. all four HIGHs); item 13 resolved with the finding inverted (the
+exact-first gate chain is now actually wired — `enable_hnsw()` had been
+leaking approximate selection into walk numerics); Tier 2 complete:
+base+delta (16), forward/forward_observed split (15), runtime trace
+emission (17), execution planner (18), two-stage selection (19) all
+shipped; parity suite (20) landed with the per-file ≥90% coverage
+pass; KnnStore unified at the retrieval-kernel level (21 — full arch-B
+retirement explicitly gated in the spec, see the item); v1 conformance
+contract (22) shipped 2026-08-01 (corruption suite + LE golden
+vectors + `docs/conformance-v1.md`; perf benchmark protocol is a
+documented follow-up in that doc); doc drift (23) closed 2026-08-01
+(every number re-verified against its bench/experiment source — the
+0.008 ms headline was the pre-2026-04-05 reduced-shape `vindex_bench`
+example; extract-default contradiction resolved in favour of the code,
+per surface; walk.md K=8092 kept — it is the literal harness constant,
+now documented as such — and WalkFfn reframed as the
+instrumentable/editable layer + CPU sparse path); hygiene (24) closed
+2026-08-01, triaged per its own licence — done: generic-engine
+vocabularies → data files behind a loud-fallback search chain, the two
+deferred 16384→10240 fixes, the activation dispatch (27 sites) onto one
+exhaustive helper, FFN component constants unified, 41 colocated tests
+for `hnsw.rs`/`mutate`/`write_f32.rs` (97/96/93% line coverage);
+documented remainder: the >250-line file splits (see the item).
+Standing follow-ups carried out of the programme: server/lql
+`try_apply_patch` migration, remote transport coverage harness,
+logit-contribution trace field, walk-FFN thresholds surfaced into
+`WalkFfnConfig`, HNSW level-0 graph fragmentation at n≳64 (new finding
+from item 24's test pass — naive `add_connection` eviction orphans
+nodes; recall@10 collapses to 0.16 at n=200 uniform), and the remaining
+file splits (`huggingface/download/mod.rs` 1329, `patch/overlay.rs`
+1071, `quant/convert.rs` 653).
+
+Sequencing is interaction-driven: Tier 0's padded-stride fix **gates**
+Tier 2's base+delta (the delta path leans on the same row-dot/sidecar
+machinery, and GPT-OSS-20B hidden=2880 is K3 rung 1); the
+`forward`/`forward_observed` split *is* the fix for the zero-activation
+bugs (don't patch them twice); the planner enum subsumes the
+wrong-capability-gate class but the live panic gets its two-line fix now.
+
+**Tier 0 — correctness (small independent diffs, before any Q4K walk
+claim on a non-256-aligned model):**
+
+1. ✅ **Q4K cache padded-stride fix + non-aligned fixture** (DONE 2026-07-30) (P0, silent
+   garbage) — `kquant_cache.rs:138-161` decodes assuming unpadded
+   `[rows, cols]`; the writer pads each row's cols to 256
+   (`write_kquant/ffn.rs:70`). Wrong FFN outputs, no diagnostic, on
+   hidden%256≠0 models (GPT-OSS-20B 2880, Gemma3-1B 1152). The fix already
+   exists in one of three copies (`kquant_forward/walk_ffn.rs:63-70`).
+   Add a hidden=320 fixture — every current Q4K fixture is 256-aligned so
+   the suite structurally cannot catch this class. Victims: parallel-down
+   path, per-feature down accumulate, selector row norms. [larql-vindex,
+   larql-inference]
+2. ✅ **Q4_0 ladder gates on the wrong format → CPU panic** (DONE 2026-07-30) (P0) —
+   `walk_ffn/mod.rs:405` admits Q4_0 data on `supports_quant(Q4_K)`;
+   `CpuBackend` says yes but leaves `q4_matvec_pair_batch` defaulted to
+   `None`, and `interleaved_q4.rs:58-62` unwraps it. Gate on Q4_0 / actual
+   batch-kernel availability; unwraps → fallthrough. `interleaved_q4.rs`
+   has zero tests. [larql-inference]
+3. ✅ **Overlay gate cache poisoned by zero-width gate vectors** (DONE 2026-07-30) (P0,
+   nondeterministic panic/wrong-scores) — `patch/overlay.rs:176-191`
+   mixed-width guard misses `len==0`; `vindexfile/mod.rs:125` inserts
+   `vec![]` gates on every INSERT, so the trigger is in-tree. Guard the
+   zero-width case AND stop inserting empty gate vectors. [larql-vindex]
+4. ✅ **Loader panics on malformed `index.json`** (DONE 2026-07-30) (P0) — `format/load.rs:81`
+   and `:293` index `gate_slices[info.layer]` unchecked from parsed JSON;
+   return `VindexError::Parse` per the crate's own stated standard.
+   [larql-vindex]
+5. ✅ **Override fallthrough** (DONE 2026-07-30 — routes to the extracted override-aware `weights_fallback` instead of erroring; step 10 honours overrides, so availability is preserved) (P1, stopgap until base+delta) —
+   `mod.rs:333-339`: sparse returning `None` on an overridden layer falls
+   through to override-blind whole-layer paths — the exact failure the
+   module doc warns about. [larql-inference]
+6. ✅ **Unaligned f32 transmutes (UB) + patch decode swallowing** (DONE 2026-07-30 — new `format/le_floats.rs`; `try_apply_patch` is the error-surfacing entry, `apply_patch` kept as an infallible wrapper that drops corrupt patches wholesale; migrating larql-server/larql-lql callers to `try_apply_patch` is a follow-up) (P1) —
+   `patch/format.rs:202`, `quant/convert.rs:565`, `config/dtype.rs:60` →
+   `from_le_bytes`/bytemuck (also fixes the native-endian `.vlp`
+   portability gap); `overlay_apply.rs:86,122` must surface
+   `decode_gate_vector` failures instead of applying meta-only half-state;
+   the hand-rolled base64 decoder silently truncates trailing chars.
+   [larql-vindex]
+
+**Tier 1 — kernel-semantics campaign (one PR neighbourhood: make explicit
+what's exact, approximate, observed, reconstructed):**
+
+7. ✅ **Wire `activation_floor`** (DONE 2026-07-30 — `effective_activation_floor()` = max(user floor, named `ACTIVATION_NOISE_FLOOR`), applied on all three sparse accumulate loops, behavioral test) — documented, settable from
+   `predict_cmd.rs:241`, read by nothing; the real threshold is a
+   hardcoded `1e-10` ×3 (`sparse.rs:338,411,549`). [larql-inference]
+8. ✅ **Name the 80% full-K threshold, align doc/code** (DONE 2026-07-30 — `walk_ffn/thresholds.rs` FULL_K_DENSITY 4/5 + PARALLEL_DOWN_MIN_HITS + GATHER_MIN_FEATURES; helper doc now states the [80%,100%) band is dense) —
+   `helpers.rs:24` fires the dense gemm at `k >= intermediate*8/10` while
+   docs say "K ≥ feature count"; fidelity-vs-K points above 0.8 density
+   are secretly dense unless `force_walk`. Named const in config; consider
+   true `k >= intermediate`. [larql-inference]
+9. ✅ **`selector:fallback` trace suffix** (DONE 2026-07-30 — dispatch-trace entry + `selector_fallback_count()`) — `joint_gate_knn` silently
+   degrades to GateOnly when norms/batched scores are missing; A/B sweeps
+   can't currently be trusted. [larql-inference]
+10. ✅ **Resolve the gather caveat** (DONE 2026-07-30 — STALE: the phrase dates from task #24's transposed-down striding; task #25's hard sidecar requirement (`down_features_q4k_layer_data(layer)?` + decline-without-sidecar pin) resolved it, validated vs dense at |err|/‖ref‖≈6e-3. Caveat deleted, history documented in `sparse_gather.rs`. Remaining issue on this path is the documented 0.15× full-forward perf collapse, not correctness) — `sparse.rs:450` says "experimental —
+    not yet correct for production down" on a kernel production routing
+    reaches (route-pool + sidecar). Stale comment (predates the
+    feature-major sidecar?) → delete; live → opt-in flag. [larql-inference]
+11. ✅ **Unify the NaN contract** (DONE 2026-07-30 — shared `selection_weight_cmp_desc` panics on NaN matching `top_k_by_abs`; 4 sites unified, `#[should_panic]` pins incl. a NaN-gate-scores mock through `joint_gate_knn`) — `top_k_by_abs` panics;
+    `selector.rs:267,320` `unwrap_or(Equal)` scrambles silently. Pick one
+    (also see the 2026-05-28 item 5 shared helper). [larql-inference]
+12. ✅ **Delete the orphaned `larql-vindex/src/walk/` module** (DONE 2026-07-30) — no
+    `mod walk;` anywhere, never compiles, stale `WalkFfnConfig` duplicate
+    (left by `3944359b`). [larql-vindex]
+13. ✅ **Decide the HNSW hot-path question** (DONE 2026-07-30 — the exact-first ordering is DELIBERATE (`735f570e` 2026-04-04 call-site comment; brute gemv break-even-or-better at walk N per `docs/ffn-graph-layer.md`/`benches/hnsw_decode.rs`; HNSW's 80–95% recall would break the exact-top-K selection-quality gates) **but it had never actually executed**: `impl GateLookup for VectorIndex` was missing the `gate_walk` override — the trait default's "Override in VectorIndex" comment dates to the same 2026-04-04 commit — so every `&dyn GateIndex` walk selection silently took the `None` default into `gate_knn`, and `enable_hnsw()` DID leak approximate HNSW into walk numerics (pin test caught it: exact `[1,19,30,0]` became signed-biased `[1,29,9,26]` on the f32 fixture). Fixed by wiring the intended chain, not HNSW: delegation shim in `index/core/gate_lookup.rs` + guarded `PatchedVindex::gate_walk` (declines on gate-overridden/tombstoned layers so the overlay-aware `gate_knn` merge stays authoritative); Q4K-only gates and patched layers still reach `gate_knn_q4`/`gate_knn` as before, so the MoE-expert HNSW win is preserved. `enable_hnsw()` doc now maps exactly which paths consult HNSW incl. the 2026-04→07 leak window; pinned by `gate_walk_ignores_hnsw_toggle`, `gate_walk_delegates_to_inherent_on_a_populated_index`, the 3 `PatchedVindex` gate_walk pins, and `walk_ffn_sparse_hot_path_ignores_enable_hnsw`) — verified: `gate_walk` is tried
+    first (`sparse.rs:231,268`) and HNSW lives only inside the `gate_knn`
+    fallback, so `enable_hnsw()` changes nothing whenever `gate_walk`
+    succeeds. Intentional (brute gemv wins at these N) → document at
+    `enable_hnsw()`; otherwise wire it. [larql-vindex, larql-inference]
+14. ✅ **Tombstone semantics for Delete→Update + pinning test** (DONE 2026-07-30 — Update resurrects, matching Insert; pinned-None meta cleared when Update carries no replacement; oversampling named `BASE_KNN_OVERSAMPLE_FACTOR`=2 with 2×→4×→all-features escalation only on layers with tombstones; 7 regression tests) —
+    Update never clears `deleted` (`overlay_apply.rs:102-138`);
+    `feature_meta()` and `gate_knn()` disagree about the same feature.
+    Also the 2× deletion-oversampling under-fill (`overlay.rs:426`).
+    [larql-vindex]
+
+**Tier 2 — capability (the strategic-review core, in this order):**
+
+15. ✅ **`forward` / `forward_observed` split** (DONE 2026-07-31 —
+    `FfnBackend::forward_with_activation` is GONE; the trait is
+    `forward` (hot, never touches an activation buffer) +
+    `forward_observed` returning `FfnActivations` (new module
+    `larql-compute/src/ffn/observe.rs`): `Dense` for dense paths (the
+    matrix is an intrinsic intermediate), `Sparse` per-position
+    `(feature, activation)` pairs for exactly the K computed features,
+    `Absent {reason}` for paths that observe nothing — the trait default,
+    so unobserving backends (remote walk's fabricated `[seq,1]` zeros,
+    MoE's output-as-activation, seven larql-kv/server stubs) now say so
+    instead of inventing tensors. `WalkFfn` routes both entry points
+    through one `forward_routed(.., Observe)` body — identical routing by
+    construction; `Skip` mode threads through every walk path
+    (sparse/gather/parallel/base_delta/weights_fallback +
+    `sparse_compute`'s split plain/`_observed` API) so the old
+    `seq_len × intermediate` zero-fill no longer exists on generation.
+    The parallel Q4K down branch reports its REAL per-feature activations
+    (the pinned all-zeros parity test flipped to assert bit-equality with
+    the serial halves); an L1 hit serves `forward` but an observed call
+    BYPASSES the cache read and recomputes (pinned); base_delta reports
+    post-patch slot activations (new `base_delta_tests.rs`, incl. decline
+    branches — 20%→95% file coverage). `run_ffn`'s capture arm densifies
+    via `FfnActivations::into_dense()` (Absent → `None`, never zeros), so
+    hooks/trace/server consumers kept their `Option<Array2>` shape;
+    changed files ≥90% line coverage except the pre-existing
+    network-debt pair `remote/http.rs` / `remote/sharded.rs` (12%→35%
+    with new no-shard observation pins; rest needs a mock-server
+    harness)) — activations
+    become opt-in; sparse paths emit `(FeatureId, f32)` pairs instead of a
+    dense `seq_len × intermediate` zero-fill. Subsumes (by construction)
+    the parallel-path zero activations (`sparse.rs:283-371`) and the L1
+    cache's fabricated-zeros hit (`mod.rs:367`), and removes the dense
+    allocation from ordinary generation. [larql-inference, larql-server]
+16. **Base-plus-delta patched FFN execution** (after item 1) —
+    `y_patched = y_base + Σ_{i∈P}(contribᵢ_new − contribᵢ_old)` is exact
+    and O(|P|) on top of the fast dense path; retires the
+    override-forces-sparse cliff and makes editing production-viable.
+    Exactness conditions: old-term subtraction through the SAME quantised
+    row_dot bytes as the dense base (not f32-recomputed), old-down rows
+    from the feature-major sidecar. Lands as a routing-ladder branch, not
+    a rewrite. [larql-inference, larql-vindex]
+17. ✅ **Runtime trace emission** (DONE 2026-07-31 — the post-hoc
+    `gate_knn` re-run is GONE: `with_trace` upgrades every call to
+    `Observe::Record` and folds the executed path's observation into
+    per-(position, layer) records at the routing-ladder exit (new
+    `walk_ffn/trace.rs`), riding the item-15 seam rather than a parallel
+    channel. `SparseActivations` entries carry the kernels' own gate/up
+    scores (`record_scored`) plus per-position kernel labels, so
+    serial/gather/parallel/weights-fallback report the values they
+    actually computed (gather now returns its fused gate/up dots);
+    records carry gate_score/up_score/activation/rank/path +
+    residual_delta_norm (`‖out_row‖`); `‖down_row‖` is served only from
+    the selector's prebuilt lazy norm cache, never computed for tracing;
+    dense whole-layer paths emit the layer summary and decline
+    per-feature records rather than fabricating. `take_trace` rebuilds
+    the public `WalkTrace` from the runtime records — hits are the
+    EXECUTED features, `WalkHit` extended additively
+    (up_score/activation/down_row_norm/rank; post-hoc KNN views build
+    via the new `WalkHit::from_gate` and stay honestly `None`) — and
+    `take_runtime_trace` exposes full fidelity. Field names follow the
+    chuk-introspect snake_case vocabulary; no dependency added. Pinned
+    by `take_trace_reports_executed_route_not_gate_knn`: a pool route
+    vs a decoy `gate_knn` — the trace must equal the executed route,
+    which the old re-run structurally cannot return. Target-logit
+    contribution needs lm_head access → documented out of scope in
+    `trace.rs`) — replace `take_trace`'s post-hoc
+    `gate_knn` re-run (`mod.rs:281-306`, which ignores selector/pools/
+    cell-router and records scores, not contributions) with emission from
+    the executed path: gate, up, activation, ‖down‖, residual-delta,
+    logit contribution, rank, path. Align with the chuk-introspect schema
+    — no second trace format. [larql-inference]
+18. ✅ **Execution planner** (DONE 2026-07-31 — path selection is an
+    explicit decision value: `FfnPlan` (new `walk_ffn/plan.rs`), one
+    variant per ladder destination incl. `OverrideBaseDelta` as a plan
+    variant per the freeze condition, names aligned to the trace_path
+    vocabulary. Every variant carries a structured `PlanReason` —
+    layer/seq_len/num_features/has_overrides, the `selected`
+    condition, a `skipped` list stating why EACH higher-priority rung
+    did not fire (base+delta declines name the exact failed
+    precondition — `base_delta_preconditions` now returns
+    `Result<slots, &'static str>`), and pre-execution `ThresholdCheck`s
+    (requested K vs FULL_K_DENSITY, single-sourced from
+    `hits_len_ge_intermediate` so `satisfied` honours `force_walk`).
+    The planner (`planner.rs` `plan_layer`) is the ladder's ONLY
+    condition source: `forward_ladder` plans, then `execute_plan`
+    matches condition-free, and `forward_unpatched_whole_layer`
+    (base+delta's base) iterates the same `WHOLE_LAYER_RUNGS` table.
+    Try-then-fallthrough handled honestly: a path returning `None`
+    mid-execution re-plans with that rung in a `PlanExclusions` set,
+    and the executed plan's reason records "declined at execution" —
+    pinned by a test where six lying capability flags each decline and
+    the ladder lands exactly where the pre-planner code did.
+    Inspection: public `WalkFfn::plan_for` (pure — L1 probed via new
+    stats-free `FfnL1Cache::peek`, no dispatch entries, no execution);
+    the runtime trace's `LayerTraceRecord` gains `plan_reason`
+    (additive — `DispatchEntry`'s literal construction is pinned by
+    routing tests). Routing is decision-identical: every dispatch/
+    routing/trace test passes unchanged, same trace_path strings; the
+    executed forward keeps exactly one L1 `get` per eligible call so
+    hit/miss accounting is preserved. 20 planner tests (one per rung +
+    decline-re-plan + purity); changed/new files ≥96% line coverage.
+    Thresholds stay in `thresholds.rs`, REFERENCED by reasons —
+    surfacing them into `WalkFfnConfig` is a tracked follow-up) —
+    `VindexFfnPlan` enum + structured reason
+    (plan/reason/layer/features/overrides), config-surfaced thresholds
+    replacing the magic ratios; only freeze once base+delta exists as a
+    plan variant. The ladder's trace_path names + routing tests are the
+    seed; add the reason field. [larql-inference]
+19. ✅ **Two-stage selection: shortlist top-M by gate, exact rerank**
+    (DONE 2026-07-31 — opt-in `WalkFfnConfig::shortlist_m:
+    Option<usize>` (+ `with_shortlist_m`; `None` = single-stage,
+    default everywhere), consumed on the selector-dispatch route (new
+    `walk_ffn/shortlist.rs`): stage 1 takes the top-M through the
+    production `gate_walk` → `gate_knn_q4` → `gate_knn` chain (now
+    factored as `production_gate_chain`, shared with the `GateOnly`
+    route and the joint fallback — no new projection code); stage 2
+    evaluates the configured criterion for ONLY those M candidates —
+    per-candidate up dots via the per-row `ffn_row_dot`, norms from
+    the existing lazy caches, O(M·d), never a full projection — and
+    fully sorts to the final top-K (`rerank_cmp`: weight desc, feature
+    asc on ties; the runtime trace's `rank` field is therefore the
+    FINAL rerank order, and `joint_gate_knn` sorts its top-K by the
+    same comparator so the two paths report identical order). The
+    weight formulas are single-sourced in `criterion_weight` /
+    `criterion_inputs` — `joint_gate_knn`'s inline per-variant
+    closures were extracted onto them, so the full-projection and
+    two-stage paths cannot drift. Hits keep the
+    `(feat_idx, raw_gate_score)` contract; `shortlist_m` forces the
+    per-position walk (like pools — the full-K gemv rewrite would
+    bypass the structure); the Sparse plan reason records a
+    `SHORTLIST_M` `ThresholdCheck` (actual=M, cutoff=K, satisfied =
+    two-stage actually runs). M < K, `Random` (no criterion), or
+    missing stage-2 inputs decline to single-stage OBSERVABLY — a
+    `shortlist:declined` dispatch-trace entry +
+    `shortlist_decline_count`, the M10 `selector:fallback` precedent.
+    Pinned by 13 tests (`shortlist_tests.rs`): M=N two-stage ==
+    `joint_gate_knn` (same features, same order, raw scores) for every
+    scored selector; a huge-‖down‖/tiny-gate decoy the full-projection
+    rerank picks but the top-M gate shortlist structurally excludes;
+    observable declines; default-off bit-identical to single-stage;
+    and the cost pin — a delegating index that PANICS on
+    `gate_scores_batch`/`gate_scores_batch_backend`/
+    `kquant_matmul_transb` runs a full two-stage forward clean, while
+    its counting twin shows single-stage joint pays ≥2 full
+    projections. Changed/new files ≥94% line coverage) — the
+    rerank criterion already exists as
+    `FeatureSelector::ActXUpScoreXDownNorm`; add the shortlist structure
+    so it stops paying full projections. Production-cost shape of the
+    existing experiment harness. [larql-inference]
+
+**Tier 3 — productization:**
+
+20. ✅ **Walk-vs-dense parity suite** (DONE 2026-07-30 — landed with the per-file 90% coverage pass: serial-vs-parallel, gather-vs-serial on a real sidecar, walk-vs-dense WeightFfn parity for gemv + exact/full_mmap/interleaved, dispatch-trace assertions against the REAL ladder in the moved dispatch_tests.rs; every walk_ffn file >= 90% line coverage) — the four tests that would have caught
+    the four worst bugs: non-aligned Q4K fixture through cache + serial
+    walk vs dequant baseline; CpuBackend + Q4_0 forward; serial-vs-parallel
+    parity at hits ≥ 512 asserting output AND activation; dispatch-trace
+    assertions against the REAL ladder (routing_tests.rs currently tests a
+    hand-copied replica that can drift without failing). No test anywhere
+    compares walk output against dense ground truth on a served vindex.
+    [larql-inference, larql-server]
+21. ✅ **KnnStore unification** (DONE 2026-07-31 — unified at the
+    RETRIEVAL-KERNEL level; honestly short of full arch-B retirement,
+    which is now explicitly gated in the spec rather than silently
+    pending. The parallel scoring implementation is GONE: `KnnStore`'s
+    private `key_matrices` GEMM + `dirty`-flag rebuild machinery is
+    deleted, and its L2-normalized keys now live as rows in the new
+    shared `patch/gate_overlay.rs::GateOverlay` — the same structure
+    that holds `PatchedVindex`'s gate overrides — so `gate_knn` and
+    every KNN query score through ONE kernel carrying the campaign's
+    hardening (H3 zero-width guard, mixed-width slow-path fallback,
+    per-layer snapshot cache). Mutators invalidate their own layer's
+    snapshot, retiring the manual `invalidate_gate_cache*` calls (a
+    forgotten-invalidation hazard class). What stays KnnStore-specific
+    is POLICY, not machinery: entity/relation/target entry metadata,
+    normalize-on-insert, rank-by-raw-cosine (vs `gate_knn`'s `|score|`
+    merged with base hits — match the statistic to the operation).
+    Public API, `.vlp` `InsertKnn`/`DeleteKnn` ops and the
+    `knn_store.bin` format are unchanged; all five consumer crates
+    (inference/lql/server/python/engine) compile untouched. Full
+    "FFN = KNN index = vindex" (spec §3: appended-slot
+    `AppendFeature`, delete the post-logits override) is NOT done —
+    the FR1/FR2/early-exit routers (2026-06/07) shipped ON the
+    post-logits override after the spec was written, and the α
+    calibration (spec Q2) plus the 189-fact parity benchmark are
+    unvalidated empirical work; `FFN_VINDEX_UNIFICATION_SPEC.md`
+    rewritten to describe the post-unification reality and the
+    remaining gate. Regression pins: query correctness after entity
+    removal renumbers indices, clone-preserves-retrieval; changed
+    files ≥90% line coverage in-crate) — still exported and live in
+    `patch/knn_store_io.rs`/`overlay.rs`/`overlay_apply.rs`; the
+    unification spec still describes it. Until removed, "FFN = KNN index =
+    vindex" is partly aspiration. [larql-vindex]
+22. ✅ **Vindex v1 conformance contract** (DONE 2026-08-01 —
+    `crates/larql-vindex/docs/conformance-v1.md` + the pinning suite
+    `tests/conformance_v1_{index,kquant,patches,down_meta,golden_le}.rs`
+    (38 tests over the shared `tests/common/` fixture): every v1
+    artifact × corruption class asserts error-not-panic-not-garbage —
+    index.json (malformed/missing/wrong-typed fields, unknown
+    dtype/quant tags, the H4 out-of-range-layer fix pinned as
+    contract), interleaved_kquant slab+manifest (unknown format tag →
+    Err; truncated slab / offset-length overflow / short manifest →
+    checked_view decline; H1 padded-stride pinned at the writer),
+    down_features sidecar (bin-without-manifest and missing shape[1]
+    → Err, OOB → decline), .vlp (corrupt/truncated base64 → wholesale
+    rejection, zero half-applied ops — M4/M5 pinned), .lknn
+    (magic/version/truncation/absurd-count), down_meta.bin (truncation,
+    checked-arithmetic overflow, allocation-bomb regression on both
+    readers). Cross-platform: byte-level LE golden vectors for
+    le_floats, .vlp base64, down_meta.bin, .lknn — exact bytes, not
+    round-trip equality; no BE runner exists, the goldens are the
+    guard. The two §3 LOW conformance violations fixed: legacy
+    `down_meta::read_binary` now bounds every allocation by the real
+    file size with checked arithmetic (mirrors `mmap_binary`; module
+    split into `down_meta/{mod,read}.rs`), and the Vindexfile parser
+    got quote-aware tuple splitting (`INSERT ("Acme, Inc", …)`),
+    hard errors on missing/unknown/duplicate DELETE condition keys,
+    and `find_free_feature().unwrap_or(0)` → error instead of
+    silently overwriting feature 0; `.lknn` capacity hints bounded by
+    remaining bytes as part of the same pass. Perf benchmark protocol
+    is a documented follow-up in conformance-v1.md §4 (walk-vs-dense
+    parity exists as item 20; no numbers faked). [larql-vindex,
+    larql-vindex-spec]
+23. ✅ **Doc drift** (DONE 2026-08-01 — every number traced to its
+    source before editing. The `0.008 ms/layer` + `0.3 ms` 34-layer
+    walk headline (repo README, vindex `operations-spec.md`) was the
+    pre-2026-04-05 `vindex_bench` example at its reduced 1024×256
+    synthetic shape ("reduced from 10240/2560/34 for bench speed"),
+    scaled to 34 layers — replaced with the current criterion
+    `vindex_ops` numbers at BOTH shapes (22.7 µs at 1024×256, 2.64 ms
+    at the Gemma 10240×2560 production shape) plus an explicit
+    exact-brute-gemv note: the walk hot path never consults HNSW,
+    `enable_hnsw` is gate-KNN-consumers-only (item 13 inversion), now
+    also stated in the crate README's interpretability recipe.
+    Extract-level default contradiction resolved IN FAVOUR OF THE
+    CODE: `larql extract` defaults to `--level inference`
+    (`extract_index_cmd.rs:46`) while bare LQL `EXTRACT MODEL`
+    defaults to browse (`lql parser/lifecycle.rs:17`) — the README
+    table now says which default belongs to which surface, and the
+    stale "add `--f16`" footer became "f16 is the default, `--f32`
+    opts out". walk.md "Lossless at K=8092": NOT fixed by swapping
+    8092→8192 — the 2026-04-03 boundary sweep, sparse.md and the
+    remote-codec tests all literally ran K=8092 (the typo is baked
+    into the harness), so the doc now says exactly that, notes
+    8092 = 79% of 10240 stays genuinely sparse while K≥8192 hits the
+    80% full-K dense rewrite (`thresholds.rs`), and date-qualifies
+    the 97.91% figure (LQL-spec INFER example run, not the sweep).
+    walk.md/ffn-README "production" framing reframed: WalkFfn =
+    instrumentable/editable execution layer + CPU sparse path, Q4K
+    GPU decode (~88 tok/s vs ~1.9 tok/s CPU INFER walk) is the perf
+    centre; historical results kept, date-qualified. Campaign-sweep
+    fixes: runtime trace emission + `new_with_trace` in walk.md
+    (item 17), base+delta-first for patched layers in walk.md + the
+    crate README W2 note (item 16), `gate_overlay.rs`/KnnStore
+    GateOverlay-backed scoring in the crate README tree (item 21),
+    `walk_ffn.rs` → `walk_ffn/` paths. No code changes.) [docs]
+24. ✅ **Hygiene** (DONE 2026-08-01 — triaged per the item's own
+    licence: worked in priority order, each piece fully or not at all,
+    remainder documented. **(1) Generic-engine violations:** the
+    English word lists (countries/languages/months/numbers + the
+    148-word stop list) and the Wikidata category vocabulary are OUT
+    of `clustering/` engine code and into `data/entity_patterns.json`
+    + `data/stop_words.json` (+ the existing
+    `data/wikidata_categories.json`), loaded through the new
+    `clustering/data_files.rs` search chain — `LARQL_DATA_DIR` env dir
+    → compile-time workspace `data/`, explicit config path via the
+    `*_from(path)` loaders, NEVER cwd; `load_reference_databases`'s
+    identical cwd-probe (`data`/`../data`/`../../data`) fixed with the
+    same resolver; fallbacks are minimal built-in core sets and LOUD
+    (stderr `warning:`). Bare `0.25` floor → `MIN_CATEGORY_SIMILARITY`;
+    the "60%+" doc-vs-`0.5`-code pattern threshold resolved in favour
+    of the code as `PATTERN_MATCH_FRACTION` (+ `MORPHOLOGICAL_MAX_LEN`);
+    class order is data (language before country), pinned. Tests cover
+    data-file loading, env-dir precedence, missing/invalid/empty-file
+    loud fallbacks, threshold boundaries, and a behavioural
+    similarity-floor pair through `auto_label_clusters_from_embeddings`;
+    clustering files 93–100% line coverage. **(2) The two deferred
+    item-23 16384 fixes:** Gemma 3 4B intermediate is 10240 (verified
+    against `larql-models` `gemma3.rs:195`) — `docs/ffn-cache.md:46`
+    now states the real sparse gate (below the 4/5 `FULL_K_DENSITY`
+    rewrite ⇒ `top_k < 8192`, 8092 qualifies) and lql
+    `insert/capture.rs:99` says 10240. **(3) Activation dispatch:**
+    27 copies of the GeluTanh|Gelu → gelu-tanh-else-SiLU match (10
+    `walk_ffn/` files, `sparse_compute.rs` ×3, `layer_graph/template.rs`,
+    `kquant_forward/walk_ffn.rs` ×4 across larql-inference AND
+    larql-compute, `cached.rs`, `ffn/weight.rs` ×4,
+    `expert_weight/gate.rs`, 3 examples) now route through ONE helper,
+    `larql_models::Activation::uses_gelu_tanh_gate_up()` — a
+    wildcard-free exhaustive match (a hypothetical new variant is a
+    compile error, not a silent SiLU landing; pinned by tests incl. a
+    `#[should_panic]` for `Relu`, which has no kernel and no in-tree
+    arch). Two silently-drifted copies found en route (`weight.rs`
+    gated arms and `cached.rs` matched `GeluTanh` only, dropping exact
+    `Gelu` to SiLU) are now consistent. **(4) Component constants:**
+    `FFN_GATE`/`FFN_UP` added beside `FFN_DOWN` +
+    `FFN_COMPONENTS_PER_LAYER`, pub in larql-vindex (crate-root
+    export) and mirrored in `larql_compute::kv_index` with
+    compile-time equality pins in `kv_index_impl.rs`; every bare
+    `0/1/2` walk/kquant call site replaced (selector norms, sparse
+    row-dot/scaled-add, sparse_parallel, `interleaved_q4`'s `* 3` →
+    `FFN_COMPONENTS_PER_LAYER` + component-slice helper, both
+    `kquant_forward/walk_ffn.rs`, and `base_delta.rs`'s local consts
+    unified on the vindex ones). **(5) Colocated tests, 41 new:**
+    `index/compute/hnsw.rs` 0 → 12 tests at 97.3% line coverage
+    (insert/search, recall@10 = 0.97 vs brute force on clustered
+    synthetic, level-RNG determinism with the LCG constants pinned);
+    `index/mutate/mod.rs` 14 tests at 96.0% (meta/gate/override
+    mutation, INSERT/DELETE-then-query, save→load round trips incl.
+    mmap→heap promotion); `format/weights/write_f32.rs` 15 tests at
+    92.6% (round trip through the f32 loader, MoE/MLA/BitNet writer
+    branches, error paths). New finding pinned honestly rather than
+    papered over: HNSW's level-0 graph FRAGMENTS as n grows — naive
+    `add_connection` eviction orphans nodes (~33/200 BFS-reachable,
+    recall@10 0.16 at n=200 uniform even with ef=n; fully connected
+    ≤~64) — production gate-KNN at 10K+ features may be silently
+    degraded; carried as a standing follow-up. **REMAINDER (documented,
+    not done): (6) file splits** — `huggingface/download/mod.rs` 1329,
+    `patch/overlay.rs` 1071, `quant/convert.rs` 653 still exceed the
+    250-line rule (94/196 vindex src files over; `walk_ffn/mod.rs` is
+    already down to 553 and `sparse.rs` to 861 via the Tier-2 sibling
+    decompositions). Verification: larql-vindex 1296 lib tests +
+    integration suites, larql-inference 1423 lib tests, larql-models /
+    larql-compute / larql-lql all green; clippy + fmt clean on changed
+    files; changed/new files ≥90% line coverage except
+    `larql-models/src/config.rs` (63% file-wide pre-existing
+    trait-default debt; the added helper's lines are 100% covered))
+    — file splits (`walk_ffn/mod.rs` 926 → timings/ladder/
+    builders; `sparse.rs` 842 → gemv/route/parallel/gather;
+    `overlay.rs` 959; `huggingface/download/mod.rs` 1329;
+    `quant/convert.rs` 655 — 88/186 vindex files exceed the 250-line
+    rule); dedupe the 8-site GeluTanh/SiLU activation dispatch (new
+    activations silently land in the SiLU arm); English word lists +
+    Wikidata categories out of `clustering/` into data files (+ fix
+    cwd-relative probing); colocated tests for `hnsw.rs` (455L, zero
+    tests), `index/mutate/mod.rs`, `write_f32.rs` (777L); bare `0/1/2`
+    component indices → `FFN_DOWN` et al. [larql-vindex, larql-inference]
+
+### Extraction tensor-coverage audit + silent-drop follow-ups (2026-07-31)
+
+Built the audit §4.6 work-item 2 asked for: every source tensor is classified
+as **recognised** (an architecture accessor names it), **dropped by a named
+rule**, or **unrecognised** — and the third bucket is loud.
+`extract::coverage` + the `tensor_audit` stage, which runs *first* in
+`build_vindex_streaming` so an unaddressable checkpoint fails in seconds
+rather than after a multi-minute extraction. Reports always; fatal under
+`LARQL_EXTRACT_STRICT=1`, which is now set in the `larql-vindex` CI workflow.
+
+The case for it was five silent drops in one week, none caught automatically:
+5 of 11 attention tensors (§4.6.1), 3 of 8 MLP tensors (§4.7), the
+`gate_walk` trait default silently `None` (review item 13), a
+`moe_intermediate_size()` defaulting to 0, and LayerNorm `β` — see item 3.
+
+Validated on ten checkpoints: Qwen3-30B-A3B (18,867 tensors), OLMoE (3,219),
+gpt-oss-20b, Gemma 3 4B (439 SigLIP tensors correctly classified
+`non-text-tower`), all clean. **GPT-2 from HF safetensors: 1 of 160
+recognised** — see item 2.
+
+1. **Migrate `residual_diff` off process-global env vars onto the
+   thread-local override.** `larql_compute::options::set_env_override`
+   exists precisely to replace `std::env::set_var`, "which races concurrent
+   `getenv` on the decode path and SIGSEGVs libc" — and all three dump sites
+   already read through `options::env_value`, which consults it first.
+   `run_with_dump_dir` / `run_with_two_env_vars` never adopted it; they were
+   fixed on 2026-07-31 with a shared mutex, which is correct but serialises
+   four ~110 s captures. Thread-local removes the shared state instead of
+   guarding it. **Prerequisite:** the dump hook must read the var on the same
+   thread that set it — true for the CPU path (`hidden.rs`'s own test relies
+   on it), plausible for Metal encoding, but a read inside a rayon worker
+   would silently stop dumping. Verify against the 4-model parity suite
+   (~7 min) before switching. Needs an additive `clear_env_override(name)`;
+   today only `clear_fast_path_overrides()` (clears all) exists.
+   [larql-inference, larql-compute]
+2. **GPT-2: rename or add an HF-safetensors variant.** `gpt2.rs` matches the
+   trait defaults only *after* the GGUF→HF normalisation, so a raw HF
+   checkpoint (`h.N.attn.c_attn.weight`, `wte.weight`, `ln_1.*`) is
+   unaddressable. It fails late at the embeddings stage with a one-tensor
+   message rather than silently, but 159 of 160 tensors are unreachable.
+   Needs the `h.N.` prefix + `c_attn`/`c_fc`/`c_proj` spellings, and a drop
+   rule for `h.N.attn.bias` (the causal mask — a derived constant, not a
+   weight, so it belongs in `coverage::rules`). Unblocked by item 3.
+   [larql-models]
+3. **Verify the restored LayerNorm `β` numerically.** No accessor named a
+   norm bias until 2026-07-31, so extraction never wrote one and
+   `build_pipeline_layers` hardcoded `input_norm_bias: None` — while the
+   Metal `layer_norm` shader implemented `+ bias` and always took its
+   no-bias variant. The CPU dense path got away with it by mangling the
+   weight key, which is why raw-safetensors inference was right and every
+   vindex-backed path dropped the shift, for **GPT-2 and StarCoder2**. Now
+   declared, extracted and resolved; the honest status is "the tensor flows
+   end to end", not "the output is correct". Wants a GB-shaped measurement.
+   [larql-models, larql-vindex, larql-compute]
+4. **Consumption-level coverage audit.** The current audit measures
+   *naming*, not consumption — a recognised tensor is one extraction *can*
+   reach, not one it wrote. Naming is where all five drops actually lived,
+   so this closes the bug class that has bitten; recording `WeightSource`
+   reads would subsume it and also catch "named but never asked for".
+   [larql-vindex]
+5. **`capture.rs` cannot reach the 90 % floor in Linux CI.** ~250 of its 408
+   lines are `metal_decode` / `metal_decode_steps` / `metal_prefill`, which
+   need a Metal device by construction — which is why the file sits outside
+   the crate's `include_globs`. Raised 34 % → ~50 % by testing `cpu_prefill`
+   for the first time, plus a macOS-gated `metal_prefill` test so the
+   constructor is exercised somewhere. Either accept the exclusion
+   permanently and say so in the policy note, or split the GPU dispatch from
+   the dump-readback logic so the latter is testable everywhere.
+   [larql-inference]
+6. **`named_keys` is hand-maintained against 62 trait accessors.** A new
+   `*_key` accessor not wired into `collect()` makes its tensors report as
+   *unrecognised* — noisy, never quiet, and the pin test catches it at the
+   source. It has already fired twice for real (`moe_post_ffn1_norm_key`;
+   then the three norm-bias accessors). If the accessor count keeps growing,
+   consider deriving the list rather than pinning a count.
+   [larql-vindex]
+
+
+### K3 serving-format ladder + efficiency re-bank (2026-08-01)
+
+Two rungs closed and one measurement corrected. Registry: `dec8-11`, `dec8-12`
+(programme `dec`); rules R7/R8 added to [`docs/dec-funnel.md`](docs/dec-funnel.md) §1.
+
+**The exact-format search is finished.** K3's experts are MXFP4, so a group
+reconstructs at most 15 distinct values — 4 payload bits is the floor by
+counting, not by search, and MXFP4 already spends exactly it. Doubled, the
+alphabet is not an arithmetic progression, so the smallest affine grid
+containing it needs 25 levels: **Q4_K can never be exact** (9 levels short),
+Q5_K can but is dominated, and **Q6_K is the cheapest exact container that can
+actually serve today**. The variable-rate loophole is closed too — measured
+entropy 3.75 bits over 7.86 M real weights, and **0.0000%** of tiles hold ≤8
+symbols at any block size ≥64, so palettes and escape codes are dead. Exact
+floor **4.06731 bpw**. `larql k3-ledger formats` / `symbol-census`.
+
+**MXFP4's low kernel efficiency is the container, not a defect.** Seven crossed
+arms at the real expert shape decomposed the winner into skeleton 76% / fp4
+decode 22% / input gather 2%, with the skeleton already streaming at 0.95 of
+attainable bandwidth. Four decoders tried; the ordering is monotone in table
+size and a table-free bit-manipulation decoder is worst by 37%. **The
+expert-side kernel line closes at single-token width.**
+
+**Numbers, and they moved down twice — both times because a measurement got
+honest, never because anything got slower:**
+
+| claim | status |
+|---|---|
+| **3.02 tok/s** | controlled healthy-regime exact-Q6_K composed ceiling |
+| **2.79–3.18** | observed, composed **paired per run** over 7 accepted runs |
+| **3.65 tok/s** | + grouped routed experts — clean measurement, integration still required |
+| **4.15 tok/s** | + routed MXFP4 — a **kernel projection**, maturity `Grouped`, below `is_servable()` |
+| **5.49 tok/s** | density-only **upper bound**; reuses Q6_K efficiencies at MXFP4 density, which R7 forbids |
+| *unmeasured* | **sustained** laptop throughput under the degradation regime below |
+
+**Two harness bugs, both silent, both now guarded.** `BufferCache::get_bytes`
+keys on `(pointer, length)`, so same-length *temporaries* aliased and returned
+each other's buffers — which meant the cold-rotation loop feeding every
+efficiency figure was handing back **one buffer eight times**. The composed
+ledger survived it (3.70 → 3.68), because the dominant term is also the
+steadiest. And a 16-run promotion campaign found that **more repeats make it
+worse**: 9 runs were unusable as the machine degraded under sustained load and
+the attention control fell 0.89 → 0.06. Runs are a time series, not
+exchangeable draws.
+
+1. **Run the sustained end-to-end decode, and name the degradation.** The nine
+   rejected runs are a second scoreboard nobody has measured: report throughput
+   by time window (startup / healthy / late / steady-state floor) over 20–30
+   minutes with system telemetry. Thermal, power management, memory pressure
+   and paging are all still live candidates. **The demo number is this one, not
+   3.02** — and it may be lower.
+   [larql-compute-metal]
+
+2. **Promote `gate/up` and the ungrouped expert shape across independent
+   cool-start sessions.** Both sit at 2.2–2.4% relative standard error against a
+   1% bar, and both feed DEC-8.7b's target row — which is the only live
+   throughput rung now that kernel efficiency is closed as a lever. The R4 lever
+   ordering *refuses to print* until they clear. Not another same-session
+   campaign; that reproduces the artifact. Check the histogram for bimodality
+   before banking a mean.
+   [larql-cli]
+
+3. **Finish the grouped-down integration A/B on a loaded model.** DEC-8.9's
+   kernel risk is retired and its `next_action` carries the six-step order;
+   this is what converts 3.02 → 3.65 from projection into result, and it is the
+   nearest end-to-end milestone.
+   [larql-compute-metal, larql-inference]
+
+4. **Resolve `A_log` before any KDA numerics.** K3's checkpoint ships `[128]`
+   where the reference module allocates `num_heads` = `[96]`, and two readings
+   of the geometry each explain the large tensors while breaking one small one
+   — **shapes cannot decide it**. `kda_a_log` fails closed and ships a
+   deliberately rectangular discriminating fixture, because the two readings
+   coincide on the diagonal and a square fixture would pass vacuously.
+   [larql-cli, larql-models]
+
+5. **Build a sentinel with a working set ≥ the largest class it gates.**
+   Attention is currently both a banked class and the control, so its 0.876 is
+   self-selected and biased upward. The obvious cheap fix is *worse*: a 21 MB
+   sentinel admitted two runs where the 72 MB attention cell had already
+   collapsed. Degradation is size-dependent; the K2 weights-only probe (89.5 MB)
+   is the candidate.
+   [larql-compute-metal]
+
+6. **`prefill_q4_seq4_synthetic_smoke` is flaky at ~3–5%, all-NaN output.**
+   Found by the new commit gate, which runs `--all-targets` rather than the
+   `--lib` subset. Failure mode is the *entire* prefill output NaN, not a
+   drifted value. **Bisect did not resolve it and n=16 per commit was
+   underpowered**: pooled 3 failures in 88 runs, with the failures landing on
+   two non-adjacent commits and 0/16 on the commits between them — at an 8%
+   true rate, `P(0 in 16) = 0.26`, so a clean 16 proves nothing and ~36 runs
+   per candidate are needed. Not attributable to any one change on the
+   evidence available. Same family as the threadgroup-scratch reuse race fixed
+   earlier in fused attention, so treat it as a real race rather than noise;
+   localising it wants a proper campaign, not another bisect.
+   [larql-compute-metal]
+
+7. **Attention E/F ceiling probes — parked, bar pre-registered.** R7 means
+   attention's 0.87–0.89 may describe its container rather than a fixable
+   kernel. Same harness, needs Q6_K variants. **If the skeleton returns ≥ 0.93
+   the class is closed and no decoder work is licensed.** Run it when preparing
+   dense-format work or DEC-8.7b, not before the integration above.
+   [larql-compute-metal]
 
 ---
 
@@ -983,7 +2062,7 @@ stages, smallest-blast first:
     "diverging" was the compiler enumerating the work, not the work being
     unbounded. Every KvEngine (standard, no_cache, markov_residual,
     markov_residual_codec, boundary_per_layer, boundary_kv, turbo_quant,
-    unlimited_context, apollo) now owns a `dequant_scratch` field; quant methods
+    windowed_checkpoint, apollo) now owns a `dequant_scratch` field; quant methods
     dequant into it and the forward resolves through `WeightsView::with_scratch`
     — **0 `&mut ModelWeights` quant methods, 0 `weights.tensors.extend` merges on
     the engine/serving path.** Per-engine pattern: bulk-convert the engine's
@@ -1311,7 +2390,7 @@ V3 is the genuinely-new-territory item.
 
 | # | Test | Prior evidence | What it falsifies | What it produces | Effort |
 |---|------|----------------|-------------------|------------------|--------|
-| **V1 ✅ DONE 2026-05-31 — FALSIFIED (dense)** | Hash routing across all layers (extend exp 27) | **Exp 27 Gemma 3 4B L0 at top-2048/d_ffn (20% mask) → KL=0.030.** Walk boundary sweep (April 2026) progressively pushed the walk down through layers on Gemma 3 4B. **One-layer one-model evidence in hand.** | "5× FFN bandwidth reduction holds at end-to-end output, not just one layer" → **FALSIFIED.** Per-layer KL ≤ 0.05 thresholds DON'T compound: applied together they give +5.4 to +7.7 bits/token NLL and 78–95% drift on all 3 dense archs. The per-layer screen is anti-correlated with the truth. Deployable bandwidth ~2.4–2.9× (gate projection still paid), not 5×, and catastrophic anyway. | **DELIVERED:** per-layer threshold tables + compounding NLL/drift + cheap-route realizability + honest bandwidth, 3 dense archs (`bench/aim-validation/v1_*.json`), harness `examples/walk_ffn_v1_hash_routing.rs`, writeup [`docs/diagnoses/v1-hash-routing.md`](docs/diagnoses/v1-hash-routing.md). **MoE-within-expert version OPEN** (dense harness measures the wrong object on the 26B → needs expert-aware tooling). | ~1 week (done) |
+| **V1 ✅ DONE 2026-05-31 — FALSIFIED (dense)** | Hash routing across all layers (extend exp 27) | **Exp 27 Gemma 3 4B L0 at top-2048/d_ffn (20% mask) → KL=0.030.** Walk boundary sweep (April 2026) progressively pushed the walk down through layers on Gemma 3 4B. **One-layer one-model evidence in hand.** | "5× FFN bandwidth reduction holds at end-to-end output, not just one layer" → **FALSIFIED.** Per-layer KL ≤ 0.05 thresholds DON'T compound: applied together they give +5.4 to +7.7 bits/token NLL and 78–95% drift on all 3 dense archs. The per-layer screen is anti-correlated with the truth. Deployable bandwidth ~2.4–2.9× (gate projection still paid), not 5×, and catastrophic anyway. | **DELIVERED:** per-layer threshold tables + compounding NLL/drift + cheap-route realizability + honest bandwidth, 3 dense archs (`bench/aim-validation/v1_*.json`), harness `chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_v1_hash_routing.rs`, writeup [`docs/diagnoses/v1-hash-routing.md`](docs/diagnoses/v1-hash-routing.md). **MoE-within-expert version OPEN** (dense harness measures the wrong object on the 26B → needs expert-aware tooling). | ~1 week (done) |
 | **V2 ✅ DONE 2026-05-31 — CONFIRMED** | FP4 generality (extend exp 26 across archs) | **Exp 26: gemma3-4b-f16.vindex is 99.83% FP4-friendly per-feature without QAT (down is the tail at 99.65%).** Single-arch evidence in hand. | "FP4-friendliness is universal, not Gemma-3-4B specific" → **CONFIRMED.** ≥99.8% per-feature R<16 across Gemma 3 4B + Granite 3B/8B (reproduces exp 26's 99.83% exactly; down the tail). Predictive E2M1 +0.116 bits/tok vs f32, beats Q4-int. No QAT. | **DELIVERED:** static scan (`fp4_q1_scan`, generalized) + predictive NLL (`walk_ffn_v2_fp4_nll`, real E2M1 codec), artifacts `bench/aim-validation/v2_*_scan.json`, writeup [`docs/diagnoses/v2-fp4-generality.md`](docs/diagnoses/v2-fp4-generality.md). Llama/Mistral/MoE-expert weights not covered (need f16 exports). | ~1 week (done) |
 | **V3 ~ PARTIAL 2026-05-31** | mmap'd vindex with sparse access on disk-resident frontier MoE | **None.** This is the genuinely-new-territory item. Risk dominates the long-term tier confidence (~52%, revised 2026-05-31). | "Disk locality + page-fault behaviour is acceptable when only top-k experts fire" → **partial:** cold scattered read ~100µs p50/140µs p99, warm ~0.04µs (~2380× gap). Steady-state hinges on cache hit rate. | **DELIVERED (feasibility):** cold-read probe (`mmap_cold_read_probe`, F_NOCACHE + verified-cold mmap faults), artifact `bench/aim-validation/v3_granite-30b.json`, writeup [`docs/diagnoses/v3-disk-resident-mmap.md`](docs/diagnoses/v3-disk-resident-mmap.md). **DEFERRED:** steady-state fault-rate + end-to-end tok/s on a >RAM model — needs >128 GB-class vindex or Linux/cgroup box (128 GB machine can't force RAM-pressure paging). | ~2 weeks |
 | **V4** | **Compound test** (V1+V2+V3 stacked end-to-end on a real MoE model) | **D-RMS-FUSE Phase 1 (2026-05-09)**: predicted ~0.2 ms/tok savings collapsed to zero. ADR-015 has a concrete instance. | "Independent wins compound multiplicatively, not destructively" — per ADR-015. The framing's central claim. | End-to-end tok/s on Gemma 4 26B-A4B (or larger if available) with hash routing + FP4 + mmap'd disk-resident vindex active simultaneously. Measure perplexity degradation, tok/s, and compare to product-of-individual-speedups prediction. | ~1 week (after V1–V3) |
@@ -1352,7 +2431,7 @@ verify.
 
 Driver: today's `KvEngine` (in `larql-kv`) and `ComputeBackend` (in
 `larql-compute`) are unaware of each other. The four research KV engines
-(MarkovRS, UnlimitedContext, TurboQuant, Apollo) live in research-only
+(MarkovRS, WindowedCheckpoint, TurboQuant, Apollo) live in research-only
 bench paths; the production decode loop bypasses them. And every backend
 (CPU, Metal, future Vulkan/CUDA) hides under a single trait that doesn't
 let engines express *intents* (windowed attention, K/V recompute,
@@ -1365,7 +2444,7 @@ Three landed specs in `crates/larql-inference/docs/specs/`:
 - [`kv-engine-unification.md`](crates/larql-inference/docs/specs/kv-engine-unification.md)
   — KvEngine trait + dispatch in `larql-inference`; `larql-kv` ships
   six engines (`Standard`, `NoCache`, `MarkovResidual`,
-  `UnlimitedContext`, `TurboQuant`, `Apollo`).
+  `WindowedCheckpoint`, `TurboQuant`, `Apollo`).
 - [`compute-backend-redesign.md`](crates/larql-inference/docs/specs/compute-backend-redesign.md)
   — `KvDispatch` sibling trait in `larql-inference` (intent-based
   per-layer surface); `EngineBackend: ComputeBackend + KvDispatch`
@@ -1385,12 +2464,12 @@ beats today's fused `decode_token` path.
 |----|------|----------|--------|-------|
 | U1 | KV engine unification — Steps 1–7 | larql-inference, larql-kv, larql-cli | **shipped 2026-05-16** | `KvEngine` trait + EngineInfo + DecodeStageSummary in `larql-inference::kv_engine`; `larql-kv` re-exports. `Standard` + `NoCache` engines added. `larql run` / `larql walk` route through engine dispatch (default `--kv-cache standard` = `Standard { window_size: None }`, bit-parity gated). `--engine SPEC` + `LARQL_KV_ENGINE` env var on run/walk. Server wiring deferred to U7 (server uses fused `decode_token` and would silently downgrade to CPU under sync dispatch). |
 | U2 | ComputeBackend redesign — Steps 1–4 | larql-inference, larql-compute | **shipped 2026-05-16** | `KvDispatch` trait in `larql-inference` (per-layer intents: cache, attention, engine-specific). `EngineBackend: ComputeBackend + KvDispatch` umbrella with blanket impl. `CpuBackend::KvDispatch` real implementation; `MetalBackend::KvDispatch` CPU-fallback scaffolding. `cpu_engine_backend()` / `default_engine_backend()` factories. 6 new `Capability` flags (`FusedAttentionStep`, `WindowedAttentionStep`, `NativeKvCodec`, `PipelinedBoundaryUpload`, `FusedResidualNorm`, `KvHandleNative`). |
-| U3 | ComputeBackend redesign — Step 3c (engine migration) | larql-kv, larql-inference | **shipped 2026-05-16** (partial); follow-up in U8 | All six engines accept `Box<dyn EngineBackend>` in constructors. `KvDispatch` widened with `Option<&VectorIndex>` on attention intents + new `coarse_prefill` / `coarse_decode_step` (quantization-agnostic, backends inspect index format internally). `StandardEngine` fully migrated: routes Q4K through `coarse_prefill` on `CpuBackend` (which calls production `predict_q4k_prefill` / `predict_q4k_decode_step_direct`). **27.6 tok/s on Gemma 3 4B Q4K, M3 Max, 8 threads — slightly faster than the legacy `larql-cpu` path (24.0 tok/s).** `NoCache` migrated (slow on purpose: O(N²) debug fallback). Others (`MarkovResidual`, `UnlimitedContext`, `TurboQuant`, `Apollo`) still carry their bespoke `prefill_q4k` overrides — they work correctly but run at ~0.4 tok/s through f32-dequant fallback. Migration to fast Q4K kernels via the dispatch trait is **U8** below. Spec: [`kv-dispatch-quantization.md`](crates/larql-inference/docs/specs/kv-dispatch-quantization.md). |
-| U4 | AsyncComputeBackend impl — Steps A1–A5 (the trait + foundation) | larql-inference, larql-compute, larql-compute-metal, larql-kv | **A1–A3 + A5 (StandardEngine) shipped 2026-05-16; A4 next** | A1 ✅ trait + handle types in `larql-inference/src/async_compute_backend.rs` (per-handle inner traits, `read(self: Box<Self>)` — stable-Rust translation of spec's `Arc<dyn AsyncHandleInner>` pattern). A2 ✅ `CpuBackend` async impl as degenerate `Ready*` wrapper, 6 bit-parity tests vs sync. A3 ✅ `MetalBackend` scaffold via CPU-delegation, feature-gated; 4 Metal-aware bit-parity tests pass under `--features metal`. A5 ✅ for `StandardEngine`: `with_async_backend` constructor + internal `BackendSlot` enum + async dispatch helpers + 8 new parity tests (`larql-inference`: 1002 lib tests; `larql-kv`: 221 lib tests). A4 next: real `MTLCommandBuffer` deferred dispatch (4–8 weeks). Remaining engines' A5 slices (`MarkovResidual`, `UnlimitedContext`, `TurboQuant`, `NoCache`, `Apollo`) compose on the same pattern (~1–2 weeks each). |
+| U3 | ComputeBackend redesign — Step 3c (engine migration) | larql-kv, larql-inference | **shipped 2026-05-16** (partial); follow-up in U8 | All six engines accept `Box<dyn EngineBackend>` in constructors. `KvDispatch` widened with `Option<&VectorIndex>` on attention intents + new `coarse_prefill` / `coarse_decode_step` (quantization-agnostic, backends inspect index format internally). `StandardEngine` fully migrated: routes Q4K through `coarse_prefill` on `CpuBackend` (which calls production `predict_q4k_prefill` / `predict_q4k_decode_step_direct`). **27.6 tok/s on Gemma 3 4B Q4K, M3 Max, 8 threads — slightly faster than the legacy `larql-cpu` path (24.0 tok/s).** `NoCache` migrated (slow on purpose: O(N²) debug fallback). Others (`MarkovResidual`, `WindowedCheckpoint`, `TurboQuant`, `Apollo`) still carry their bespoke `prefill_q4k` overrides — they work correctly but run at ~0.4 tok/s through f32-dequant fallback. Migration to fast Q4K kernels via the dispatch trait is **U8** below. Spec: [`kv-dispatch-quantization.md`](crates/larql-inference/docs/specs/kv-dispatch-quantization.md). |
+| U4 | AsyncComputeBackend impl — Steps A1–A5 (the trait + foundation) | larql-inference, larql-compute, larql-compute-metal, larql-kv | **A1–A3 + A5 (StandardEngine) shipped 2026-05-16; A4 next** | A1 ✅ trait + handle types in `larql-inference/src/async_compute_backend.rs` (per-handle inner traits, `read(self: Box<Self>)` — stable-Rust translation of spec's `Arc<dyn AsyncHandleInner>` pattern). A2 ✅ `CpuBackend` async impl as degenerate `Ready*` wrapper, 6 bit-parity tests vs sync. A3 ✅ `MetalBackend` scaffold via CPU-delegation, feature-gated; 4 Metal-aware bit-parity tests pass under `--features metal`. A5 ✅ for `StandardEngine`: `with_async_backend` constructor + internal `BackendSlot` enum + async dispatch helpers + 8 new parity tests (`larql-inference`: 1002 lib tests; `larql-kv`: 221 lib tests). A4 next: real `MTLCommandBuffer` deferred dispatch (4–8 weeks). Remaining engines' A5 slices (`MarkovResidual`, `WindowedCheckpoint`, `TurboQuant`, `NoCache`, `Apollo`) compose on the same pattern (~1–2 weeks each). |
 | U5 | AsyncComputeBackend impl — Step A6 (per-engine specialised shaders) | larql-compute, larql-kv | **spec'd, not started** | This is the tok/s payoff. Priority order: `attention_step_windowed` (the `standard:window=N` win), then engine-specific intents in order of impact — `markov-rs` Metal K/V recompute, `apollo` pipelined boundary upload, `turbo-quant` codec kernel. Each shader paired with a real-model bench. Ongoing — months of iterative work. |
 | U6 | AsyncComputeBackend impl — Step A7 (VulkanBackend) | larql-compute | **spec'd, not started — blocked on U9-U12** | Same trait shape as Metal, different primitives (`VkCommandPool`, semaphores, SPIR-V). Validates the multi-backend story is real, not Metal-shaped. 6–10 weeks **once U9-U12 unblock the engine layer**. Today the substrate trait is drop-in but `larql-inference` still has 30+ `cfg(feature = "metal")` gates and 2 `downcast_ref::<MetalBackend>()` sites that conflate "Metal" with "GPU pipeline" — landing Vulkan against today's tree would force per-backend cfg explosion across the inference crate. |
 | U7 | AsyncComputeBackend impl — Step A8 (CudaBackend) + server wiring | larql-compute, larql-server | **spec'd, not started — blocked on U9-U12** | CUDA streams map naturally to the deferred-dispatch shape — designed against it. Server wiring (deferred from `kv-engine-unification.md` §10.6) lands here: `larql-server`'s `handle_stream_generate` switches from direct `generate_streaming` to `generate_with_engine` against an `AsyncComputeBackend`, finally honouring `LARQL_KV_ENGINE` server-side. 6–10 weeks Cuda + 1–2 weeks server. Same engine-layer blockers as U6. |
-| U8 | Engine migration — bespoke `prefill_q4k` paths onto dispatch trait | larql-kv, larql-inference | **specced, not started** | `MarkovResidual`, `UnlimitedContext`, `TurboQuant`, `Apollo` each carry an engine-side `prefill_q4k` override that bypasses the dispatch trait's `coarse_prefill` / `coarse_decode_step` intents and uses slower CPU code paths (dequant-to-f32 + f32 sgemv) instead of the production `predict_q4k_*` kernels. Result: ~0.4 tok/s vs `StandardEngine`'s 27.6 tok/s on the same hardware. Each engine has legitimate specialisation (RsStore residuals, per-window K/V checkpoints, WHT+Lloyd-Max codec, boundary residual injection) — the migration keeps that engine-side logic but routes the per-layer matvec through `larql_compute::QuantMatVec::q4k_matvec` instead of dequant-then-f32. Per-engine: ~2-5 days. See [`kv-dispatch-quantization.md`](crates/larql-inference/docs/specs/kv-dispatch-quantization.md) Phase 2. |
+| U8 | Engine migration — bespoke `prefill_q4k` paths onto dispatch trait | larql-kv, larql-inference | **specced, not started** | `MarkovResidual`, `WindowedCheckpoint`, `TurboQuant`, `Apollo` each carry an engine-side `prefill_q4k` override that bypasses the dispatch trait's `coarse_prefill` / `coarse_decode_step` intents and uses slower CPU code paths (dequant-to-f32 + f32 sgemv) instead of the production `predict_q4k_*` kernels. Result: ~0.4 tok/s vs `StandardEngine`'s 27.6 tok/s on the same hardware. Each engine has legitimate specialisation (RsStore residuals, per-window K/V checkpoints, WHT+Lloyd-Max codec, boundary residual injection) — the migration keeps that engine-side logic but routes the per-layer matvec through `larql_compute::QuantMatVec::q4k_matvec` instead of dequant-then-f32. Per-engine: ~2-5 days. See [`kv-dispatch-quantization.md`](crates/larql-inference/docs/specs/kv-dispatch-quantization.md) Phase 2. |
 | U9 | De-Metal the inference-side GPU cfg gates | larql-inference, larql-cli | **not started — compute-refactor branch** | 23 `cfg(all(feature = "metal", target_os = "macos"))` sites in `larql-inference/src` + 8 in `larql-cli/src` use "metal" as a synonym for "GPU pipeline available." Two options: (a) rename `feature = "metal"` → `feature = "gpu"` on `larql-inference` with `larql-compute-metal` as one optional backend inside it, so the same flag turns on Metal today and Vulkan/CUDA tomorrow without per-call-site flag matrix; (b) replace cfg gates with `Capability::FullPipelineQ4` / `Capability::DecodeToken` probes on `&dyn ComputeBackend`. Mechanical search/replace + targeted refactor; ~1-2 days. **Prerequisite for U6/U7.** |
 | U10 | Move `prepare_ple_inputs` (Per-Layer Embeddings upload) onto a trait method | larql-compute, larql-compute-metal, larql-inference | **not started — compute-refactor branch** | Kills the 2 `downcast_ref::<larql_compute_metal::MetalBackend>()` sites (`layer_graph/hybrid.rs:78`, `layer_graph/generate/gpu/mod.rs:261`) and the `metal_ple: Option<&MetalBackend>` typed parameter that flows through `generate/gpu/decode_loop.rs:60-67`. Add `fn prepare_ple_inputs(&self, flat: &[f32], num_layers: usize, ple_dim: usize)` to `ComputeBackend` (default no-op) plus `Capability::PerLayerEmbeddings`. Spec at `compute-backend-redesign.md` §6.3 explicitly says "Engines do **not** check `backend.name()` to decide behaviour" — this is the residual gap. ~1 day. **Prerequisite for U6/U7.** |
 | U11 | Move `take_last_split_timings()` onto a trait method | larql-compute, larql-compute-metal, larql-inference | **not started — compute-refactor branch** | `larql_compute_metal::take_last_split_timings()` is reached directly as a free function from `decode_loop.rs:194-200`. Replace with `fn take_split_timings(&self) -> Option<ProfileTimings>` on a sub-trait (or `ComputeBackend` with a default `None`) so Vulkan/CUDA can expose the same instrumentation hook. Also folds the `ProfileTimings` type down into `larql-compute`. ~0.5 day. **Prerequisite for U6/U7.** |
@@ -1451,12 +2530,12 @@ achievability table + `docs/diagnoses/`.)**
 | C4 | FP4 productisation (exp 26 → product) — native FP4 quantisation tier (`Q4_K → FP4`) | larql-vindex + larql-compute | research only → **V2-validated, greenlit** | Exp 26 + **V2 (2026-05-31, confirmed)**: ≥99.8% FP4-friendly per-feature across Gemma 3 / Granite (no QAT, `down` the tail); predictive E2M1 +0.116 bits/tok vs f32, beating Q4-int. The FP4 codec already exists (`larql-models/src/quant/fp4*.rs`). Add `Quantisation::FP4` variant; CPU-first kernel; Metal twin. ~2× shrink vs Q4_K. See `docs/diagnoses/v2-fp4-generality.md`. |
 | C5 | mmap'd vindex with lazy disk-resident edges — only resident pages for active edges per token | larql-vindex + larql-inference | not started | Today vindex loads whole layer tensors into RAM. For models bigger than RAM, mmap the vindex file and let the OS page in only the gate-KNN-resolved edges. Pairs with C2 and C3: when only 20% of edges fire, only those pages are read. |
 | C6 | AMX / AVX-512 / Apple AMX kernels for residual compute | larql-compute (CPU side) | partial — Accelerate BLAS, AMX through it | Current CPU path uses ndarray + Accelerate; promote to direct AMX intrinsics on Apple Silicon, AVX-512 on x86. Compute that *does* happen needs to be as good as it gets, since bandwidth is what's left over. |
-| C7 | KV compression as **default** for long context (Apollo / MarkovRS / UnlimitedContext / TurboQuant) | larql-inference | engines reachable on `run`/`walk` (CPU) via `--engine` / `LARQL_KV_ENGINE`; default still `standard` (production K/V cache); GPU performance on opt-in engines requires AsyncComputeBackend (see U-series below) | Unification spec at [`kv-engine-unification.md`](crates/larql-inference/docs/specs/kv-engine-unification.md) — all 7 steps landed. MarkovRS / UnlimitedContext / TurboQuant opt-in via `--engine` (CPU-correct, Metal works via CPU-fallback delegation). Apollo bench-only. Promoting any of these as default for long context requires `AsyncComputeBackend` Step A6 (engine-specific Metal shaders) to land — see U5 below. Server engine wiring also blocked on AsyncComputeBackend (U7); without it the server would silently downgrade Metal decode to CPU. |
+| C7 | KV compression as **default** for long context (Apollo / MarkovRS / WindowedCheckpoint / TurboQuant) | larql-inference | engines reachable on `run`/`walk` (CPU) via `--engine` / `LARQL_KV_ENGINE`; default still `standard` (production K/V cache); GPU performance on opt-in engines requires AsyncComputeBackend (see U-series below) | Unification spec at [`kv-engine-unification.md`](crates/larql-inference/docs/specs/kv-engine-unification.md) — all 7 steps landed. MarkovRS / WindowedCheckpoint / TurboQuant opt-in via `--engine` (CPU-correct, Metal works via CPU-fallback delegation). Apollo bench-only. Promoting any of these as default for long context requires `AsyncComputeBackend` Step A6 (engine-specific Metal shaders) to land — see U5 below. Server engine wiring also blocked on AsyncComputeBackend (U7); without it the server would silently downgrade Metal decode to CPU. |
 | C8 | BR4 (Boundary refs Phase 4 — bounded KV eviction + durability-first capture) | larql-server + larql-inference | not started | See § "P1 — Boundary refs and cold-context storage" below. The CPU track makes BR4 load-bearing because long-context CPU inference can't keep raw KV in RAM. |
 | C9 | Distributed-load-balancing for "model spans 4 consumer machines" | larql-router + larql-server | shipped (grid + rebalancer) | **DEMOTED to P2 per ADR-019 (2026-05-09)** — substantial production-engineering with no current experiment requiring multi-machine. Single-shard grid (already shipped) sufficient for substrate. Re-promote if a specific experiment needs multi-machine. |
 | C10 | CPU bench harness — `larql bench --cpu` with per-stage breakdown matched against `llama.cpp -ngl 0` | larql-cli + bench/ | **DISCREPANCY RESOLVED 2026-06-02 — no regression; true gap ~1.6–1.8×.** The 1.50× (05-16) vs 1.93× (05-31) split was **two stacked measurement confounds**, not a real change: (1) **larql path mismatch** — 27.6 was the `StandardEngine` path, 23.6 the legacy `larql bench --cpu` (`predict_kquant_decode_step`) path; a stable ~12% delta (26.4 vs 23.5 today), so comparing one date's StandardEngine against the other's legacy path manufactured a phantom "regression"; (2) **llama.cpp harness artifact** — the 45.5 was an unwarmed/short-n ollama `num_gpu=0` fluke; warmed + n=128 it converges to **42.8–43.0 = llama-bench's 42.99** (both harnesses, both dates agree at ~43). Reconciled like-for-like (M3 Max, t=8, warm): **larql 23.5 legacy / 26.4 StandardEngine vs llama.cpp 43.0 → 1.6–1.8×.** Gap is C12 (both attn AND FFN already use the int8 Q8_K SDOT kernel via `attention_decode_step_native`). **Free wins landed (2026-06-02):** `larql bench --cpu` now also reports the production StandardEngine row; new `--ollama-cpu` forces `num_gpu=0`+`num_thread` so `--ollama` is a true CPU baseline (was silently Metal-GPU). Reconciled artifact `bench/baselines/c10_gemma3-4b_cpu_reconciled.json`. **26B-A4B baseline LANDED 2026-06-10** (`c10_gemma4-26b-a4b_cpu_reconciled.json`): llama.cpp **32.1** vs larql in-process **7.1** default / **9.7** with `LARQL_Q4K_DIRECT_ATTN=1` / loopback 7.3 (t=8, warm, n=128, drift-checked). The 26B gap (4.5×) is **f32-residency byte traffic** (attn 4.15 GB + dense slab 2.14 GB + lm_head 2.95 GB per token vs llama.cpp ~2.1 GB all-quantized; every leg bandwidth-saturated ~62–71 GB/s), NOT the C12 kernel (experts already int8 SDOT, ~8% of bytes). Medium-term tier 62%→70% per the gate rule. Method addition: **pmset AC check + cross-engine drift bracket are now mandatory** — the first session was invalidated by a silent battery drain (llama.cpp itself collapsed 34→1 tok/s at 31% battery; far beyond the 1.5–3× thermal class). | CPU-track baseline-credibility threshold can't be enforced without this. First acceptance test: Gemma 3 4B Q4_K on M3 Max CPU vs quant-matched `llama.cpp -ngl 0`. Then Llama 2 7B + Mistral 7B for cross-arch CPU + the 26B-A4B MoE baseline. Major improvement 2026-05-15→05-16 (2.78× → 1.50×) — see `bench/baselines/cpu/COMPARISON.md` and `DIAGNOSIS-2026-05-16-thread-scaling.md`; reconciliation `bench/baselines/c10_gemma3-4b_cpu_reconciled.json`. |
 | C11 | Architecture rule enforcement — CI check for "no GPU-only paths in core" | scripts/ + crate boundaries | not started | Static check: anything in `larql-inference` core (not `metal/`, not `cpu/`) must compile and pass tests with Metal feature off. Prevents the dual-track from drifting into Metal-locked code. |
-| C12 | Q4K decode kernel — hand-asm aarch64 to close the 1.50× gap to llama.cpp | larql-compute | **v1 asm landed opt-in 2026-06-02 (`LARQL_Q4K_ASM=1`); roofline reframed the work.** Two 2026-06-02 results: (a) **Roofline microbench** (`benches/q4k_q8k_matvec.rs`) shows the kernel is **compute/issue-bound, NOT DRAM-bandwidth-bound** — scalar 9.3 vs NEON 17.7 GiB/s on identical data, size-invariant — which **overturns the `DIAGNOSIS-2026-05-16` "memory-system-level" conclusion** and confirms hand-asm scheduling is a real lever (17.7 GiB/s ↔ ~33 cyc/super-block, exactly as specced). (b) **`q4k_q8k_matvec_asm`** (whole super-block dot in one `asm!` block, 8 scales as vector lanes killing the 8 scalar `ldrb`) — **bit-exact** (`q8k_matvec_asm_matches_scalar_bit_exact`), **+3.7–4.9% isolated**, ~+1–2% e2e (diluted: opt-in covers `matvec_into` callers — attention Q/K/V/O + `down` — but NOT the fused `gate_up`). **Finding: latency-hiding has low headroom** — a 4-accumulator variant showed no reliable gain (the inlined row loop lets the OoO core already overlap super-blocks), so **the two-super-block interleave is deprioritized**; the real lever to reach ~28 GiB/s is **instruction-count reduction** (perf-counter-guided, llama.cpp-style vectorized scale path) + **asm-ifying `gate_up`** (lifts the e2e ceiling). See spec §"2026-06-02 roofline measurement". | Per-core gap is **1.73× constant across thread counts** (5.7 vs 9.88 tok/s single-threaded on M3 Max). Same algorithm (Q4K × Q8K with NEON SDOT), same `vdotq_s32` instructions — llama.cpp uses hand-written inline aarch64 asm with two-super-block interleaving + explicit prefetch hints, we use Rust intrinsics lowered by LLVM. Effective bandwidth: ~63 GB/s vs ~95 GB/s. **Per-stage profile (`LARQL_INSTRUMENT_UNLIMITED=1` on Gemma 3 4B 8-thread, 2026-05-16): FFN 26.0 ms (74%) + Attention 9.3-11.0 ms (26%, grows with ctx) + Embed ~0 ms = 35-37 ms/step.** FFN matvec on gate/up/down (4608 × 9216) is the dominant target; attention matvec is the same kernel on smaller matrices. The 38 tok/s asymptote (FFN-alone) sets the floor any engine can reach on the current kernel — Standard and UnlimitedContext both hit 26.6 tok/s on Gemma 3 4B Q4K CPU (8-thread, 40-token prompt, 64 decode tokens) because both route through the same `attention_decode_step_native` + `ffn_decode_step_native` hot paths. Phases: (1) hand-asm Q4K matvec on the FFN tile shapes (gate/up/down) — closes ~95% of the gap, 1-2 weeks; (2) pre-formatted block layout — 1.1-1.2× on top, 3-5 days; (3) Q6K kernel for `ffn_down` — 1.05×, 2-3 days; (4) reduce rayon launch overhead — 1.04×, 2-3 days. Acceptance: ≥9.5 tok/s single-core, ≥39 tok/s 8-thread on Gemma 3 4B Q4K. Spec: [`crates/larql-compute/docs/q4k-decode-kernel.md`](crates/larql-compute/docs/q4k-decode-kernel.md). Per-stage measurement protocol: see "C12 per-stage measurement" below. |
+| C12 | Q4K decode kernel — hand-asm aarch64 to close the 1.50× gap to llama.cpp | larql-compute | **v1 asm landed opt-in 2026-06-02 (`LARQL_Q4K_ASM=1`); roofline reframed the work.** Two 2026-06-02 results: (a) **Roofline microbench** (`benches/q4k_q8k_matvec.rs`) shows the kernel is **compute/issue-bound, NOT DRAM-bandwidth-bound** — scalar 9.3 vs NEON 17.7 GiB/s on identical data, size-invariant — which **overturns the `DIAGNOSIS-2026-05-16` "memory-system-level" conclusion** and confirms hand-asm scheduling is a real lever (17.7 GiB/s ↔ ~33 cyc/super-block, exactly as specced). (b) **`q4k_q8k_matvec_asm`** (whole super-block dot in one `asm!` block, 8 scales as vector lanes killing the 8 scalar `ldrb`) — **bit-exact** (`q8k_matvec_asm_matches_scalar_bit_exact`), **+3.7–4.9% isolated**, ~+1–2% e2e (diluted: opt-in covers `matvec_into` callers — attention Q/K/V/O + `down` — but NOT the fused `gate_up`). **Finding: latency-hiding has low headroom** — a 4-accumulator variant showed no reliable gain (the inlined row loop lets the OoO core already overlap super-blocks), so **the two-super-block interleave is deprioritized**; the real lever to reach ~28 GiB/s is **instruction-count reduction** (perf-counter-guided, llama.cpp-style vectorized scale path) + **asm-ifying `gate_up`** (lifts the e2e ceiling). See spec §"2026-06-02 roofline measurement". | Per-core gap is **1.73× constant across thread counts** (5.7 vs 9.88 tok/s single-threaded on M3 Max). Same algorithm (Q4K × Q8K with NEON SDOT), same `vdotq_s32` instructions — llama.cpp uses hand-written inline aarch64 asm with two-super-block interleaving + explicit prefetch hints, we use Rust intrinsics lowered by LLVM. Effective bandwidth: ~63 GB/s vs ~95 GB/s. **Per-stage profile (`LARQL_INSTRUMENT_UNLIMITED=1` on Gemma 3 4B 8-thread, 2026-05-16): FFN 26.0 ms (74%) + Attention 9.3-11.0 ms (26%, grows with ctx) + Embed ~0 ms = 35-37 ms/step.** FFN matvec on gate/up/down (4608 × 9216) is the dominant target; attention matvec is the same kernel on smaller matrices. The 38 tok/s asymptote (FFN-alone) sets the floor any engine can reach on the current kernel — Standard and WindowedCheckpoint both hit 26.6 tok/s on Gemma 3 4B Q4K CPU (8-thread, 40-token prompt, 64 decode tokens) because both route through the same `attention_decode_step_native` + `ffn_decode_step_native` hot paths. Phases: (1) hand-asm Q4K matvec on the FFN tile shapes (gate/up/down) — closes ~95% of the gap, 1-2 weeks; (2) pre-formatted block layout — 1.1-1.2× on top, 3-5 days; (3) Q6K kernel for `ffn_down` — 1.05×, 2-3 days; (4) reduce rayon launch overhead — 1.04×, 2-3 days. Acceptance: ≥9.5 tok/s single-core, ≥39 tok/s 8-thread on Gemma 3 4B Q4K. Spec: [`crates/larql-compute/docs/q4k-decode-kernel.md`](crates/larql-compute/docs/q4k-decode-kernel.md). Per-stage measurement protocol: see "C12 per-stage measurement" below. |
 
 **Implementation order** (post ADR-019): C10 → C1 → C2 → C7 → C12 → C3 → C4 → C5 → C6 → C8 → C11.
 
@@ -1479,7 +2558,7 @@ long-context. C11 prevents architectural drift.
 
 Two instruments measure the kernel-bound nature of CPU decode and let you isolate which sub-kernel the asm should target first:
 
-- `LARQL_INSTRUMENT_UNLIMITED=1` — prints `embed / attention / ffn` per `extend_q4k` call from `larql_kv::engines::unlimited_context::rs_extend_from_checkpoint_q4k`. Captures the per-token, per-layer-aggregated breakdown. Source: `crates/larql-kv/src/engines/unlimited_context/extend.rs`.
+- `LARQL_INSTRUMENT_UNLIMITED=1` — prints `embed / attention / ffn` per `extend_q4k` call from `larql_kv::engines::windowed_checkpoint::rs_extend_from_checkpoint_q4k`. Captures the per-token, per-layer-aggregated breakdown. Source: `crates/larql-kv/src/engines/windowed_checkpoint/extend.rs`.
 - `LARQL_INSTRUMENT_MARKOV=1` — same shape for `markov-residual`, kept for cross-engine sanity that both substrate paths agree. Source: `crates/larql-kv/src/engines/markov_residual/q4k.rs`.
 
 Reproducer (Gemma 3 4B Q4K, M3 Max, default 8 threads):
@@ -1488,7 +2567,7 @@ Reproducer (Gemma 3 4B Q4K, M3 Max, default 8 threads):
 cargo build --release -p larql-cli
 LARQL_INSTRUMENT_UNLIMITED=1 ./target/release/larql bench \
   ~/.cache/larql/local/gemma3-4b-q4k-v2.vindex \
-  --backends cpu --engine unlimited-context -n 32
+  --backends cpu --engine windowed-checkpoint -n 32
 ```
 
 Recorded baseline (2026-05-16, 8-thread, ~70-token ctx after warmup):
@@ -1717,7 +2796,7 @@ Both specs live at `crates/larql-inference/docs/specs/`.
 - **SQ1 (Markov)**: contract is sound, reference impl already works, but
   it's engineering not research — and the open trait-shape question
   means migrating Markov first risks forcing
-  `UnlimitedContextEngine`/`ApolloEngine` into a shape that doesn't fit.
+  `WindowedCheckpointEngine`/`ApolloEngine` into a shape that doesn't fit.
   Designing the trait once across all three engines (or at least
   resolving sibling-vs-trait before SQ1 lands) is cheaper than migrating
   one and refactoring twice. V1/V2 also produce the measurement

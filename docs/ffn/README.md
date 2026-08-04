@@ -11,7 +11,7 @@ and can be swapped into the forward pass.
 | [SparseFfn](sparse.md) | `ffn/sparse.rs` | Gate matmul + top-K sparse up/down | Sparse inference research |
 | LayerFfnRouter | `ffn/mod.rs` | Per-layer backend selection | Hybrid strategies |
 | HighwayFfn | `ffn/mod.rs` | Returns zeros (skip FFN) | Layer skipping experiments |
-| [WalkFfn](walk.md) | `vindex/walk_ffn.rs` | Gate KNN + sparse FFN + trace | **INFER with interpretability** |
+| [WalkFfn](walk.md) | `vindex/walk_ffn/` | Gate KNN + sparse FFN + runtime trace | **INFER with interpretability** |
 
 ## Experimental Backends
 
@@ -32,11 +32,15 @@ The gate matmul (`residual @ gate.T`) is **irreducible** for novel residuals. No
 index, clustering, or proxy can predict which features activate without seeing the actual
 post-attention residual. Every approach that skips the gate matmul selects the wrong features.
 
-The production path: **WalkFfn** uses vindex gate KNN for feature selection, then runs sparse
-FFN on only the selected features. Accepts any `GateIndex` implementor (`VectorIndex` or
-`PatchedVindex`), so INSERT/DELETE/UPDATE to the vindex immediately affect inference output.
+**WalkFfn** uses vindex gate KNN for feature selection (exact `gate_walk` gemv on the hot
+path), then runs sparse FFN on only the selected features. Accepts any `GateIndex` implementor
+(`VectorIndex` or `PatchedVindex`), so INSERT/DELETE/UPDATE to the vindex immediately affect
+inference output. It is the production path for *instrumented and edited* execution (INFER,
+traces, patches) and the CPU sparse path — raw decode throughput is served by the Q4K GPU
+decode path (~88 tok/s Gemma 3 4B on M3 Max vs ~1.9 tok/s CPU INFER walk; repo README
+"Benchmarks").
 
-## Bottleneck Analysis
+## Bottleneck Analysis (2026-04 measurement, CPU BLAS)
 
 FFN layer 20, Gemma-3-4b (seq_len=6, hidden=2560, intermediate=10240):
 

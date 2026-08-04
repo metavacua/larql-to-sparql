@@ -7,6 +7,7 @@ pub mod encoders;
 pub mod loading;
 pub mod multimodal;
 pub mod quant;
+pub(crate) mod tensor_keys;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_fixtures;
 pub mod validation;
@@ -14,8 +15,8 @@ pub mod vectors;
 pub mod weights;
 
 pub use config::{
-    Activation, ExpertFormat, FfnType, Llama3RopeScaling, ModelArchitecture, ModelConfig, NormType,
-    RopeScaling,
+    Activation, ExpertFormat, ExpertGatePolicy, ExpertRoutingPolicy, FfnType, Llama3RopeScaling,
+    ModelArchitecture, ModelConfig, NormType, RopeScaling,
 };
 pub use detect::{
     detect_architecture, detect_architecture_validated, detect_from_json,

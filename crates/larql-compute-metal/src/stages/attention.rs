@@ -22,6 +22,15 @@ pub struct Flags {
     pub rotary_dim: u32,
 }
 
+/// First of the two consecutive `fused_attention` slots carrying
+/// attention sinks; the `has_sinks` flag follows in slot 15.
+const SINKS_BUFFER_INDEX: u64 = 14;
+
+/// Threadgroup width for `fused_attention`. The kernel's threadgroup
+/// reductions size their scratch arrays against this, so it is fixed by
+/// the shader rather than tunable here.
+const THREADS_PER_THREADGROUP: u64 = 256;
+
 /// Dispatch `fused_attention` into the given encoder. Caller owns the
 /// encoder lifecycle.
 #[allow(clippy::too_many_arguments)]
@@ -39,6 +48,7 @@ pub fn encode(
     scale: f32,
     rope_base: f32,
     flags: Flags,
+    sinks: Option<&[f32]>,
 ) {
     let seq_val = seq_len as u32;
     let hd_val = head_dim as u32;
@@ -62,8 +72,11 @@ pub fn encode(
     enc.set_bytes(11, 4, &flags.softcap as *const f32 as *const c_void);
     enc.set_bytes(12, 4, &skip_rope_val as *const u32 as *const c_void);
     enc.set_bytes(13, 4, &flags.rotary_dim as *const u32 as *const c_void);
+    // Attention sinks (GPT-OSS): one learned logit per query head that
+    // competes in the softmax and is then discarded.
+    super::sinks::bind(enc, SINKS_BUFFER_INDEX, sinks, num_q_heads);
     enc.dispatch_thread_groups(
         MTLSize::new(num_q_heads as u64, seq_len as u64, 1),
-        MTLSize::new(256, 1, 1),
+        MTLSize::new(THREADS_PER_THREADGROUP, 1, 1),
     );
 }

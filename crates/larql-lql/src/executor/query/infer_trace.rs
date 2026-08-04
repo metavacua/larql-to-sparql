@@ -466,12 +466,7 @@ mod tests {
     }
 
     fn hit(layer: usize, feature: usize, gate: f32, top: &str, top_k: &[&str]) -> WalkHit {
-        WalkHit {
-            layer,
-            feature,
-            gate_score: gate,
-            meta: meta(top, top_k),
-        }
+        WalkHit::from_gate(layer, feature, gate, meta(top, top_k))
     }
 
     fn bands() -> LayerBands {

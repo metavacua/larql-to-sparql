@@ -36,6 +36,9 @@ mod attn;
 mod ffn;
 mod lm_head;
 mod moe_layers;
+mod moe_layers_per_expert;
+#[cfg(test)]
+mod moe_layers_per_expert_tests;
 mod norms;
 
 pub mod feature_major_down;
@@ -140,8 +143,9 @@ fn pad_to_block(data: &[f32]) -> Vec<f32> {
 /// zero-pads the input vector to `padded_cols`).
 pub(super) fn pad_rows_to_block(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, usize) {
     debug_assert_eq!(data.len(), rows * cols);
-    let block = larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
-    let padded_cols = cols.div_ceil(block) * block;
+    // One formula, shared with the readers (`kquant_decode`,
+    // `dequantize_matrix`): writer and decoders must agree on the stride.
+    let padded_cols = larql_models::quant::ggml::k_quant_padded_cols(cols);
     if padded_cols == cols {
         return (data.to_vec(), cols);
     }
@@ -256,6 +260,10 @@ pub fn write_model_weights_kquant_with_opts(
     attn::write_attn_weights_kquant(source, dir, num_layers, callbacks)?;
     ffn::write_interleaved_ffn_kquant(source, dir, num_layers, opts, callbacks)?;
     moe_layers::write_per_layer_moe_kquant(source, dir, num_layers)?;
+    // Separate-tensor MoE models fall through the packed writer above; without
+    // this they produce an index that verifies and slices cleanly and then
+    // panics on the first decoded token with no expert store.
+    moe_layers_per_expert::write_per_layer_moe_per_expert(source, dir, num_layers)?;
     let mut entries = norms::write_norms_and_router(source, dir, num_layers)?;
     super::ple_sidecar::write_ple_weights(source, dir, num_layers, &mut entries)?;
     lm_head::write_lm_head_kquant(source, dir, &mut entries)?;
@@ -287,7 +295,12 @@ fn update_index_json(
 
     config.has_model_weights = true;
     config.quant = crate::QuantFormat::Q4K;
-    if arch.is_hybrid_moe() {
+    // Any MoE model whose experts landed in the per-layer store must declare
+    // the layout, pure or hybrid — the loader only registers
+    // `layers/{L}/{e}/…` byte ranges when it sees this flag. Writing the
+    // layer files without setting it produced a vindex that looked complete
+    // on disk and loaded zero experts.
+    if arch.is_moe() || arch.is_hybrid_moe() {
         config.ffn_layout = Some(FfnLayout::PerLayer);
     }
     config.model_config = Some(VindexModelConfig::from_arch(arch));

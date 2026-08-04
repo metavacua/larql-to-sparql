@@ -1,0 +1,43 @@
+[
+  {
+    "label": "language",
+    "members": [
+      "english", "french", "german", "spanish", "italian", "portuguese",
+      "russian", "chinese", "japanese", "korean", "arabic", "hindi",
+      "bengali", "turkish", "dutch", "polish", "swedish", "norwegian",
+      "danish", "finnish", "greek", "czech", "romanian", "hungarian",
+      "thai", "vietnamese", "indonesian", "malay", "tagalog", "swahili",
+      "hebrew", "persian", "urdu"
+    ]
+  },
+  {
+    "label": "country",
+    "members": [
+      "australia", "china", "chinese", "japan", "japanese", "germany",
+      "german", "france", "french", "italy", "italian", "spain", "spanish",
+      "russia", "russian", "brazil", "india", "indian", "canada",
+      "canadian", "mexico", "mexican", "britain", "british", "korea",
+      "korean", "turkey", "turkish", "poland", "polish", "sweden",
+      "swedish", "norway", "norwegian", "portugal", "portuguese",
+      "netherlands", "dutch", "greece", "greek", "egypt", "egyptian",
+      "argentina", "iran", "iranian", "thailand", "thai", "vietnam",
+      "vietnamese", "indonesia", "indonesian", "malaysia", "malaysian",
+      "philippines", "filipino"
+    ]
+  },
+  {
+    "label": "month",
+    "members": [
+      "january", "february", "march", "april", "may", "june", "july",
+      "august", "september", "october", "november", "december"
+    ]
+  },
+  {
+    "label": "number",
+    "members": [
+      "one", "two", "three", "four", "five", "six", "seven", "eight",
+      "nine", "ten", "first", "second", "third", "fourth", "fifth",
+      "sixth", "seventh", "eighth"
+    ]
+  }
+]

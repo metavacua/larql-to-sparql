@@ -16,6 +16,7 @@ rayon = "1.10"
 # Wire-format constants (Q4_K_BLOCK_ELEMS, etc.) for padding decisions.
 # Tests/benches depend on it too — keep both lists in sync.
 larql-models = { path = "../larql-models" }
+larql-execution = { path = "../larql-execution" }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }

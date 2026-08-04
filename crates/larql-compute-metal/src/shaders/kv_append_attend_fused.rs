@@ -41,6 +41,8 @@ kernel void kv_append_attend_fused(
     constant uint&      window_size [[buffer(9)]],
     device const float* new_k   [[buffer(10)]],  // [num_kv * head_dim]
     device const float* new_v   [[buffer(11)]],  // [num_kv * head_dim]
+    constant float*     sinks     [[buffer(12)]],  // per-Q-head attention sink logits
+    constant uint&      has_sinks [[buffer(13)]],  // 0 = no sinks (slot is a placeholder)
     uint tg_id  [[threadgroup_position_in_grid]],
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]],
@@ -92,6 +94,10 @@ kernel void kv_append_attend_fused(
     float global_max = tg_sg_vals[0];
     uint n_sg = (tg_sz + 31) / 32;
     for (uint i = 1; i < n_sg; i++) global_max = max(global_max, tg_sg_vals[i]);
+    // The sink competes in the softmax, so it must join the max or
+    // exp(sink - max) overflows when the sink dominates. Every thread
+    // computes the same value here, as with the reduction above.
+    if (has_sinks != 0u) global_max = max(global_max, sinks[head]);
 
     float local_sum = 0.0f;
     for (uint t = t_start + tid; t < T; t += tg_sz) {
@@ -113,6 +119,9 @@ kernel void kv_append_attend_fused(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     float global_sum = tg_sg_vals[0];
     for (uint i = 1; i < n_sg; i++) global_sum += tg_sg_vals[i];
+    // Denominator only: the sink has no output slot, so the emitted
+    // weights deliberately sum to less than one.
+    if (has_sinks != 0u) global_sum += exp(sinks[head] - global_max);
     float inv_sum = 1.0f / global_sum;
 
     for (uint t = t_start + tid; t < T; t += tg_sz) {

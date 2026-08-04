@@ -28,6 +28,85 @@ pub enum Activation {
     Relu,
 }
 
+impl Activation {
+    /// Which of the two implemented gate/up FFN kernel families this
+    /// activation dispatches to on the CPU walk / kquant paths:
+    /// `true` = gelu-tanh, `false` = SiLU.
+    ///
+    /// This is the ONE definition of that mapping — the 2026-07-30
+    /// vindex/walk-FFN review (§4) found it copy-pasted across eight
+    /// walk backends, where a new `Activation` variant would silently
+    /// land in the SiLU arm. The match is deliberately exhaustive (no
+    /// wildcard): adding a variant fails compilation here instead.
+    ///
+    /// - [`Activation::Gelu`] (exact GELU) is served by the tanh
+    ///   approximation — a deliberate, documented approximation on
+    ///   these paths (no exact-GELU kernel exists; no in-tree
+    ///   architecture currently returns `Gelu`).
+    /// - [`Activation::Relu`] has NO gate/up kernel; it panics loudly
+    ///   rather than silently computing SiLU numerics. No in-tree
+    ///   architecture returns `Relu`.
+    pub fn uses_gelu_tanh_gate_up(self) -> bool {
+        match self {
+            Activation::GeluTanh | Activation::Gelu => true,
+            Activation::Silu => false,
+            Activation::Relu => panic!(
+                "Activation::Relu has no gate/up FFN kernel on the walk/kquant paths \
+                 (only gelu-tanh and SiLU are implemented)"
+            ),
+        }
+    }
+}
+
+/// How an expert's fused gate/up projection becomes the down projection's
+/// input.
+///
+/// Most MoE models are a plain gated FFN. GPT-OSS is not, and the difference
+/// is not cosmetic: it clamps both halves, scales the sigmoid argument, and
+/// adds one to the up branch. Modelling that as "SiLU with extra steps" is how
+/// a forward pass ends up plausibly wrong — hence an explicit policy rather
+/// than an [`Activation`] variant.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExpertGatePolicy {
+    /// `activation(gate) * up` — Mixtral, Gemma 4, OLMoE, GraniteMoE.
+    Gated,
+    /// GPT-OSS's clamped GLU, from `GptOssExperts._apply_gate`:
+    ///
+    /// ```text
+    /// g   = gate.clamp(max = limit)          // upper bound only
+    /// u   = up.clamp(-limit, limit)          // symmetric
+    /// glu = g * sigmoid(alpha * g)
+    /// out = (u + 1) * glu
+    /// ```
+    ClampedGlu {
+        /// Clamp bound (`swiglu_limit`, 7.0 on the released checkpoints).
+        limit: f32,
+        /// Multiplier on the sigmoid argument (1.702 in the reference).
+        alpha: f32,
+    },
+}
+
+/// How a router's top-k weights are normalised.
+///
+/// There are only two observable behaviours, and the difference is whether the
+/// selected weights sum to 1. Getting it wrong rescales the entire expert
+/// branch, which is a large error that still produces coherent-looking output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpertRoutingPolicy {
+    /// Softmax over **all** experts, then keep the top-k probabilities as they
+    /// are. They sum to *less* than 1 — by whatever mass the unselected
+    /// experts hold. Mixtral and OLMoE with `norm_topk_prob: false`.
+    SoftmaxThenSelect,
+    /// The selected weights are normalised to sum to 1.
+    ///
+    /// Two routes arrive here and they are algebraically identical, which is
+    /// why one variant covers both: renormalising the top-k probabilities
+    /// (`norm_topk_prob: true`, Gemma 4), or softmaxing over just the selected
+    /// logits (GPT-OSS) —
+    /// `softmax(l)_i / Σ_{j∈topk} softmax(l)_j = exp(l_i) / Σ_{j∈topk} exp(l_j)`.
+    NormalisedOverSelected,
+}
+
 /// Whether the FFN uses a gated architecture.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FfnType {
@@ -114,6 +193,15 @@ pub struct ModelConfig {
     pub top_k_experts: Option<usize>,
     /// Gemma 4 A4B: intermediate (hidden) dimension of each expert's FFN.
     pub moe_intermediate_size: Option<usize>,
+    /// GPT-OSS: clamp bound applied to both halves of the fused gate/up
+    /// projection before the GLU (`swiglu_limit` in `config.json`, 7.0 on
+    /// the released checkpoints). `None` for architectures that don't clamp.
+    pub swiglu_limit: Option<f64>,
+    /// Whether the router renormalises its top-k probabilities to sum to 1
+    /// (`norm_topk_prob` in `config.json`). `None` means the field was absent;
+    /// architectures that read it treat that as `false`, matching HF's own
+    /// default for the OLMoE/Mixtral family.
+    pub norm_topk_prob: Option<bool>,
     // MLA fields
     pub kv_lora_rank: Option<usize>,
     pub q_lora_rank: Option<usize>,
@@ -267,6 +355,18 @@ pub trait ModelArchitecture: Send + Sync {
         None
     }
 
+    /// Attention-sink key (None if the architecture has no sinks).
+    ///
+    /// A sink is a learned per-head logit concatenated to the attention
+    /// logits, included in the softmax, then dropped — so the weights
+    /// over real keys deliberately sum to less than one. Architectures
+    /// that use them (GPT-OSS) must both return this key *and* have the
+    /// attention kernel apply it; returning the key alone changes
+    /// nothing but the extracted bytes.
+    fn attn_sinks_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
     /// FFN bias keys (None if model doesn't use FFN bias).
     fn ffn_up_bias_key(&self, _layer: usize) -> Option<String> {
         None
@@ -295,6 +395,57 @@ pub trait ModelArchitecture: Send + Sync {
             "{}post_attention_layernorm.weight",
             self.layer_prefix(layer)
         )
+    }
+
+    // ── LayerNorm biases (declared 2026-07-31) ──
+    //
+    // LayerNorm is `γ·x̂ + β`; RMSNorm has no β. These default to `None` so
+    // every RMSNorm architecture is unaffected, and only the `NormType::
+    // LayerNorm` families (GPT-2, StarCoder2) override them.
+    //
+    // Until these existed, no accessor anywhere named a norm bias, so
+    // extraction never wrote one and `build_pipeline_layers` hardcoded
+    // `input_norm_bias: None` — while the Metal `layer_norm` shader
+    // implemented `+ bias` and its no-bias variant was always the one
+    // selected. The CPU dense path got away with it by mangling the weight
+    // key (`".weight"` → `".bias"`), which is why raw-safetensors inference
+    // was right and every vindex-backed path silently dropped the shift.
+    // Same shape as the attention-sinks gap in `docs/k3-funnel.md` §4.6.
+
+    /// Bias for the input LayerNorm. `None` for RMSNorm architectures.
+    fn input_layernorm_bias_key(&self, layer: usize) -> Option<String> {
+        self.norm_bias_of(&self.input_layernorm_key(layer))
+    }
+
+    /// Bias for the post-attention LayerNorm. `None` for RMSNorm.
+    fn post_attention_layernorm_bias_key(&self, layer: usize) -> Option<String> {
+        self.norm_bias_of(&self.post_attention_layernorm_key(layer))
+    }
+
+    /// Bias for the final LayerNorm. `None` for RMSNorm.
+    fn final_norm_bias_key(&self) -> Option<String> {
+        self.norm_bias_of(self.final_norm_key())
+    }
+
+    /// The bias key paired with a norm *weight* key, if this architecture's
+    /// norm has a bias at all.
+    ///
+    /// Derived from the weight key rather than written out per architecture,
+    /// so an architecture that overrides its norm naming gets the matching
+    /// bias for free and the two cannot drift apart. Gated on
+    /// [`NormType::LayerNorm`] so RMSNorm families answer `None` rather than
+    /// claiming a tensor they do not have.
+    ///
+    /// Uses `strip_suffix` rather than a `replace(".weight", ".bias")`:
+    /// `replace` rewrites *every* occurrence, so a key that contained the
+    /// substring earlier in its path would be silently mangled.
+    fn norm_bias_of(&self, weight_key: &str) -> Option<String> {
+        if self.norm_type() != NormType::LayerNorm {
+            return None;
+        }
+        weight_key
+            .strip_suffix(".weight")
+            .map(|stem| format!("{stem}.bias"))
     }
     fn pre_feedforward_layernorm_key(&self, layer: usize) -> Option<String> {
         Some(format!(
@@ -647,6 +798,66 @@ pub trait ModelArchitecture: Send + Sync {
         None
     }
 
+    // ── MoE biases and gating (declared 2026-07-30) ──
+    //
+    // These three tensors exist per layer in the GPT-OSS checkpoint and were
+    // silently dropped for the same reason the attention biases were: nothing
+    // named them, so extraction never asked and the forward pass never
+    // applied them. A key returned here is only half the obligation — the
+    // backend has to consume it. See `docs/k3-funnel.md` §4.7.
+
+    /// Router bias key, added to the router logits before top-k selection.
+    /// `None` for routers without a bias term.
+    fn moe_router_bias_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Per-expert bias on the fused gate+up projection.
+    /// Shape `[num_experts, 2 * moe_intermediate_size]`, interleaved on the
+    /// last axis exactly as the weight rows are.
+    fn packed_gate_up_bias_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Per-expert bias on the expert down projection.
+    /// Shape `[num_experts, hidden_size]`.
+    fn packed_down_bias_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// How an expert's gate/up projection is combined into the down
+    /// projection's input. Defaults to the plain gated FFN every other
+    /// MoE architecture in the support table uses.
+    fn expert_gate_policy(&self) -> ExpertGatePolicy {
+        ExpertGatePolicy::Gated
+    }
+
+    /// How the router's top-k weights are normalised.
+    ///
+    /// Read from `norm_topk_prob`, which is exactly what that field means:
+    /// `true` renormalises the selected weights to sum to 1; `false` or absent
+    /// keeps the raw softmax probabilities, which sum to less by however much
+    /// mass the unselected experts hold.
+    ///
+    /// **This default reads the config on purpose.** Baking one routing order
+    /// into code that serves both architectures is a rescale of the entire
+    /// expert branch, and it has now been got wrong twice — `docs/k3-funnel.md`
+    /// §4.7 finding 5, then again in `select_and_normalise` an hour after that
+    /// finding was written up. A config-reading default makes a new MoE
+    /// architecture correct on arrival instead of correct only if someone
+    /// remembers to override; `QwenArch` shipped `norm_topk_prob: true` models
+    /// and inherited the wrong order for exactly that reason.
+    ///
+    /// Override only where the order is fixed by the architecture rather than
+    /// by config, as GPT-OSS's is.
+    fn expert_routing_policy(&self) -> ExpertRoutingPolicy {
+        if self.config().norm_topk_prob.unwrap_or(false) {
+            ExpertRoutingPolicy::NormalisedOverSelected
+        } else {
+            ExpertRoutingPolicy::SoftmaxThenSelect
+        }
+    }
+
     /// Shared expert FFN gate weight key.
     fn shared_expert_gate_key(&self, _layer: usize) -> Option<String> {
         None
@@ -878,6 +1089,31 @@ pub trait ModelArchitecture: Send + Sync {
     fn multimodal(&self) -> Option<&dyn crate::multimodal::MultiModalProtocol> {
         None
     }
+
+    // ── Engine capability predicates ──
+
+    /// Whether per-layer K/V is a pure function of `(pre-attention
+    /// residual, layer weights, absolute position)` — the structural
+    /// precondition for engines that persist the residual stream and
+    /// rebuild K/V on demand (the markov-residual family; see
+    /// `crates/larql-inference/docs/specs/markov-residual-engine.md` §4).
+    ///
+    /// Derived from structural metadata, not an architecture allowlist:
+    /// - the norm feeding the K/V projections must be stateless at
+    ///   inference time — both current [`NormType`] variants are, and a
+    ///   future stateful variant falls out of the `matches!` and fails
+    ///   closed;
+    /// - position must enter solely through RoPE re-applied at the
+    ///   row's absolute index; learned absolute position tables
+    ///   ([`Self::position_embed_key`]) sit outside the residual
+    ///   recompute path;
+    /// - K/V must be a direct projection of the normed residual — MLA
+    ///   ([`Self::uses_mla`]) routes K/V through a decode-time latent
+    ///   the recompute path cannot rebuild.
+    fn kv_recomputable_from_residuals(&self) -> bool {
+        let norm_stateless = matches!(self.norm_type(), NormType::RmsNorm | NormType::LayerNorm);
+        norm_stateless && self.position_embed_key().is_none() && !self.uses_mla()
+    }
 }
 
 /// `llama3` rope scaling parameters. Lives in larql-models so both the
@@ -893,4 +1129,308 @@ pub struct Llama3RopeScaling {
     pub low_freq_factor: f64,
     pub high_freq_factor: f64,
     pub original_max_position_embeddings: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An architecture that overrides nothing, so every call below exercises
+    /// the trait default itself. The per-architecture files test their
+    /// overrides; nothing else pins the defaults an architecture inherits by
+    /// *not* overriding — and a changed default silently rewrites the
+    /// behaviour of every architecture that relied on it.
+    struct DefaultsArch(ModelConfig);
+
+    impl ModelArchitecture for DefaultsArch {
+        fn family(&self) -> &str {
+            "defaults-test"
+        }
+        fn config(&self) -> &ModelConfig {
+            &self.0
+        }
+    }
+
+    /// A minimal parsed config; tests mutate the returned fields directly
+    /// rather than guessing config.json spellings (parsing is
+    /// `detect::parser`'s test surface, not this one's).
+    fn base_config() -> ModelConfig {
+        crate::detect_from_json(&serde_json::json!({
+            "model_type": "llama",
+            "hidden_size": 64,
+            "intermediate_size": 128,
+            "num_hidden_layers": 2,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 2,
+            "head_dim": 16,
+            "vocab_size": 32,
+        }))
+        .config()
+        .clone()
+    }
+
+    #[test]
+    fn optional_weight_keys_default_to_absent() {
+        let a = DefaultsArch(base_config());
+        assert_eq!(a.position_embed_key(), None);
+        assert_eq!(a.fused_qkv_key(0), None);
+        assert_eq!(a.fused_qkv_bias_key(0), None);
+        assert_eq!(a.attn_sinks_key(0), None);
+        assert_eq!(a.ffn_up_bias_key(0), None);
+        assert_eq!(a.ffn_down_bias_key(0), None);
+        assert_eq!(a.layer_scalar_key(0), None);
+        assert_eq!(a.kv_shared_source_layer(0), None);
+    }
+
+    #[test]
+    fn moe_defaults_describe_a_dense_model() {
+        let a = DefaultsArch(base_config());
+        assert!(!a.is_moe());
+        assert!(!a.is_hybrid_moe());
+        assert_eq!(a.num_experts(), 0);
+        assert_eq!(a.num_experts_per_token(), 0);
+        assert_eq!(a.num_shared_experts(), 0);
+        assert_eq!(a.moe_intermediate_size(), 0);
+        assert_eq!(a.moe_router_type(), "top_k_softmax");
+        assert_eq!(a.expert_format(), ExpertFormat::PerExpert);
+        assert_eq!(a.expert_gate_policy(), ExpertGatePolicy::Gated);
+        assert_eq!(a.moe_router_key(0), None);
+        assert_eq!(a.moe_router_bias_key(0), None);
+        assert_eq!(a.moe_router_scale_key(0), None);
+        assert_eq!(a.moe_router_per_expert_scale_key(0), None);
+        assert_eq!(a.moe_router_norm_key(0), None);
+        assert!(!a.moe_router_norm_parameter_free());
+        assert_eq!(a.moe_router_input_scalar(), None);
+        assert_eq!(a.expert_ffn_gate_key(0, 0), None);
+        assert_eq!(a.expert_ffn_up_key(0, 0), None);
+        assert_eq!(a.expert_ffn_down_key(0, 0), None);
+        assert_eq!(a.shared_expert_gate_key(0), None);
+        assert_eq!(a.shared_expert_up_key(0), None);
+        assert_eq!(a.shared_expert_down_key(0), None);
+        assert_eq!(a.packed_gate_up_blocks_key(0), None);
+        assert_eq!(a.packed_gate_up_scales_key(0), None);
+        assert_eq!(a.packed_gate_up_bias_key(0), None);
+        assert_eq!(a.packed_down_blocks_key(0), None);
+        assert_eq!(a.packed_down_scales_key(0), None);
+        assert_eq!(a.packed_down_bias_key(0), None);
+        assert_eq!(a.packed_experts_gate_up_key(0), None);
+        assert_eq!(a.packed_experts_down_key(0), None);
+        assert_eq!(a.moe_post_outer_norm_key(0), None);
+        assert_eq!(a.moe_post_ffn1_norm_key(0), None);
+        assert_eq!(a.moe_pre_experts_norm_key(0), None);
+        assert_eq!(a.moe_post_experts_norm_key(0), None);
+        assert!(!a.moe_has_combined_output_norm());
+    }
+
+    /// The routing default reads `norm_topk_prob` from the config on purpose
+    /// (see the method's doc for the two times a baked-in order went wrong):
+    /// a new MoE architecture must be correct on arrival.
+    #[test]
+    fn expert_routing_policy_reads_norm_topk_prob() {
+        let mut cfg = base_config();
+        cfg.norm_topk_prob = None;
+        assert_eq!(
+            DefaultsArch(cfg.clone()).expert_routing_policy(),
+            ExpertRoutingPolicy::SoftmaxThenSelect
+        );
+        cfg.norm_topk_prob = Some(false);
+        assert_eq!(
+            DefaultsArch(cfg.clone()).expert_routing_policy(),
+            ExpertRoutingPolicy::SoftmaxThenSelect
+        );
+        cfg.norm_topk_prob = Some(true);
+        assert_eq!(
+            DefaultsArch(cfg).expert_routing_policy(),
+            ExpertRoutingPolicy::NormalisedOverSelected
+        );
+    }
+
+    #[test]
+    fn mla_defaults_describe_standard_gqa() {
+        let a = DefaultsArch(base_config());
+        assert!(!a.uses_mla());
+        assert_eq!(a.kv_lora_rank(), 0);
+        assert_eq!(a.q_lora_rank(), 0);
+        assert_eq!(a.mla_kv_a_key(0), None);
+        assert_eq!(a.mla_kv_b_key(0), None);
+        assert_eq!(a.mla_q_a_key(0), None);
+        assert_eq!(a.mla_q_b_key(0), None);
+        assert_eq!(a.mla_qk_nope_head_dim(), None);
+        assert_eq!(a.mla_qk_rope_head_dim(), None);
+        assert_eq!(a.mla_v_head_dim(), None);
+    }
+
+    #[test]
+    fn scaling_multipliers_default_to_identity() {
+        let mut cfg = base_config();
+        cfg.residual_multiplier = None;
+        cfg.attention_multiplier = None;
+        cfg.logits_scaling = None;
+        let a = DefaultsArch(cfg.clone());
+        assert_eq!(a.residual_multiplier(), 1.0);
+        assert_eq!(a.attention_multiplier(), 1.0);
+        assert_eq!(a.logits_scaling(), 1.0);
+
+        cfg.residual_multiplier = Some(0.5);
+        cfg.attention_multiplier = Some(0.25);
+        cfg.logits_scaling = Some(8.0);
+        let a = DefaultsArch(cfg);
+        assert_eq!(a.residual_multiplier(), 0.5);
+        assert_eq!(a.attention_multiplier(), 0.25);
+        assert_eq!(a.logits_scaling(), 8.0);
+    }
+
+    #[test]
+    fn attention_scale_prefers_query_pre_attn_scalar_over_head_dim() {
+        let mut cfg = base_config();
+        cfg.query_pre_attn_scalar = None;
+        let a = DefaultsArch(cfg.clone());
+        let by_head_dim = (cfg.head_dim as f64).powf(-0.5);
+        assert_eq!(a.attention_scale(), by_head_dim);
+        assert_eq!(a.attention_scale_for_layer(0), by_head_dim);
+
+        cfg.query_pre_attn_scalar = Some(256.0);
+        let a = DefaultsArch(cfg);
+        assert_eq!(a.attention_scale(), 256.0f64.powf(-0.5));
+        assert_eq!(a.attention_scale_for_layer(1), 256.0f64.powf(-0.5));
+    }
+
+    /// PLE keys are all-or-nothing on `per_layer_embed_dim`: a partial key
+    /// set would load half a mechanism.
+    #[test]
+    fn ple_keys_are_all_present_or_all_absent() {
+        let mut cfg = base_config();
+        cfg.per_layer_embed_dim = None;
+        let off = DefaultsArch(cfg.clone());
+        assert!(!off.has_per_layer_embeddings());
+        assert_eq!(off.per_layer_embed_dim(), 0);
+        assert_eq!(off.per_layer_embed_key(), None);
+        assert_eq!(off.per_layer_model_projection_key(), None);
+        assert_eq!(off.per_layer_projection_norm_key(), None);
+        assert_eq!(off.per_layer_input_gate_key(0), None);
+        assert_eq!(off.per_layer_projection_key(0), None);
+        assert_eq!(off.post_per_layer_input_norm_key(0), None);
+
+        cfg.per_layer_embed_dim = Some(8);
+        let on = DefaultsArch(cfg);
+        assert!(on.has_per_layer_embeddings());
+        assert_eq!(on.per_layer_embed_dim(), 8);
+        assert_eq!(
+            on.per_layer_embed_key().as_deref(),
+            Some("embed_tokens_per_layer.weight")
+        );
+        assert_eq!(
+            on.per_layer_model_projection_key().as_deref(),
+            Some("per_layer_model_projection.weight")
+        );
+        assert_eq!(
+            on.per_layer_projection_norm_key().as_deref(),
+            Some("per_layer_projection_norm.weight")
+        );
+        let prefix = on.layer_prefix(1);
+        assert_eq!(
+            on.per_layer_input_gate_key(1),
+            Some(format!("{prefix}per_layer_input_gate.weight"))
+        );
+        assert_eq!(
+            on.per_layer_projection_key(1),
+            Some(format!("{prefix}per_layer_projection.weight"))
+        );
+        assert_eq!(
+            on.post_per_layer_input_norm_key(1),
+            Some(format!("{prefix}post_per_layer_input_norm.weight"))
+        );
+    }
+
+    #[test]
+    fn softcapping_reads_config_and_defaults_off() {
+        let mut cfg = base_config();
+        cfg.attn_logit_softcapping = None;
+        cfg.final_logit_softcapping = None;
+        let a = DefaultsArch(cfg.clone());
+        assert_eq!(a.attn_logit_softcapping(), None);
+        assert_eq!(a.final_logit_softcapping(), None);
+
+        cfg.attn_logit_softcapping = Some(50.0);
+        cfg.final_logit_softcapping = Some(30.0);
+        let a = DefaultsArch(cfg);
+        assert_eq!(a.attn_logit_softcapping(), Some(50.0));
+        assert_eq!(a.final_logit_softcapping(), Some(30.0));
+    }
+
+    #[test]
+    fn rope_scaling_defaults_and_config_read() {
+        let mut cfg = base_config();
+        cfg.rope_scaling = None;
+        let a = DefaultsArch(cfg.clone());
+        assert_eq!(a.rope_scaling_type(), None);
+        assert_eq!(a.rope_scaling_factor(), 1.0);
+        assert_eq!(a.rope_position_divisor_for_layer(0), 1.0);
+        assert!(a.llama3_rope_scaling().is_none());
+
+        cfg.rope_scaling = Some(RopeScaling {
+            scaling_type: "linear".to_string(),
+            factor: 8.0,
+            llama3_low_freq_factor: None,
+            llama3_high_freq_factor: None,
+            llama3_original_max_position_embeddings: None,
+            gemma3_global_only: false,
+        });
+        let a = DefaultsArch(cfg);
+        assert_eq!(a.rope_scaling_type(), Some("linear"));
+        assert_eq!(a.rope_scaling_factor(), 8.0);
+    }
+
+    #[test]
+    fn norm_eps_reads_config_with_crate_fallback() {
+        let mut cfg = base_config();
+        cfg.norm_eps = Some(1e-5);
+        assert_eq!(DefaultsArch(cfg.clone()).norm_eps(), 1e-5);
+        cfg.norm_eps = None;
+        assert_eq!(
+            DefaultsArch(cfg).norm_eps(),
+            crate::defaults::DEFAULT_NORM_EPS
+        );
+    }
+
+    #[test]
+    fn misc_defaults() {
+        let a = DefaultsArch(base_config());
+        assert!(a.multimodal().is_none());
+        assert_eq!(a.sliding_window_size(), None);
+        assert!(!a.is_sliding_window_layer(0));
+    }
+
+    /// The markov-residual precondition: stateless norm, no learned position
+    /// table, no MLA — all true of the default architecture surface.
+    #[test]
+    fn kv_recomputable_from_residuals_by_default() {
+        assert!(DefaultsArch(base_config()).kv_recomputable_from_residuals());
+    }
+
+    // ── Activation::uses_gelu_tanh_gate_up — the ONE gate/up kernel
+    //    mapping (2026-07-30 review §4 dedupe) ─────────────────────────
+
+    #[test]
+    fn gelu_family_maps_to_gelu_tanh_kernel() {
+        assert!(Activation::GeluTanh.uses_gelu_tanh_gate_up());
+        // Exact GELU is served by the tanh approximation — documented.
+        assert!(Activation::Gelu.uses_gelu_tanh_gate_up());
+    }
+
+    #[test]
+    fn silu_maps_to_silu_kernel() {
+        assert!(!Activation::Silu.uses_gelu_tanh_gate_up());
+    }
+
+    /// A variant with no gate/up kernel must fail LOUDLY, never
+    /// silently compute SiLU numerics. Together with the helper's
+    /// wildcard-free match (a new `Activation` variant is a compile
+    /// error there), this pins the review requirement that a
+    /// hypothetical new activation cannot silently land in the SiLU arm.
+    #[test]
+    #[should_panic(expected = "no gate/up FFN kernel")]
+    fn relu_panics_instead_of_silently_running_silu() {
+        Activation::Relu.uses_gelu_tanh_gate_up();
+    }
 }

@@ -132,3 +132,42 @@ async fn walk_ffn_q8k_valid_layer_against_q4k_completes() {
         "got unexpected status {status:?}"
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// Opt-in serve_us timing trailer (DEC-1A two-scoreboard schema).
+// The synthetic Q4K fixture (hidden=8, not a 256 multiple) cannot
+// reach the 200 path of this endpoint, so the trailer's happy path
+// is pinned at the codec level (larql-inference `remote::timing` +
+// q8k_wire tests) and end-to-end on the multi-layer endpoint; here
+// we pin that the header does not perturb the handler's behaviour.
+// ══════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn walk_ffn_q8k_timing_header_does_not_change_rejection_paths() {
+    use larql_inference::ffn::remote::{split_timing_trailer, TIMING_HEADER, TIMING_HEADER_VALUE};
+    let (model, _fixture) = common::model_with_q4k_weights("synthetic");
+    let state = common::state(vec![model]);
+    let app = larql_server::routes::single_model_router(state);
+    // Valid frame shape-wise, but hidden=8 is not a 256 multiple → the
+    // handler 400s; the timing header must not change that, and error
+    // bodies never carry the trailer.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/walk-ffn-q8k")
+                .header(header::CONTENT_TYPE, Q8K_BATCH_CT)
+                .header(TIMING_HEADER, TIMING_HEADER_VALUE)
+                .body(Body::from(make_single_q8k_request(0)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    drop(_fixture);
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let (_, serve_us) = split_timing_trailer(&body);
+    assert_eq!(serve_us, None);
+}

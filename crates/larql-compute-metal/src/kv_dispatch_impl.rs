@@ -28,6 +28,10 @@ use larql_models::ModelWeights;
 /// Zero-sized type; const-construction is free.
 const CPU: CpuBackend = CpuBackend;
 
+/// K and V — the two cached tensors every attention layer stores per
+/// position. Named so the K/V sizing arithmetic doesn't read as a bare 2.
+const KV_TENSORS_PER_LAYER: usize = 2;
+
 impl KvDispatch for MetalBackend {
     fn alloc_kv_buffer(&self, layer: usize, max_tokens: usize, kv_dim: usize) -> KvHandle {
         // Handles are CPU-resident at Step 4. When real Metal kernels land
@@ -394,6 +398,100 @@ impl KvDispatch for MetalBackend {
         Some(hidden)
     }
 
+    /// Coarse prefill under an engine window.
+    ///
+    /// Accepts only a prompt that fits inside the window, matching the
+    /// CPU rule: the fused prefill has no per-query-position masking, so
+    /// a longer prompt would attend in full while the engine advertises
+    /// a bound. Declining sends the engine to the per-layer path, which
+    /// is correct — just slower.
+    fn coarse_prefill_windowed(
+        &self,
+        weights: &ModelWeights,
+        token_ids: &[u32],
+        index: Option<&dyn larql_compute::KvIndex>,
+        window: Option<usize>,
+    ) -> Option<(Array2<f32>, KvHandle)> {
+        if let Some(w) = window {
+            if w == 0 || token_ids.len() > w {
+                return None;
+            }
+        }
+        self.set_engine_window(window);
+        self.coarse_prefill(weights, token_ids, index)
+    }
+
+    /// Coarse decode under an engine window.
+    ///
+    /// Two mechanisms, because one cannot do both jobs:
+    ///
+    /// - **Attention** is bounded by `window` every step, via the layer
+    ///   spec's window (see `effective_window_for`). The kernel attends
+    ///   `[T - window, T)`, so extra resident rows are simply not read.
+    /// - **Memory** is bounded by compaction, run only when occupancy
+    ///   reaches `COMPACTION_SLACK x window`. Compacting every step would
+    ///   memmove the whole window per token; amortised it is O(1) per
+    ///   token, at the cost of holding up to that multiple of the window.
+    ///
+    /// Doing only the compaction would let attention read up to the slack
+    /// multiple of the window between compactions; doing only the span
+    /// clamp would never reclaim memory. Both, or neither contract holds.
+    fn coarse_decode_step_windowed(
+        &self,
+        weights: &ModelWeights,
+        token_id: u32,
+        index: Option<&dyn larql_compute::KvIndex>,
+        handle: &mut KvHandle,
+        abs_position: usize,
+        window: Option<usize>,
+    ) -> Option<Array2<f32>> {
+        let Some(w) = window else {
+            self.set_engine_window(None);
+            return self.coarse_decode_step(weights, token_id, index, handle, abs_position);
+        };
+        if w == 0 {
+            return None;
+        }
+        self.set_engine_window(Some(w));
+        self.compact_kv_to_window(w);
+        self.coarse_decode_step(weights, token_id, index, handle, abs_position)
+    }
+
+    fn per_layer_is_host_delegated(&self) -> bool {
+        // Every per-layer method above forwards to `CPU`. Only the
+        // `coarse_*` family runs Metal kernels. Until the per-layer
+        // surface has native implementations this must stay `true`, or
+        // diagnostics will keep reporting CPU work as GPU work.
+        true
+    }
+
+    fn backend_resident_kv_bytes(&self) -> usize {
+        // The coarse pipeline's K/V lives here, not in the handle
+        // (`MetalCoarseHandle` is a sentinel), so an engine that only
+        // measures its handles reports zero on this path. Count the
+        // populated prefix of each layer — `current_len`, not `max_seq`:
+        // the buffers are preallocated to the context ceiling and
+        // charging an engine for capacity it has not filled would
+        // overstate every short-context run.
+        let Ok(guard) = self.kv_cache.lock() else {
+            return 0;
+        };
+        let Some(cache) = guard.as_ref() else {
+            return 0;
+        };
+        cache
+            .layers
+            .iter()
+            .map(|l| {
+                l.current_len
+                    * l.num_kv_heads
+                    * l.head_dim
+                    * KV_TENSORS_PER_LAYER
+                    * std::mem::size_of::<f32>()
+            })
+            .sum()
+    }
+
     fn read_kv_row_at(
         &self,
         _handle: &KvHandle,
@@ -402,7 +500,7 @@ impl KvDispatch for MetalBackend {
     ) -> Option<(Vec<f32>, Vec<f32>)> {
         // W10 Phase B: read a single position's K/V back from the Metal
         // kv cache. Used by engines running under HOnly that need to
-        // snapshot a specific position on demand (e.g. unlimited_context's
+        // snapshot a specific position on demand (e.g. windowed_checkpoint's
         // close_window). Small (~kv_dim * 4 B per K and V) so cheap vs
         // an end-of-window snapshot of the whole window.
         let cache_guard = self.kv_cache.lock().ok()?;
@@ -795,5 +893,299 @@ mod tests {
             larql_compute::StateDumpMask::Full,
         );
         assert!(result.is_none());
+    }
+}
+
+/// Occupancy multiple of the window at which compaction runs.
+///
+/// Compaction memmoves the surviving rows, so running it every step
+/// would cost O(window) per token. Letting occupancy reach this multiple
+/// before reclaiming makes it O(1) amortised, and the attention span
+/// clamp means the extra resident rows are never read.
+const COMPACTION_SLACK: usize = 2;
+
+impl MetalBackend {
+    /// Reclaim K/V above `COMPACTION_SLACK x window` rows, per layer.
+    ///
+    /// Safe to call every step: it is a no-op until occupancy actually
+    /// reaches the slack bound. Eviction lowers occupancy only —
+    /// `abs_position` keeps climbing, so RoPE does not rewind (see
+    /// `LayerKVCache::evict_to_window`).
+    pub(crate) fn compact_kv_to_window(&self, window: usize) {
+        if window == 0 {
+            return;
+        }
+        let trigger = window.saturating_mul(COMPACTION_SLACK);
+        let Ok(mut guard) = self.kv_cache.lock() else {
+            return;
+        };
+        let Some(cache) = guard.as_mut() else {
+            return;
+        };
+        for layer in cache.layers.iter_mut() {
+            if layer.current_len >= trigger {
+                layer.evict_to_window(window);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod windowed_coarse_tests {
+    use super::*;
+    use crate::MetalBackend;
+
+    fn backend() -> MetalBackend {
+        MetalBackend::new().expect("Metal device available on test host")
+    }
+
+    /// The narrower of the two windows wins, and `0` means unbounded on
+    /// both sides — the same sentinel the kernel uses, so no translation.
+    #[test]
+    fn effective_window_takes_the_narrower_of_arch_and_engine() {
+        let b = backend();
+
+        b.set_engine_window(None);
+        assert_eq!(b.effective_window_for(0), 0, "both unbounded");
+        assert_eq!(b.effective_window_for(1024), 1024, "arch window survives");
+
+        b.set_engine_window(Some(256));
+        assert_eq!(
+            b.effective_window_for(0),
+            256,
+            "engine bounds a global layer"
+        );
+        assert_eq!(
+            b.effective_window_for(1024),
+            256,
+            "engine is narrower than the arch's sliding layer"
+        );
+        assert_eq!(
+            b.effective_window_for(128),
+            128,
+            "arch is narrower than the engine's request"
+        );
+
+        b.set_engine_window(None);
+        assert_eq!(
+            b.effective_window_for(1024),
+            1024,
+            "clearing restores the arch"
+        );
+    }
+
+    /// A prompt longer than the window is declined — the fused prefill
+    /// has no per-query masking, so accepting would attend in full while
+    /// the engine advertises a bound.
+    #[test]
+    fn prefill_declines_a_prompt_longer_than_the_window() {
+        let b = backend();
+        let weights = larql_models::test_fixtures::make_test_q4k_weights();
+        assert!(b
+            .coarse_prefill_windowed(&weights, &[0u32, 1, 2, 3], None, Some(2))
+            .is_none());
+        assert!(
+            b.coarse_prefill_windowed(&weights, &[0u32, 1, 2, 3], None, Some(0))
+                .is_none(),
+            "a zero window is refused, not treated as unbounded"
+        );
+    }
+
+    /// Compaction is a no-op below the slack bound and reclaims above it,
+    /// without ever moving the stream position.
+    #[test]
+    fn compaction_reclaims_only_past_the_slack_bound() {
+        let b = backend();
+        let window = 4usize;
+        {
+            let mut guard = b.kv_cache.lock().expect("kv cache lock");
+            *guard = Some(crate::ops::kv_cache::KVCache::new(&b.bufs, 1, 64, 2, 4));
+            let layer = &mut guard.as_mut().unwrap().layers[0];
+            for _ in 0..(window * COMPACTION_SLACK - 1) {
+                layer.advance_one();
+            }
+        }
+        b.compact_kv_to_window(window);
+        {
+            let guard = b.kv_cache.lock().unwrap();
+            let layer = &guard.as_ref().unwrap().layers[0];
+            assert_eq!(
+                layer.current_len,
+                window * COMPACTION_SLACK - 1,
+                "below the slack bound nothing should move"
+            );
+        }
+
+        {
+            let mut guard = b.kv_cache.lock().unwrap();
+            guard.as_mut().unwrap().layers[0].advance_one();
+        }
+        b.compact_kv_to_window(window);
+        {
+            let guard = b.kv_cache.lock().unwrap();
+            let layer = &guard.as_ref().unwrap().layers[0];
+            assert_eq!(layer.current_len, window, "reclaimed to the window");
+            assert_eq!(
+                layer.abs_position,
+                window * COMPACTION_SLACK,
+                "compaction must never rewind the stream position"
+            );
+        }
+    }
+
+    /// A zero window compacts nothing rather than emptying the cache.
+    #[test]
+    fn a_zero_window_compacts_nothing() {
+        let b = backend();
+        {
+            let mut guard = b.kv_cache.lock().expect("kv cache lock");
+            *guard = Some(crate::ops::kv_cache::KVCache::new(&b.bufs, 1, 64, 2, 4));
+            guard.as_mut().unwrap().layers[0].advance_one();
+        }
+        b.compact_kv_to_window(0);
+        let guard = b.kv_cache.lock().unwrap();
+        assert_eq!(guard.as_ref().unwrap().layers[0].current_len, 1);
+    }
+
+    /// Before any prefill there is no cache to compact — the guard arm
+    /// returns rather than panicking on the empty Option.
+    #[test]
+    fn compaction_without_a_cache_is_a_no_op() {
+        let b = backend();
+        b.compact_kv_to_window(4);
+        assert!(b.kv_cache.lock().unwrap().is_none());
+    }
+
+    /// The per-layer surface forwards to the CPU; diagnostics must be
+    /// able to say so.
+    #[test]
+    fn per_layer_surface_reports_host_delegation() {
+        assert!(backend().per_layer_is_host_delegated());
+    }
+
+    /// The coarse pipeline's K/V lives behind a sentinel handle, so the
+    /// backend must self-report it: zero before any cache exists, and
+    /// current_len (not capacity) × kv_dim × K,V × f32 once one does.
+    #[test]
+    fn resident_kv_bytes_counts_the_populated_prefix_only() {
+        let b = backend();
+        assert_eq!(b.backend_resident_kv_bytes(), 0, "no cache yet");
+
+        {
+            let mut guard = b.kv_cache.lock().expect("kv cache lock");
+            *guard = Some(crate::ops::kv_cache::KVCache::new(&b.bufs, 1, 64, 2, 4));
+            let layer = &mut guard.as_mut().unwrap().layers[0];
+            for _ in 0..3 {
+                layer.advance_one();
+            }
+        }
+        // 3 rows × (2 kv_heads × 4 head_dim) × K and V × 4 bytes.
+        assert_eq!(b.backend_resident_kv_bytes(), 3 * 8 * 2 * 4);
+    }
+
+    /// Single-position readback: None before a cache exists, None past
+    /// the populated prefix or layer range, and a kv_dim-sized row pair
+    /// inside it.
+    #[test]
+    fn read_kv_row_at_bounds_and_shape() {
+        let b = backend();
+        let handle = b.alloc_kv_buffer(0, 8, 8);
+        assert!(
+            b.read_kv_row_at(&handle, 0, 0).is_none(),
+            "no cache installed yet"
+        );
+
+        {
+            let mut guard = b.kv_cache.lock().expect("kv cache lock");
+            *guard = Some(crate::ops::kv_cache::KVCache::new(&b.bufs, 1, 64, 2, 4));
+            let layer = &mut guard.as_mut().unwrap().layers[0];
+            layer.advance_one();
+            layer.advance_one();
+        }
+        assert!(b.read_kv_row_at(&handle, 5, 0).is_none(), "layer range");
+        assert!(
+            b.read_kv_row_at(&handle, 0, 2).is_none(),
+            "pos past the populated prefix"
+        );
+        let (k_row, v_row) = b
+            .read_kv_row_at(&handle, 0, 1)
+            .expect("in-range position reads back");
+        assert_eq!(k_row.len(), 8, "kv_dim = 2 heads × 4 head_dim");
+        assert_eq!(v_row.len(), 8);
+    }
+
+    /// The unbounded arm delegates to the plain coarse step (which
+    /// declines without an index), the zero window refuses outright,
+    /// and a real window sets the clamp before delegating.
+    #[test]
+    fn decode_step_windowed_arms_all_decline_without_an_index() {
+        let b = backend();
+        let weights = larql_models::test_fixtures::make_test_q4k_weights();
+        let mut handle = b.alloc_kv_buffer(0, 8, 8);
+
+        assert!(b
+            .coarse_decode_step_windowed(&weights, 0, None, &mut handle, 0, None)
+            .is_none());
+        assert!(b
+            .coarse_decode_step_windowed(&weights, 0, None, &mut handle, 0, Some(0))
+            .is_none());
+        assert!(b
+            .coarse_decode_step_windowed(&weights, 0, None, &mut handle, 0, Some(4))
+            .is_none());
+    }
+
+    /// A prompt that fits inside the window is accepted into the fused
+    /// prefill path (which then declines without an index — the accept
+    /// arm is what this pins, not the kernel).
+    #[test]
+    fn prefill_windowed_accepts_a_fitting_prompt() {
+        let b = backend();
+        let weights = larql_models::test_fixtures::make_test_q4k_weights();
+        assert!(b
+            .coarse_prefill_windowed(&weights, &[0u32, 1], None, Some(4))
+            .is_none());
+        assert!(b
+            .coarse_prefill_windowed(&weights, &[0u32, 1], None, None)
+            .is_none());
+    }
+
+    /// The state-capturing step is a thin Full-mask delegation; without
+    /// an index the fused path declines through the same spine.
+    #[test]
+    fn decode_step_with_state_delegates_to_the_masked_form() {
+        let b = backend();
+        let weights = larql_models::test_fixtures::make_test_q4k_weights();
+        let mut handle = b.alloc_kv_buffer(0, 8, 8);
+        let mut state = larql_compute::PerLayerDecodeState::with_capacity(1);
+        assert!(b
+            .coarse_decode_step_with_state(&weights, 0, None, &mut handle, 0, Some(&mut state))
+            .is_none());
+    }
+
+    /// Compressed append forwards to the CPU backend, whose contract is
+    /// an explicit unimplemented panic — not a silent no-op.
+    #[test]
+    #[should_panic(expected = "compressed_kv_append not implemented")]
+    fn compressed_kv_append_forwards_to_the_cpu_unimplemented() {
+        let b = backend();
+        let mut handle = b.alloc_kv_buffer(0, 4, 4);
+        let k = Array2::<f32>::zeros((1, 4));
+        let v = Array2::<f32>::zeros((1, 4));
+        struct NoCodec;
+        impl CompressionCodec for NoCodec {
+            fn encode(&self, v: &[f32]) -> Vec<u8> {
+                v.iter().flat_map(|f| f.to_le_bytes()).collect()
+            }
+            fn decode(&self, b: &[u8], dim: usize) -> Vec<f32> {
+                b.chunks_exact(4)
+                    .take(dim)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect()
+            }
+            fn name(&self) -> &str {
+                "no-codec"
+            }
+        }
+        b.compressed_kv_append(&mut handle, &k, &v, &NoCodec);
     }
 }

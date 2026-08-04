@@ -13,6 +13,15 @@ pub fn run(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("not a directory: {}", args.vindex.display()).into());
     }
 
+    // A VINDEX2 container is opaque blobs, so verifying it means checksums.
+    // A VINDEX3 container declares its own structure, so it can answer the
+    // stronger question — *will this bind?* — without executing anything.
+    if larql_vindex::format::generation::detect_generation(&args.vindex)?
+        == larql_vindex::format::generation::ContainerGeneration::V3
+    {
+        return verify_v3(&args.vindex);
+    }
+
     let config = larql_vindex::load_vindex_config(&args.vindex)?;
 
     let stored = match &config.checksums {
@@ -61,4 +70,48 @@ pub fn run(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Structural verification of a VINDEX3 container.
+///
+/// Checks what a checksum sweep cannot: that the container's own declarations
+/// are mutually consistent and complete enough to bind. Opening it already
+/// established that `index.json` parses, the manifest parses and validates,
+/// and every declared storage key resolves to a file; `verify` adds segment
+/// parsing, programme satisfaction and per-entry region bounds.
+///
+/// Execution parity is deliberately excluded — it needs an input and a kernel,
+/// and folding it in would make routine verification cost a forward pass.
+fn verify_v3(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("Verifying: {} (VINDEX3, structural)", path.display());
+    let container = larql_vindex::format::vindex3::Vindex3Container::open(path)?;
+
+    println!(
+        "  index.json ......... OK (schema {})",
+        container.index().version
+    );
+    println!(
+        "  moe_manifest ....... OK ({} MoE layer(s))",
+        container.manifest().layers.len()
+    );
+    println!(
+        "  storage keys ....... OK ({} segment(s) resolved)",
+        container.index().segments.len()
+    );
+
+    let defects = container.verify();
+    if defects.is_empty() {
+        println!("  structure .......... OK (bindable)");
+        println!("\nAll checks passed.");
+        return Ok(());
+    }
+    println!("  structure .......... {} defect(s)", defects.len());
+    for d in &defects {
+        println!("    - {d}");
+    }
+    Err(format!(
+        "{} structural defect(s); container is not bindable",
+        defects.len()
+    )
+    .into())
 }

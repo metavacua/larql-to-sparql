@@ -16,6 +16,7 @@
 //! 3. Default pattern of 6 (every 6th layer is full)
 
 use crate::config::{Activation, ExpertFormat, ModelArchitecture, ModelConfig};
+use crate::tensor_keys::qk_norm;
 
 /// Layer type string used in Gemma 4 `layer_types` config field.
 const LAYER_TYPE_FULL: &str = "full_attention";
@@ -176,17 +177,11 @@ impl ModelArchitecture for Gemma4Arch {
     // ── QK norm (inherited from Gemma 3) ──
 
     fn attn_q_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.q_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.k_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::k(&self.layer_prefix(layer))
     }
 
     // ── Gemma-family behavior ──

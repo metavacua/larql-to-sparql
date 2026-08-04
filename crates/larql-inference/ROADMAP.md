@@ -1014,7 +1014,7 @@ them.
 
 Tests: `forward::kv_generate::tests` — noop matches baseline; record fires
 on prefill + every decode step; α=5 steer changes generated tokens vs
-baseline. Demo: `examples/mech_interp_demo.rs` § [7] shows
+baseline. Demo: `crates/larql-demos/examples/inference/mech_interp_demo.rs` § [7] shows
 `baseline_ids = [12, 30, 10, 29]` vs `steered_ids = [4, 4, 4, 4]`.
 
 ### M7 — `W_E` / `W_U` + `project_through_unembed`
@@ -1064,7 +1064,7 @@ Wired into `generate_with_sampling` via `eos.is_eos(id, &decoded)`. Greedy
 suffix on each `push`. Equivalent to llama.cpp `llama_token_to_piece` and HF
 Python `decode_stream`. Handles HF leading-space (`▁`) for SP tokenizers and
 multi-byte UTF-8 chars that straddle a token boundary. Demo at
-`examples/detok_demo.rs` shows the bug ("thecapitaloffranceisparis") and the
+`crates/larql-demos/examples/inference/detok_demo.rs` shows the bug ("thecapitaloffranceisparis") and the
 fix ("the capital of france is paris").
 
 ### Token streaming
@@ -1073,7 +1073,7 @@ fix ("the capital of france is paris").
 every emitted token, including the first (which comes out of prefill). Uses
 `Detokenizer::push` so streamed text preserves HF leading-space spacing.
 `generate_with_sampling` is a thin wrapper passing a no-op closure so
-non-streaming callers are unaffected. Demo at `examples/streaming_demo.rs`
+non-streaming callers are unaffected. Demo at `crates/larql-demos/examples/inference/streaming_demo.rs`
 prints tokens live with stdout flushing.
 
 ### Sampling
@@ -1091,7 +1091,7 @@ overhead is <2µs/call at top-K=64 (<0.02% of decode budget). CLI flags
 `max_context`. Pluggable `TurnRenderer` covers Gemma / ChatML / Llama-3
 templates. The most recent turn is never dropped — eviction is a no-op
 when only one turn remains, so a long single prompt is preserved over
-silently truncating. `examples/chat_demo.rs` runs a 3-turn conversation.
+silently truncating. `crates/larql-demos/examples/inference/chat_demo.rs` runs a 3-turn conversation.
 
 True KV carryover across turns (so prefill on turn N+1 only processes
 the new tokens) is a follow-up — the API surface is in place; it's an

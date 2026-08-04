@@ -41,25 +41,22 @@ pub fn write_floats(
 }
 
 /// Encode f32 data as either f32 or f16 bytes.
+///
+/// F32 is written explicitly little-endian. All currently supported
+/// targets are LE, so this is byte-identical to the old native-endian
+/// writer — it just makes the on-disk format portable.
 pub fn encode_floats(data: &[f32], dtype: StorageDtype) -> Vec<u8> {
     match dtype {
-        StorageDtype::F32 => {
-            let bytes: &[u8] =
-                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
-            bytes.to_vec()
-        }
+        StorageDtype::F32 => crate::format::le_floats::encode_f32_le(data),
         StorageDtype::F16 => larql_models::quant::half::encode_f16(data),
     }
 }
 
-/// Decode bytes back to f32, handling dtype.
+/// Decode bytes back to f32, handling dtype. Safe on unaligned input
+/// (mmap slices at arbitrary byte offsets).
 pub fn decode_floats(data: &[u8], dtype: StorageDtype) -> Vec<f32> {
     match dtype {
-        StorageDtype::F32 => {
-            let floats: &[f32] =
-                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const f32, data.len() / 4) };
-            floats.to_vec()
-        }
+        StorageDtype::F32 => crate::format::le_floats::decode_f32_le(data),
         StorageDtype::F16 => larql_models::quant::half::decode_f16(data),
     }
 }
@@ -82,6 +79,18 @@ mod tests {
         let encoded = encode_floats(&data, StorageDtype::F32);
         assert_eq!(encoded.len(), 12);
         let decoded = decode_floats(&encoded, StorageDtype::F32);
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn decode_f32_from_misaligned_subslice() {
+        // Regression: the old `&[u8] → &[f32]` transmute was UB when the
+        // buffer wasn't 4-byte aligned (e.g. an mmap slice at an odd byte
+        // offset). Decoding from `&buf[1..]` must return exact values.
+        let data = vec![1.0f32, -2.5, 3.25];
+        let mut buf = vec![0u8];
+        buf.extend_from_slice(&encode_floats(&data, StorageDtype::F32));
+        let decoded = decode_floats(&buf[1..], StorageDtype::F32);
         assert_eq!(decoded, data);
     }
 

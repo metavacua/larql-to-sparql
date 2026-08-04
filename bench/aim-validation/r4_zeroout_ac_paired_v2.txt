@@ -1,0 +1,71 @@
+Loading output/gemma3-4b-q4k-v2.vindex ...
+
+R4 zero-out (paired, interleaved) — 34 layers, 10240 features/layer, seq_len=1
+16 repeats × 3-forward blocks, rotated arm order, 8 warmup/arm
+AC=true load=2.58
+
+── all K=2048  (34 routed layers)  dense 119407 µs [116757–132072]  8.4 tok/s  sentinel drift +1.8% spread 3.6%
+     oracle-par[sparse:parallel_q4k_down] parity ✓
+     oracle-gath[sparse:gather_q4k] DIFF L0 residual 49.400894 vs 49.655884 (rel 5.14e-3)
+     arm          median µs paired ratio vs dense (med [IQR])  sel µs/L  top1
+     exact-pool      203766              0.589× [0.584–0.600]    3924.2     ✗
+     oracle-par      102504              1.160× [1.157–1.172]     977.7     ✗
+     oracle-gath     129378              0.927× [0.920–0.939]       NaN     ✗
+
+── all K=4096  (34 routed layers)  dense 120512 µs [117483–132303]  8.3 tok/s  sentinel drift -5.9% spread 3.9%
+     oracle-par[sparse:parallel_q4k_down] parity ✓
+     oracle-gath[sparse:gather_q4k] DIFF L0 residual 52.630367 vs 52.870384 (rel 4.54e-3)
+     arm          median µs paired ratio vs dense (med [IQR])  sel µs/L  top1
+     exact-pool      215817              0.561× [0.558–0.571]    3892.9     ✓
+     oracle-par      144505              0.837× [0.832–0.842]    1828.2     ✓
+     oracle-gath     172201              0.699× [0.697–0.711]       NaN     ✓
+
+── all K=6144  (34 routed layers)  dense 119959 µs [117202–122994]  8.3 tok/s  sentinel drift -0.6% spread 1.5%
+     oracle-par[sparse:parallel_q4k_down] parity ✓
+     oracle-gath[sparse:gather_q4k] DIFF L0 residual 56.26633 vs 56.51462 (rel 4.39e-3)
+     arm          median µs paired ratio vs dense (med [IQR])  sel µs/L  top1
+     exact-pool      224472              0.533× [0.525–0.540]    3871.2     ✓
+     oracle-par      178559              0.670× [0.661–0.683]    2502.0     ✓
+     oracle-gath     145614              0.823× [0.816–0.829]       NaN     ✓
+
+── last-4 K=2048  (4 routed layers)  dense 124118 µs [120155–127821]  8.1 tok/s  sentinel drift +2.5% spread 3.6%
+     oracle-par[sparse:parallel_q4k_down] parity ✓
+     oracle-gath[sparse:gather_q4k] DIFF L30 residual 7.8430686 vs 7.857973 (rel 1.90e-3)
+     arm          median µs paired ratio vs dense (med [IQR])  sel µs/L  top1
+     exact-pool      134525              0.922× [0.909–0.931]    4213.6     ✓
+     oracle-par      121476              1.025× [1.013–1.039]    1019.9     ✓
+     oracle-gath     124746              0.981× [0.969–1.009]       NaN     ✓
+
+── last-4 K=4096  (4 routed layers)  dense 133097 µs [126682–148708]  7.5 tok/s  sentinel drift +6.2% spread 5.7%
+     oracle-par[sparse:parallel_q4k_down] parity ✓
+     oracle-gath[sparse:gather_q4k] DIFF L30 residual 8.37194 vs 8.385002 (rel 1.56e-3)
+     arm          median µs paired ratio vs dense (med [IQR])  sel µs/L  top1
+     exact-pool      141902              0.936× [0.924–0.950]    4346.5     ✓
+     oracle-par      131635              0.992× [0.982–1.034]    2056.4     ✓
+     oracle-gath     137033              0.959× [0.953–0.985]       NaN     ✓
+
+── last-9 K=2048  (9 routed layers)  dense 130793 µs [126947–140272]  7.6 tok/s  sentinel drift -0.0% spread 2.6%
+     oracle-par[sparse:parallel_q4k_down] parity ✓
+     oracle-gath[sparse:gather_q4k] DIFF L25 residual 7.4153266 vs 7.434388 (rel 2.56e-3)
+     arm          median µs paired ratio vs dense (med [IQR])  sel µs/L  top1
+     exact-pool      149540              0.877× [0.875–0.891]    4028.6     ✓
+     oracle-par      121357              1.083× [1.053–1.096]    1054.9     ✓
+     oracle-gath     133482              0.987× [0.971–1.006]       NaN     ✓
+
+── last-9 K=4096  (9 routed layers)  dense 130072 µs [124776–134935]  7.7 tok/s  sentinel drift +2.3% spread 3.9%
+     oracle-par[sparse:parallel_q4k_down] parity ✓
+     oracle-gath[sparse:gather_q4k] DIFF L25 residual 8.180133 vs 8.195643 (rel 1.89e-3)
+     arm          median µs paired ratio vs dense (med [IQR])  sel µs/L  top1
+     exact-pool      153140              0.855× [0.850–0.865]    4050.6     ✓
+     oracle-par      131352              0.987× [0.963–1.006]    1954.0     ✓
+     oracle-gath     141997              0.921× [0.901–0.929]       NaN     ✓
+
+  Analytic per-layer work (N = 10240 features):
+  K           exec rows   selection rows     exec/dense
+  2048             6144            10240          0.20×
+  4096            12288            10240          0.40×
+  6144            18432            10240          0.60×
+
+  Row-count ceiling on the sparse band: 5.00× at K=2048, 2.50× at K=4096,
+  1.67× at K=6144. A paired ratio far below its ceiling is gather
+  inefficiency, not selection cost — which no router can recover.

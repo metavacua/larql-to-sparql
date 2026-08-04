@@ -13,6 +13,7 @@ larql-core = { path = "../larql-core", default-features = false }
 larql-models = { path = "../larql-models" }
 larql-compute = { path = "../larql-compute" }
 larql-vindex-spec = { path = "../larql-vindex-spec" }
+larql-execution = { path = "../larql-execution" }
 serde = { workspace = true }
 # Apple-only sibling backend.  Made `optional = true` so the
 # (target-gated) cfg path on non-macOS doesn't need to fake it out;
@@ -66,6 +67,9 @@ gpu = ["dep:larql-compute-metal"]
 
 [dev-dependencies]
 larql-inference = { path = "../larql-inference" }
+# The KvEngine decode path, for the teacher-forced / free-running decode
+# parity harness. Dev-only: nothing in the library depends on the engine layer.
+larql-kv = { path = "../larql-kv" }
 criterion = "0.5"
 tempfile = "3"
 # HTTP mocking for the publish trio (lfs / remote / upload).
@@ -74,6 +78,10 @@ tempfile = "3"
 # parallel runs would race.
 mockito = "1.7"
 serial_test = "3.2"
+
+[[bench]]
+name = "vindex3_bound_execute"
+harness = false
 
 [[bench]]
 name = "vindex_ops"

@@ -161,6 +161,116 @@ mod tests {
         assert_eq!(out.shape(), &[1, weights.hidden_size]);
     }
 
+    /// Regression for docs/audits/dec-readiness-review-2026-07-22.md §1a:
+    /// pins the numerical equivalence the server's batched-GEMM Q8K
+    /// handler (`larql-server/routes/walk_ffn/q8k.rs`) depends on. Same-
+    /// layer entries dequantised to f32 and run through
+    /// `kquant_ffn_forward_layer` as ONE multi-row GEMM must reproduce
+    /// (within f32 rounding) what the single-row `q4k_q8k_matvec_into`
+    /// kernel produces per entry — otherwise batching same-layer rows to
+    /// fix the ~linear-in-B batch curve would silently change the numbers.
+    #[test]
+    fn walk_ffn_kquant_layer_q8k_batched_gemm_matches_per_row_single_kernel() {
+        use crate::cpu::ops::q4k_q8k_dot::quantize_x_to_q8k;
+        let weights = make_test_q4k_weights();
+        let idx = make_q4k_fixture_index(&weights);
+        let hidden = weights.hidden_size;
+
+        let rows: Vec<Vec<f32>> = (0..3)
+            .map(|i| {
+                (0..hidden)
+                    .map(|j| ((i * hidden + j) as f32 * 0.001).sin() * 0.05)
+                    .collect()
+            })
+            .collect();
+
+        // Reference: each row through the single-row Q8K fast kernel,
+        // exactly as a batch-1 request (or the pre-fix code) would.
+        let single_row_outputs: Vec<Vec<f32>> = rows
+            .iter()
+            .map(|r| {
+                let h_q8k = quantize_x_to_q8k(r);
+                kquant_ffn_forward_layer_q8k(&*weights.arch, &idx, 0, &h_q8k)
+                    .into_raw_vec_and_offset()
+                    .0
+            })
+            .collect();
+
+        // Batched: dequantise each row's Q8K activation back to f32 and
+        // run all 3 rows through ONE GEMM, mirroring the server's grouped
+        // handler.
+        let mut dequantised: Vec<f32> = Vec::with_capacity(3 * hidden);
+        for r in &rows {
+            let h_q8k = quantize_x_to_q8k(r);
+            for b in 0..h_q8k.n_blocks() {
+                let d = h_q8k.d[b];
+                for i in 0..256 {
+                    dequantised.push(d * (h_q8k.qs[b * 256 + i] as f32));
+                }
+            }
+        }
+        let x = ndarray::Array2::from_shape_vec((3, hidden), dequantised).unwrap();
+        let batched = kquant_ffn_forward_layer(&*weights.arch, &idx, 0, &x);
+
+        for (row_idx, single) in single_row_outputs.iter().enumerate() {
+            let batched_row = batched.row(row_idx);
+            for (a, &b) in single.iter().zip(batched_row.iter()) {
+                assert!(
+                    (a - b).abs() < 1e-3,
+                    "row {row_idx}: single-kernel {a} vs batched-GEMM {b} diverge"
+                );
+            }
+        }
+    }
+
+    /// Regression for docs/audits/dec-readiness-review-2026-07-22.md §1d:
+    /// the down-projection fast path must consult the down slab's own
+    /// format tag (`ffn[2].1`), not just the block-alignment guard.
+    /// Before the fix, any down slab — regardless of its declared format —
+    /// went straight into the Q4_K-only `q4k_q8k_matvec_into` kernel
+    /// whenever `intermediate` was 256-aligned, silently misreading any
+    /// non-Q4_K byte layout. Here the down component is (still
+    /// Q4_K-encoded bytes, but) tagged with an unsupported format string;
+    /// with the fix, that tag mismatch routes to the format-aware
+    /// `dequantize_matrix` fallback, which loudly rejects an unknown tag
+    /// instead of the fast path silently "succeeding" on the wrong
+    /// assumption.
+    #[test]
+    #[should_panic(expected = "unsupported quant format")]
+    fn walk_ffn_kquant_layer_q8k_rejects_down_slab_with_non_q4k_format_tag() {
+        struct BogusDownFormat<'a> {
+            inner: &'a crate::test_fixtures::Q4kFixtureIndex,
+        }
+        impl crate::KvIndex for BogusDownFormat<'_> {
+            fn num_features(&self, l: usize) -> usize {
+                self.inner.num_features(l)
+            }
+            fn attn_kquant_layer_data(&self, l: usize) -> Option<[(&[u8], &str); 4]> {
+                self.inner.attn_kquant_layer_data(l)
+            }
+            fn interleaved_kquant_layer_data(
+                &self,
+                l: usize,
+            ) -> Option<[(&[u8], &str); crate::FFN_COMPONENTS_PER_LAYER]> {
+                let mut ffn = self.inner.interleaved_kquant_layer_data(l)?;
+                ffn[2].1 = "BOGUS_FORMAT";
+                Some(ffn)
+            }
+            fn interleaved_kquant_mmap_ref(&self) -> Option<&[u8]> {
+                self.inner.interleaved_kquant_mmap_ref()
+            }
+            // No `kquant_ffn_layer_once` — forces the dequant fallback,
+            // which is the only branch that consults the format tag.
+        }
+        use crate::cpu::ops::q4k_q8k_dot::quantize_x_to_q8k;
+        let weights = make_test_q4k_weights();
+        let inner = make_q4k_fixture_index(&weights);
+        let idx = BogusDownFormat { inner: &inner };
+        let h_in: Vec<f32> = vec![0.01; weights.hidden_size];
+        let h_q8k = quantize_x_to_q8k(&h_in);
+        let _ = kquant_ffn_forward_layer_q8k(&*weights.arch, &idx, 0, &h_q8k);
+    }
+
     // ── tensors.rs ───────────────────────────────────────────────────
 
     #[test]

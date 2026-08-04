@@ -77,7 +77,7 @@ responsible for capturing them at the correct depth, which is exactly
 what `larql_inference::capture_decoy_residuals` does. Validated against
 synthetic constellations by the unit tests in `patch/refine.rs`; the
 end-to-end Gemma 3 4B reproduction lives in
-`larql-lql/examples/refine_demo.rs`.
+`larql-lql/crates/larql-demos/examples/lql/refine_demo.rs`.
 
 ## The Headline
 
@@ -272,7 +272,10 @@ larql-vindex/src/
 │   ├── overlay.rs              PatchedVindex (queries, mutators, walk, bake_down)
 │   ├── overlay_apply.rs        apply_patch, remove_patch, rebuild_overrides
 │   ├── overlay_gate_trait.rs   impl GateIndex for PatchedVindex
-│   ├── knn_store.rs            L0 KnnStore (arch-B residual-key KNN)
+│   ├── gate_overlay.rs         GateOverlay — shared retrieval kernel for gate
+│   │                           overrides AND KnnStore keys (one scoring path)
+│   ├── knn_store.rs            L0 KnnStore (arch-B residual-key KNN; scoring
+│   │                           via the shared GateOverlay since 2026-07-31)
 │   ├── knn_store_io.rs         KnnStore .lknn save / load (f16 keys)
 │   └── refine.rs               Gate refine pass (Gram-Schmidt orthogonalisation
 │                               of patched gates + optional decoy residuals)
@@ -609,6 +612,13 @@ index.warmup_hnsw_all_layers();
 let trace = index.walk(&query, &layers, 10);
 ```
 
+Scope note: `enable_hnsw` affects **gate-KNN consumers only** — the
+browse `walk()` above, server KNN endpoints, `gate_knn` callers. The
+WalkFfn inference hot path selects features via the exact `gate_walk`
+batched gemv and ignores this toggle entirely (2026-07-30 review,
+item 13; pinned by `gate_walk_ignores_hnsw_toggle` and
+`walk_ffn_sparse_hot_path_ignores_enable_hnsw`).
+
 For batch / prefill (multi-position walks), `gate_knn_batch` already
 parallelises per-position top-K extraction when `seq_len ≥ 16` — no
 caller change needed. Production prefill at seq_len=256 sees -24 % vs
@@ -675,8 +685,10 @@ larql-router --shards 0-16=http://127.0.0.1:9181,17-33=http://127.0.0.1:9182 \
 Why each flag matters:
 - `--feature-major-down` (extract-time) — emits `down_features_q4k.bin`.
   Activates when the FFN walk dispatches through the *sparse* path
-  (`walk_ffn_sparse` — INSERT-patched layers, explicit sparse-K, or
-  FP4 storage). On those paths, per-feature down decode reads one row
+  (`walk_ffn_sparse` — explicit sparse-K or FP4 storage; since
+  2026-07-31, INSERT-patched layers first try the exact base+delta
+  dense path — 2026-07-30 review, item 16 — and reach the sparse walk
+  only when its preconditions decline). On those paths, per-feature down decode reads one row
   from the new file instead of dequantising the whole layer +
   transposing through the cache; deletes the binding RSS constraint
   on per-shard memory budget. The default dense Q4K HTTP walk

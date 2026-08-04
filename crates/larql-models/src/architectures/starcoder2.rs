@@ -7,6 +7,7 @@
 //! - Uses GQA with sliding window
 
 use crate::config::{Activation, FfnType, ModelArchitecture, ModelConfig, NormType};
+use crate::tensor_keys::attn_bias;
 
 pub struct StarCoder2Arch {
     config: ModelConfig,
@@ -59,18 +60,18 @@ impl ModelArchitecture for StarCoder2Arch {
 
     // Attention biases (including O proj)
     fn attn_o_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.o_proj.bias", self.layer_prefix(layer)))
+        attn_bias::o(&self.layer_prefix(layer))
     }
 
     fn attn_q_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.q_proj.bias", self.layer_prefix(layer)))
+        attn_bias::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.k_proj.bias", self.layer_prefix(layer)))
+        attn_bias::k(&self.layer_prefix(layer))
     }
 
     fn attn_v_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.v_proj.bias", self.layer_prefix(layer)))
+        attn_bias::v(&self.layer_prefix(layer))
     }
 }

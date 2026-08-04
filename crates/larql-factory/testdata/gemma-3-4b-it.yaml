@@ -1,0 +1,62 @@
+apiVersion: vindex.chukai.io/v1
+kind: VindexBuild
+metadata:
+  name: gemma-3-4b-it
+  description: FFN knowledge index for Gemma 3 4B IT
+
+spec:
+  source:
+    hf_repo: google/gemma-3-4b-it
+    revision: 9b5b1a2f7c3e0d1a4b8f2c6e9d0a3b5c7e1f4a82
+    licence: gemma
+
+  extractor:
+    tool: larql
+    version: "0.14.2"
+    level: inference
+    dtype: f16
+    options:
+      down_q4k: true
+      drop_gate_vectors: false
+      preserve_mtp_head: true
+
+  outputs:
+    - preset: full
+    - preset: client
+    - preset: browse
+    - preset: expert-server
+      shard_cap_gib: 20
+    - preset: attn
+    - preset: embed
+
+  verify:
+    reconstruction:
+      layers_sampled: 8
+      seed: 1729
+      max_abs_diff: 0.0
+      min_cosine: 1.0
+    logit_match:
+      prompt_set: verify/gemma-smoke-32.jsonl
+      top1_agreement_min: 0.99
+      bits_per_char_drift_max: 0.005
+    from_hub: true
+
+  publish:
+    hub:
+      owner: chrishayuk
+      repo_template: "{model_slug}-vindex{slice_suffix}"
+      repo_type: dataset
+      collection: "larql/vindex-v1"
+      tags: [vindex, larql, mechanistic-interpretability]
+      visibility: private-until-verified
+    mirror:
+      r2_bucket: chuk-vindex
+
+  budget:
+    executor: auto
+    max_wall_minutes: 240
+    max_usd: 12
+    requires:
+      disk_gib: 512
+      ram_gib: 64
+      net_down_mbps: 1000

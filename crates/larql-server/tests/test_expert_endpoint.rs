@@ -76,6 +76,8 @@ impl TestMoeArch {
                 enable_moe_block: true,
                 top_k_experts: Some(TOP_K),
                 moe_intermediate_size: Some(INTER),
+                swiglu_limit: None,
+                norm_topk_prob: None,
                 kv_lora_rank: None,
                 q_lora_rank: None,
                 qk_nope_head_dim: None,

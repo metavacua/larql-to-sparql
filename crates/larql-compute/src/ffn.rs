@@ -7,8 +7,14 @@
 //! `larql-inference` because they reference session state, gRPC
 //! clients, and shard discovery.
 
+pub mod expert_weight;
+pub mod observe;
+#[cfg(test)]
+mod observe_tests;
 pub mod weight;
 
+pub use expert_weight::ExpertWeightFfn;
+pub use observe::{FfnActivations, SparseActivations, SparseEntry};
 pub use weight::{
     dense_ffn_forward, dense_ffn_forward_backend, BackendFfn, NullFfn, Q4kMatmulFfn, ViewFfn,
     WeightFfn,
@@ -26,23 +32,55 @@ pub const Q4K_Q8K_SUPERBLOCK_ELEMS: usize = 256;
 /// FFN backend trait. Defines how a single layer's FFN is computed.
 pub trait FfnBackend {
     /// Run the FFN for a given layer on the pre-FFN-normed residual.
+    ///
+    /// The hot path: implementations must not allocate or fill any
+    /// activation buffer here — observation is opt-in via
+    /// [`forward_observed`](Self::forward_observed).
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32>;
 
-    /// Run FFN and also return the pre-down activation (for capture).
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>);
+    /// Run the FFN and also return an honest record of the pre-down
+    /// activations the executed path computed (see [`FfnActivations`]).
+    ///
+    /// Dense paths report [`FfnActivations::Dense`]; sparse paths emit
+    /// only the `(feature, activation)` pairs they computed; paths that
+    /// observe nothing (cache hits, remote dispatch) report
+    /// [`FfnActivations::Absent`] — never fabricated zeros. The default
+    /// implementation is for backends that cannot observe at all.
+    fn forward_observed(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, FfnActivations) {
+        (self.forward(layer, x), FfnActivations::unobserved())
+    }
 
     /// Human-readable name for logging.
     fn name(&self) -> &str;
 
     /// For hybrid MoE layers: receive `h_post_attn` (post-attention,
     /// pre-FFN, unnormalized) and return the full layer output `h_out`.
-    /// Returns `None` to fall back to local dispatch.
+    ///
+    /// The three outcomes are deliberately distinct, and conflating any two of
+    /// them is how a missing operand becomes a plausible wrong answer:
+    ///
+    /// ```text
+    /// Ok(Some(h_out))   the layer executed
+    /// Ok(None)          this backend does not serve this layer; fall back
+    /// Err(refusal)      a required operation could not execute
+    /// ```
+    ///
+    /// `Ok(None)` must never be used to report a refusal. It means *not
+    /// applicable* — the caller is free to run its own dispatch and the result
+    /// is still correct. `Err` means a routed operation was required and did
+    /// not happen, so any output the caller assembles is incomplete. A backend
+    /// that returned `Ok(None)` on failure would put the caller back where the
+    /// error channel was added to rescue it from.
+    ///
+    /// What to *do* about an `Err` is the caller's policy, not the backend's:
+    /// a strict engine propagates it, a best-effort one may log and degrade
+    /// explicitly. The backend's job is to report what happened.
     fn forward_moe_full_layer(
         &self,
         _layer: usize,
         _h_post_attn: &Array2<f32>,
-    ) -> Option<Array2<f32>> {
-        None
+    ) -> Result<Option<Array2<f32>>, larql_execution::BoxRefusal> {
+        Ok(None)
     }
 }
 
@@ -194,23 +232,17 @@ mod tests {
         assert_eq!(Q4K_Q8K_SUPERBLOCK_ELEMS, 256);
     }
 
-    // ── FfnBackend default impl ───────────────────────────────────────────────
+    // ── FfnBackend default impls ──────────────────────────────────────────────
 
     #[test]
-    fn ffn_backend_default_forward_moe_full_layer_returns_none() {
-        // Pin the default `forward_moe_full_layer` impl as None — non-MoE
-        // backends rely on this fallback so they don't have to override it.
+    fn ffn_backend_defaults_are_none_moe_and_absent_observation() {
+        // Pin the default `forward_moe_full_layer` impl as None and the
+        // default `forward_observed` as forward + Absent — backends that
+        // can't observe must never fabricate an activation tensor.
         struct StubFfn;
         impl FfnBackend for StubFfn {
             fn forward(&self, _layer: usize, x: &Array2<f32>) -> Array2<f32> {
                 x.clone()
-            }
-            fn forward_with_activation(
-                &self,
-                _layer: usize,
-                x: &Array2<f32>,
-            ) -> (Array2<f32>, Array2<f32>) {
-                (x.clone(), x.clone())
             }
             fn name(&self) -> &str {
                 "stub"
@@ -218,14 +250,16 @@ mod tests {
         }
         let ffn = StubFfn;
         let h = Array2::<f32>::zeros((1, 4));
-        assert!(ffn.forward_moe_full_layer(0, &h).is_none());
+        // The default is "not applicable", not a refusal — a backend that serves
+        // no MoE layer must let the caller dispatch locally rather than fail it.
+        assert!(matches!(ffn.forward_moe_full_layer(0, &h), Ok(None)));
         // Exercise the stub's required-method surface so the coverage
         // report reflects the trait-shape footprint, not just the
-        // default-method probe above.
+        // default-method probes.
         assert_eq!(ffn.forward(0, &h).shape(), &[1, 4]);
-        let (act_pre, act_post) = ffn.forward_with_activation(0, &h);
-        assert_eq!(act_pre.shape(), &[1, 4]);
-        assert_eq!(act_post.shape(), &[1, 4]);
+        let (out, obs) = ffn.forward_observed(0, &h);
+        assert_eq!(out.shape(), &[1, 4]);
+        assert_eq!(obs, FfnActivations::unobserved());
         assert_eq!(ffn.name(), "stub");
     }
 }

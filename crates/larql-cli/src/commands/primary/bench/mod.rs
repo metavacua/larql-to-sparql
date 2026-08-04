@@ -28,7 +28,7 @@
 //!   helpers    — pure helpers (wire-list parsing, concurrent aggregation, efficiency).
 //!   run        — orchestration entry point.
 //!   local      — local Metal/CPU bench (`run_larql`).
-//!   engine     — KV-engine bench (markov-rs / unlimited-context).
+//!   engine     — KV-engine bench (markov-rs / windowed-checkpoint).
 //!   remote_ffn — remote FFN HTTP path + `--concurrent` aggregation.
 //!   remote_moe — remote MoE expert path + `--concurrent` aggregation.
 //!   ollama     — Ollama side-by-side comparison.
@@ -46,6 +46,7 @@ pub(super) mod grid_lan_runtime;
 pub(super) mod local;
 pub(super) mod local_moe_runtime;
 pub(super) mod local_runtime;
+pub(super) mod notes;
 pub(super) mod ollama;
 pub(super) mod output;
 pub(super) mod remote_ffn;

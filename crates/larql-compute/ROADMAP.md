@@ -36,6 +36,51 @@ From the whole-codebase review ([`docs/audits/codebase-review-2026-05-28.md`](..
   forward: `fc1 → GELU-tanh → fc2` with bias on both layers. No spatial
   pooling — Granite's encoder output has the correct token count per tile.
 
+## Open: head-major K/V layout for decode attention
+
+**The single highest-leverage change the `kvperf-1` data points at**, because
+it sits *below* every KV engine rather than inside one. All six cached engines
+share one marginal cost per context token (7.72-8.30 µs, a 7.5% spread across
+six mechanisms that could hardly be more different) — they all end up in this
+kernel, and it runs at roughly 44% of attainable memory bandwidth. See
+[`larql-kv/docs/decode-cost-model.md`](../larql-kv/docs/decode-cost-model.md) §4.
+
+Today K/V is `[L, num_kv * head_dim]` — head-**minor**:
+
+```text
+each head's gemv reads head_dim floats with a num_kv * head_dim stride
+with GQA, the `reps` query heads sharing a KV head each stream it again
+```
+
+On qwen3-0.6b that is a 512 B window with a 4096 B stride, read twice
+(`reps = 2`). **Hypothesis (untested):** `[kv_head][L][head_dim]` makes each
+head's read contiguous *and* lets the sharing q-heads share one pass, roughly
+halving the O(context) term that dominates every engine.
+
+A bench exists — `benches/decode_attention_layout.rs` — comparing four layouts
+doing identical arithmetic, so any difference is memory behaviour. It includes
+a `head_major_spin` variant specifically so the parallel primitive is not
+confounded with the layout (production uses the spin pool; a rayon candidate
+would otherwise be compared on two axes at once).
+
+**Measurement protocol, because this one has already bitten:** an earlier
+version timed one layer against one reused K/V buffer. At L=1024 that is 8.4 MB
+— cache-resident — and it clocked 90 µs against the ~301 µs the end-to-end
+slope implies, reporting essentially the roofline. It was measuring a regime
+decode never runs in, **and the layout ranking inverted between that regime and
+the real one.** Each iteration now walks a full stack of distinct per-layer K/V
+buffers, as one decode step does.
+
+Two further conditions before believing a result:
+
+- **AC power.** On battery macOS throttles enough to invent or erase this
+  effect, and criterion runs the variants sequentially — deepening throttle
+  mid-run penalises later variants and corrupts the *ranking*, which is the
+  entire output.
+- **A drift control.** Measure `head_minor` twice, first and last. If those
+  two disagree the machine moved under the run and the ordering is not
+  trustworthy regardless of what it says.
+
 ## Open: compute modularity and model-agnostic cleanup
 
 **Status**: Started 2026-05-08.
@@ -161,7 +206,13 @@ Bench (Gemma 4 31B Q4K, M3 Max, single-machine localhost):
 
 Bottleneck at 6.5 tok/s: attention at 92ms/token (60%). Two-pass batch structure
 (capture pass + apply pass) doubles the local Metal attention cost. FFN at 60ms
-is at the 400 GB/s GPU bandwidth ceiling for 11.7 GB/token of Q4K weight reads.
+is near the GPU bandwidth ceiling for 11.7 GB/token of Q4K weight reads.
+
+> **Corrected 2026-07-29:** this originally read "at the 400 GB/s GPU bandwidth
+> ceiling". 400 GB/s is the SoC **spec sheet**; measured GPU-attainable read on
+> this box is **367 GB/s** (`f32_gemv` streaming 2.68 GB), and the production
+> FFN kernels run at 273–314 GB/s — 74–85% of attainable, near but not at it.
+> See [`docs/diagnoses/memory-bandwidth-roofline.md`](../../docs/diagnoses/memory-bandwidth-roofline.md).
 
 **Build separation required**: `--features metal-experts` must NOT be used for
 `larql-cli` (causes 10.7 vs 18.9 tok/s regression on Gemma 4 26B-A4B due to Metal
@@ -1222,16 +1273,27 @@ in `decode/mod.rs` ×2 and `decode_hybrid.rs` ×1) collapses to a single
 method call. Adding a future Q4_K-style format updates one classifier,
 not 3+ OR-chains. Pinned by `quant_format_classifiers` test.
 
-**Full `FormatRoute` enum DEFERRED.** The roadmap intent
-(`F32Input { fused_down: Option<&KernelHandle> }` / `Q8Input { norm_q8,
-qkv_q8 }` / etc., with the `match QuantFormat::*` confined to one
-constructor in `metal/stages/quant_matvec.rs`) is a 49-file refactor —
-every dispatch site that currently matches on `QuantFormat` would need
-to switch to consuming a `FormatRoute`. Doing it concurrently with the
-in-flight MoE struct refactor risks heavy merge conflicts. Defer until
-MoE settles AND there's a concrete near-term need (e.g. an FP4 / FP8
-format being added). The classifier helpers above absorb the immediate
-duplication cost in the meantime.
+**CPU-side `FormatRoute` registry SHIPPED (2026-07-22, DEC prep).**
+`src/quant_route.rs`: a per-format dispatch record (`dequant_padded` /
+`q8k_matvec` / `quant_matmul` fn pointers) resolved by
+`QuantFormat::route()` — one match arm per format. The string-keyed CPU
+dispatch sites (`kquant_forward::dequant::dequantize_matrix`,
+`q4k_q8k_matvec_parallel`, `ffn::weight::{quant_matmul, block_bytes}`,
+`kquant_forward::cached`'s direct-matvec gates and down-stride lookup)
+now resolve `tag → QuantFormat → FormatRoute` instead of each holding a
+local `"Q4_K" | "Q6_K"` match. Unknown-format contract documented on the
+module and enforced: seam parsers error loudly, capability probes return
+`None`/`false` and fall back, kernel entry points panic instead of
+silently zero-filling (`q4k_q8k_matvec_parallel`'s `_ => return` bug —
+dec-readiness §1 class — is fixed, with `should_panic` regressions).
+Adding MXFP4 (DEC-6a) = one variant + one route arm + kernels; formats
+with side metadata follow the `ternary_matvec` parallel-path template.
+
+**Metal-side route DEFERRED.** The original intent (`F32Input { … }` /
+`Q8Input { … }` with the `match QuantFormat::*` confined to one
+constructor in `metal/stages/quant_matvec.rs`) remains open — the Metal
+crate keeps its own enum dispatch (`pick_qkv_route` already anticipates
+an FP4 family). Revisit when a new format actually lands a shader.
 
 ### #8 — `Pipelines` struct asymmetry (DONE)
 
@@ -1579,10 +1641,16 @@ Similar to Linux plus:
 Expected result: `cargo build -p larql-cli` works on Windows 11
 x86_64 (MSVC toolchain) with CPU-only decode.
 
-### CUDA backend (re-land from earlier PR)
+### CUDA backend (G-ladder; see ADR-0024)
 **Effort**: Large  
-**Status**: Trait ready, implementation was in an earlier PR — needs
-        cherry-pick + rebase onto current `ComputeBackend` trait.
+**Status**: G0 decided 2026-07-24 (ADR-0024): sibling crate
+        `larql-compute-cuda`, cudarc + NVRTC runtime-compiled kernels,
+        phase-1 ports the Metal f32-FMA reference semantics (~24 shader
+        files), dp4a int8 as opt-in phase 2. NOTE the earlier framing here
+        ("re-land from earlier PR") was investigated and corrected: PR #53
+        contained cuBLAS-SGEMV-over-CPU-dequant only — no custom kernels,
+        stub DecodeBackend. Nothing to cherry-pick; its no-SDK dynamic-
+        loading property is inherited via cudarc instead.
 
 An earlier PR implemented CUDA kernels but was not merged. Current
 `ComputeBackend` trait supports the interface; the Metal decode loop

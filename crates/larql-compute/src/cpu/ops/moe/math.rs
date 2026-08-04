@@ -1,7 +1,12 @@
 //! Numeric primitives used by the MoE forward pass.
 //!
-//! `pub(super)` keeps these module-private — `cpu_moe_forward` and the
-//! per-expert helpers share them, nothing outside `moe/` should.
+//! Most are `pub(super)`: `cpu_moe_forward` and the per-expert helpers share
+//! them and nothing outside `moe/` should.
+//!
+//! `matmul_vec` and `softmax` are the exceptions. They are the router's
+//! numerical recipe, and a VINDEX3 `BoundRouter` binds *these functions* so
+//! that kernel-binding parity is a statement about the production kernel
+//! rather than about two similar-looking loops agreeing.
 
 /// Dequantize a BF16 byte slice to f32.
 #[inline]
@@ -67,7 +72,10 @@ pub(super) fn gelu_tanh(x: f32) -> f32 {
 /// `out_rows × in_cols` multiplies, repeated 8 experts × 60 layers per token,
 /// and BLAS sgemv hits the AMX tiles + SIMD fused-multiply-add pipeline that
 /// the scalar path misses entirely.
-pub(super) fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<f32> {
+/// Public so a VINDEX3 `BoundRouter` can bind *this* kernel rather than
+/// reimplement a lookalike. Binding the real function is the difference
+/// between proving kernel binding works and proving two similar loops agree.
+pub fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<f32> {
     debug_assert_eq!(w.len(), out_rows * in_cols);
     debug_assert_eq!(x.len(), in_cols);
     if out_rows == 0 || in_cols == 0 {
@@ -116,7 +124,10 @@ pub(super) fn matmul_vec_into(
 }
 
 /// Softmax in-place.
-pub(super) fn softmax(v: &mut [f32]) {
+/// Public for the same reason as [`matmul_vec`]: the router's numerical
+/// recipe is scoring *and* its softmax, and reproducing one while
+/// reimplementing the other would leave the comparison meaningless.
+pub fn softmax(v: &mut [f32]) {
     let max = v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let mut sum = 0.0f32;
     for x in v.iter_mut() {

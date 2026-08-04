@@ -153,13 +153,79 @@ pub fn dequantize_all_experts(
 /// Per-expert weight matrix: one inner `Vec<f32>` per expert, row-major.
 pub type ExpertWeights = Vec<Vec<f32>>;
 
+/// Number of projections fused into one `gate_up` tensor.
+const FUSED_HALVES: usize = 2;
+
+/// Which projection to lift out of a fused `gate_up` tensor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FusedHalf {
+    /// The gate projection (`w1`) — the **even** fused rows.
+    Gate,
+    /// The up projection (`w3`) — the **odd** fused rows.
+    Up,
+}
+
+impl FusedHalf {
+    /// Fused-row index holding row `row` of this projection.
+    ///
+    /// Gate and up are **interleaved**, not contiguous — see
+    /// [`deinterleave_fused_half`] for why.
+    #[inline]
+    pub const fn fused_row(self, row: usize) -> usize {
+        match self {
+            Self::Gate => FUSED_HALVES * row,
+            Self::Up => FUSED_HALVES * row + 1,
+        }
+    }
+}
+
+/// Lift one projection out of a dequantised fused `gate_up` expert matrix.
+///
+/// GPT-OSS fuses gate and up into one tensor, **interleaved along the output
+/// axis** — gate occupies the even rows and up the odd ones. That is not a
+/// guess; it follows the reference chain in
+/// `transformers/integrations/mxfp4.py` and
+/// `transformers/models/gpt_oss/modeling_gpt_oss.py`:
+///
+/// ```text
+/// blocks (E, 2*I, G, 16)
+///   -> dequant             (E, 2*I, H)      row = the on-disk output row
+///   -> .transpose(1, 2)    (E, H, 2*I)      on-disk row becomes the LAST axis
+///   -> _apply_gate: gate = x[..., 0::2], up = x[..., 1::2]
+/// ```
+///
+/// so `gate_up[..., 0::2]` selects even on-disk rows and `[..., 1::2]` odd ones.
+///
+/// Taking the first and second halves instead silently yields two 50/50
+/// mixtures of the real gate and up rows. That is what larql did until
+/// 2026-07-30, and it is near-invisible without a reference to diff against:
+/// both halves come out with matching summary statistics, because both are the
+/// same mixture. See `docs/k3-funnel.md` §4.7.
+///
+/// `data` is row-major `[out_features, in_features]`; the result is row-major
+/// `[out_features / 2, in_features]`.
+pub fn deinterleave_fused_half(
+    data: &[f32],
+    out_features: usize,
+    in_features: usize,
+    half: FusedHalf,
+) -> Vec<f32> {
+    let rows = out_features / FUSED_HALVES;
+    let mut out = Vec::with_capacity(rows * in_features);
+    for row in 0..rows {
+        let start = half.fused_row(row) * in_features;
+        out.extend_from_slice(&data[start..start + in_features]);
+    }
+    out
+}
+
 /// Dequantize and split a GPT-OSS fused gate_up packed tensor into separate
 /// gate (w1) and up (w3) per-expert matrices.
 ///
-/// GPT-OSS stores gate and up projections fused row-wise into a single MXFP4
-/// tensor of shape `[num_experts, 2*hidden, groups, 16]`. This function
-/// dequantizes it and splits at the midpoint: rows `[0..half]` = gate,
-/// rows `[half..]` = up.
+/// GPT-OSS stores gate and up projections fused into a single MXFP4 tensor of
+/// shape `[num_experts, 2*intermediate, groups, 16]`, **interleaved** along the
+/// output axis. The de-interleaving convention is owned by
+/// [`deinterleave_fused_half`].
 ///
 /// Returns `(gate_experts, up_experts)` each an `ExpertWeights` of length
 /// `num_experts`, where each inner `Vec` holds one expert's weight matrix
@@ -173,12 +239,21 @@ pub fn split_gate_up_experts(
 ) -> Result<(ExpertWeights, ExpertWeights), ModelError> {
     let expert_data = dequantize_all_experts(blocks, scales, num_experts, out_features, groups)?;
     let in_features = groups * 32;
-    let half = out_features / 2;
     let mut gates = Vec::with_capacity(num_experts);
     let mut ups = Vec::with_capacity(num_experts);
     for data in expert_data {
-        gates.push(data[..half * in_features].to_vec());
-        ups.push(data[half * in_features..].to_vec());
+        gates.push(deinterleave_fused_half(
+            &data,
+            out_features,
+            in_features,
+            FusedHalf::Gate,
+        ));
+        ups.push(deinterleave_fused_half(
+            &data,
+            out_features,
+            in_features,
+            FusedHalf::Up,
+        ));
     }
     Ok((gates, ups))
 }
@@ -382,19 +457,79 @@ mod tests {
         }
     }
 
-    // ── split_gate_up_experts ──
+    // ── fused gate/up de-interleaving ──
+    //
+    // The convention under test is that gate occupies the EVEN fused rows and
+    // up the ODD ones (`deinterleave_fused_half`). Note that a fixture with
+    // `out_features = 2` cannot test it: row 0 is simultaneously "the first
+    // half" and "the even rows", so both the interleaved and the (wrong)
+    // contiguous-halves reading agree. That is precisely why the original
+    // tests here passed against a broken split for months — they pinned the
+    // shape, not the convention. Anything asserting the convention needs
+    // `out_features >= 4`. See `docs/k3-funnel.md` §4.7.
+
+    /// Four distinct fused rows, so gate-vs-up row selection is observable.
+    /// Nibbles are all `2` (= 1.0), so each row's value is its own scale:
+    /// rows = [1.0, 2.0, 4.0, 8.0].
+    fn four_row_fused_expert() -> (Vec<u8>, Vec<u8>) {
+        let blocks = vec![0x22u8; 4 * 16];
+        let scales = vec![127u8, 128u8, 129u8, 130u8]; // 1.0, 2.0, 4.0, 8.0
+        (blocks, scales)
+    }
 
     #[test]
-    fn split_gate_up_even_split() {
-        // 1 expert, out_features=2 (half=1), 1 group → 32 elements total.
-        // gate = first 32 values (scale 1.0, nibble 2 → 1.0 each).
-        // up   = second 32 values (scale 2.0, nibble 2 → 2.0 each).
-        let blocks = vec![0x22u8; 32]; // 2 groups × 16 bytes
+    fn fused_row_indices_interleave() {
+        assert_eq!(FusedHalf::Gate.fused_row(0), 0);
+        assert_eq!(FusedHalf::Gate.fused_row(1), 2);
+        assert_eq!(FusedHalf::Gate.fused_row(7), 14);
+        assert_eq!(FusedHalf::Up.fused_row(0), 1);
+        assert_eq!(FusedHalf::Up.fused_row(1), 3);
+        assert_eq!(FusedHalf::Up.fused_row(7), 15);
+    }
+
+    #[test]
+    fn deinterleave_takes_even_rows_for_gate_and_odd_for_up() {
+        // Two rows of two elements each, values = row index.
+        let data = vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0];
+        let gate = deinterleave_fused_half(&data, 4, 2, FusedHalf::Gate);
+        let up = deinterleave_fused_half(&data, 4, 2, FusedHalf::Up);
+        assert_eq!(gate, vec![0.0, 0.0, 2.0, 2.0], "gate must be the even rows");
+        assert_eq!(up, vec![1.0, 1.0, 3.0, 3.0], "up must be the odd rows");
+    }
+
+    /// The regression that the two-row fixtures could not express: under the
+    /// old contiguous-halves split this returns gate = [1.0, 2.0] and
+    /// up = [4.0, 8.0], which is a 50/50 mixture of the real projections.
+    #[test]
+    fn split_gate_up_is_interleaved_not_contiguous_halves() {
+        let (blocks, scales) = four_row_fused_expert();
+        let (gates, ups) = split_gate_up_experts(&blocks, &scales, 1, 4, 1).unwrap();
+
+        let gate_rows: Vec<f32> = gates[0].chunks(32).map(|r| r[0]).collect();
+        let up_rows: Vec<f32> = ups[0].chunks(32).map(|r| r[0]).collect();
+
+        assert_eq!(
+            gate_rows,
+            vec![1.0, 4.0],
+            "gate must come from fused rows 0 and 2, not 0 and 1"
+        );
+        assert_eq!(
+            up_rows,
+            vec![2.0, 8.0],
+            "up must come from fused rows 1 and 3, not 2 and 3"
+        );
+    }
+
+    #[test]
+    fn split_gate_up_shapes_and_minimal_two_row_case() {
+        // 1 expert, out_features=2 (one row each), 1 group → 32 elements.
+        // Shape-only: this fixture cannot distinguish the two conventions.
+        let blocks = vec![0x22u8; 32];
         let scales = vec![127u8, 128u8]; // [1.0, 2.0]
         let (gates, ups) = split_gate_up_experts(&blocks, &scales, 1, 2, 1).unwrap();
         assert_eq!(gates.len(), 1);
         assert_eq!(ups.len(), 1);
-        assert_eq!(gates[0].len(), 32); // half=1, in_features=32
+        assert_eq!(gates[0].len(), 32);
         assert_eq!(ups[0].len(), 32);
         assert!(gates[0].iter().all(|&v| (v - 1.0).abs() < 1e-6));
         assert!(ups[0].iter().all(|&v| (v - 2.0).abs() < 1e-6));

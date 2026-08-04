@@ -95,7 +95,7 @@ Pre-seeded from 1,923 labelled features × 34 layers. Write-back from server on 
 - Patched session (after INSERT) → cache bypassed for that layer
 - Cost: a cache miss on every call to a patched layer — which is correct, since the output changes with the patch
 
-This is tested explicitly in `examples/ffn_cache_demo.rs` (Scenario 3).
+This is tested explicitly in `crates/larql-demos/examples/inference/ffn_cache_demo.rs` (Scenario 3).
 
 ---
 
@@ -129,7 +129,7 @@ The L2 gate-KNN call in `run_full_output` uses the request's `top_k` to derive t
 | `crates/larql-server/src/ffn_l2_cache.rs` | `FfnL2Cache` struct + unit tests |
 | `crates/larql-server/src/state.rs` | `LoadedModel.ffn_l2_cache` field |
 | `crates/larql-server/src/routes/walk_ffn.rs` | L2 wired into `run_full_output` |
-| `crates/larql-inference/examples/ffn_cache_demo.rs` | Demo: hit rates + patch safety |
+| `crates/larql-demos/examples/inference/ffn_cache_demo.rs` | Demo: hit rates + patch safety |
 | `crates/larql-inference/examples/bench_ffn_cache.rs` | Benchmark: latency delta |
 | `docs/ffn-cache.md` | User-facing guide |
 

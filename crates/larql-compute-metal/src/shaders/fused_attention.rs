@@ -34,6 +34,8 @@ kernel void fused_attention(
     constant float&     softcap     [[buffer(11)]],  // 0.0 = disabled
     constant uint&      skip_rope   [[buffer(12)]],  // 0 = apply RoPE, 1 = skip (caller pre-applied)
     constant uint&      rotary_dim  [[buffer(13)]],  // 0 = full head_dim, else partial rotation
+    constant float*     sinks       [[buffer(14)]],  // per-Q-head attention sink logits
+    constant uint&      has_sinks   [[buffer(15)]],  // 0 = no sinks (buffer is a dummy)
     uint2 tg_id [[threadgroup_position_in_grid]],    // (head, query_pos)
     uint tid    [[thread_index_in_threadgroup]])
 {
@@ -159,6 +161,9 @@ kernel void fused_attention(
         for (uint i = 0; i < min(tg_sz, causal_len); i++) {
             if (tg_maxes[i] > m) m = tg_maxes[i];
         }
+        // The sink competes in the softmax, so it must join the max or
+        // exp(sink - max) overflows when the sink dominates.
+        if (has_sinks != 0u && sinks[head] > m) m = sinks[head];
         tg_max = m;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -178,6 +183,9 @@ kernel void fused_attention(
     if (tid == 0) {
         float s = 0.0f;
         for (uint i = 0; i < min(tg_sz, causal_len); i++) s += tg_sums[i];
+        // Denominator only: the sink has no output slot, so the emitted
+        // weights deliberately sum to less than one.
+        if (has_sinks != 0u) s += exp(sinks[head] - tg_max);
         tg_sum = s;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);

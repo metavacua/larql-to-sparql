@@ -30,6 +30,14 @@ use crate::MetalBackend;
 use larql_compute::FullPipelineLayer;
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
 
+/// First of the two consecutive `attn_fused` slots carrying attention
+/// sinks; the `has_sinks` flag follows in slot 19. See `stages::sinks`.
+const ATTN_FUSED_SINKS_INDEX: u64 = 18;
+
+/// First of the two consecutive `kv_append_attend_fused` slots carrying
+/// attention sinks; the `has_sinks` flag follows in slot 13.
+const KV_APPEND_ATTEND_SINKS_INDEX: u64 = 12;
+
 pub(super) struct AttnBufs<'a> {
     /// Layer-input residual (read).
     pub h_buf: &'a Buffer,
@@ -105,7 +113,11 @@ impl MetalBackend {
         } else {
             layer_head_dim
         };
-        let window_size = attn_spec.sliding_window as u32;
+        // Narrower of the architecture's per-layer SWA and any window the
+        // engine imposed on this sequence. The kernel attends
+        // `[T - window_size, T)`, so this both bounds attention and lets
+        // the cache hold more rows than the window between compactions.
+        let window_size = self.effective_window_for(attn_spec.sliding_window as u32);
 
         // Env flags governing kernel-level fusion. Cached at backend
         // startup (see `metal::flags::DecodeFlags`) so the decode hot
@@ -128,19 +140,24 @@ impl MetalBackend {
         // block for this token by the time we reach the shared layer).
         let kv_shared_source = layer.kv_shared_source;
         let attend_cache_idx = kv_shared_source.unwrap_or(layer_idx);
+        // `pos` is the ABSOLUTE stream position to RoPE at; `t_val` is how
+        // many cached rows to attend. They are equal-and-offset only while
+        // nothing has been evicted — once a window slides, occupancy falls
+        // and position keeps climbing, so they must be read from different
+        // fields. Deriving `t_val` from `pos` (as `pos + 1`) is what tied
+        // them together before.
         let pos = if let Some(src) = kv_shared_source {
-            // Source has already incremented its current_len for this token.
-            // Position to RoPE is the same as the source's last-written index.
-            (kv_cache.layers[src].current_len.saturating_sub(1)) as u32
+            // Source has already advanced past the row it just wrote;
+            // RoPE at that row's position.
+            (kv_cache.layers[src].abs_position.saturating_sub(1)) as u32
         } else {
-            kv_cache.layers[layer_idx].current_len as u32
+            kv_cache.layers[layer_idx].abs_position as u32
         };
         let t_val = if kv_shared_source.is_some() {
-            // Source's current_len already counts this token; t_val is the
-            // total positions to attend over (= source.current_len).
+            // Source's current_len already counts this token.
             kv_cache.layers[attend_cache_idx].current_len as u32
         } else {
-            pos + 1
+            (kv_cache.layers[layer_idx].current_len + 1) as u32
         };
         let attn_span = ops::kv_cache::attention_span(t_val, window_size);
 
@@ -222,11 +239,18 @@ impl MetalBackend {
                 &layer_rope_base as *const f32 as *const std::ffi::c_void,
             );
             enc.set_bytes(17, 4, &rdim as *const u32 as *const std::ffi::c_void);
+            // Attention sinks (GPT-OSS) — see `stages::sinks`.
+            crate::stages::sinks::bind(
+                enc,
+                ATTN_FUSED_SINKS_INDEX,
+                layer.attn_sinks,
+                layer_num_q_heads,
+            );
             enc.dispatch_thread_groups(
                 MTLSize::new(layer_num_q_heads as u64, 1, 1),
                 MTLSize::new(tg_w, 1, 1),
             );
-            kv_cache.layers[layer_idx].current_len += 1;
+            kv_cache.layers[layer_idx].advance_one();
         } else if use_fused_qkn_rope
             && layer.q_norm_weight.is_some()
             && layer.k_norm_weight.is_some()
@@ -362,6 +386,13 @@ impl MetalBackend {
             enc.set_bytes(9, 4, &window_size as *const u32 as *const std::ffi::c_void);
             enc.set_buffer(10, Some(bufs.k_out), 0);
             enc.set_buffer(11, Some(bufs.v_out), 0);
+            // Attention sinks (GPT-OSS) — see `stages::sinks`.
+            crate::stages::sinks::bind(
+                enc,
+                KV_APPEND_ATTEND_SINKS_INDEX,
+                layer.attn_sinks,
+                layer_num_q_heads,
+            );
             enc.dispatch_thread_groups(
                 MTLSize::new(layer_num_q_heads as u64, 1, 1),
                 MTLSize::new(
@@ -430,7 +461,7 @@ impl MetalBackend {
         // Only own-cache layers advance current_len; shared layers leave
         // their (unused) cache pointer at 0 forever.
         if !did_fused_attn && kv_shared_source.is_none() {
-            kv_cache.layers[layer_idx].current_len += 1;
+            kv_cache.layers[layer_idx].advance_one();
         }
 
         // ── Step 5a: O projection ──

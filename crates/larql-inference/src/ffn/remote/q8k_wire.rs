@@ -75,7 +75,19 @@ pub fn encode_q8k_batch_request(layers: &[(usize, &Q8KActivation)]) -> Vec<u8> {
 // ── Decode (client ← server) ─────────────────────────────────────────────────
 
 /// Decode a Q8K batch response body into a `HashMap<layer_idx → output_floats>`.
+///
+/// Entries with a duplicate `layer_idx` collapse (last wins) — use
+/// [`decode_q8k_batch_response_entries`] when the request carried several rows
+/// for the same layer.
 pub fn decode_q8k_batch_response(body: &[u8]) -> Result<HashMap<usize, Vec<f32>>, String> {
+    Ok(decode_q8k_batch_response_entries(body)?
+        .into_iter()
+        .collect())
+}
+
+/// Decode a Q8K batch response body into ordered `(layer_idx, output_floats)`
+/// entries, preserving duplicates and wire order.
+pub fn decode_q8k_batch_response_entries(body: &[u8]) -> Result<Vec<(usize, Vec<f32>)>, String> {
     if body.len() < 4 {
         return Err(format!(
             "q8k batch response too short: {} bytes",
@@ -94,7 +106,7 @@ pub fn decode_q8k_batch_response(body: &[u8]) -> Result<HashMap<usize, Vec<f32>>
         ));
     }
     let mut offset = 4usize;
-    let mut out = HashMap::with_capacity(num_entries);
+    let mut out = Vec::with_capacity(num_entries);
     for i in 0..num_entries {
         if body.len() < offset + 8 {
             return Err(format!("q8k batch response: truncated entry header {i}"));
@@ -115,7 +127,7 @@ pub fn decode_q8k_batch_response(body: &[u8]) -> Result<HashMap<usize, Vec<f32>>
             .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
             .collect();
         offset += floats_bytes;
-        out.insert(layer_idx, floats);
+        out.push((layer_idx, floats));
     }
     Ok(out)
 }
@@ -277,6 +289,44 @@ mod tests {
     }
 
     #[test]
+    fn response_entries_preserve_duplicate_layers_in_wire_order() {
+        // B-row replay sends B entries for the SAME layer; the ordered
+        // decode must keep all of them, in order. The HashMap variant
+        // collapses to one — that asymmetry is the reason this exists.
+        let out0 = vec![1.0f32, 2.0];
+        let out1 = vec![3.0f32, 4.0];
+        let out2 = vec![5.0f32, 6.0];
+        let entries: Vec<(usize, &[f32])> = vec![(7usize, &out0), (7usize, &out1), (7usize, &out2)];
+        let body = encode_q8k_batch_response(&entries);
+
+        let ordered = decode_q8k_batch_response_entries(&body).unwrap();
+        assert_eq!(ordered.len(), 3);
+        assert_eq!(ordered[0], (7, out0.clone()));
+        assert_eq!(ordered[1], (7, out1.clone()));
+        assert_eq!(ordered[2], (7, out2.clone()));
+
+        let collapsed = decode_q8k_batch_response(&body).unwrap();
+        assert_eq!(collapsed.len(), 1, "map variant collapses duplicates");
+        assert_eq!(collapsed[&7], out2, "last entry wins in the map variant");
+    }
+
+    #[test]
+    fn response_entries_truncated_returns_error() {
+        let out = vec![1.0f32, 2.0];
+        let entries: Vec<(usize, &[f32])> = vec![(0usize, &out)];
+        let mut body = encode_q8k_batch_response(&entries);
+        body.truncate(body.len() - 4);
+        assert!(decode_q8k_batch_response_entries(&body).is_err());
+    }
+
+    #[test]
+    fn response_entries_reject_impossible_entry_count() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(decode_q8k_batch_response_entries(&body).is_err());
+    }
+
+    #[test]
     fn decode_request_truncated_returns_error() {
         let result = decode_q8k_batch_request(&[0u8; 3]);
         assert!(result.is_err());
@@ -286,6 +336,86 @@ mod tests {
     fn decode_response_truncated_returns_error() {
         let result = decode_q8k_batch_response(&[0u8; 3]);
         assert!(result.is_err());
+    }
+
+    // ── Timing-trailer extension (DEC-1A two-scoreboard schema) ──────────
+
+    use crate::ffn::remote::timing::{append_timing_trailer, split_timing_trailer};
+
+    #[test]
+    fn extended_response_splits_then_decodes_identically() {
+        let out0 = vec![1.0f32, 2.0, -3.5];
+        let out1 = vec![-0.5f32, 0.0, 7.0];
+        let entries: Vec<(usize, &[f32])> = vec![(5usize, &out0), (7usize, &out1)];
+        let plain = encode_q8k_batch_response(&entries);
+
+        let mut extended = plain.clone();
+        append_timing_trailer(&mut extended, 321.5);
+        assert_eq!(extended.len(), plain.len() + 8);
+
+        // New-client path: strip the trailer, then the normal decoder sees
+        // exactly the pre-extension payload.
+        let (payload, serve_us) = split_timing_trailer(&extended);
+        assert_eq!(payload, plain.as_slice());
+        assert!((serve_us.unwrap() - 321.5).abs() < 1e-6);
+        let decoded = decode_q8k_batch_response_entries(payload).unwrap();
+        assert_eq!(decoded, vec![(5, out0.clone()), (7, out1.clone())]);
+    }
+
+    #[test]
+    fn non_timing_decoder_tolerates_extended_response() {
+        // A non-timing-aware decoder fed the extended frame must still
+        // work: the decoder reads exactly `num_entries` entries and
+        // ignores trailing bytes by design.
+        let out = vec![4.0f32, -4.0];
+        let entries: Vec<(usize, &[f32])> = vec![(3usize, &out)];
+        let mut extended = encode_q8k_batch_response(&entries);
+        append_timing_trailer(&mut extended, 10.0);
+        let decoded = decode_q8k_batch_response_entries(&extended).unwrap();
+        assert_eq!(decoded, vec![(3, out)]);
+    }
+
+    #[test]
+    fn plain_response_split_returns_none_and_full_payload() {
+        // Old-server path: no trailer appended; the new client's split is
+        // a no-op (zero-float tails don't match the magic).
+        let out = vec![0.0f32, 0.0];
+        let entries: Vec<(usize, &[f32])> = vec![(0usize, &out)];
+        let plain = encode_q8k_batch_response(&entries);
+        let (payload, serve_us) = split_timing_trailer(&plain);
+        assert_eq!(payload, plain.as_slice());
+        assert_eq!(serve_us, None);
+    }
+
+    #[test]
+    fn entry_count_guard_still_rejects_with_trailer_present() {
+        // Guard preservation: the alloc-bomb bound (num_entries vs body
+        // capacity) must keep rejecting garbage even when a trailer
+        // lengthens the body by exactly TIMING_TRAILER_LEN.
+        let mut body = Vec::new();
+        body.extend_from_slice(&u32::MAX.to_le_bytes());
+        append_timing_trailer(&mut body, 5.0);
+        assert!(decode_q8k_batch_response_entries(&body).is_err());
+        // And after the new-client strip, identical rejection.
+        let (payload, _) = split_timing_trailer(&body);
+        assert!(decode_q8k_batch_response_entries(payload).is_err());
+    }
+
+    #[test]
+    fn extended_response_split_reencode_reappend_is_byte_identical() {
+        // Byte-identity pin for the extended q8k frame.
+        let out = vec![1.5f32, -2.25, 1e-20];
+        let entries: Vec<(usize, &[f32])> = vec![(9usize, &out)];
+        let mut extended = encode_q8k_batch_response(&entries);
+        append_timing_trailer(&mut extended, 42.75);
+
+        let (payload, serve_us) = split_timing_trailer(&extended);
+        let decoded = decode_q8k_batch_response_entries(payload).unwrap();
+        let ref_entries: Vec<(usize, &[f32])> =
+            decoded.iter().map(|(l, v)| (*l, v.as_slice())).collect();
+        let mut rebuilt = encode_q8k_batch_response(&ref_entries);
+        append_timing_trailer(&mut rebuilt, serve_us.unwrap() as f32);
+        assert_eq!(rebuilt, extended);
     }
 
     #[test]

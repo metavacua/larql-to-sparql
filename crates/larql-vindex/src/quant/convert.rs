@@ -560,11 +560,9 @@ fn read_source_projection(
         let layer_bytes = n * hidden * bpf;
         let slice = &bytes[cursor..cursor + layer_bytes];
         let floats: Vec<f32> = match dtype {
-            Dtype::F32 => {
-                let view: &[f32] =
-                    unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const f32, n * hidden) };
-                view.to_vec()
-            }
+            // Explicit LE decode — `slice` starts at an arbitrary byte
+            // offset, so a `&[f32]` reinterpret-cast would be UB.
+            Dtype::F32 => crate::format::le_floats::decode_f32_le(slice),
             Dtype::F16 => larql_models::quant::half::decode_f16(slice),
             Dtype::Bf16 => larql_models::quant::half::decode_bf16(slice),
         };

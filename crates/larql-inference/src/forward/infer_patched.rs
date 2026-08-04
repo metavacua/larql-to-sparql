@@ -617,6 +617,13 @@ fn route_knn_override(
 /// same trace view without duplicating the loop or re-consuming WalkFfn's
 /// internal `take_trace` (which drains residuals and so can't coexist with
 /// the KNN-override residual capture above).
+///
+/// NOTE (2026-07-30 review, item 17): this is deliberately a POST-HOC KNN
+/// view — "what does the patched index associate with these residuals" —
+/// so its hits are built via `WalkHit::from_gate` with the execution
+/// fields `None`. For the features a walk actually executed, use
+/// `WalkFfn::take_trace` / `take_runtime_trace`, which emit from the
+/// executed path.
 pub fn walk_trace_from_residuals(
     residuals: &[(usize, Vec<f32>)],
     patched: &PatchedVindex,
@@ -629,12 +636,7 @@ pub fn walk_trace_from_residuals(
             .into_iter()
             .filter_map(|(feature, gate_score)| {
                 let meta = patched.feature_meta(*layer, feature)?;
-                Some(WalkHit {
-                    layer: *layer,
-                    feature,
-                    gate_score,
-                    meta,
-                })
+                Some(WalkHit::from_gate(*layer, feature, gate_score, meta))
             })
             .collect();
         out.push((*layer, walk_hits));

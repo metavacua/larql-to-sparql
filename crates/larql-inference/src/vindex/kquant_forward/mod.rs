@@ -33,7 +33,10 @@ pub use generation::{
     generate_kquant_cpu_constrained_streaming, generate_kquant_cpu_constrained_streaming_sampled,
     generate_kquant_cpu_remote, is_end_of_turn, predict_kquant,
 };
-pub use hidden::{moe_ffn_block_cpu, moe_ffn_block_cpu_with_index, predict_kquant_hidden};
+pub use hidden::{
+    build_moe_router_weights, moe_ffn_block_cpu, moe_ffn_block_cpu_with_index,
+    predict_kquant_hidden,
+};
 pub use hooks::predict_kquant_hidden_hooked;
 pub use interventions::{
     predict_kquant_hidden_with_mapped_head_residual_delta,

@@ -288,6 +288,7 @@ mod tests {
             reps,
             scale,
             seq,
+            None,
         );
 
         // Absorbed path: project through absorbed weight matrices, then run gqa_attention_asym
@@ -304,6 +305,7 @@ mod tests {
             reps,
             scale,
             seq,
+            None,
         );
 
         // Must match numerically (within float precision)

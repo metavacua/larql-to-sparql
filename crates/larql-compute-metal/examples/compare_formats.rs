@@ -128,6 +128,7 @@ fn main() {
         let q4kf_layers: Vec<larql_compute::FullPipelineLayer> = layers_data
             .iter()
             .map(|ld| larql_compute::FullPipelineLayer {
+                attn_sinks: None,
                 wq: larql_compute::QuantWeight {
                     data: &ld.wq_q4kf,
                     scales: None,
@@ -215,6 +216,7 @@ fn main() {
         let q4k_layers: Vec<larql_compute::FullPipelineLayer> = layers_data
             .iter()
             .map(|ld| larql_compute::FullPipelineLayer {
+                attn_sinks: None,
                 wq: larql_compute::QuantWeight {
                     data: &ld.wq_q4k,
                     scales: None,
@@ -302,6 +304,7 @@ fn main() {
         let gguf_layers: Vec<larql_compute::FullPipelineLayer> = layers_data
             .iter()
             .map(|ld| larql_compute::FullPipelineLayer {
+                attn_sinks: None,
                 wq: larql_compute::QuantWeight {
                     data: &ld.wq_gguf,
                     scales: None,

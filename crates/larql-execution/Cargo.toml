@@ -1,0 +1,16 @@
+[package]
+name = "larql-execution"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Execution-refusal semantics shared across LARQL's runtime crates. Zero larql-* deps."
+keywords = ["execution", "refusal", "runtime"]
+categories = ["data-structures"]
+
+# Deliberately empty, and it should stay that way. This is a contract crate:
+# `larql-compute` sits below `larql-vindex` in the graph, so neither could name
+# the other's refusal vocabulary without a cycle, and a shared leaf is the only
+# place the classification can live. Follows `larql-vindex-spec`'s precedent —
+# a dependency-light contract several crates depend on.
+[dependencies]

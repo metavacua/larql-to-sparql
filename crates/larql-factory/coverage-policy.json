@@ -1,0 +1,10 @@
+{
+  "policy_note": "Default policy is 90% line coverage per source file. Every file was at 100% as of 2026-07-29; no per-file debt baselines exist here — a new file landing below 90% should be closed with tests before merge, not added here as an exception.",
+  "include_globs": [
+    "crates/larql-factory/src/**/*.rs"
+  ],
+  "exclude_globs": [],
+  "default_line_min_percent": 90.0,
+  "total_line_min_percent": 90.0,
+  "per_file_line_min_percent": {}
+}

@@ -9,6 +9,7 @@ keywords = ["transformer", "model-config", "llm", "architecture"]
 categories = ["data-structures"]
 
 [dependencies]
+larql-vindex-spec = { path = "../larql-vindex-spec" }
 ndarray = "0.16"
 serde = { workspace = true }
 serde_json = { workspace = true }

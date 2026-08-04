@@ -4,7 +4,7 @@
 **Date:** 2026-04-24
 **Status:** Implemented (~98%); FP4/FP8 storage in progress (exp 26)
 **Implementation:** `larql-vindex` crate (Rust)
-**Companion specs:** [Operations](operations-spec.md), [Ecosystem](ecosystem-spec.md), [LQL](../../larql-lql/docs/spec.md)
+**Companion specs:** [Conformance v1](conformance-v1.md) (error-not-panic contract, corruption tests, LE golden vectors), [Operations](operations-spec.md), [Ecosystem](ecosystem-spec.md), [LQL](../../larql-lql/docs/spec.md)
 **FP4 companion specs:** [FP4 format](fp4-format-spec.md), [FP4 precision policy](fp4-precision-policy.md), [Quantize CLI](../../larql-cli/docs/quantize-spec.md)
 
 **Implementation coverage:** File layout, binary formats, extract levels, f16 storage, checksums, mmap loading, streaming extraction, `larql verify`, Q4_K quantisation — all implemented. **FP4/FP8 block storage** — codec layer landed (see §5.10), writer and walk-kernel dispatch in progress.

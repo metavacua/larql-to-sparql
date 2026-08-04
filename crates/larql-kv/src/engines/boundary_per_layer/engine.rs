@@ -141,6 +141,12 @@ impl BoundaryPerLayerEngine {
 
 impl BoundaryPerLayerEngine {
     /// Shared body for `decode_step` / `decode_step_resident`.
+    ///
+    /// The store is mutated in place (never `take`n): a failing step must
+    /// leave `self.store` populated so a retry or the dense-walk fallback
+    /// can still run — one transient backend failure must not brick the
+    /// session. `walk::run_decode` guarantees canonical state is untouched
+    /// on failure (see its docs).
     fn decode_step_impl(
         &mut self,
         weights: &ModelWeights,
@@ -148,14 +154,14 @@ impl BoundaryPerLayerEngine {
         token_id: u32,
         index: Option<&larql_vindex::VectorIndex>,
     ) -> Result<Array2<f32>, EngineError> {
+        let view = larql_inference::WeightsView::with_scratch(weights, &self.dequant_scratch);
         let rs = self
             .store
-            .take()
+            .as_mut()
             .ok_or_else(|| EngineError::InvariantViolation {
                 what: "decode_step called before prefill (store missing)".into(),
             })?;
-        let view = larql_inference::WeightsView::with_scratch(weights, &self.dequant_scratch);
-        let (hidden, new_rs) = walk::run_decode(
+        walk::run_decode(
             view,
             ffn,
             self.backend.as_ref(),
@@ -164,11 +170,6 @@ impl BoundaryPerLayerEngine {
             token_id,
             index,
         )
-        .ok_or_else(|| EngineError::BackendFailure {
-            details: "walk::run_decode returned None".into(),
-        })?;
-        self.store = Some(new_rs);
-        Ok(hidden)
     }
 }
 
@@ -204,6 +205,10 @@ impl KvEngine for BoundaryPerLayerEngine {
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
+        // Engine reuse: a stale dispatch handle from a previous prompt's
+        // `prefill_quant` must never survive a re-prefill, or the next
+        // `decode_step_quant` would dispatch against the OLD prompt's KV.
+        self.kv_handle = None;
         let (hidden, store) = walk::run_prefill(
             larql_inference::WeightsView::with_scratch(weights, &self.dequant_scratch),
             ffn,
@@ -211,10 +216,7 @@ impl KvEngine for BoundaryPerLayerEngine {
             &self.policy,
             self.window_size,
             token_ids,
-        )
-        .ok_or_else(|| EngineError::BackendFailure {
-            details: "walk::run_prefill returned None".into(),
-        })?;
+        )?;
         self.store = Some(store);
         Ok(hidden)
     }
@@ -241,7 +243,12 @@ impl KvEngine for BoundaryPerLayerEngine {
     }
 
     fn memory_bytes(&self) -> usize {
+        // Store + whichever off-engine home holds the K/V on the coarse
+        // path: the handle (CPU whole-model cache) or the backend itself
+        // (Metal sentinel handle). Mutually exclusive, so summing is safe.
         self.store.as_ref().map_or(0, |s| s.memory_bytes())
+            + self.kv_handle.as_ref().map_or(0, |h| h.resident_bytes())
+            + self.backend.backend_resident_kv_bytes()
     }
 
     fn window_tokens(&self) -> usize {
@@ -250,6 +257,17 @@ impl KvEngine for BoundaryPerLayerEngine {
 
     fn cold_bytes(&self) -> usize {
         self.store.as_ref().map_or(0, |s| s.cold_bytes())
+    }
+
+    fn dispatch_path(&self) -> Option<larql_inference::kv_engine::DispatchPath> {
+        use larql_inference::kv_engine::DispatchPath;
+        // `kv_handle` = the W1-GPU fused path; cleared on fallback to
+        // the dense walk. `store` marks that a prefill has happened.
+        match (self.kv_handle.is_some(), self.store.is_some()) {
+            (true, _) => Some(DispatchPath::Coarse),
+            (false, true) => Some(DispatchPath::PerLayer),
+            (false, false) => None,
+        }
     }
 
     // ── Q4K path ─────────────────────────────────────────────────────────
@@ -276,6 +294,7 @@ impl KvEngine for BoundaryPerLayerEngine {
             self.window_size,
             index,
             token_ids,
+            &mut self.dequant_scratch,
         ) {
             self.store = Some(store);
             self.kv_handle = Some(handle);
@@ -307,9 +326,13 @@ impl KvEngine for BoundaryPerLayerEngine {
                     .ok_or_else(|| EngineError::InvariantViolation {
                         what: "decode_step_quant kv_handle vanished mid-call".into(),
                     })?;
+            // The store is mutated in place (never `take`n): on a dispatch
+            // failure it must survive so the dense-walk fallback below
+            // stays reachable on the next call — one transient failure
+            // must not brick the session.
             let rs = self
                 .store
-                .take()
+                .as_mut()
                 .ok_or_else(|| EngineError::InvariantViolation {
                     what: "decode_step_quant called before prefill (store missing)".into(),
                 })?;
@@ -321,16 +344,18 @@ impl KvEngine for BoundaryPerLayerEngine {
                 rs,
                 index,
                 token_id,
+                &mut self.dequant_scratch,
             );
             match result {
-                Some((hidden, new_rs)) => {
-                    self.store = Some(new_rs);
+                Some(hidden) => {
                     self.kv_handle = Some(handle);
                     return Ok(hidden);
                 }
                 None => {
-                    // State-dump failure — clear handle, surface as
-                    // BackendFailure so the harness can route accordingly.
+                    // State-dump failure — the handle is no longer trusted,
+                    // so clear it (the next decode takes the dense walk over
+                    // the preserved store); surface as BackendFailure so the
+                    // harness can route accordingly.
                     self.kv_handle = None;
                     return Err(EngineError::BackendFailure {
                         details: "state-dump payload incomplete".into(),
@@ -363,6 +388,8 @@ impl KvEngine for BoundaryPerLayerEngine {
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
+        // Engine reuse: clear any stale dispatch handle (see `prefill`).
+        self.kv_handle = None;
         if matches!(executor.dispatch_kind(), ExecutorDispatchKind::Fused) {
             // State policy can't fire under fused dispatch; degrade.
             return self.prefill(weights, ffn, token_ids);
@@ -393,25 +420,22 @@ impl KvEngine for BoundaryPerLayerEngine {
         if matches!(executor.dispatch_kind(), ExecutorDispatchKind::Fused) {
             return self.decode_step(weights, ffn, token_id);
         }
+        // Store mutated in place (never `take`n): a transient executor
+        // failure must leave `self.store` populated so a retry or the
+        // dense-walk fallback still works (see `executor::run_decode`'s
+        // failure invariant).
+        let view = larql_inference::WeightsView::with_scratch(weights, &self.dequant_scratch);
         let rs = self
             .store
-            .take()
+            .as_mut()
             .ok_or_else(|| EngineError::InvariantViolation {
                 what: "decode_step_via_executor called before prefill (store missing)".into(),
             })?;
-        let (hidden, new_rs) = executor::run_decode(
-            larql_inference::WeightsView::with_scratch(weights, &self.dequant_scratch),
-            executor,
-            ffn,
-            &self.policy,
-            rs,
-            token_id,
-        )
-        .ok_or_else(|| EngineError::BackendFailure {
-            details: "executor::run_decode returned None".into(),
-        })?;
-        self.store = Some(new_rs);
-        Ok(hidden)
+        executor::run_decode(view, executor, ffn, &self.policy, rs, token_id).ok_or_else(|| {
+            EngineError::BackendFailure {
+                details: "executor::run_decode returned None".into(),
+            }
+        })
     }
 }
 
@@ -662,14 +686,6 @@ mod tests {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             ndarray::Array2::zeros((x.shape()[0], self.hidden))
         }
-        fn forward_with_activation(
-            &self,
-            layer: usize,
-            x: &ndarray::Array2<f32>,
-        ) -> (ndarray::Array2<f32>, ndarray::Array2<f32>) {
-            let out = self.forward(layer, x);
-            (out.clone(), out)
-        }
         fn name(&self) -> &str {
             "counting"
         }
@@ -918,9 +934,12 @@ mod tests {
             hidden: 4,
         };
         let x = ndarray::Array2::<f32>::zeros((1, 4));
-        let (out, act) = ffn.forward_with_activation(0, &x);
+        let (out, obs) = ffn.forward_observed(0, &x);
         assert_eq!(out.shape(), &[1, 4]);
-        assert_eq!(act.shape(), &[1, 4]);
+        assert!(
+            obs.is_absent(),
+            "counting stub must not fabricate activations"
+        );
         assert_eq!(ffn.name(), "counting");
         let exec = FusedStubExecutor {
             backend: larql_compute::CpuBackend,
@@ -952,7 +971,10 @@ mod tests {
             BoundaryPerLayerEngine::new(None, policy, weights.num_layers, &store).unwrap();
         let ffn = larql_inference::ffn::NullFfn;
         let err = engine.prefill(&weights, &ffn, &[]).unwrap_err();
-        assert_eq!(err, larql_inference::kv_engine::EngineError::EmptyPrompt);
+        assert!(matches!(
+            err,
+            larql_inference::kv_engine::EngineError::EmptyPrompt
+        ));
     }
 
     #[test]
@@ -969,7 +991,10 @@ mod tests {
         let err = engine
             .prefill_quant(&weights, &ffn, &index, &[], &*backend)
             .unwrap_err();
-        assert_eq!(err, larql_inference::kv_engine::EngineError::EmptyPrompt);
+        assert!(matches!(
+            err,
+            larql_inference::kv_engine::EngineError::EmptyPrompt
+        ));
     }
 
     #[test]
@@ -985,7 +1010,10 @@ mod tests {
         let err = engine
             .prefill_via_executor(&weights, &exec, &ffn, &[])
             .unwrap_err();
-        assert_eq!(err, larql_inference::kv_engine::EngineError::EmptyPrompt);
+        assert!(matches!(
+            err,
+            larql_inference::kv_engine::EngineError::EmptyPrompt
+        ));
     }
 
     #[test]
@@ -1025,6 +1053,115 @@ mod tests {
             err,
             larql_inference::kv_engine::EngineError::InvariantViolation { .. }
         ));
+    }
+
+    // ── Transient-failure recovery: the store must survive a failed step ─────
+
+    /// Executor whose decode always fails (default `run_decode_layer` → None)
+    /// but reports `PerLayer` dispatch so the engine takes the executor path.
+    /// Models a transient backend failure (e.g. a remote FFN shard dropping).
+    struct FailingDecodeExecutor {
+        backend: larql_compute::CpuBackend,
+    }
+    impl larql_inference::layer_executor::LayerExecutor for FailingDecodeExecutor {
+        fn backend(&self) -> &dyn larql_compute::ComputeBackend {
+            &self.backend
+        }
+        fn dispatch_kind(&self) -> larql_inference::layer_executor::ExecutorDispatchKind {
+            larql_inference::layer_executor::ExecutorDispatchKind::PerLayer
+        }
+        fn name(&self) -> &str {
+            "failing-decode"
+        }
+    }
+
+    #[test]
+    fn failed_executor_decode_preserves_store_for_retry() {
+        let weights = make_test_weights();
+        let ffn = larql_inference::ffn::NullFfn;
+        let policy = BoundaryLayerPolicy::bf16_uniform("test", weights.num_layers);
+        let store = store_with_record(&policy);
+        let mut engine =
+            BoundaryPerLayerEngine::new(None, policy, weights.num_layers, &store).unwrap();
+        engine.prefill(&weights, &ffn, &[0u32, 1]).expect("prefill");
+        let exec = FailingDecodeExecutor {
+            backend: larql_compute::CpuBackend,
+        };
+        let err = engine
+            .decode_step_via_executor(&weights, &exec, &ffn, 2)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            larql_inference::kv_engine::EngineError::BackendFailure { .. }
+        ));
+        // The transient failure must NOT consume the store — a subsequent
+        // decode through a working path has to succeed (dense-walk fallback).
+        assert!(
+            engine.store.is_some(),
+            "one transient failure must not permanently brick the session"
+        );
+        let h = engine
+            .decode_step(&weights, &ffn, 2)
+            .expect("retry after transient failure must succeed");
+        assert_eq!(h.shape(), &[1, weights.hidden_size]);
+    }
+
+    // ── Engine reuse: plain prefill must clear a stale dispatch handle ───────
+
+    #[test]
+    fn plain_prefill_clears_stale_dispatch_handle() {
+        use larql_inference::test_utils::{make_test_q4k_vindex, make_test_q4k_weights};
+        let weights = make_test_q4k_weights();
+        let index = make_test_q4k_vindex(&weights);
+        let backend = larql_compute::cpu_backend();
+        let policy = BoundaryLayerPolicy::bf16_uniform("test", weights.num_layers);
+        let store = store_with_record(&policy);
+        let mut engine =
+            BoundaryPerLayerEngine::new(None, policy, weights.num_layers, &store).unwrap();
+        let ffn = larql_inference::ffn::NullFfn;
+        engine
+            .prefill_quant(&weights, &ffn, &index, &[0u32, 1], &*backend)
+            .expect("prefill_quant (prompt A)");
+        assert!(
+            engine.kv_handle.is_some(),
+            "Q4K fixture prefill must take the dispatch path"
+        );
+        // Prompt B via plain prefill: the stale handle must be cleared, or a
+        // later decode_step_quant would dispatch against prompt A's GPU KV.
+        engine
+            .prefill(&weights, &ffn, &[0u32, 1, 2])
+            .expect("plain prefill (prompt B)");
+        assert!(
+            engine.kv_handle.is_none(),
+            "plain prefill must clear the previous prompt's dispatch handle"
+        );
+    }
+
+    #[test]
+    fn prefill_via_executor_clears_stale_dispatch_handle() {
+        use larql_inference::layer_executor::LocalWalkExecutor;
+        use larql_inference::test_utils::{make_test_q4k_vindex, make_test_q4k_weights};
+        let weights = make_test_q4k_weights();
+        let index = make_test_q4k_vindex(&weights);
+        let backend = larql_compute::cpu_backend();
+        let policy = BoundaryLayerPolicy::bf16_uniform("test", weights.num_layers);
+        let store = store_with_record(&policy);
+        let mut engine =
+            BoundaryPerLayerEngine::new(None, policy, weights.num_layers, &store).unwrap();
+        let ffn = larql_inference::ffn::NullFfn;
+        engine
+            .prefill_quant(&weights, &ffn, &index, &[0u32, 1], &*backend)
+            .expect("prefill_quant (prompt A)");
+        assert!(engine.kv_handle.is_some());
+        let cpu = larql_compute::CpuBackend;
+        let exec = LocalWalkExecutor::new(&cpu);
+        engine
+            .prefill_via_executor(&weights, &exec, &ffn, &[0u32, 1])
+            .expect("executor prefill (prompt B)");
+        assert!(
+            engine.kv_handle.is_none(),
+            "executor prefill must clear the previous prompt's dispatch handle"
+        );
     }
 
     #[test]

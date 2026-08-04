@@ -6,6 +6,54 @@ The format follows the conventions of [Keep a Changelog](https://keepachangelog.
 with dated entries (`YYYY-MM-DD`) instead of semantic versions during the
 pre-1.0 phase. Forward-looking work lives in [`ROADMAP.md`](ROADMAP.md).
 
+## [2026-07-25] — Windows: non-zero anon mmap length for `make_read_only`
+
+Unbroke `test - windows-latest`, which had failed for **44 consecutive runs**
+since 2026-06-19 (last green `f647b0aa`) on a single test —
+`extract::build::tests::dense_only_vindex_loads_without_gate_vectors` —
+while macOS, Linux and the ubuntu coverage leg stayed green throughout.
+
+### Mechanism
+
+Not what the error line suggests. `VectorIndex::load_vindex_with_range` built
+the attention-only client-slice gate buffer as
+`MmapMut::map_anon(0)?.make_read_only()?`, and the failure surfaced as:
+
+```
+Io(Os { code: 87, kind: InvalidInput, message: "The parameter is incorrect." })
+```
+
+`map_anon(0)` is **not** the failing call — memmap2 0.9.11 clamps the underlying
+Windows mapping to one byte (`windows.rs:365`), so it succeeds. But it records
+the *requested* length of 0, so the chained `make_read_only()` reaches
+`virtual_protect`, which computes `aligned_len = self.len + alignment = 0` and
+calls `VirtualProtect(ptr, 0, PAGE_READONLY, …)` — Windows rejects a zero
+`dwSize`. memmap2's early-out for empty maps keys on a sentinel pointer used
+only by *file-backed* zero-length maps, which an anonymous mapping never has.
+Unix performs no protection change at all, hence green everywhere else.
+
+### Fix
+
+`mmap_util::map_anon_min_one(len)` maps `len.max(1)`, keeping the recorded
+length non-zero so the conversion stays legal. Applied at both sites:
+
+- `format/load.rs:125` — the attention-only client slice
+  (`larql slice --preset client`), which carries no gate data at all. This is
+  what the failing test builds.
+- `format/load.rs:302` — `synthesize_gate_from_q4k`, which carried the
+  **identical latent bug**: it also ends in `make_read_only()`, and
+  `total_bytes` is 0 whenever the layer range owns no features. Never reached
+  by CI, but it sits on the range-restricted-vindex path the DEC funnel uses.
+
+Safe because every consumer bounds-checks against the mapping length before
+reading, and the buffer is described as empty by its all-zero `GateLayerSlice`s
+— the extra byte is unreachable. Other `map_anon` call sites were audited: all
+are `#[cfg(test)]` helpers or non-empty payloads.
+
+Three tests in `mmap_util` pin the contract on every platform (zero length
+accepted, non-zero lengths pass through unchanged, zero length survives
+`make_read_only`). 1106 lib tests green, clippy clean at `-D warnings`.
+
 ## [2026-05-10] — Coverage push after the migration
 
 Lifted the post-step-6/7 debt baselines back up. Migration shrunk

@@ -79,8 +79,12 @@ impl<'a> FfnBackend for BoundFfnRouter<'a> {
         self.get(layer).forward(layer, x)
     }
 
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
-        self.get(layer).forward_with_activation(layer, x)
+    fn forward_observed(
+        &self,
+        layer: usize,
+        x: &Array2<f32>,
+    ) -> (Array2<f32>, crate::ffn::FfnActivations) {
+        self.get(layer).forward_observed(layer, x)
     }
 
     fn name(&self) -> &str {
@@ -96,7 +100,7 @@ impl<'a> FfnBackend for BoundFfnRouter<'a> {
         &self,
         layer: usize,
         h_post_attn: &Array2<f32>,
-    ) -> Option<Array2<f32>> {
+    ) -> Result<Option<Array2<f32>>, larql_execution::BoxRefusal> {
         self.get(layer).forward_moe_full_layer(layer, h_post_attn)
     }
 }
@@ -403,9 +407,9 @@ mod tests {
     }
 
     #[test]
-    fn ffn_backend_impl_forward_with_activation_matches_direct_dispatch() {
-        // Same contract for the activation-capturing variant — both
-        // tuple elements must match.
+    fn ffn_backend_impl_forward_observed_matches_direct_dispatch() {
+        // Same contract for the observed variant — output AND
+        // observation must match the direct dispatch.
         use ndarray::Array2;
         let weights = make_test_weights();
         let router = FfnLayerPolicy::from_spec("dense")
@@ -419,11 +423,11 @@ mod tests {
         let x = Array2::<f32>::from_shape_fn((1, hidden), |(_, j)| 0.02 * (j as f32));
 
         let layer = 0;
-        let (via_router_out, via_router_act) =
-            (&router as &dyn FfnBackend).forward_with_activation(layer, &x);
-        let (via_direct_out, via_direct_act) = router.get(layer).forward_with_activation(layer, &x);
-        assert_eq!(via_router_out.shape(), via_direct_out.shape());
-        assert_eq!(via_router_act.shape(), via_direct_act.shape());
+        let (via_router_out, via_router_obs) =
+            (&router as &dyn FfnBackend).forward_observed(layer, &x);
+        let (via_direct_out, via_direct_obs) = router.get(layer).forward_observed(layer, &x);
+        assert_eq!(via_router_out, via_direct_out);
+        assert_eq!(via_router_obs, via_direct_obs);
     }
 
     #[test]
@@ -442,9 +446,9 @@ mod tests {
         let x = Array2::<f32>::zeros((1, weights.hidden_size));
         let result = (&router as &dyn FfnBackend).forward_moe_full_layer(0, &x);
         assert!(
-            result.is_none(),
-            "v0 backends don't implement moe_full_layer; \
-             router delegation must preserve the None default"
+            matches!(result, Ok(None)),
+            "v0 backends don't implement moe_full_layer; router delegation must \
+             preserve the not-applicable default, not turn it into a refusal"
         );
     }
 
