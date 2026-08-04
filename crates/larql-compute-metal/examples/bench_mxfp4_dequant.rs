@@ -88,9 +88,9 @@ fn arg_mb(name: &str, default: usize) -> usize {
     it.next().and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
-fn synth_f32(out: usize, inp: usize, salt: usize) -> Vec<f32> {
+fn synth_f32(out: usize, inp: usize, variant: usize) -> Vec<f32> {
     (0..out * inp)
-        .map(|i| ((((i * 31 + salt * 17) % 251) as f32) - 125.0) * 0.001)
+        .map(|i| ((((i * 31 + variant * 17) % 251) as f32) - 125.0) * 0.001)
         .collect()
 }
 
@@ -118,8 +118,8 @@ impl WorkingSet {
         let n = (target_bytes / one.len().max(1)).max(2);
         let mut mats = Vec::with_capacity(n);
         mats.push(one);
-        for salt in 1..n {
-            mats.push(quantise(&synth_f32(out, inp, salt)));
+        for variant in 1..n {
+            mats.push(quantise(&synth_f32(out, inp, variant)));
         }
         Self {
             mats,
