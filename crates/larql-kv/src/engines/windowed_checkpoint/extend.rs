@@ -752,6 +752,225 @@ mod tests {
         assert_eq!(out.new_checkpoint.len(), weights.num_layers);
     }
 
+    // ── truncate_kv_rows ──────────────────────────────────────────────────────
+
+    #[test]
+    fn truncate_kv_rows_drops_rows_past_len() {
+        let mut kv: Vec<SharedKV> = vec![(
+            Array2::from_shape_fn((5, 4), |(i, j)| (i * 4 + j) as f32),
+            Array2::from_shape_fn((5, 4), |(i, j)| -((i * 4 + j) as f32)),
+        )];
+        truncate_kv_rows(&mut kv, 3);
+        assert_eq!(kv[0].0.shape(), &[3, 4]);
+        assert_eq!(kv[0].1.shape(), &[3, 4]);
+        // Kept the *first* rows in order — the inverse of an append.
+        assert_eq!(kv[0].0[[0, 0]], 0.0);
+        assert_eq!(kv[0].0[[2, 3]], 11.0);
+    }
+
+    #[test]
+    fn truncate_kv_rows_is_noop_at_or_below_target() {
+        let mut kv: Vec<SharedKV> =
+            vec![(Array2::zeros((2, 4)), Array2::zeros((2, 4)))];
+        truncate_kv_rows(&mut kv, 2);
+        assert_eq!(kv[0].0.shape(), &[2, 4]);
+        truncate_kv_rows(&mut kv, 5);
+        assert_eq!(kv[0].0.shape(), &[2, 4], "shorter than target stays put");
+    }
+
+    #[test]
+    fn truncate_kv_rows_truncates_k_and_v_independently() {
+        // A rewind after a partial in-place fallback can leave K and V at
+        // different lengths for a layer; each side is clamped on its own.
+        let mut kv: Vec<SharedKV> =
+            vec![(Array2::zeros((5, 4)), Array2::zeros((3, 4)))];
+        truncate_kv_rows(&mut kv, 3);
+        assert_eq!(kv[0].0.shape(), &[3, 4]);
+        assert_eq!(kv[0].1.shape(), &[3, 4]);
+    }
+
+    // ── rs_extend_inplace ─────────────────────────────────────────────────────
+
+    fn over_allocated_buffers(
+        weights: &ModelWeights,
+        capacity: usize,
+    ) -> Vec<SharedKV> {
+        let kv_dim = weights.num_kv_heads * weights.head_dim;
+        (0..weights.num_layers)
+            .map(|_| {
+                (
+                    Array2::<f32>::zeros((capacity, kv_dim)),
+                    Array2::<f32>::zeros((capacity, kv_dim)),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn inplace_empty_tokens_is_invariant_violation() {
+        let weights = make_test_weights();
+        let mut kv = over_allocated_buffers(&weights, 4);
+        let result = rs_extend_inplace(
+            larql_inference::WeightsView::dense(&weights),
+            &[],
+            &mut kv,
+            0,
+            0,
+            &larql_compute::CpuBackend,
+            None,
+            None,
+        );
+        assert!(matches!(
+            result,
+            Err(EngineError::InvariantViolation { .. })
+        ));
+    }
+
+    #[test]
+    fn inplace_wrong_slot_count_is_invariant_violation() {
+        let weights = make_test_weights();
+        let mut kv: Vec<SharedKV> = Vec::new();
+        let result = rs_extend_inplace(
+            larql_inference::WeightsView::dense(&weights),
+            &[0u32],
+            &mut kv,
+            0,
+            0,
+            &larql_compute::CpuBackend,
+            None,
+            None,
+        );
+        assert!(matches!(
+            result,
+            Err(EngineError::InvariantViolation { .. })
+        ));
+    }
+
+    #[test]
+    fn inplace_fallback_matches_owned_concat_bit_for_bit() {
+        // Dense f32 weights with no index: the in-place projection returns
+        // None every layer, so every step takes the owned-concat fallback —
+        // which must be the same numerics as rs_extend_from_checkpoint_backend
+        // (it IS the same attention call over the same `[..len]` view).
+        let weights = make_test_weights();
+        let tokens = [0u32, 1, 2];
+
+        let mut ref_kv = empty_prior(&weights);
+        let reference = rs_extend_from_checkpoint_backend(
+            larql_inference::WeightsView::dense(&weights),
+            &tokens,
+            &mut ref_kv,
+            0,
+            &larql_compute::CpuBackend,
+            None,
+            None,
+        )
+        .expect("owned-concat reference extend");
+
+        let mut kv = over_allocated_buffers(&weights, 8);
+        let last = rs_extend_inplace(
+            larql_inference::WeightsView::dense(&weights),
+            &tokens,
+            &mut kv,
+            0,
+            0,
+            &larql_compute::CpuBackend,
+            None,
+            None,
+        )
+        .expect("in-place extend via fallback");
+
+        assert_eq!(last.shape(), reference.last_hidden.shape());
+        for (a, b) in last.iter().zip(reference.last_hidden.iter()) {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "fallback path must be bit-identical to the owned-concat form"
+            );
+        }
+    }
+
+    #[test]
+    fn inplace_q4k_direct_matches_owned_concat_and_keeps_buffers() {
+        // Q4K-direct on (thread-local override): the in-place projection
+        // engages, appending rows into the caller's over-allocated buffers
+        // instead of replacing them. Hidden states must still match the
+        // owned-concat form — only the cache representation differs.
+        use larql_inference::test_utils::{make_test_q4k_vindex, make_test_q4k_weights};
+        let _q4k = crate::engines::Q4kFlagGuard::set(&[
+            (larql_compute::options::ENV_Q4K_DIRECT_ATTN, true),
+            (larql_compute::options::ENV_Q4K_ATTN_INT8, false),
+        ]);
+        let weights = make_test_q4k_weights();
+        let index = make_test_q4k_vindex(&weights);
+        let tokens = [0u32, 1, 2];
+        let capacity = 8;
+
+        let mut ref_kv = empty_prior(&weights);
+        let reference = rs_extend_from_checkpoint_backend(
+            larql_inference::WeightsView::dense(&weights),
+            &tokens,
+            &mut ref_kv,
+            0,
+            &larql_compute::CpuBackend,
+            None,
+            Some(&index),
+        )
+        .expect("owned-concat reference extend");
+
+        let mut kv = over_allocated_buffers(&weights, capacity);
+        let last = rs_extend_inplace(
+            larql_inference::WeightsView::dense(&weights),
+            &tokens,
+            &mut kv,
+            0,
+            0,
+            &larql_compute::CpuBackend,
+            None,
+            Some(&index),
+        )
+        .expect("in-place Q4K extend");
+
+        for (a, b) in last.iter().zip(reference.last_hidden.iter()) {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "in-place path must be bit-identical to the owned-concat form"
+            );
+        }
+        assert!(last.iter().all(|v| v.is_finite()));
+    }
+
+    // ── rs_extend_from_checkpoint_quant profiler channel ──────────────────────
+
+    #[test]
+    fn extend_quant_populates_profiler_stages() {
+        let weights = make_test_weights();
+        let index = larql_inference::test_utils::make_test_vindex(&weights);
+        let backend = larql_compute::cpu_backend();
+        let mut prof = crate::profiler::EngineProfiler::default();
+        let out = rs_extend_from_checkpoint_quant(
+            larql_inference::WeightsView::dense(&weights),
+            &index,
+            &[0u32, 1],
+            empty_prior(&weights),
+            0,
+            &*backend,
+            Some(&mut prof),
+        )
+        .expect("profiled extend");
+        assert!(out.last_hidden.iter().all(|v| v.is_finite()));
+        // One extend call = one accumulation per stage; recompute_* stays
+        // untouched (windowed_checkpoint appends incrementally).
+        assert_eq!(prof.embed.count, 1);
+        assert_eq!(prof.attention.count, 1);
+        assert_eq!(prof.ffn.count, 1);
+        assert_eq!(prof.decode_total.count, 1);
+        assert!(prof.decode_total.total_us > 0.0);
+        assert_eq!(prof.recompute_cold.count, 0);
+        assert_eq!(prof.recompute_hot.count, 0);
+    }
+
     #[test]
     fn extend_quant_seeded_from_prior_matches_shape() {
         let weights = make_test_weights();

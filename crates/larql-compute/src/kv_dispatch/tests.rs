@@ -405,6 +405,153 @@ fn default_read_kv_row_at_returns_none() {
     assert!(backend.read_kv_row_at(&handle, 0, 0).is_none());
 }
 
+#[test]
+fn default_backend_resident_kv_bytes_is_zero() {
+    // Default 0 = every byte is reachable through a handle; a backend
+    // that hides K/V internally must override or its memory accounting
+    // double-counts nothing and under-reports everything.
+    let backend = StubKvBackend;
+    assert_eq!(backend.backend_resident_kv_bytes(), 0);
+}
+
+#[test]
+fn default_per_layer_is_host_delegated_is_false() {
+    // Default false = "a backend is assumed to mean what it says".
+    let backend = StubKvBackend;
+    assert!(!backend.per_layer_is_host_delegated());
+}
+
+// ── Windowed coarse defaults fail closed ─────────────────────────
+//
+// The windowed variants' defaults promise: `window: None` delegates to
+// the window-less method, `Some(_)` answers None even when the window-
+// less path would succeed — "this backend cannot bound what you asked
+// me to bound". A stub whose window-less methods DO succeed proves the
+// Some(_) arm declines without consulting them.
+
+struct CoarseCapableStub;
+impl KvDispatch for CoarseCapableStub {
+    fn coarse_prefill(
+        &self,
+        _weights: &larql_models::ModelWeights,
+        _token_ids: &[u32],
+        _index: Option<&dyn crate::KvIndex>,
+    ) -> Option<(Array2<f32>, KvHandle)> {
+        Some((Array2::zeros((1, 4)), stub_kv_handle(1, 4)))
+    }
+    fn coarse_decode_step(
+        &self,
+        _weights: &larql_models::ModelWeights,
+        _token_id: u32,
+        _index: Option<&dyn crate::KvIndex>,
+        _handle: &mut KvHandle,
+        _abs_position: usize,
+    ) -> Option<Array2<f32>> {
+        Some(Array2::zeros((1, 4)))
+    }
+}
+
+#[test]
+fn default_coarse_prefill_windowed_delegates_when_unwindowed() {
+    let weights = make_test_weights();
+    let backend = CoarseCapableStub;
+    let result = backend.coarse_prefill_windowed(&weights, &[0u32, 1], None, None);
+    assert!(
+        result.is_some(),
+        "window: None must delegate to coarse_prefill"
+    );
+}
+
+#[test]
+fn default_coarse_prefill_windowed_fails_closed_on_real_window() {
+    let weights = make_test_weights();
+    let backend = CoarseCapableStub;
+    let result = backend.coarse_prefill_windowed(&weights, &[0u32, 1], None, Some(4));
+    assert!(
+        result.is_none(),
+        "a real window must decline even though coarse_prefill succeeds"
+    );
+}
+
+#[test]
+fn default_coarse_decode_step_windowed_delegates_when_unwindowed() {
+    let weights = make_test_weights();
+    let backend = CoarseCapableStub;
+    let mut handle = stub_kv_handle(1, 4);
+    let result = backend.coarse_decode_step_windowed(&weights, 0, None, &mut handle, 1, None);
+    assert!(
+        result.is_some(),
+        "window: None must delegate to coarse_decode_step"
+    );
+}
+
+#[test]
+fn default_coarse_decode_step_windowed_fails_closed_on_real_window() {
+    let weights = make_test_weights();
+    let backend = CoarseCapableStub;
+    let mut handle = stub_kv_handle(1, 4);
+    let result = backend.coarse_decode_step_windowed(&weights, 0, None, &mut handle, 1, Some(4));
+    assert!(
+        result.is_none(),
+        "a real window must decline even though coarse_decode_step succeeds"
+    );
+}
+
+// ── attention_step_windowed happy path ───────────────────────────
+//
+// The None-propagation branch is pinned above; this stub drives the
+// success branch of the default body: attention_step returns a hidden
+// state, then the default MUST clip the cache to the window before
+// returning it.
+
+struct AttnCapableStub {
+    clipped_to: std::sync::atomic::AtomicUsize,
+}
+impl KvDispatch for AttnCapableStub {
+    fn attention_step(
+        &self,
+        _weights: larql_models::WeightsView,
+        query: &Array2<f32>,
+        _kv: &mut KvHandle,
+        _layer: usize,
+        _abs_position: usize,
+        _index: Option<&dyn crate::KvIndex>,
+    ) -> Option<Array2<f32>> {
+        Some(query.clone())
+    }
+    fn clip_kv(&self, _handle: &mut KvHandle, window_size: usize) {
+        self.clipped_to
+            .store(window_size, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn default_attention_step_windowed_clips_after_successful_step() {
+    let backend = AttnCapableStub {
+        clipped_to: std::sync::atomic::AtomicUsize::new(0),
+    };
+    let weights = make_test_weights();
+    let mut handle = stub_kv_handle(0, weights.hidden_size);
+    let query = Array2::from_elem((1, weights.hidden_size), 1.0_f32);
+    let out = backend
+        .attention_step_windowed(
+            larql_models::WeightsView::dense(&weights),
+            &query,
+            &mut handle,
+            0,
+            0,
+            7,
+            None,
+        )
+        .expect("successful attention_step must propagate through the windowed default");
+    assert_eq!(out, query, "default returns attention_step's hidden state");
+    assert_eq!(
+        backend.clipped_to.load(std::sync::atomic::Ordering::SeqCst),
+        7,
+        "default must clip_kv to the requested window after the step"
+    );
+}
+
 // ── Inner handle as_any / as_any_mut surface ─────────────────────
 
 #[test]
