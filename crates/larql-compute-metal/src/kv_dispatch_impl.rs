@@ -1046,4 +1046,146 @@ mod windowed_coarse_tests {
         let guard = b.kv_cache.lock().unwrap();
         assert_eq!(guard.as_ref().unwrap().layers[0].current_len, 1);
     }
+
+    /// Before any prefill there is no cache to compact — the guard arm
+    /// returns rather than panicking on the empty Option.
+    #[test]
+    fn compaction_without_a_cache_is_a_no_op() {
+        let b = backend();
+        b.compact_kv_to_window(4);
+        assert!(b.kv_cache.lock().unwrap().is_none());
+    }
+
+    /// The per-layer surface forwards to the CPU; diagnostics must be
+    /// able to say so.
+    #[test]
+    fn per_layer_surface_reports_host_delegation() {
+        assert!(backend().per_layer_is_host_delegated());
+    }
+
+    /// The coarse pipeline's K/V lives behind a sentinel handle, so the
+    /// backend must self-report it: zero before any cache exists, and
+    /// current_len (not capacity) × kv_dim × K,V × f32 once one does.
+    #[test]
+    fn resident_kv_bytes_counts_the_populated_prefix_only() {
+        let b = backend();
+        assert_eq!(b.backend_resident_kv_bytes(), 0, "no cache yet");
+
+        {
+            let mut guard = b.kv_cache.lock().expect("kv cache lock");
+            *guard = Some(crate::ops::kv_cache::KVCache::new(&b.bufs, 1, 64, 2, 4));
+            let layer = &mut guard.as_mut().unwrap().layers[0];
+            for _ in 0..3 {
+                layer.advance_one();
+            }
+        }
+        // 3 rows × (2 kv_heads × 4 head_dim) × K and V × 4 bytes.
+        assert_eq!(b.backend_resident_kv_bytes(), 3 * 8 * 2 * 4);
+    }
+
+    /// Single-position readback: None before a cache exists, None past
+    /// the populated prefix or layer range, and a kv_dim-sized row pair
+    /// inside it.
+    #[test]
+    fn read_kv_row_at_bounds_and_shape() {
+        let b = backend();
+        let handle = b.alloc_kv_buffer(0, 8, 8);
+        assert!(
+            b.read_kv_row_at(&handle, 0, 0).is_none(),
+            "no cache installed yet"
+        );
+
+        {
+            let mut guard = b.kv_cache.lock().expect("kv cache lock");
+            *guard = Some(crate::ops::kv_cache::KVCache::new(&b.bufs, 1, 64, 2, 4));
+            let layer = &mut guard.as_mut().unwrap().layers[0];
+            layer.advance_one();
+            layer.advance_one();
+        }
+        assert!(b.read_kv_row_at(&handle, 5, 0).is_none(), "layer range");
+        assert!(
+            b.read_kv_row_at(&handle, 0, 2).is_none(),
+            "pos past the populated prefix"
+        );
+        let (k_row, v_row) = b
+            .read_kv_row_at(&handle, 0, 1)
+            .expect("in-range position reads back");
+        assert_eq!(k_row.len(), 8, "kv_dim = 2 heads × 4 head_dim");
+        assert_eq!(v_row.len(), 8);
+    }
+
+    /// The unbounded arm delegates to the plain coarse step (which
+    /// declines without an index), the zero window refuses outright,
+    /// and a real window sets the clamp before delegating.
+    #[test]
+    fn decode_step_windowed_arms_all_decline_without_an_index() {
+        let b = backend();
+        let weights = larql_models::test_fixtures::make_test_q4k_weights();
+        let mut handle = b.alloc_kv_buffer(0, 8, 8);
+
+        assert!(b
+            .coarse_decode_step_windowed(&weights, 0, None, &mut handle, 0, None)
+            .is_none());
+        assert!(b
+            .coarse_decode_step_windowed(&weights, 0, None, &mut handle, 0, Some(0))
+            .is_none());
+        assert!(b
+            .coarse_decode_step_windowed(&weights, 0, None, &mut handle, 0, Some(4))
+            .is_none());
+    }
+
+    /// A prompt that fits inside the window is accepted into the fused
+    /// prefill path (which then declines without an index — the accept
+    /// arm is what this pins, not the kernel).
+    #[test]
+    fn prefill_windowed_accepts_a_fitting_prompt() {
+        let b = backend();
+        let weights = larql_models::test_fixtures::make_test_q4k_weights();
+        assert!(b
+            .coarse_prefill_windowed(&weights, &[0u32, 1], None, Some(4))
+            .is_none());
+        assert!(b
+            .coarse_prefill_windowed(&weights, &[0u32, 1], None, None)
+            .is_none());
+    }
+
+    /// The state-capturing step is a thin Full-mask delegation; without
+    /// an index the fused path declines through the same spine.
+    #[test]
+    fn decode_step_with_state_delegates_to_the_masked_form() {
+        let b = backend();
+        let weights = larql_models::test_fixtures::make_test_q4k_weights();
+        let mut handle = b.alloc_kv_buffer(0, 8, 8);
+        let mut state = larql_compute::PerLayerDecodeState::with_capacity(1);
+        assert!(b
+            .coarse_decode_step_with_state(&weights, 0, None, &mut handle, 0, Some(&mut state))
+            .is_none());
+    }
+
+    /// Compressed append forwards to the CPU backend, whose contract is
+    /// an explicit unimplemented panic — not a silent no-op.
+    #[test]
+    #[should_panic(expected = "compressed_kv_append not implemented")]
+    fn compressed_kv_append_forwards_to_the_cpu_unimplemented() {
+        let b = backend();
+        let mut handle = b.alloc_kv_buffer(0, 4, 4);
+        let k = Array2::<f32>::zeros((1, 4));
+        let v = Array2::<f32>::zeros((1, 4));
+        struct NoCodec;
+        impl CompressionCodec for NoCodec {
+            fn encode(&self, v: &[f32]) -> Vec<u8> {
+                v.iter().flat_map(|f| f.to_le_bytes()).collect()
+            }
+            fn decode(&self, b: &[u8], dim: usize) -> Vec<f32> {
+                b.chunks_exact(4)
+                    .take(dim)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect()
+            }
+            fn name(&self) -> &str {
+                "no-codec"
+            }
+        }
+        b.compressed_kv_append(&mut handle, &k, &v, &NoCodec);
+    }
 }
