@@ -226,7 +226,7 @@ fn demo_binary_wire() {
     println!(
         "Logits request  ({} bytes): {:?}",
         logits_req.len(),
-        &residual
+        residual
     );
 }
 
