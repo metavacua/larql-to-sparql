@@ -44,6 +44,15 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      # protoc on PATH satisfies the `cfg(not(windows))` skip in
+      # `larql-router-protocol`'s build.rs — pulled in transitively when
+      # this job builds workspace crates that touch the gRPC surface.
+      # Same idiom as larql-cli.yml / larql-vindex.yml.
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v6
         with:

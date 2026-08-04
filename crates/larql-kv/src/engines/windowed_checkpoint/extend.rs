@@ -770,8 +770,7 @@ mod tests {
 
     #[test]
     fn truncate_kv_rows_is_noop_at_or_below_target() {
-        let mut kv: Vec<SharedKV> =
-            vec![(Array2::zeros((2, 4)), Array2::zeros((2, 4)))];
+        let mut kv: Vec<SharedKV> = vec![(Array2::zeros((2, 4)), Array2::zeros((2, 4)))];
         truncate_kv_rows(&mut kv, 2);
         assert_eq!(kv[0].0.shape(), &[2, 4]);
         truncate_kv_rows(&mut kv, 5);
@@ -782,8 +781,7 @@ mod tests {
     fn truncate_kv_rows_truncates_k_and_v_independently() {
         // A rewind after a partial in-place fallback can leave K and V at
         // different lengths for a layer; each side is clamped on its own.
-        let mut kv: Vec<SharedKV> =
-            vec![(Array2::zeros((5, 4)), Array2::zeros((3, 4)))];
+        let mut kv: Vec<SharedKV> = vec![(Array2::zeros((5, 4)), Array2::zeros((3, 4)))];
         truncate_kv_rows(&mut kv, 3);
         assert_eq!(kv[0].0.shape(), &[3, 4]);
         assert_eq!(kv[0].1.shape(), &[3, 4]);
@@ -791,10 +789,7 @@ mod tests {
 
     // ── rs_extend_inplace ─────────────────────────────────────────────────────
 
-    fn over_allocated_buffers(
-        weights: &ModelWeights,
-        capacity: usize,
-    ) -> Vec<SharedKV> {
+    fn over_allocated_buffers(weights: &ModelWeights, capacity: usize) -> Vec<SharedKV> {
         let kv_dim = weights.num_kv_heads * weights.head_dim;
         (0..weights.num_layers)
             .map(|_| {
