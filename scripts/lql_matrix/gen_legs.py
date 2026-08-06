@@ -38,11 +38,11 @@ GGUF = [("bitnetgguf", "microsoft/bitnet-b1.58-2B-4T-gguf", "microsoft/bitnet-b1
 
 def leg(name, hf, op, level="all", flags="", expect_quant="none",
         source_kind="safetensors", corpus_model=None, tokenizer_repo="",
-        roundtrip=False):
+        roundtrip=False, lql_with=""):
     return {"name": name, "hf": hf, "corpus_model": corpus_model or hf,
             "source_kind": source_kind, "op": op, "level": level, "flags": flags,
             "expect_quant": expect_quant, "tokenizer_repo": tokenizer_repo,
-            "roundtrip": roundtrip}
+            "roundtrip": roundtrip, "lql_with": lql_with}
 
 
 def _model_id(leg_name):
@@ -73,6 +73,39 @@ def build_legs():
             rt = mid in ("smol135", "smol135base") and lv in ("inference", "all")
             legs.append(leg(f"{mid}.native.{lv}", hf, "extract", level=lv,
                             roundtrip=rt))
+
+    # 1b. SURFACE-PARITY axis — do the CLI and LQL extract surfaces agree?
+    #
+    #     They declare different level lattices and nothing in-tree measures
+    #     whether that difference is behavioural or merely documentary:
+    #
+    #       larql-vindex-spec/src/lib.rs + larql-vindex/src/config/index.rs
+    #         four variants; Inference = "+ FFN up/down", norms arrive at
+    #         Attention, and ExtractLevel derives #[default] Browse.
+    #       larql-lql/src/ast.rs
+    #         three variants; Inference = "+ attention weights", with up and
+    #         norms pushed to All. No syntax reaches `attention` at all.
+    #       larql-cli extract_index_cmd.rs
+    #         --level defaults to `inference`, not Browse.
+    #       larql-vindex/docs/format-spec.md §4
+    #         prose says "three levels".
+    #
+    #     tensor_presence.py already resolves this by measurement: the
+    #     weight-class vector of a produced vindex says which components a
+    #     level actually wrote. Comparing `native.<lv>` against `lql.<lv>` and
+    #     `native.default` against `lql.default` decides it empirically
+    #     instead of by reading four disagreeing declarations.
+    for mid, hf in SAFETENSORS:
+        # CLI with no --level at all — the workflow omits the flag when level="".
+        legs.append(leg(f"{mid}.native.default", hf, "extract", level=""))
+        # Every level the LQL grammar can express, plus the legacy alias.
+        legs.append(leg(f"{mid}.lql.default", hf, "extract-lql", level=""))
+        legs.append(leg(f"{mid}.lql.inference", hf, "extract-lql", level="",
+                        lql_with="WITH INFERENCE"))
+        legs.append(leg(f"{mid}.lql.all", hf, "extract-lql", level="",
+                        lql_with="WITH ALL"))
+        legs.append(leg(f"{mid}.lql.weights-legacy", hf, "extract-lql", level="",
+                        lql_with="WITH WEIGHTS"))
 
     # 2. TRANSFORMATIONS — one all-level leg each (no level cross).
     #    q4k requantize per model (arch × quant coverage; re-catches the MoE panic #273).

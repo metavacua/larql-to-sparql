@@ -147,6 +147,7 @@ jobs:
       EXPECT_QUANT: ${{ matrix.leg.expect_quant }}
       CORPUS_MODEL: ${{ matrix.leg.corpus_model }}
       TOKENIZER_REPO: ${{ matrix.leg.tokenizer_repo }}
+      LQL_WITH: ${{ matrix.leg.lql_with }}
     steps:
       - uses: actions/checkout@v6
       - name: Download larql binary
@@ -180,6 +181,14 @@ jobs:
             extract)
               /usr/bin/time -v -o "$TIMEF" timeout 18000 \
                 $LARQL extract "$HF" -o "$VINDEX" ${LEVEL:+--level $LEVEL} $FLAGS >"$O" 2>"$E" ;;
+            extract-lql)
+              # Same production, driven through the LQL surface instead of the
+              # CLI flag, so the two level lattices can be compared by the
+              # weight-class vector tensor_presence.py derives. LQL_WITH empty
+              # exercises the grammar's own default (Browse), which is NOT the
+              # CLI's default (inference).
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL lql "EXTRACT MODEL \"$HF\" INTO \"$VINDEX\" $LQL_WITH;" >"$O" 2>"$E" ;;
             gguf-to-vindex)
               GGUF=$(find ~/.cache/huggingface -name '*.gguf' | head -1)
               echo "gguf source: $GGUF"
