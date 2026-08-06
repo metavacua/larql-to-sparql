@@ -1,0 +1,442 @@
+# LQL Strategy Matrix — empirical (source × produce-recipe × level) × command experiment.
+#
+# For every CLI-invokable leg (a model + a produce recipe: extract at a level,
+# extract with a quant flag, gguf-to-vindex, or post-hoc quantize), the workflow
+# PRODUCES a vindex on the current binary, records its structural descriptor
+# (family/dtype/quant vs expected — so extraction/convert breakage or silent
+# dequant is observed, not assumed), then runs the full LQL command corpus against
+# it and records the RAW MECHANICAL OUTCOME of every cell. Discovery experiment,
+# not a pass/fail gate: the breakage is the deliverable. Legs are enumerated by
+# scripts/lql_matrix/gen_legs.py (no prediction-pruning — see that file).
+
+name: lql-strategy-matrix
+
+on:
+  push:
+    branches: [lql-strategy-matrix, xml-groundwork/fidelity-measure]
+  pull_request:
+    branches: [lql-strategy-matrix, main]
+  workflow_dispatch:
+    inputs:
+      strict:
+        description: "Fail the run if any conformance invariant is violated"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUST_BACKTRACE: "1"
+
+jobs:
+  # Enumerate every leg as JSON → consumed by the matrix via fromJSON. A malformed
+  # plan fails here in seconds, before any leg runs.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      legs: ${{ steps.gen.outputs.legs }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: gen
+        # TEMPORARY (round-trip CI validation): narrow the matrix to the
+        # round-trip-relevant models only. gen_legs.py keeps the full model list;
+        # this env var filters it. Remove the `env:` block to restore full coverage.
+        env:
+          LQL_MATRIX_ONLY: "smol135,smol135base"
+        run: |
+          legs=$(python3 scripts/lql_matrix/gen_legs.py)
+          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+          echo "$legs" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{len(d)} legs planned')"
+
+  # Compile larql-cli ONCE; every leg downloads the binary.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lqlmatrix-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-lqlmatrix-
+      - name: Install BLAS (build)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - name: Build larql-cli (release)
+        run: cargo build --release -p larql-cli
+      - name: Upload larql binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: larql-bin
+          path: target/release/larql
+          retention-days: 1
+          if-no-files-found: error
+
+  quality:
+    # Loud, obviously-directed signal on the LQL command stack: fmt + clippy +
+    # tests, run ALONGSIDE the matrix (NOT a dependency of it) so a red check
+    # never skips the matrix — we want both signals on the same run to compare
+    # "unit test passed" against "matrix cell crashed" and localise the defect.
+    # No exemptions: the backlog is included on purpose. The alarm stays on.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Ensure clippy + rustfmt (runner ships stable rust already)
+        run: rustup component add clippy rustfmt
+      - name: Install BLAS
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lqlmatrix-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-lqlmatrix-
+      - name: fmt (loud)
+        id: fmt
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+      - name: clippy — LQL stack (loud, no exemption)
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-lql -p larql-cli -p larql-inference -p larql-vindex -p larql-core -p larql-kv -p larql-models --no-default-features -- -D warnings
+      - name: test — LQL stack (comparative signal for the matrix)
+        id: test
+        continue-on-error: true
+        run: cargo test -p larql-lql -p larql-cli -p larql-inference -p larql-vindex -p larql-core -p larql-kv -p larql-models --no-default-features
+      - name: Report + fail loud if any check failed
+        run: |
+          {
+            echo "## Quality — LQL command stack"
+            echo "| check | outcome |"
+            echo "|---|---|"
+            echo "| fmt    | ${{ steps.fmt.outcome }} |"
+            echo "| clippy | ${{ steps.clippy.outcome }} |"
+            echo "| test   | ${{ steps.test.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "${{ steps.fmt.outcome }}" = success ] \
+            && [ "${{ steps.clippy.outcome }}" = success ] \
+            && [ "${{ steps.test.outcome }}" = success ]
+
+  matrix:
+    needs: [plan, build]
+    strategy:
+      fail-fast: false          # every leg runs even when one breaks — breakage is data
+      max-parallel: 12
+      matrix:
+        leg: ${{ fromJSON(needs.plan.outputs.legs) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      NAME: ${{ matrix.leg.name }}
+      HF: ${{ matrix.leg.hf }}
+      OP: ${{ matrix.leg.op }}
+      LEVEL: ${{ matrix.leg.level }}
+      FLAGS: ${{ matrix.leg.flags }}
+      EXPECT_QUANT: ${{ matrix.leg.expect_quant }}
+      CORPUS_MODEL: ${{ matrix.leg.corpus_model }}
+      TOKENIZER_REPO: ${{ matrix.leg.tokenizer_repo }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download larql binary
+        uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - name: Prep
+        run: |
+          chmod +x bin/larql scripts/lql_matrix/run_matrix.sh
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev time
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Pre-download source snapshot (${{ matrix.leg.hf }})
+        run: |
+          python -m pip install --quiet huggingface_hub numpy
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('${HF}')"
+
+      - name: Produce vindex (${{ matrix.leg.op }})
+        run: |
+          set +e
+          mkdir -p out
+          LARQL=./bin/larql
+          VINDEX="out/${NAME}.vindex"
+          TIMEF="out/produce-${NAME}.time"
+          O="out/produce-${NAME}.out"; E="out/produce-${NAME}.err"
+          start=$(date +%s%3N)
+          case "$OP" in
+            extract)
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL extract "$HF" -o "$VINDEX" ${LEVEL:+--level $LEVEL} $FLAGS >"$O" 2>"$E" ;;
+            gguf-to-vindex)
+              GGUF=$(find ~/.cache/huggingface -name '*.gguf' | head -1)
+              echo "gguf source: $GGUF"
+              # Stage the tokenizer from the base repo beside the .gguf — the -gguf repo
+              # ships none, so gguf-to-vindex fails late without it (#180/#277).
+              if [ -n "$TOKENIZER_REPO" ]; then
+                TOKDIR=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('${TOKENIZER_REPO}', allow_patterns=['tokenizer*','*special_tokens*','config.json','generation_config.json']))")
+                cp "$TOKDIR"/tokenizer*.json "$TOKDIR"/special_tokens_map.json "$(dirname "$GGUF")/" 2>/dev/null || true
+                echo "staged tokenizer from $TOKENIZER_REPO into $(dirname "$GGUF")"
+              fi
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL convert gguf-to-vindex "$GGUF" -o "$VINDEX" ${LEVEL:+--level $LEVEL} $FLAGS >"$O" 2>"$E" ;;
+            quantize-q4k)
+              /usr/bin/time -v -o "${TIMEF}.src" timeout 18000 \
+                $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL convert quantize q4k --input "${VINDEX}.src" --output "$VINDEX" >>"$O" 2>>"$E" ;;
+            quantize-fp4)
+              /usr/bin/time -v -o "${TIMEF}.src" timeout 18000 \
+                $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL convert quantize fp4 --input "${VINDEX}.src" --output "$VINDEX" >>"$O" 2>>"$E" ;;
+          esac
+          ec=$?
+          end=$(date +%s%3N)
+          case "$ec" in
+            0) bucket=ok ;; 124) bucket=timeout ;; 137|139|134) bucket=crash ;; *) bucket=err ;;
+          esac
+          # peak RSS = MAX across every command's time file (extract .src + quantize),
+          # not just the last — a fast-failing quantize must not hide a multi-GB extract.
+          rss=$(python3 scripts/lql_matrix/peak_rss.py "${TIMEF}.src" "$TIMEF" 2>/dev/null)
+          vmb=$(du -sm "$VINDEX" 2>/dev/null | cut -f1)
+          printf '{"name":"%s","op":"%s","level":"%s","flags":"%s","exit_code":%d,"bucket":"%s","duration_ms":%d,"peak_rss_kb":%s,"vindex_mb":%s}\n' \
+            "$NAME" "$OP" "$LEVEL" "$FLAGS" "$ec" "$bucket" "$((end-start))" "${rss:-0}" "${vmb:-0}" \
+            > "out/produce-${NAME}.json"
+          echo "produce ${NAME}: exit=$ec bucket=$bucket rss=${rss:-?}kb vindex=${vmb:-?}MB"
+          # descriptor: what did we actually get vs what we expected?
+          python3 scripts/lql_matrix/descriptor.py "$VINDEX" "$NAME" "$EXPECT_QUANT" \
+            > "out/descriptor-${NAME}.json" 2>/dev/null || echo '{"name":"'"$NAME"'","error":"descriptor failed"}' > "out/descriptor-${NAME}.json"
+          echo "descriptor:"; cat "out/descriptor-${NAME}.json"
+          # weight-family inventory (which classes the recipe produced)
+          MDIR="out/manifest-${NAME}"; mkdir -p "$MDIR"
+          cp "$VINDEX/index.json" "$VINDEX/weight_manifest.json" "$MDIR/" 2>/dev/null || true
+          # tensor-presence witness (Q8): filename -> size for every vindex file
+          python3 -c "import json,os,sys; d=sys.argv[1]; print(json.dumps({f: os.path.getsize(os.path.join(d,f)) for f in os.listdir(d)}) if os.path.isdir(d) else '{}')" \
+            "$VINDEX" > "$MDIR/listing.json" 2>/dev/null || echo '{}' > "$MDIR/listing.json"
+
+      - name: Round-trip compile (${{ matrix.leg.name }})
+        if: ${{ matrix.leg.roundtrip == true }}
+        continue-on-error: true
+        run: |
+          BASE_DIR=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('${HF}'))")
+          python3 scripts/lql_matrix/roundtrip_compile.py --name "$NAME" --hf "$HF" \
+            --vindex "out/${NAME}.vindex" --larql-bin ./bin/larql --out-root "$(mktemp -d)" \
+            --produce-out "out/roundtrip-produce-${NAME}.jsonl" --diff-out "out/roundtrip-${NAME}.json"
+
+      - name: Upload round-trip results
+        if: ${{ always() && matrix.leg.roundtrip == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-${{ matrix.leg.name }}
+          retention-days: 1
+          path: |
+            out/roundtrip-${{ matrix.leg.name }}.json
+            out/roundtrip-produce-${{ matrix.leg.name }}.jsonl
+
+      - name: Run LQL command corpus (${{ matrix.leg.name }})
+        run: |
+          VINDEX="out/${NAME}.vindex"
+          LARQL_BIN=./bin/larql \
+          MODEL_ID="${CORPUS_MODEL}" \
+          TMPROOT="$(mktemp -d)" \
+          CELL_TIMEOUT=900 \
+          scripts/lql_matrix/run_matrix.sh \
+            "${NAME}" "$VINDEX" scripts/lql_matrix/commands.jsonl "out/results-${NAME}.jsonl"
+
+      - name: Upload leg results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.leg.name }}
+          retention-days: 1
+          path: |
+            out/results-${{ matrix.leg.name }}.jsonl
+            out/produce-${{ matrix.leg.name }}.json
+            out/produce-${{ matrix.leg.name }}.err
+            out/descriptor-${{ matrix.leg.name }}.json
+            out/manifest-${{ matrix.leg.name }}/
+            out/cells/
+
+  # Model-level lifecycle cells (EXTRACT MODEL / USE MODEL) don't read a produced
+  # vindex — run them ONCE per model instead of once per leg (removes the biggest
+  # duplicated extraction: the per-leg re-extract). Separate `lifecycle-*` artifacts
+  # so the conformance/aggregate `results-*` globs ignore them.
+  model-lifecycle:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        model:
+          # TEMPORARY (round-trip CI validation): only smol135 is exercised for
+          # the model-lifecycle corpus. Uncomment the others to restore full coverage.
+          - { id: smol135,   hf: "HuggingFaceTB/SmolLM2-135M-Instruct" }
+          # - { id: qwen05,    hf: "Qwen/Qwen2.5-Coder-0.5B-Instruct" }
+          # - { id: smol360,   hf: "HuggingFaceTB/SmolLM2-360M-Instruct" }
+          # - { id: qwen15,    hf: "Qwen/Qwen2.5-1.5B-Instruct" }
+          # - { id: granite1b, hf: "ibm-granite/granite-3.0-1b-a400m-instruct" }
+          # - { id: bitnet2b,  hf: "microsoft/bitnet-b1.58-2B-4T" }
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download larql binary
+        uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - name: Prep
+        run: |
+          chmod +x bin/larql scripts/lql_matrix/run_matrix.sh
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev time
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Pre-download snapshot (${{ matrix.model.hf }})
+        run: |
+          python -m pip install --quiet huggingface_hub
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('${{ matrix.model.hf }}')"
+      - name: Run model-level lifecycle corpus (${{ matrix.model.id }})
+        run: |
+          mkdir -p out
+          LARQL_BIN=./bin/larql \
+          MODEL_ID="${{ matrix.model.hf }}" \
+          TMPROOT="$(mktemp -d)" \
+          CELL_TIMEOUT=900 \
+          scripts/lql_matrix/run_matrix.sh \
+            "${{ matrix.model.id }}-lifecycle" "unused.vindex" \
+            scripts/lql_matrix/commands-model.jsonl "out/lifecycle-${{ matrix.model.id }}.jsonl"
+      - name: Upload lifecycle results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-${{ matrix.model.id }}
+          retention-days: 1
+          path: |
+            out/lifecycle-${{ matrix.model.id }}.jsonl
+            out/cells/
+
+  aggregate:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Build matrix report
+        run: |
+          cp artifacts/results-*/descriptor-*.json . 2>/dev/null || true
+          cp artifacts/results-*/produce-*.json . 2>/dev/null || true
+          python3 scripts/lql_matrix/aggregate.py "artifacts/results-*/results-*.jsonl" lql-matrix.md
+          cat lql-matrix.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload combined matrix
+        uses: actions/upload-artifact@v4
+        with:
+          name: lql-matrix
+          retention-days: 1
+          path: lql-matrix.md
+
+  conformance:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Run conformance oracle
+        env:
+          STRICT_INPUT: ${{ github.event.inputs.strict }}
+        run: |
+          STRICT=""
+          [ "$STRICT_INPUT" = "true" ] && STRICT="--strict"
+          python3 scripts/lql_matrix/conformance.py \
+            "artifacts/results-*/results-*.jsonl" conformance.md conformance.json $STRICT
+          echo "=== conformance.md ==="; cat conformance.md
+          cat conformance.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload conformance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance
+          retention-days: 1
+          path: |
+            conformance.md
+            conformance.json
+
+  roundtrip:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Build round-trip catalogue
+        run: |
+          python3 scripts/lql_matrix/roundtrip_aggregate.py \
+            "artifacts/roundtrip-*/roundtrip-*.json" roundtrip-catalogue.json roundtrip-catalogue.md
+          cat roundtrip-catalogue.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload round-trip catalogue
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-catalogue
+          retention-days: 1
+          path: |
+            roundtrip-catalogue.json
+            roundtrip-catalogue.md
+
+  inventory:
+    needs: [matrix, conformance]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Tensor-presence + Q8 resolution
+        run: |
+          python3 scripts/lql_matrix/tensor_presence.py \
+            "artifacts/results-*/manifest-*/listing.json" presence.json
+          python3 - <<'PY'
+          import json, glob, sys
+          sys.path.insert(0, "scripts/lql_matrix")
+          import tensor_presence as T
+          pres = json.load(open("presence.json"))
+          cj = glob.glob("artifacts/conformance/conformance.json")
+          violations = json.load(open(cj[0]))["violations"] if cj else None
+          res = T.render_q8(pres, violations, native_only=True)
+          json.dump(res, open("q8.json", "w"), indent=2)
+          md = T.q8_markdown(res)
+          open("q8.md", "w", encoding="utf-8").write(md)
+          print(md)
+          PY
+          cat q8.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inventory
+          retention-days: 1
+          path: |
+            presence.json
+            q8.json
+            q8.md
