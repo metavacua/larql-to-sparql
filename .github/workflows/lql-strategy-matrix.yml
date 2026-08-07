@@ -12,8 +12,11 @@
 name: lql-strategy-matrix
 
 on:
+  # Feature branches trigger via their pull_request only. Listing a branch
+  # here *and* targeting `main` below fires the whole matrix twice per push,
+  # on two events that the concurrency group cannot dedupe (see below).
   push:
-    branches: [lql-strategy-matrix, xml-groundwork/fidelity-measure]
+    branches: [lql-strategy-matrix]
   pull_request:
     branches: [lql-strategy-matrix, main]
   workflow_dispatch:
@@ -28,8 +31,17 @@ on:
 permissions:
   contents: read
 
+# `github.ref` is refs/heads/<branch> on push but refs/pull/<n>/merge on
+# pull_request, so keying on it puts the two events in different groups and a
+# branch with an open PR runs the whole matrix twice. `head_ref || ref_name`
+# normalises both to the branch name, so one branch means one group.
+#
+# cancel-in-progress stays false: a leg that dies mid-run loses its measured
+# rows, and this workflow is a discovery experiment whose output is the
+# deliverable — unlike the per-crate gates, where a superseded PR run is
+# simply stale and worth cancelling.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: false
 
 env:
