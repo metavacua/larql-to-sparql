@@ -125,7 +125,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/huggingface
-          key: hf-snapshot-${{ matrix.repo.slug }}-v1
+          key: hf-snapshot-${{ matrix.repo.slug }}-v2
       - name: Fetch (${{ matrix.repo.repo }})
         run: |
           python -m pip install --quiet huggingface_hub
@@ -268,7 +268,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/huggingface
-          key: hf-snapshot-${{ steps.slug.outputs.slug }}-v1
+          key: hf-snapshot-${{ steps.slug.outputs.slug }}-v2
       - name: Resolve source snapshot (${{ matrix.leg.hf }})
         run: |
           python -m pip install --quiet huggingface_hub numpy
@@ -444,7 +444,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/huggingface
-          key: hf-snapshot-${{ steps.slug.outputs.slug }}-v1
+          key: hf-snapshot-${{ steps.slug.outputs.slug }}-v2
       - name: Resolve snapshot (${{ matrix.model.hf }})
         run: |
           python -m pip install --quiet huggingface_hub
