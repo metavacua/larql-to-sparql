@@ -294,7 +294,7 @@ recipe|recipe validate $TMP/recipe.yaml
 card|card render $TMP/recipe.yaml
 dev|dev
 repl|repl
-lql|lql SHOW MODELS;
+lql|lql "SHOW MODELS;"
 query|query $TMP/graph.json --entity France
 describe|describe $TMP/graph.json France
 stats|stats $TMP/graph.json
