@@ -622,7 +622,9 @@ jobs:
           echo "descriptor:"
           if [ -s "out/descriptor-${NAME}.json" ]; then cat "out/descriptor-${NAME}.json"
           else echo "(descriptor wrote nothing — see descriptor-${NAME}.err)"; fi
-          [ -s "out/descriptor-${NAME}.err" ] && { echo "descriptor stderr:"; cat "out/descriptor-${NAME}.err"; }
+          if [ -s "out/descriptor-${NAME}.err" ]; then
+            echo "descriptor stderr:"; cat "out/descriptor-${NAME}.err"
+          fi
 
           # weight-family inventory
           MDIR="out/manifest-${NAME}"; mkdir -p "$MDIR"
@@ -637,7 +639,14 @@ jobs:
           # "the lister crashed".
           python3 -c "import json,os,sys; d=sys.argv[1]; print(json.dumps({f: os.path.getsize(os.path.join(d,f)) for f in os.listdir(d)}))" \
             "$VINDEX" > "$MDIR/listing.json" 2> "$MDIR/listing.err"
-          [ -s "$MDIR/listing.err" ] && { echo "listing stderr:"; cat "$MDIR/listing.err"; }
+          # `if`, not `[ -s ... ] && {...}`. Under `bash -e {0}` a step's exit
+          # status is its LAST command's, so the && form failed the step
+          # whenever the file was EMPTY — i.e. whenever nothing had gone
+          # wrong. All 21 legs of run 31267330863 died on it. An `if` whose
+          # condition is false returns 0.
+          if [ -s "$MDIR/listing.err" ]; then
+            echo "listing stderr:"; cat "$MDIR/listing.err"
+          fi
 
       - name: Round-trip compile (${{ matrix.leg.name }})
         if: ${{ matrix.leg.roundtrip == true }}
