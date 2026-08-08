@@ -203,9 +203,29 @@ after the `build:` job:
   # a pty.fork read loop. Nothing here asserts. It runs things and uploads what
   # they printed.
   probe:
-    needs: build
+    needs: [gate, build]
+    if: needs.gate.outputs.probe == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # We are not testing HuggingFace. `pull`, `model pull`, `publish` and
+      # `hf upload` would otherwise put HF's availability, rate limiter and
+      # auth into the measurement, none of which is larql's surface. Pointing
+      # the hub at a closed port makes them fail at the network boundary in
+      # milliseconds, so what the capture shows is how the CLI parsed the argv
+      # and what it did next — which is the whole question this probe asks.
+      #
+      # This is the in-tree mechanism, not a trick: larql-vindex honours
+      # HF_ENDPOINT in format/huggingface/download/mod.rs:283, and its own
+      # test at :576 points it at a non-existent server for exactly this.
+      # hf-hub 0.5 reads it too (api/mod.rs:14).
+      #
+      # KNOWN ESCAPE: k3_ledger/fetch.rs:36 hardcodes https://huggingface.co
+      # and ignores HF_ENDPOINT. `k3-ledger report` should die at clap first
+      # (`report` is not among its subcommands), but if a capture shows hub
+      # traffic anyway, that is a larql finding — a hardcoded URL inconsistent
+      # with the rest of the tree — and NOT a harness defect to route around.
+      HF_ENDPOINT: http://127.0.0.1:1
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
@@ -219,28 +239,55 @@ after the `build:` job:
           mkdir -p probe
       - name: REPL — piped stdin
         run: |
+          # GitHub's default shell is `bash --noprofile --norc -eo pipefail`.
+          # The `set -uo pipefail` in the later steps does NOT clear -e. Left
+          # alone, the first nonzero exit kills the step and every capture
+          # after it is lost — the harness would destroy precisely the data it
+          # exists to collect, and a probe whose whole purpose is to provoke
+          # failures fails on the first one. `|| true` is not the fix (it
+          # converts a failure into a success value); `continue-on-error` is
+          # not either (-e still aborts the script inside the step, it just
+          # paints the job green). Turn -e off and record the code.
+          set +e
           printf 'SHOW MODELS;\nSTATS;\nexit\n' \
             | timeout 60 ./bin/larql repl > probe/repl-pipe.out 2> probe/repl-pipe.err
-          echo "exit=$?" >> probe/repl-pipe.err
+          # BOTH halves, separately. Under pipefail a pipeline's $? is whichever
+          # member failed. If larql exits without draining stdin — plausible,
+          # and the exact unknown this probe exists to settle — printf takes
+          # SIGPIPE and $? is 141 for PRINTF, which reads as larql having died
+          # on a signal. One lying exit code already cost this project three
+          # reversed claims about COMPILE; do not let the probe mint another.
+          echo "printf_exit=${PIPESTATUS[0]} larql_exit=${PIPESTATUS[1]}" \
+            >> probe/repl-pipe.err
       - name: REPL — pty via script(1)
         run: |
+          set +e
           printf 'SHOW MODELS;\nSTATS;\nexit\n' \
             | timeout 60 script -q -e -c './bin/larql repl' probe/repl-script.merged \
               > probe/repl-script.out 2> probe/repl-script.err
-          echo "exit=$?" >> probe/repl-script.err
+          # script -e propagates the child's exit, so PIPESTATUS[1] is larql's.
+          echo "printf_exit=${PIPESTATUS[0]} script_exit=${PIPESTATUS[1]}" \
+            >> probe/repl-script.err
       - name: REPL — pty via probe_pty.py (the loop Task 4 will use)
         run: |
+          set +e
           printf 'SHOW MODELS;\nSTATS;\nexit\n' \
             | python3 scripts/lql_matrix/probe_pty.py probe/repl-pty.merged \
               ./bin/larql repl 2> probe/repl-pty.err
+          # probe_pty.py already prints the child's `exit=` to its own stderr;
+          # this records whether the DRIVER itself survived, which is a
+          # different question and the one Task 4 depends on.
+          echo "printf_exit=${PIPESTATUS[0]} driver_exit=${PIPESTATUS[1]}" \
+            >> probe/repl-pty.err
       - name: One-shot lql, for comparison
         run: |
+          set +e
           timeout 60 ./bin/larql lql 'SHOW MODELS; STATS;' \
             > probe/lql.out 2> probe/lql.err
           echo "exit=$?" >> probe/lql.err
       - name: All 38 subcommands — --help
         run: |
-          set -uo pipefail
+          set +e -u
           for c in run chat pull model link list show slice publish rm bench \
                    dec-bench k3-ledger accuracy shannon serve repl lql extract \
                    extract-index build compile convert hf verify diag parity \
@@ -252,64 +299,79 @@ after the `build:` job:
           cat probe/help.index
       - name: All 38 subcommands — the guessed real invocations
         run: |
-          set -uo pipefail
+          set +e -u
           TMP=$(mktemp -d)
-          # No vindex exists in this job. That is deliberate: it separates
-          # "the argument shape is wrong" from "the input was missing", and
-          # both answers are needed before Task 7 writes the corpus.
-          while IFS= read -r line; do
-            [ -z "$line" ] && continue
+          # Neither a vindex nor a reachable hub exists in this job. Both
+          # absences are deliberate and they do the same work: they separate
+          # "the argument shape is wrong" from "the input was missing" and
+          # from "the network answered", and all three answers are needed
+          # before Task 7 writes the corpus. See the HF_ENDPOINT note on the
+          # job for why the hub is closed rather than warm.
+          # A bash array, NOT a heredoc. A heredoc body has to sit at column 0
+          # and its terminator likewise, and column 0 ends a YAML block scalar
+          # — the workflow would not parse. Every line here stays inside the
+          # scalar's indentation.
+          CMDS=(
+            "extract|extract $TMP/nomodel -o $TMP/v.vindex --level all"
+            "extract-index|extract-index $TMP/nomodel -o $TMP/v2.vindex --level browse"
+            "convert|convert quantize q4k --input $TMP/v.vindex --output $TMP/q.vindex"
+            "build|build $TMP/Vindexfile -o $TMP/b.vindex"
+            "slice|slice $TMP/v.vindex --output $TMP/s.vindex --kind browse"
+            "compile|compile --base $TMP/nomodel --vindex $TMP/e.vlp --output $TMP/c"
+            "link|link $TMP/v.vindex"
+            "pull|pull chrishayuk/gemma-3-4b-it-vindex"
+            "model|model pull HuggingFaceTB/SmolLM2-135M"
+            "list|list"
+            "show|show $TMP/v.vindex"
+            "verify|verify $TMP/v.vindex"
+            "diag|diag $TMP/v.vindex"
+            "capabilities|capabilities"
+            "run|run $TMP/v.vindex --prompt hi --max-tokens 2"
+            "chat|chat $TMP/v.vindex --max-tokens 1"
+            "serve|serve $TMP/v.vindex --port 18080"
+            "bench|bench $TMP/v.vindex --tokens 2"
+            "dec-bench|dec-bench"
+            "k3-ledger|k3-ledger report"
+            "accuracy|accuracy $TMP/v.vindex"
+            "shannon|shannon score $TMP/v.vindex"
+            "parity|parity $TMP/v.vindex"
+            "moe-locality|moe-locality $TMP/v.vindex"
+            "publish|publish $TMP/v.vindex --repo example/does-not-exist"
+            "hf|hf upload $TMP/v.vindex --repo example/does-not-exist"
+            "recipe|recipe validate $TMP/recipe.yaml"
+            "card|card render $TMP/recipe.yaml"
+            "dev|dev"
+            "repl|repl"
+            "lql|lql \"SHOW MODELS;\""
+            "query|query $TMP/graph.json --entity France"
+            "describe|describe $TMP/graph.json France"
+            "stats|stats $TMP/graph.json"
+            "validate|validate $TMP/graph.json"
+            "merge|merge $TMP/graph.json $TMP/graph.json -o $TMP/m.json"
+            "filter|filter $TMP/graph.json --min-confidence 0.5 -o $TMP/f.json"
+            "rm|rm $TMP/v.vindex"
+          )
+          for line in "${CMDS[@]}"; do
             id=${line%%|*}; rest=${line#*|}
+            # eval so the row's own quoting survives into argv: the lql row
+            # must arrive as TWO arguments (`lql` and `SHOW MODELS;`), and an
+            # unquoted split would make it three and mask the real behaviour.
             eval "set -- $rest"
             timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
-            echo "$id exit=$? argv=[$rest]" >> probe/cmd.index
-          done <<EOF
-extract|extract $TMP/nomodel -o $TMP/v.vindex --level all
-extract-index|extract-index $TMP/nomodel -o $TMP/v2.vindex --level browse
-convert|convert quantize q4k --input $TMP/v.vindex --output $TMP/q.vindex
-build|build $TMP/Vindexfile -o $TMP/b.vindex
-slice|slice $TMP/v.vindex --output $TMP/s.vindex --kind browse
-compile|compile --base $TMP/nomodel --vindex $TMP/e.vlp --output $TMP/c
-link|link $TMP/v.vindex
-pull|pull chrishayuk/gemma-3-4b-it-vindex
-model|model pull HuggingFaceTB/SmolLM2-135M
-list|list
-show|show $TMP/v.vindex
-verify|verify $TMP/v.vindex
-diag|diag $TMP/v.vindex
-capabilities|capabilities
-run|run $TMP/v.vindex --prompt hi --max-tokens 2
-chat|chat $TMP/v.vindex --max-tokens 1
-serve|serve $TMP/v.vindex --port 18080
-bench|bench $TMP/v.vindex --tokens 2
-dec-bench|dec-bench
-k3-ledger|k3-ledger report
-accuracy|accuracy $TMP/v.vindex
-shannon|shannon score $TMP/v.vindex
-parity|parity $TMP/v.vindex
-moe-locality|moe-locality $TMP/v.vindex
-publish|publish $TMP/v.vindex --repo example/does-not-exist
-hf|hf upload $TMP/v.vindex --repo example/does-not-exist
-recipe|recipe validate $TMP/recipe.yaml
-card|card render $TMP/recipe.yaml
-dev|dev
-repl|repl
-lql|lql "SHOW MODELS;"
-query|query $TMP/graph.json --entity France
-describe|describe $TMP/graph.json France
-stats|stats $TMP/graph.json
-validate|validate $TMP/graph.json
-merge|merge $TMP/graph.json $TMP/graph.json -o $TMP/m.json
-filter|filter $TMP/graph.json --min-confidence 0.5 -o $TMP/f.json
-rm|rm $TMP/v.vindex
-EOF
+            echo "$id exit=$? argc=$# argv=[$rest]" >> probe/cmd.index
+          done
           cat probe/cmd.index
       - name: Show every capture
         if: always()
         run: |
+          # set +e rather than `|| true` on the head: same protection against
+          # -e killing the listing part-way, without writing a success value
+          # over a failure anywhere. This step only echoes; the artifact below
+          # is the actual record.
+          set +e
           for f in probe/*; do
             echo "───── $f ($(wc -c < "$f") bytes)"
-            head -40 "$f" || true
+            head -40 "$f"
           done
       - uses: actions/upload-artifact@v4
         if: always()
@@ -322,6 +384,14 @@ EOF
 The `serve`, `chat` and `repl` rows have no terminating input and are expected
 to consume their 60s timeout. That is recorded, not avoided — Task 7 needs to
 know which subcommands do not self-terminate.
+
+The `pull`, `model pull`, `publish` and `hf upload` rows are expected to fail
+at the network boundary against the closed `HF_ENDPOINT` port, in milliseconds.
+That is the intended result, not a degraded one: what Task 7 needs from them is
+whether clap accepted the argv and how far `run()` got, and a real fetch would
+answer neither while putting HF's rate limiter into the measurement. Whether
+larql's *downloading* works is a different question, already covered by the
+`prefetch`-warmed legs, and is not this probe's subject.
 
 - [ ] **Step 4: Verify the workflow parses**
 
