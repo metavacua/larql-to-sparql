@@ -15,8 +15,13 @@ Design (decoupled axes — see docs/superpowers + tracker discussion):
     `--keep-quant`. GGUF legs carry `tokenizer_repo` so the workflow can stage the
     base repo's tokenizer.json beside the .gguf (the -gguf repo ships none; #180/#277).
 
-Leg fields: name, hf, corpus_model, source_kind, op, level, flags, expect_quant,
+Leg fields: name, hf, corpus_model, source_kind, op, level, flags,
 tokenizer_repo (only set for gguf legs).
+
+No `expect_quant`: the harness records what a recipe produced, never what it was
+supposed to produce. An expectation in the leg table is what made descriptor.py
+emit `quant_match`, i.e. a verdict — and a stale expectation then reads as a
+product defect.
 """
 import json
 import os
@@ -36,12 +41,12 @@ LEVELS = ["browse", "attention", "inference", "all"]
 GGUF = [("bitnetgguf", "microsoft/bitnet-b1.58-2B-4T-gguf", "microsoft/bitnet-b1.58-2B-4T")]
 
 
-def leg(name, hf, op, level="all", flags="", expect_quant="none",
+def leg(name, hf, op, level="all", flags="",
         source_kind="safetensors", corpus_model=None, tokenizer_repo="",
         roundtrip=False, lql_with=""):
     return {"name": name, "hf": hf, "corpus_model": corpus_model or hf,
             "source_kind": source_kind, "op": op, "level": level, "flags": flags,
-            "expect_quant": expect_quant, "tokenizer_repo": tokenizer_repo,
+            "tokenizer_repo": tokenizer_repo,
             "roundtrip": roundtrip, "lql_with": lql_with}
 
 
@@ -111,28 +116,27 @@ def build_legs():
     #    q4k requantize per model (arch × quant coverage; re-catches the MoE panic #273).
     for mid, hf in SAFETENSORS:
         legs.append(leg(f"{mid}.xform.q4k", hf, "extract", level="all",
-                        flags="--quant q4k", expect_quant="q4k"))
+                        flags="--quant q4k"))
     #    level-invariance sentinel: one q4k at a non-all level, asserted ≡ q4k.all (#275).
     legs.append(leg("qwen05.xform.q4k-sentinel-browse",
                     "Qwen/Qwen2.5-Coder-0.5B-Instruct", "extract",
-                    level="browse", flags="--quant q4k", expect_quant="q4k"))
+                    level="browse", flags="--quant q4k"))
     #    post-hoc requant invariants: quantize q4k (assert ≡ inline) + fp4 (hidden%256==0).
     legs.append(leg("qwen05.xform.posthoc-q4k", "Qwen/Qwen2.5-Coder-0.5B-Instruct",
-                    "quantize-q4k", level="inference", expect_quant="q4k"))
+                    "quantize-q4k", level="inference"))
     legs.append(leg("qwen15.xform.fp4", "Qwen/Qwen2.5-1.5B-Instruct",
-                    "quantize-fp4", level="inference", expect_quant="fp4"))  # 1536 % 256 == 0
+                    "quantize-fp4", level="inference"))  # 1536 % 256 == 0
     #    f32 side-channel path coverage: one leg on a small model.
     legs.append(leg("smol135.xform.f32", "HuggingFaceTB/SmolLM2-135M-Instruct",
-                    "extract", level="all", flags="--f32", expect_quant="none"))
+                    "extract", level="all", flags="--f32"))
 
     # 3. GGUF / BitNet ternary — tokenizer staged from the base repo (fixes the #180 wall).
     for mid, ghf, tok in GGUF:
         for lv in ["inference", "all"]:
             legs.append(leg(f"{mid}.ternary.{lv}", ghf, "gguf-to-vindex", level=lv,
-                            flags="--keep-quant", expect_quant="ternary",
+                            flags="--keep-quant",
                             source_kind="gguf", corpus_model=tok, tokenizer_repo=tok))
-        legs.append(leg(f"{mid}.dequant.all", ghf, "gguf-to-vindex", level="all",
-                        expect_quant="none", source_kind="gguf",
+        legs.append(leg(f"{mid}.dequant.all", ghf, "gguf-to-vindex", level="all", source_kind="gguf",
                         corpus_model=tok, tokenizer_repo=tok))
 
     return legs

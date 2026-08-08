@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
-"""LQL strategy-matrix runner — EMPIRICAL, NOT a validation suite.
+"""LQL strategy-matrix runner — runs the commands and reports what happened.
 
-Runs every LQL command in a corpus against one already-extracted vindex and
-records RAW MECHANICAL OUTCOMES ONLY per cell: exit code, coarse bucket
-(ok / err / timeout / crash), wall duration, peak RSS, and an *error-text
-signal* (did stdout/stderr contain an error/refusal even though the process
-exited 0 — `larql lql` exits 0 on in-band errors). It makes NO judgement about
-whether output is "correct"; a break is data to read. A failing cell never
-aborts the run.
+Runs every LQL command in a corpus against one already-extracted vindex.
+The COMPLETE stdout/stderr of every cell goes to <out_dir>/cells/ and is
+uploaded as an artifact. That is the result. Reading it is a separate activity.
+
+This driver derives NOTHING from the output. It previously emitted a coarse
+bucket, an error-text boolean, a first-error line, and 800-codepoint head/tail
+snapshots — and every downstream consumer read those instead of the captures,
+which is how a cell whose output said `failed to write model` came to be
+reported as a `BEGIN PATCH` parse error: `err_line` takes the FIRST error in a
+batch, and a corpus cell is a batch of statements. Across a run, 69% of the raw
+bytes never reached the rows at all, to save 1.3 MiB out of 1.9 MiB total.
+
+The JSONL row is now an INDEX into the captures, not a description of them:
+which cell ran, what LQL it ran, the process exit code, how long it took, how
+much memory it used, how many bytes it wrote. Every one of those is a fact
+about the process, not an opinion about the output.
 
 I/O practices (deliberate):
-  * FULL stdout/stderr of every cell are written to per-cell files under
-    <out_dir>/cells/ and kept for artifact upload — nothing is captured then
-    discarded, and a panic's backtrace TAIL survives.
-  * Stream *content* never transits the shell argv. This driver reads the
-    captured files itself (utf-8, errors="replace") and truncates by CODEPOINT,
-    so a multibyte boundary can never corrupt a row.
+  * Stream *content* never transits the shell argv, and is never truncated.
   * One process orchestrates each cell via an argv list (no shell, no
     injection); WRAP is shlex-split so containment prefixes compose cleanly.
+  * A failing cell never aborts the run.
 
 Usage:   run_matrix.py <level> <vindex_dir> <corpus.jsonl> <out.jsonl>
 Env:     LARQL_BIN (default target/release/larql), MODEL_ID, TMPROOT,
@@ -35,29 +40,7 @@ import sys
 import tempfile
 import time
 
-# larql prints "Error: …" for in-band failures and Rust prints "… panicked at …";
-# case-sensitive on purpose — matches what larql/Rust actually emit, avoids
-# flagging benign prose that merely contains the word "error".
-ERR_RE = re.compile(r"Error:|panicked|Parse error|note: run with RUST_BACKTRACE")
 RSS_RE = re.compile(r"Maximum resident set size.*?:\s*(\d+)")
-CLIP = 800  # codepoint budget for head/tail snapshots in the JSONL
-
-
-def bucket_for(rc: int) -> str:
-    if rc == 0:
-        return "ok"
-    if rc == 124:
-        return "timeout"
-    if rc in (137, 139, 134) or (rc < 0 and -rc in (9, 11, 6)):
-        return "crash"  # SIGKILL(OOM)/SIGSEGV/SIGABRT
-    return "err"
-
-
-def first_error_line(text: str) -> str:
-    for ln in text.splitlines():
-        if ERR_RE.search(ln):
-            return ln.strip()[:200]
-    return ""
 
 
 def main() -> None:
@@ -118,14 +101,6 @@ def main() -> None:
             with outf.open("wb") as so, errf.open("wb") as se:
                 rc = subprocess.run(argv, stdout=so, stderr=se).returncode
             dur_ms = int((time.monotonic() - t0) * 1000)
-            bucket = bucket_for(rc)
-
-            # read the FULL captured streams back (utf-8, tolerant, codepoint-safe)
-            so_b, se_b = outf.read_bytes(), errf.read_bytes()
-            so_txt = so_b.decode("utf-8", "replace")
-            se_txt = se_b.decode("utf-8", "replace")
-            combined = so_txt + "\n" + se_txt
-            err_signal = 1 if ERR_RE.search(combined) else 0
 
             peak_rss_kb = ""
             if time_bin and timef.exists():
@@ -134,21 +109,24 @@ def main() -> None:
                     peak_rss_kb = int(m.group(1))
                 timef.unlink()  # RSS captured; keep only .out/.err for artifacts
 
+            # An INDEX into the captures, not a description of them. `stdout`
+            # and `stderr` name the files holding the complete output; nothing
+            # here is derived from their contents.
             row = {
                 "level": level, "id": cid, "cat": cat, "lql": lql,
-                "exit_code": rc, "bucket": bucket, "duration_ms": dur_ms,
-                "peak_rss_kb": peak_rss_kb, "err_signal": err_signal,
-                "err_line": first_error_line(combined) if err_signal else "",
-                "stdout_bytes": len(so_b), "stderr_bytes": len(se_b),
-                "stdout_head": so_txt[:CLIP], "stderr_head": se_txt[:CLIP],
-                "stderr_tail": se_txt[-CLIP:],
+                "exit_code": rc, "duration_ms": dur_ms,
+                "peak_rss_kb": peak_rss_kb,
+                "stdout": str(outf.relative_to(out_path.parent)),
+                "stderr": str(errf.relative_to(out_path.parent)),
+                "stdout_bytes": outf.stat().st_size,
+                "stderr_bytes": errf.stat().st_size,
             }
             with out_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
 
-            flag = " ERR*" if err_signal else ""
-            print(f"[{level}] {cid} -> exit={rc} {bucket}{flag} "
-                  f"{dur_ms}ms rss={peak_rss_kb}", file=sys.stderr)
+            print(f"[{level}] {cid} -> exit={rc} {dur_ms}ms "
+                  f"rss={peak_rss_kb} out={row['stdout_bytes']}B "
+                  f"err={row['stderr_bytes']}B", file=sys.stderr)
             n += 1
 
     print(f"wrote {n} rows + provenance to {out}", file=sys.stderr)

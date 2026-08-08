@@ -37,22 +37,25 @@ workflow matrix later.
 The runner is `run_matrix.py` (invoked via the `run_matrix.sh` shim). It emits a
 `{"type":"meta",…}` **provenance** row per level (commit, `larql --version`,
 model, runner OS, `RUST_BACKTRACE`, timestamp), then one row per cell with:
-exact substituted command, `exit_code`, coarse **mechanical** bucket,
-`duration_ms`, `peak_rss_kb` (via `/usr/bin/time -v`), `stdout_bytes`/
-`stderr_bytes`, an 800-char head of each stream **and** an 800-char `stderr_tail`
-(panics/backtraces live at the tail), plus an **error-text overlay**
-(`err_signal`/`err_line`). The **full** stdout/stderr of every cell are written
-to `<out_dir>/cells/<level>.<id>.{out,err}` and kept as artifacts — nothing is
-captured then discarded.
+exact substituted command, `exit_code`, `duration_ms`, `peak_rss_kb` (via
+`/usr/bin/time -v`), `stdout_bytes`/`stderr_bytes`, and the `stdout`/`stderr`
+paths. The **full** stdout/stderr of every cell are written to
+`<out_dir>/cells/<level>.<id>.{out,err}` and kept as artifacts — nothing is
+captured then discarded, and nothing is summarised.
 
-Buckets: `ok` (exit 0) · `err<N>` (non-zero N) · `timeout` (per-cell cap) ·
-`crash` (SIGKILL-OOM/SIGSEGV/SIGABRT = 137/139/134).
+**The harness reports; it does not judge.** There is no bucket, no
+error-signal, no first-error line, no pass/fail, and no conformance oracle.
+Every cell's COMPLETE stdout/stderr is written under `cells/` and uploaded; the
+JSONL row is an index into those files (which cell, what LQL, exit code,
+duration, RSS, byte counts) and derives nothing from their contents.
 
-`larql lql` exits `0` even on an in-band error, so `ok` ≠ "did something
-meaningful". `err_signal=1` marks a cell whose stdout/stderr carried an
-`Error:`/`panicked`/`Parse error` **despite** exit 0 (a masked error or graceful
-refusal); `aggregate.py` renders it as ⚠️ vs a clean ✅. We surface this, we do
-not "correct" it.
+This matters because `larql lql` exits `0` on an in-band error, so no single
+derived field can describe a cell — and a corpus cell is a *batch* of
+statements, so "the error" is ambiguous by construction. A previous version
+emitted `err_line` = the FIRST error in the batch, which reported cells whose
+output said `failed to write model` as `BEGIN PATCH` parse errors, and
+truncated heads at 800 codepoints, dropping 69% of the raw bytes to save 1.3
+MiB out of 1.9 MiB. Read the captures.
 
 I/O practices: stream content never transits the shell argv (the driver reads
 the captured files itself, utf-8, truncating by codepoint); `timeout
@@ -65,11 +68,10 @@ the captured files itself, utf-8, truncating by codepoint); `timeout
 | `commands.jsonl` | the **vindex-level** corpus (runs per leg against its produced vindex); `{{VINDEX}}`/`{{TMP}}` placeholders |
 | `commands-model.jsonl` | the **model-level** corpus (`EXTRACT MODEL` / `USE MODEL`) — run once per model by the `model-lifecycle` job, not per leg |
 | `gen_legs.py` | enumerates the **legs** (native level grid + one-off transformation/encoding recipes) as JSON — the matrix columns |
-| `descriptor.py` | reads a produced vindex's `index.json` → `(family, dtype, quant, …)` vs the leg's expected quant |
-| `run_matrix.py` | the runner — orchestrates each cell, captures full streams + RSS + error-signal → JSONL |
+| `descriptor.py` | reads a produced vindex's `index.json` → `(family, dtype, quant, layers, …)`; reports only, compares against nothing |
+| `run_matrix.py` | the runner — orchestrates each cell, writes full streams to `cells/`, emits an index row |
 | `run_matrix.sh` | thin shim → `run_matrix.py` (stable `<leg> <vindex> <corpus> <out>` API) |
-| `aggregate.py` | merges per-leg JSONL → `lql-matrix.md` (descriptor conformance, per-leg tally, resource, failures detail) |
-| `../../.github/workflows/lql-strategy-matrix.yml` | the CI matrix (plan legs → build once → produce vindex per leg → run corpus → aggregate → 24h artifacts + job summary) |
+| `../../.github/workflows/lql-strategy-matrix.yml` | the CI matrix (plan legs → prefetch models once → build once → produce vindex per leg → run corpus → upload raw captures) |
 | `../../.github/workflows/lql-matrix-smoke.yml` | fast stub-driven smoke of the harness itself on a runner (no build/model) |
 
 ## Legs (decoupled axes)
@@ -101,7 +103,6 @@ LARQL_BIN=target/release/larql \
 WRAP="larql-probe safe --mem 2500 --" \
 scripts/lql_matrix/run_matrix.sh browse <some.vindex> \
   scripts/lql_matrix/commands.jsonl out/results-browse.jsonl
-python3 scripts/lql_matrix/aggregate.py "out/results-*.jsonl" lql-matrix.md
 ```
 
 On CI, `WRAP` is empty (the runner is already isolated) and larql runs directly.
