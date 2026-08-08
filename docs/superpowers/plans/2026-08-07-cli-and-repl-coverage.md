@@ -132,7 +132,7 @@ work built on top of it.
 > Task 7's argv corrections for the 10 wrong rows are tabulated in that
 > diagnosis. Piped stdin executes statements correctly and needs no change.
 
-- [ ] **Step 1: Write the minimal pty probe**
+- [x] **Step 1: Write the minimal pty probe**
 
 Create `scripts/lql_matrix/probe_pty.py`:
 
@@ -190,7 +190,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Verify the probe locally against a known-tty program**
+- [x] **Step 2: Verify the probe locally against a known-tty program**
 
 Run:
 ```bash
@@ -203,7 +203,7 @@ Expected: `TTY_YES` and `GOT:hello`, and the command returns rather than hanging
 If it hangs, fix the loop **now** — this is the cheapest place it will ever be
 diagnosed.
 
-- [ ] **Step 3: Add the probe job**
+- [x] **Step 3: Add the probe job**
 
 In `.github/workflows/lql-strategy-matrix.yml`, insert this job immediately
 after the `build:` job:
@@ -406,7 +406,7 @@ answer neither while putting HF's rate limiter into the measurement. Whether
 larql's *downloading* works is a different question, already covered by the
 `prefetch`-warmed legs, and is not this probe's subject.
 
-- [ ] **Step 4: Verify the workflow parses**
+- [x] **Step 4: Verify the workflow parses**
 
 Run:
 ```bash
@@ -415,7 +415,7 @@ python3 -c "import yaml; d=yaml.safe_load(open('.github/workflows/lql-strategy-m
 ```
 Expected: the job list includes `probe`.
 
-- [ ] **Step 5: Commit and push**
+- [x] **Step 5: Commit and push**
 
 ```bash
 git add .github/workflows/lql-strategy-matrix.yml scripts/lql_matrix/probe_pty.py
@@ -428,7 +428,7 @@ capture to discover, not a corpus and a sequencer built on top of it."
 git push
 ```
 
-- [ ] **Step 6: Read every capture before writing any code**
+- [x] **Step 6: Read every capture before writing any code**
 
 ```bash
 gh run download <run-id> --repo metavacua/larql-to-sparql --name probe --dir /tmp/probe

@@ -432,7 +432,11 @@ jobs:
         if: always()
         with:
           name: probe
-          retention-days: 1
+          # 14, not 1. docs/diagnoses/task0-cli-repl-probe.md cites this
+          # artifact file-by-file so its claims can be checked rather than
+          # taken on trust, and a 1-day retention makes that promise expire
+          # the next morning.
+          retention-days: 14
           path: probe/
 
   quality:
