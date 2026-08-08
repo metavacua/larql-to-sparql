@@ -88,7 +88,17 @@ def main() -> None:
             if not line:
                 continue
             c = json.loads(line)
-            cid, cat, lql = c["id"], c.get("cat", ""), subst(c["lql"])
+            cid, cat = c["id"], c.get("cat", "")
+            # A cell's statements are a LIST — authored boundaries, so nothing
+            # here re-derives them. `larql lql` takes one batch string, and
+            # space-joining reproduces the pre-migration cell byte for byte
+            # (asserted against the real splitter in
+            # crates/larql-lql/tests/matrix_corpus_wellformed.rs). A str would
+            # be silently iterable, so reject it rather than splice the cell
+            # into characters.
+            if isinstance(c["lql"], str):
+                raise TypeError(f"cell {cid!r}: `lql` is a str, expected a list")
+            lql = subst(" ".join(c["lql"]))
 
             outf = cells_dir / f"{level}.{cid}.out"
             errf = cells_dir / f"{level}.{cid}.err"
