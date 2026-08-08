@@ -34,6 +34,11 @@ on:
     # regress on a change that touches no Rust. Filter on the compile inputs
     # rather than on the two compute crates alone: a bench cell can regress
     # from a dependency change, so anything under crates/ still triggers.
+    #
+    # Note this buys little on a long-lived PR: GitHub evaluates a
+    # pull_request paths filter against the whole base..head diff, so a PR
+    # that touched a crate once keeps matching forever. The `if:` on the job
+    # below is what actually stops a run mid-iteration.
     paths:
       - "crates/**"
       - "Cargo.toml"
@@ -49,6 +54,18 @@ jobs:
     # macos-14 = Apple Silicon (M1+). Required for the metal cells —
     # without it, drop --features gpu from FEATURES to skip them
     # and run only the CPU surface on any runner.
+    # Selective disable. A job-level `if:` cannot shell out to git, so
+    # unlike the strategy matrix's gate these read the PR TITLE only.
+    # The title is empty on push events, where contains() is false and
+    # the job runs exactly as before.
+    #
+    # This is the control that actually works on a long-lived PR: a
+    # `paths` filter on pull_request is evaluated against the WHOLE PR
+    # diff, not the incremental push, so once a PR has touched a crate
+    # every later push re-triggers it however unrelated the change.
+    if: >-
+      !contains(github.event.pull_request.title, '[skip crates]') &&
+      !contains(github.event.pull_request.title, '[skip bench-regress]')
     runs-on: macos-14
     timeout-minutes: 90
 
