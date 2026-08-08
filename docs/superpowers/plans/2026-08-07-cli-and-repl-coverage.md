@@ -456,189 +456,87 @@ fail here, cheaply, rather than nine tasks later.
 
 ---
 
-### Task 1: Fix the six malformed `BEGIN PATCH` cells
+### Task 1: Fix the corpus cells that cannot parse — **DONE, approach changed**
 
 `parse_begin` in `crates/larql-lql/src/parser/patch.rs` calls `expect_string()`, so the path is mandatory. Six cells send `BEGIN PATCH;` and have never opened a named patch session — every one produces `Parse error: expected string literal, got Semicolon`, and because a cell is a batch, that error is the first in the batch and masks everything after it.
 
+> **Approach changed during execution, on instruction: do not write custom
+> parsers or Python scripts — LQL and LARQL already have a lexer and parser.**
+>
+> The planned `corpus_lint.py` was a regex that approximated the LQL grammar.
+> It was written, and it was wrong twice over: it produced a false positive on
+> `BEGIN PATCH;` appearing inside a string literal, and — decisively — it knew
+> only about `BEGIN PATCH`, so it would have declared the corpus clean while a
+> seventh cell was still malformed. It was deleted unused.
+>
+> Replaced by `crates/larql-lql/tests/matrix_corpus_wellformed.rs`, which reads
+> the shipped corpus and runs every cell through LQL's own `split_statements`
+> feeding `parser::parse` — the exact pair `run_batch` uses, so the test checks
+> the same decomposition that actually runs. `split_statements` was made `pub`
+> for this; a batch's statement boundaries are not derivable from outside
+> without reimplementing it, since `;` inside a string literal does not end a
+> statement.
+>
+> **This rule binds Tasks 6 and 7.** Their planned `lint_cli_corpus`,
+> `SUBCOMMANDS` and `_rows` do not exist and must not be written as a Python
+> re-implementation of the CLI's argument grammar. clap already owns that
+> grammar; validate a CLI corpus by invoking the real binary, exactly as Task 0
+> did to correct ten guessed argv rows.
+
 **Files:**
-- Create: `scripts/lql_matrix/corpus_lint.py`
-- Create: `scripts/lql_matrix/corpus_lint_test.py`
+- Create: `crates/larql-lql/tests/matrix_corpus_wellformed.rs`
+- Modify: `crates/larql-lql/src/repl.rs`, `crates/larql-lql/src/lib.rs` — export `split_statements`
 - Modify: `scripts/lql_matrix/commands.jsonl`
 
 **Interfaces:**
-- Consumes: nothing.
-- Produces: `corpus_lint.lint_lql_corpus(path: str) -> list[str]` returning a list of human-readable problems, empty when clean. Task 5 reuses it for the CLI corpora via `lint_cli_corpus`.
+- Consumes: `larql_lql::{parse, split_statements}`.
+- Produces: `larql_lql::split_statements(&str) -> Vec<String>`, now public.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the test against the real parser**
 
-Create `scripts/lql_matrix/corpus_lint_test.py`:
+`crates/larql-lql/tests/matrix_corpus_wellformed.rs`, two tests:
+`every_shipped_lql_cell_parses` walks `commands.jsonl` and reports every
+statement the parser rejects, with cell id, line, the statement text and the
+real `ParseError`; `bare_begin_patch_is_rejected_by_the_grammar` pins *why* the
+corpus rule exists, and fails if the grammar ever stops requiring the path.
 
-```python
-import json
-import os
-import sys
+Cells whose id begins `neg.` or `error.` are exempt — the corpus deliberately
+carries negative cells, and a test demanding everything parse would delete the
+coverage proving larql rejects bad input.
 
-sys.path.insert(0, os.path.dirname(__file__))
-import corpus_lint as L
+- [x] **Step 2: Run it against the unfixed corpus**
 
-HERE = os.path.dirname(__file__)
+Run: `cargo test -p larql-lql --test matrix_corpus_wellformed`
+Result: FAILED, **7** of 64 cells (149 statements), all
+`Parse error: expected string literal, got Semicolon` — one root-cause class,
+a mandatory string operand omitted.
 
+- [x] **Step 3: Root-cause the seventh cell**
 
-def test_bare_begin_patch_is_reported(tmp_path):
-    p = tmp_path / "c.jsonl"
-    p.write_text(json.dumps({"id": "x", "cat": "patch", "lql": 'USE "v"; BEGIN PATCH;'}) + "\n",
-                 encoding="utf-8")
-    problems = L.lint_lql_corpus(str(p))
-    assert any("BEGIN PATCH" in s for s in problems)
+The plan predicted six. The real parser found a seventh the regex could not
+have: cell `merge`, line 47, `USE "{{VINDEX}}"; MERGE;`. `parse_merge`
+(`parser/mutation.rs:154`) calls `expect_string()` for `source`, mandatory just
+as `parse_begin` does for its path; the grammar's own tests all feed
+`MERGE "source.vindex";`. It is the only `MERGE` cell in the corpus, so **the
+MERGE surface has never once been exercised by this harness.**
 
+- [x] **Step 4: Fix the seven cells**
 
-def test_named_begin_patch_is_clean(tmp_path):
-    p = tmp_path / "c.jsonl"
-    p.write_text(json.dumps({"id": "x", "cat": "patch",
-                             "lql": 'USE "v"; BEGIN PATCH "{{TMP}}/x.vlp";'}) + "\n",
-                 encoding="utf-8")
-    assert L.lint_lql_corpus(str(p)) == []
+Six get their own `.vlp` under the substituted tmp dir, named for the cell so
+they cannot collide: `BEGIN PATCH "{{TMP}}/<id>.vlp";`. `merge` gets the
+grammar's minimal accepted form, `MERGE "{{VINDEX}}";`. Nothing else changed —
+7 lines of 64, verified by `git diff --numstat`.
 
+- [x] **Step 5: Verify**
 
-def test_missing_required_key_is_reported(tmp_path):
-    p = tmp_path / "c.jsonl"
-    p.write_text(json.dumps({"id": "x"}) + "\n", encoding="utf-8")
-    problems = L.lint_lql_corpus(str(p))
-    assert any("lql" in s for s in problems)
+`cargo test -p larql-lql --test matrix_corpus_wellformed` passes; the full
+`cargo test -p larql-lql` suite passes (726 + 236 across its targets) so
+exporting `split_statements` broke nothing; `cargo fmt --check` clean and
+`cargo clippy --tests` at 0 warnings.
 
+Whether a now-parseable cell *succeeds* at runtime is not asserted anywhere.
+That is the run's business and belongs in the captures.
 
-def test_duplicate_id_is_reported(tmp_path):
-    p = tmp_path / "c.jsonl"
-    rows = [json.dumps({"id": "dup", "cat": "a", "lql": "STATS;"}),
-            json.dumps({"id": "dup", "cat": "a", "lql": "STATS;"})]
-    p.write_text("\n".join(rows) + "\n", encoding="utf-8")
-    assert any("dup" in s for s in L.lint_lql_corpus(str(p)))
-
-
-def test_the_real_lql_corpus_is_clean():
-    # The shipped corpus must never regress to malformed input. A malformed
-    # probe is a harness defect, not a finding about larql.
-    assert L.lint_lql_corpus(os.path.join(HERE, "commands.jsonl")) == []
-```
-
-- [ ] **Step 2: Run it to make sure it fails**
-
-Run: `cd scripts/lql_matrix && python3 -m pytest corpus_lint_test.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'corpus_lint'`
-
-- [ ] **Step 3: Write the minimal implementation**
-
-Create `scripts/lql_matrix/corpus_lint.py`:
-
-```python
-#!/usr/bin/env python3
-"""Validate a corpus file's shape.
-
-A malformed probe is a harness defect, not a finding about larql. Six cells
-in commands.jsonl sent `BEGIN PATCH;` — the grammar requires a path
-(parser/patch.rs `parse_begin` calls `expect_string()`), so those cells never
-opened a named patch session, and because a cell is a batch of statements the
-resulting parse error was the FIRST error and masked everything after it.
-
-This module exists so that class of defect fails locally in milliseconds
-instead of consuming a CI run and then being misread as a product finding.
-"""
-import json
-import re
-
-# `BEGIN PATCH` with no quoted path. Matches `BEGIN PATCH;` and `BEGIN PATCH `
-# at end of statement, not `BEGIN PATCH "file.vlp";`.
-_BARE_BEGIN_PATCH = re.compile(r"BEGIN\s+PATCH\s*(;|$)", re.IGNORECASE)
-
-_LQL_REQUIRED = ("id", "cat", "lql")
-
-
-def _rows(path):
-    out = []
-    with open(path, encoding="utf-8") as f:
-        for n, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            out.append((n, json.loads(line)))
-    return out
-
-
-def lint_lql_corpus(path):
-    """Return a list of problems in an LQL corpus. Empty list means clean."""
-    problems = []
-    seen = {}
-    for n, row in _rows(path):
-        for key in _LQL_REQUIRED:
-            if key not in row:
-                problems.append(f"{path}:{n}: missing required key {key!r}")
-        cid = row.get("id")
-        if cid in seen:
-            problems.append(f"{path}:{n}: duplicate id {cid!r} (first at line {seen[cid]})")
-        elif cid is not None:
-            seen[cid] = n
-        lql = row.get("lql", "")
-        if _BARE_BEGIN_PATCH.search(lql):
-            problems.append(
-                f"{path}:{n}: cell {cid!r} sends `BEGIN PATCH` with no path — "
-                "the grammar requires one, so this cell can never open a patch "
-                'session. Use BEGIN PATCH "{{TMP}}/<name>.vlp";')
-    return problems
-```
-
-- [ ] **Step 4: Run the tests — four pass, the real-corpus one fails**
-
-Run: `cd scripts/lql_matrix && python3 -m pytest corpus_lint_test.py -q`
-Expected: 4 passed, 1 failed — `test_the_real_lql_corpus_is_clean` reports six cells.
-
-- [ ] **Step 5: Fix the six cells**
-
-Run this rewrite, which gives each cell its own `.vlp` under the substituted tmp dir so cells cannot collide:
-
-```bash
-cd /home/metavacua/larql-vindex3-03-08-2026
-python3 - <<'PY'
-import json, re
-p = "scripts/lql_matrix/commands.jsonl"
-out = []
-fixed = []
-for line in open(p, encoding="utf-8"):
-    line = line.strip()
-    if not line:
-        continue
-    d = json.loads(line)
-    new = re.sub(r"BEGIN\s+PATCH\s*;",
-                 'BEGIN PATCH "{{TMP}}/%s.vlp";' % d["id"], d["lql"])
-    if new != d["lql"]:
-        fixed.append(d["id"])
-        d["lql"] = new
-    out.append(json.dumps(d))
-open(p, "w", encoding="utf-8").write("\n".join(out) + "\n")
-print("fixed:", fixed)
-PY
-```
-
-Expected output: `fixed: ['insert.in_patch', 'patch.begin', 'patch.begin_insert_save', 'compile.into_vindex', 'compile.into_model', 'roundtrip.insert_compile_infer']`
-
-- [ ] **Step 6: Run the tests to verify they pass**
-
-Run: `cd scripts/lql_matrix && python3 -m pytest -q`
-Expected: PASS — 64 tests (59 existing + 5 new).
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add scripts/lql_matrix/corpus_lint.py scripts/lql_matrix/corpus_lint_test.py scripts/lql_matrix/commands.jsonl
-git commit -m "harness: fix six cells that sent BEGIN PATCH with no path
-
-parse_begin calls expect_string(), so the path is mandatory. These six
-cells have never opened a named patch session; each produced a parse
-error that, being first in a multi-statement batch, masked every later
-error in the cell. corpus_lint catches the class in milliseconds instead
-of a CI run."
-```
-
----
 
 ### Task 2: Driver abstraction — argv and stdin for one cell
 

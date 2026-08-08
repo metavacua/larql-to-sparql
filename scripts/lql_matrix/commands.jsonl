@@ -41,24 +41,24 @@
 {"id": "trace.decompose", "cat": "inference", "lql": "USE \"{{VINDEX}}\"; TRACE \"The capital of France is\" DECOMPOSE LAYERS 5-15;"}
 {"id": "diff.current", "cat": "lifecycle", "lql": "USE \"{{VINDEX}}\"; DIFF \"{{VINDEX}}\" CURRENT;"}
 {"id": "insert.auto", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; INSERT INTO EDGES (entity, relation, target) VALUES (\"John Coyle\", \"lives-in\", \"Colchester\");"}
-{"id": "insert.in_patch", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH; INSERT INTO EDGES (entity, relation, target) VALUES (\"John Coyle\", \"lives-in\", \"Colchester\"); SAVE PATCH;"}
+{"id": "insert.in_patch", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH \"{{TMP}}/insert.in_patch.vlp\"; INSERT INTO EDGES (entity, relation, target) VALUES (\"John Coyle\", \"lives-in\", \"Colchester\"); SAVE PATCH;"}
 {"id": "delete.where", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; DELETE FROM EDGES WHERE entity = \"John Coyle\" AND relation = \"lives-in\";"}
 {"id": "update.set", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; UPDATE EDGES SET target = \"London\" WHERE entity = \"John Coyle\" AND relation = \"lives-in\";"}
-{"id": "merge", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; MERGE;"}
+{"id": "merge", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; MERGE \"{{VINDEX}}\";"}
 {"id": "rebalance.basic", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; REBALANCE;"}
 {"id": "rebalance.floor_ceiling", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; REBALANCE FLOOR 0.20 CEILING 0.95 MAX 8;"}
 {"id": "rebalance.until_converged", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; REBALANCE UNTIL CONVERGED MAX 16;"}
-{"id": "patch.begin", "cat": "patch", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH;"}
+{"id": "patch.begin", "cat": "patch", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH \"{{TMP}}/patch.begin.vlp\";"}
 {"id": "patch.begin_named", "cat": "patch", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH \"{{TMP}}/matrix-test.vlp\";"}
-{"id": "patch.begin_insert_save", "cat": "patch", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH; INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\"); SAVE PATCH;"}
+{"id": "patch.begin_insert_save", "cat": "patch", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH \"{{TMP}}/patch.begin_insert_save.vlp\"; INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\"); SAVE PATCH;"}
 {"id": "patch.full_lifecycle", "cat": "patch", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH \"mlc.vlp\"; INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\"); SAVE PATCH; SHOW PATCHES; APPLY PATCH \"mlc.vlp\"; REMOVE PATCH \"mlc.vlp\";"}
 {"id": "compact.minor", "cat": "compact", "lql": "USE \"{{VINDEX}}\"; COMPACT MINOR;"}
 {"id": "compact.major", "cat": "compact", "lql": "USE \"{{VINDEX}}\"; COMPACT MAJOR;"}
 {"id": "compact.major_full", "cat": "compact", "lql": "USE \"{{VINDEX}}\"; COMPACT MAJOR FULL;"}
 {"id": "compact.major_lambda", "cat": "compact", "lql": "USE \"{{VINDEX}}\"; COMPACT MAJOR WITH LAMBDA = 0.01;"}
-{"id": "compile.into_vindex", "cat": "compile", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH; INSERT INTO EDGES (entity, relation, target) VALUES (\"CompileTest\", \"maps-to\", \"Value\"); SAVE PATCH; COMPILE CURRENT INTO VINDEX \"{{TMP}}/compiled.vindex\";"}
-{"id": "compile.into_model", "cat": "compile", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH; INSERT INTO EDGES (entity, relation, target) VALUES (\"CompileTest\", \"maps-to\", \"Value\"); SAVE PATCH; COMPILE CURRENT INTO MODEL \"{{TMP}}/compiled-model/\" FORMAT safetensors;"}
-{"id": "roundtrip.insert_compile_infer", "cat": "roundtrip", "lql": "USE \"{{VINDEX}}\"; INFER \"Glarf is a\" TOP 3; BEGIN PATCH; INSERT INTO EDGES (entity, relation, target) VALUES (\"Glarf\", \"is-a\", \"Wobble\"); SAVE PATCH; DESCRIBE \"Glarf\"; COMPILE CURRENT INTO VINDEX \"{{TMP}}/rt.vindex\"; USE \"{{TMP}}/rt.vindex\"; INFER \"Glarf is a\" TOP 3;"}
+{"id": "compile.into_vindex", "cat": "compile", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH \"{{TMP}}/compile.into_vindex.vlp\"; INSERT INTO EDGES (entity, relation, target) VALUES (\"CompileTest\", \"maps-to\", \"Value\"); SAVE PATCH; COMPILE CURRENT INTO VINDEX \"{{TMP}}/compiled.vindex\";"}
+{"id": "compile.into_model", "cat": "compile", "lql": "USE \"{{VINDEX}}\"; BEGIN PATCH \"{{TMP}}/compile.into_model.vlp\"; INSERT INTO EDGES (entity, relation, target) VALUES (\"CompileTest\", \"maps-to\", \"Value\"); SAVE PATCH; COMPILE CURRENT INTO MODEL \"{{TMP}}/compiled-model/\" FORMAT safetensors;"}
+{"id": "roundtrip.insert_compile_infer", "cat": "roundtrip", "lql": "USE \"{{VINDEX}}\"; INFER \"Glarf is a\" TOP 3; BEGIN PATCH \"{{TMP}}/roundtrip.insert_compile_infer.vlp\"; INSERT INTO EDGES (entity, relation, target) VALUES (\"Glarf\", \"is-a\", \"Wobble\"); SAVE PATCH; DESCRIBE \"Glarf\"; COMPILE CURRENT INTO VINDEX \"{{TMP}}/rt.vindex\"; USE \"{{TMP}}/rt.vindex\"; INFER \"Glarf is a\" TOP 3;"}
 {"id": "neg.parse_error", "cat": "negative", "lql": "USE \"{{VINDEX}}\"; NOT A VALID STATEMENT;"}
 {"id": "neg.unknown_verb", "cat": "negative", "lql": "USE \"{{VINDEX}}\"; FOOBAR;"}
 {"id": "neg.show_foobar", "cat": "negative", "lql": "USE \"{{VINDEX}}\"; SHOW FOOBAR;"}

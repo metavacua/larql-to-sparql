@@ -10,4 +10,4 @@ pub use ast::Statement;
 pub use error::LqlError;
 pub use executor::Session;
 pub use parser::parse;
-pub use repl::{run_batch, run_repl, run_statement};
+pub use repl::{run_batch, run_repl, run_statement, split_statements};
