@@ -669,7 +669,8 @@ jobs:
           TMPROOT="$(mktemp -d)" \
           CELL_TIMEOUT=900 \
           scripts/lql_matrix/run_matrix.sh \
-            "${NAME}" "$VINDEX" scripts/lql_matrix/commands.jsonl "out/results-${NAME}.jsonl"
+            "${NAME}" "$VINDEX" scripts/lql_matrix/commands.jsonl \
+            "out/results-${NAME}.lql.jsonl" --driver lql
 
       - name: Upload leg results
         if: always()
@@ -678,7 +679,7 @@ jobs:
           name: results-${{ matrix.leg.name }}
           retention-days: 1
           path: |
-            out/results-${{ matrix.leg.name }}.jsonl
+            out/results-${{ matrix.leg.name }}.*.jsonl
             out/produce-${{ matrix.leg.name }}.json
             out/produce-${{ matrix.leg.name }}.err
             out/descriptor-${{ matrix.leg.name }}.json
