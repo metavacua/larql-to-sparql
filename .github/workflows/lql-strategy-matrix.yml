@@ -313,7 +313,13 @@ jobs:
               # ships none, so gguf-to-vindex fails late without it (#180/#277).
               if [ -n "$TOKENIZER_REPO" ]; then
                 TOKDIR=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('${TOKENIZER_REPO}', allow_patterns=['tokenizer*','*special_tokens*','config.json','generation_config.json']))")
-                cp "$TOKDIR"/tokenizer*.json "$TOKDIR"/special_tokens_map.json "$(dirname "$GGUF")/" 2>/dev/null || true
+                # Staged file-by-file and REPORTED. Was `2>/dev/null || true`,
+                # so a gguf leg could proceed with no tokenizer and fail later
+                # for a reason unrelated to the missing stage (#180/#277).
+                for tf in "$TOKDIR"/tokenizer*.json "$TOKDIR"/special_tokens_map.json; do
+                  if [ -f "$tf" ]; then cp "$tf" "$(dirname "$GGUF")/" && echo "staged: $(basename "$tf")"
+                  else echo "NOT staged (absent in $TOKENIZER_REPO): $(basename "$tf")"; fi
+                done
                 echo "staged tokenizer from $TOKENIZER_REPO into $(dirname "$GGUF")"
               fi
               /usr/bin/time -v -o "$TIMEF" timeout 18000 \
@@ -331,27 +337,43 @@ jobs:
           esac
           ec=$?
           end=$(date +%s%3N)
-          case "$ec" in
-            0) bucket=ok ;; 124) bucket=timeout ;; 137|139|134) bucket=crash ;; *) bucket=err ;;
-          esac
           # peak RSS = MAX across every command's time file (extract .src + quantize),
           # not just the last — a fast-failing quantize must not hide a multi-GB extract.
-          rss=$(python3 scripts/lql_matrix/peak_rss.py "${TIMEF}.src" "$TIMEF" 2>/dev/null)
-          vmb=$(du -sm "$VINDEX" 2>/dev/null | cut -f1)
-          printf '{"name":"%s","op":"%s","level":"%s","flags":"%s","exit_code":%d,"bucket":"%s","duration_ms":%d,"peak_rss_kb":%s,"vindex_mb":%s}\n' \
-            "$NAME" "$OP" "$LEVEL" "$FLAGS" "$ec" "$bucket" "$((end-start))" "${rss:-0}" "${vmb:-0}" \
+          # Nothing below sends stderr to /dev/null or substitutes a plausible
+          # value on failure: a swallowed failure is indistinguishable from a
+          # successful empty result, and the harness exists to show what happened.
+          rss=$(python3 scripts/lql_matrix/peak_rss.py "${TIMEF}.src" "$TIMEF" 2>>"$E")
+          vmb=$(du -sm "$VINDEX" 2>>"$E" | cut -f1)
+          printf '{"name":"%s","op":"%s","level":"%s","flags":"%s","exit_code":%d,"duration_ms":%d,"peak_rss_kb":%s,"vindex_mb":%s}\n' \
+            "$NAME" "$OP" "$LEVEL" "$FLAGS" "$ec" "$((end-start))" "${rss:-null}" "${vmb:-null}" \
             > "out/produce-${NAME}.json"
-          echo "produce ${NAME}: exit=$ec bucket=$bucket rss=${rss:-?}kb vindex=${vmb:-?}MB"
-          # descriptor: what did we actually get vs what we expected?
+          echo "produce ${NAME}: exit=$ec rss=${rss:-?}kb vindex=${vmb:-?}MB"
+
+          # descriptor: what the recipe actually produced. Its stderr is KEPT —
+          # this used to be `2>/dev/null || echo '{"error":"descriptor failed"}'`,
+          # which destroyed the traceback and replaced it with a fixed string, so
+          # a crashed descriptor and a descriptor reporting a problem looked the same.
           python3 scripts/lql_matrix/descriptor.py "$VINDEX" "$NAME" \
-            > "out/descriptor-${NAME}.json" 2>/dev/null || echo '{"name":"'"$NAME"'","error":"descriptor failed"}' > "out/descriptor-${NAME}.json"
-          echo "descriptor:"; cat "out/descriptor-${NAME}.json"
-          # weight-family inventory (which classes the recipe produced)
+            > "out/descriptor-${NAME}.json" 2> "out/descriptor-${NAME}.err"
+          echo "descriptor:"
+          if [ -s "out/descriptor-${NAME}.json" ]; then cat "out/descriptor-${NAME}.json"
+          else echo "(descriptor wrote nothing — see descriptor-${NAME}.err)"; fi
+          [ -s "out/descriptor-${NAME}.err" ] && { echo "descriptor stderr:"; cat "out/descriptor-${NAME}.err"; }
+
+          # weight-family inventory
           MDIR="out/manifest-${NAME}"; mkdir -p "$MDIR"
-          cp "$VINDEX/index.json" "$VINDEX/weight_manifest.json" "$MDIR/" 2>/dev/null || true
-          # tensor-presence witness (Q8): filename -> size for every vindex file
-          python3 -c "import json,os,sys; d=sys.argv[1]; print(json.dumps({f: os.path.getsize(os.path.join(d,f)) for f in os.listdir(d)}) if os.path.isdir(d) else '{}')" \
-            "$VINDEX" > "$MDIR/listing.json" 2>/dev/null || echo '{}' > "$MDIR/listing.json"
+          for f in index.json weight_manifest.json; do
+            if [ -f "$VINDEX/$f" ]; then cp "$VINDEX/$f" "$MDIR/"
+            else echo "absent: $VINDEX/$f" >> "$MDIR/copy.log"; fi
+          done
+          [ -f "$MDIR/copy.log" ] && cat "$MDIR/copy.log"
+
+          # filename -> size for every vindex file. On failure the stderr is kept
+          # and no `{}` is fabricated: an empty listing must mean "no files", never
+          # "the lister crashed".
+          python3 -c "import json,os,sys; d=sys.argv[1]; print(json.dumps({f: os.path.getsize(os.path.join(d,f)) for f in os.listdir(d)}))" \
+            "$VINDEX" > "$MDIR/listing.json" 2> "$MDIR/listing.err"
+          [ -s "$MDIR/listing.err" ] && { echo "listing stderr:"; cat "$MDIR/listing.err"; }
 
       - name: Round-trip compile (${{ matrix.leg.name }})
         if: ${{ matrix.leg.roundtrip == true }}
@@ -396,6 +418,8 @@ jobs:
             out/produce-${{ matrix.leg.name }}.json
             out/produce-${{ matrix.leg.name }}.err
             out/descriptor-${{ matrix.leg.name }}.json
+            out/descriptor-${{ matrix.leg.name }}.err
+            out/produce-${{ matrix.leg.name }}.out
             out/manifest-${{ matrix.leg.name }}/
             out/cells/
 

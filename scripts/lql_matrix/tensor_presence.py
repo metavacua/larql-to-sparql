@@ -51,11 +51,17 @@ def listing_of(vindex_dir):
 
 
 def load_listing(path):
-    try:
-        d = json.loads(Path(path).read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) else {}
-    except Exception:
-        return {}
+    """Load a listing.json, or raise.
+
+    This used to `except Exception: return {}`, which made an unreadable or
+    malformed listing indistinguishable from a vindex that genuinely contains
+    no files — the caller then reported "0 files" as a finding about larql when
+    it was a fact about the harness. A missing input is the caller's problem to
+    surface, not this function's to paper over."""
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(d, dict):
+        raise ValueError(f"{path}: expected a JSON object, got {type(d).__name__}")
+    return d
 
 
 _LEG_RE = re.compile(r"manifest-(.+?)/listing\.json$")
@@ -72,7 +78,14 @@ def collect(results_glob):
         seen.add(p)
         m = _LEG_RE.search(p)
         if m:
-            rows[m.group(1)] = presence(load_listing(p))
+            try:
+                rows[m.group(1)] = presence(load_listing(p))
+            except Exception as e:
+                # Recorded per leg, never blanked and never dropped. A leg whose
+                # listing cannot be read is a DIFFERENT fact from a leg with no
+                # files, and one unreadable listing must not cost the other legs
+                # their data.
+                rows[m.group(1)] = {"error": f"{type(e).__name__}: {e}", "path": p}
     return rows
 
 

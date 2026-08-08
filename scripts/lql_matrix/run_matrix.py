@@ -66,8 +66,10 @@ def main() -> None:
     try:
         ver = subprocess.run([larql, "--version"], capture_output=True,
                              text=True, timeout=30).stdout.strip()
-    except Exception:
-        ver = ""
+    except Exception as e:
+        # Recorded, not blanked. An empty version string reads as "old binary"
+        # or "field unused"; this says the probe itself failed and why.
+        ver = f"<--version failed: {type(e).__name__}: {e}>"
     meta = {
         "type": "meta", "level": level, "larql_version": ver,
         "commit": os.environ.get("GITHUB_SHA", ""),
