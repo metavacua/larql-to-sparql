@@ -274,7 +274,15 @@ fn execute_and_print(session: &mut Session, input: &str) {
     }
 }
 
-fn split_statements(input: &str) -> Vec<String> {
+/// Split a batch into statements, the way `run_batch` does.
+///
+/// Public because a batch's statement boundaries are not derivable from
+/// outside without reimplementing this: `;` inside a string literal does not
+/// end a statement. The strategy-matrix corpus test parses every shipped cell
+/// with the real lexer and parser rather than approximating the grammar, and
+/// it needs the same splitter `run_batch` feeds `parser::parse`, or it would
+/// be testing a different decomposition than the one that actually runs.
+pub fn split_statements(input: &str) -> Vec<String> {
     let mut stmts = Vec::new();
     let mut current = String::new();
     let mut in_string = false;
