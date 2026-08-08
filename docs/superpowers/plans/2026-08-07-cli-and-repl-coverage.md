@@ -538,53 +538,101 @@ Whether a now-parseable cell *succeeds* at runtime is not asserted anywhere.
 That is the run's business and belongs in the captures.
 
 
-### Task 2: Driver abstraction — argv and stdin for one cell
+### Task 2: Statements become data; drivers map a cell to an invocation
+
+> **Approach changed during execution, same instruction as Task 1: no custom
+> parsers, no Python re-implementations.**
+>
+> As planned, `drivers.py` carried its own `split_statements` whose docstring
+> said it "mirrors larql's own splitter in crates/larql-lql/src/repl.rs". Two
+> implementations of one grammar, kept in agreement by hand. Deleted before it
+> was written.
+>
+> The splitter is not moved — it is **removed**. A corpus cell's `lql` becomes
+> a LIST of statements, so the boundaries are authored data rather than
+> something any code has to re-derive. The one-shot `lql` driver joins with a
+> space (byte-identical to the current single-string cell), and the REPL
+> drivers join with newlines. No splitter exists in the harness at all.
+>
+> Measured facts behind the choice: 0 of 64 cells contain `;` inside a string
+> literal; cells hold 1–9 statements, mean 2.3; and `larql_lql::parse` rejects
+> a multi-statement line outright (`unexpected trailing token`), so a REPL
+> driver genuinely must send one statement per line — sending the whole cell
+> would turn every multi-statement cell into a single parse error.
 
 **Files:**
-- Create: `scripts/lql_matrix/drivers.py`
-- Create: `scripts/lql_matrix/drivers_test.py`
+- Create: `scripts/lql_matrix/drivers.py`, `scripts/lql_matrix/drivers_test.py`
+- Modify: `scripts/lql_matrix/commands.jsonl` — `lql` becomes a list
+- Modify: `crates/larql-lql/tests/matrix_corpus_wellformed.rs` — list shape, plus the round-trip guard
+- Modify: `scripts/lql_matrix/run_matrix.py` — join the list at the use site
 
 **Interfaces:**
-- Consumes: nothing.
+- Consumes: `larql_lql::split_statements` (migration and guard only, never at run time).
 - Produces:
   - `drivers.DRIVERS: tuple[str, ...]` = `("lql", "repl-pipe", "repl-pty", "cli")`
-  - `drivers.build(driver: str, cell: dict, larql: str) -> tuple[list[str], bytes | None]` returning `(argv, stdin_bytes)`. `stdin_bytes` is `None` when the driver writes no stdin. Task 3 calls this from `run_matrix.py`.
-  - `drivers.split_statements(lql: str) -> list[str]` — splits a cell's `lql` on `;` at top level, preserving quoted strings, each returned statement ending in `;`.
+  - `drivers.build(driver: str, cell: dict, larql: str) -> tuple[list[str], bytes | None]`
+    returning `(argv, stdin_bytes)`; `stdin_bytes` is `None` when the driver
+    writes no stdin. Task 3 calls this from `run_matrix.py`.
+  - No `split_statements`. Deliberately.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Migrate the corpus with the real splitter, once**
 
-Create `scripts/lql_matrix/drivers_test.py`:
+A throwaway Rust test emits the list-shaped corpus using
+`larql_lql::split_statements`, trimming each entry (the splitter returns
+`" STATS;"` with the leading space intact). Run it, take the output, delete the
+test. Splitting 64 cells by hand or in Python would reintroduce exactly the
+second implementation this task exists to remove.
+
+- [ ] **Step 2: Update the corpus test, and add the round-trip guard**
+
+`matrix_corpus_wellformed.rs` reads `lql` as an array and parses each entry —
+simpler than before, since it no longer splits. Then the guard that keeps
+Task 1's `pub` export honest:
+
+```rust
+// The one-shot `lql` driver hands the SPACE-JOINED cell to run_batch, which
+// splits it again with this same function. If that split ever disagrees with
+// the authored list, the three LQL drivers stop exercising identical
+// statement sequences and the design's driver-parity property is silently
+// gone. Pin it with the real splitter rather than trusting the migration.
+let joined = entries.join(" ");
+let resplit: Vec<String> = larql_lql::split_statements(&joined)
+    .iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+assert_eq!(resplit, entries, "cell {id:?} does not survive join/split");
+```
+
+- [ ] **Step 3: Keep the existing matrix leg runnable**
+
+`run_matrix.py` does `subst(c["lql"])` and would break on a list — invisibly,
+because the matrix legs are currently gated off. One line: join the list at the
+use site. Every commit leaves the harness runnable.
+
+- [ ] **Step 4: Write the failing driver test**
+
+`scripts/lql_matrix/drivers_test.py` — no splitter tests, because there is no
+splitter. The full 4 drivers x 2 cell-shapes matrix, four acceptances and four
+rejections, plus the unknown-driver rejection:
 
 ```python
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(__file__))
 import drivers as D
 
-CELL_LQL = {"id": "c", "cat": "x", "lql": 'USE "v"; STATS;'}
+CELL_LQL = {"id": "c", "cat": "x", "lql": ['USE "v";', "STATS;"]}
 CELL_CLI = {"id": "c", "cat": "x", "argv": ["verify", "{{VINDEX}}"]}
 
 
-def test_split_statements_basic():
-    assert D.split_statements('USE "v"; STATS;') == ['USE "v";', 'STATS;']
-
-
-def test_split_statements_preserves_semicolon_in_string():
-    assert D.split_statements('WALK "a; b" TOP 5;') == ['WALK "a; b" TOP 5;']
-
-
-def test_split_statements_adds_missing_trailing_semicolon():
-    assert D.split_statements("STATS") == ["STATS;"]
-
-
-def test_lql_driver_is_one_shot_batch():
+def test_lql_driver_joins_with_spaces_into_one_shot_batch():
     argv, stdin = D.build("lql", CELL_LQL, "/bin/larql")
     assert argv == ["/bin/larql", "lql", 'USE "v"; STATS;']
     assert stdin is None
 
 
-def test_repl_pipe_sends_statements_on_stdin_one_per_line():
+def test_repl_pipe_sends_one_statement_per_line():
     argv, stdin = D.build("repl-pipe", CELL_LQL, "/bin/larql")
     assert argv == ["/bin/larql", "repl"]
     assert stdin == b'USE "v";\nSTATS;\n'
@@ -603,55 +651,37 @@ def test_cli_driver_uses_argv_verbatim():
 
 
 def test_unknown_driver_raises():
-    import pytest
     with pytest.raises(ValueError):
         D.build("nope", CELL_LQL, "/bin/larql")
 
 
-# ── The full 4 drivers x 2 cell-shapes matrix. Four accept, four reject.
-#
-#              lql-cell (has "lql")      cli-cell (has "argv")
-#   lql        accept                    reject (KeyError)
-#   repl-pipe  accept                    reject (KeyError)
-#   repl-pty   accept                    reject (KeyError)
-#   cli        reject (KeyError)         accept
-#
-# The four acceptances are the tests above. The four rejections follow.
-# A driver must never fabricate a missing field: a fabricated invocation
-# would be captured and read as a real result.
+# A driver must never fabricate a missing field: a fabricated invocation would
+# be captured and read as a real result.
+@pytest.mark.parametrize("driver", ["lql", "repl-pipe", "repl-pty"])
+def test_cli_cell_under_an_lql_driver_raises(driver):
+    with pytest.raises(KeyError):
+        D.build(driver, CELL_CLI, "/bin/larql")
+
 
 def test_lql_cell_under_cli_driver_raises():
-    import pytest
     with pytest.raises(KeyError):
         D.build("cli", CELL_LQL, "/bin/larql")
 
 
-def test_cli_cell_under_lql_driver_raises():
-    import pytest
-    with pytest.raises(KeyError):
-        D.build("lql", CELL_CLI, "/bin/larql")
-
-
-def test_cli_cell_under_repl_pipe_driver_raises():
-    import pytest
-    with pytest.raises(KeyError):
-        D.build("repl-pipe", CELL_CLI, "/bin/larql")
-
-
-def test_cli_cell_under_repl_pty_driver_raises():
-    import pytest
-    with pytest.raises(KeyError):
-        D.build("repl-pty", CELL_CLI, "/bin/larql")
+def test_a_string_lql_cell_is_rejected_not_silently_iterated():
+    # A str is iterable, so a missed migration would splice a cell into
+    # single characters and produce 60 nonsense statements rather than fail.
+    with pytest.raises(TypeError):
+        D.build("repl-pipe", {"id": "c", "cat": "x", "lql": 'USE "v"; STATS;'},
+                "/bin/larql")
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+- [ ] **Step 5: Run it to make sure it fails**
 
 Run: `cd scripts/lql_matrix && python3 -m pytest drivers_test.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'drivers'`
 
-- [ ] **Step 3: Write the implementation**
-
-Create `scripts/lql_matrix/drivers.py`:
+- [ ] **Step 6: Write the implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -665,6 +695,13 @@ surface and none covers another:
   repl-pty   larql repl under a pseudo-terminal
   cli        the subcommand invoked directly
 
+A cell's `lql` is a LIST of statements. There is no splitter here and there
+must not be one: LQL's grammar lives in crates/larql-lql, a second
+implementation of it in Python would drift, and statement boundaries are
+authored data anyway. `larql_lql::parse` rejects a multi-statement line
+(`unexpected trailing token`), which is why the REPL drivers send one
+statement per line rather than the whole cell.
+
 repl-pty appends `exit` because a terminal has no EOF: without it the session
 would run to the cell timeout every time.
 
@@ -675,71 +712,48 @@ cell to an invocation and stops.
 DRIVERS = ("lql", "repl-pipe", "repl-pty", "cli")
 
 
-def split_statements(lql):
-    """Split on top-level `;`, preserving quoted strings. Each returned
-    statement ends with `;`. Mirrors larql's own splitter in
-    crates/larql-lql/src/repl.rs so the REPL drivers send exactly the
-    statements the batch driver would."""
-    stmts, cur = [], []
-    in_string, quote = False, '"'
-    for ch in lql:
-        if in_string:
-            cur.append(ch)
-            if ch == quote:
-                in_string = False
-        elif ch in ('"', "'"):
-            in_string, quote = True, ch
-            cur.append(ch)
-        elif ch == ";":
-            cur.append(ch)
-            stmts.append("".join(cur).strip())
-            cur = []
-        else:
-            cur.append(ch)
-    tail = "".join(cur).strip()
-    if tail:
-        stmts.append(tail if tail.endswith(";") else tail + ";")
-    return [s for s in stmts if s]
+def _statements(cell):
+    stmts = cell["lql"]
+    if isinstance(stmts, str):
+        raise TypeError(
+            f"cell {cell.get('id')!r}: `lql` is a str, expected a list of "
+            "statements. A str is iterable, so accepting one here would "
+            "splice the cell into single characters instead of failing.")
+    return stmts
 
 
 def build(driver, cell, larql):
     """Return (argv, stdin_bytes). stdin_bytes is None when nothing is written.
 
-    Raises ValueError on an unknown driver and KeyError when the cell lacks
-    the field the driver needs — never fabricates an invocation, because a
-    fabricated one would be captured and read as a real result.
+    Raises ValueError on an unknown driver, KeyError when the cell lacks the
+    field the driver needs, TypeError on an unmigrated string cell — never
+    fabricates an invocation, because a fabricated one would be captured and
+    read as a real result.
     """
     if driver == "lql":
-        return [larql, "lql", cell["lql"]], None
+        return [larql, "lql", " ".join(_statements(cell))], None
     if driver in ("repl-pipe", "repl-pty"):
-        lines = split_statements(cell["lql"])
+        lines = list(_statements(cell))
         if driver == "repl-pty":
-            lines = lines + ["exit"]
+            lines.append("exit")
         return [larql, "repl"], ("\n".join(lines) + "\n").encode("utf-8")
     if driver == "cli":
         return [larql, *cell["argv"]], None
     raise ValueError(f"unknown driver {driver!r}; expected one of {DRIVERS}")
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `cd scripts/lql_matrix && python3 -m pytest drivers_test.py -q`
-Expected: PASS — 12 tests: 3 splitter, 4 acceptances and 4 rejections covering
-the whole driver x cell-shape matrix, plus the unknown-driver rejection.
+Expected: PASS — 10 tests covering the whole driver x cell-shape matrix plus
+the unknown-driver and unmigrated-string rejections.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 8: Commit**
 
-```bash
-git add scripts/lql_matrix/drivers.py scripts/lql_matrix/drivers_test.py
-git commit -m "harness: driver abstraction — argv and stdin per cell
+Corpus migration, Rust guard, `run_matrix.py` join and the driver module go in
+together: each alone leaves the harness in a state where a cell shape and its
+readers disagree.
 
-Four drivers over the same corpora: lql one-shot batch, repl piped,
-repl under a pty, and the CLI subcommand direct. A driver is a distinct
-user surface and none is assumed to cover another. repl-pty appends
-exit because a terminal has no EOF."
-```
-
----
 
 ### Task 3: Wire the driver into `run_matrix.py`, `lql` behaviour unchanged
 
