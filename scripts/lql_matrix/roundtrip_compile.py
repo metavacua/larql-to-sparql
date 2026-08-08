@@ -291,8 +291,15 @@ def main(argv):
                                  "produce": produce_rows,
                                  "comparisons": comp_rows}) + "\n")
     except Exception as e:  # noqa: BLE001 — never crash the calling CI job
+        # The FULL traceback is recorded. `str(e)` alone gave one line with no
+        # frame, so a harness bug and a larql failure produced the same shape of
+        # row and neither could be located.
+        import traceback
         with open(ns.diff_out, "w", encoding="utf-8") as f:
-            f.write(json.dumps({"leg": ns.name, "error": str(e)}) + "\n")
+            f.write(json.dumps({"leg": ns.name,
+                                "error": f"{type(e).__name__}: {e}",
+                                "traceback": traceback.format_exc()}) + "\n")
+        print(traceback.format_exc(), file=sys.stderr)
     return 0
 
 

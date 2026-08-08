@@ -37,6 +37,31 @@ def test_collect_maps_leg_to_presence(tmp_path):
     assert got["qwen05.native.attention"]["ffn_unwrap_risk"] is True
     assert got["qwen05.native.all"]["ffn_unwrap_risk"] is False
 
-def test_load_listing_tolerates_missing(tmp_path):
-    assert T.load_listing(str(tmp_path / "nope.json")) == {}
+def test_load_listing_raises_on_missing(tmp_path):
+    # A missing listing must NOT read as "a vindex with no files". It used to
+    # return {}, which made a harness failure look like a product finding.
+    import pytest
+    with pytest.raises(OSError):
+        T.load_listing(str(tmp_path / "nope.json"))
+
+
+def test_load_listing_raises_on_non_object(tmp_path):
+    p = tmp_path / "listing.json"
+    p.write_text("[1, 2, 3]", encoding="utf-8")
+    import pytest
+    with pytest.raises(ValueError):
+        T.load_listing(str(p))
+
+
+def test_collect_records_unreadable_listing_per_leg(tmp_path):
+    # One bad listing is reported as an error row for THAT leg; the others
+    # still yield presence data.
+    good = tmp_path / "results-a" / "manifest-a"
+    bad = tmp_path / "results-b" / "manifest-b"
+    good.mkdir(parents=True); bad.mkdir(parents=True)
+    (good / "listing.json").write_text(json.dumps({"gate_vectors.bin": 10}), encoding="utf-8")
+    (bad / "listing.json").write_text("{not json", encoding="utf-8")
+    rows = T.collect(str(tmp_path / "results-*" / "manifest-*" / "listing.json"))
+    assert rows["a"]["has_gate"] is True
+    assert "error" in rows["b"] and "path" in rows["b"]
 
