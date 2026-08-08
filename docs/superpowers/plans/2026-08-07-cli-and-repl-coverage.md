@@ -119,6 +119,19 @@ work built on top of it.
   `probe_pty.py` into `run_matrix.run_under_pty`. Task 7's corpus is written
   from the captured argument errors rather than guessed a second time.
 
+> **Result (run 31246014726, see `docs/diagnoses/task0-cli-repl-probe.md`).**
+> The READ half of the loop is verified; the WRITE half is refuted. Writing all
+> statements up front and never again loses them: under `script(1)` one of
+> three vanished silently, and under `probe_pty.py` two did and the driver hit
+> its deadline. Task 4 must **not** lift `probe_pty.py`'s single up-front
+> `os.write` — it has to write each statement in response to a prompt, and
+> re-measure both pty mechanisms afterwards. The design's line that a
+> `pty`-module driver is "an acceptable alternative" to `script(1)` is
+> measured false as written: they lost different amounts of the same input.
+>
+> Task 7's argv corrections for the 10 wrong rows are tabulated in that
+> diagnosis. Piped stdin executes statements correctly and needs no change.
+
 - [ ] **Step 1: Write the minimal pty probe**
 
 Create `scripts/lql_matrix/probe_pty.py`:
