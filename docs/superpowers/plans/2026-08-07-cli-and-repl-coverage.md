@@ -8,6 +8,45 @@
 
 **Tech Stack:** Python 3.12 stdlib only (`subprocess`, `pty`, `json`, `argparse`, `random`), pytest for harness tests, bash + GitHub Actions for the workflow. No new dependencies.
 
+## Task Ordering: highest failure probability first
+
+Tasks are ordered by **how likely they are to fail**, not by dependency
+convenience. Anything that could invalidate later work is attempted before that
+work exists; near-certainties come last, when a failure costs a fix rather than
+a redesign.
+
+| rank | risk | where |
+|---|---|---|
+| 1 | 38 CLI invocations with arguments guessed from doc comments | Task 0 |
+| 2 | `larql repl` on non-tty stdin — rustyline behaviour unverified | Task 0 |
+| 3 | `pty.fork` + `select` + `EIO` runner — fiddly, easy to hang | Task 0 |
+| 4 | `--driver` wiring without changing existing `lql` behaviour | Task 3 |
+| 5 | sequencer wiring, order actually observable | Task 9 |
+| — | corpus regex fix, pure functions, leg axis, consolidation | Tasks 1, 2, 5, 8, 10 |
+
+The top three all land in Task 0, which writes **no harness code at all** — it
+runs things on a runner and uploads what they print. A guessed CLI argument that
+is wrong should cost a capture to discover, not a corpus, a sequencer and a
+workflow branch built on top of it.
+
+## Exhaustive Coverage of Finite Condition Sets
+
+Where a set of conditions is tractably finite, the tests enumerate **all
+acceptance and all rejection cases**, not a representative sample.
+
+| set | size | where enumerated |
+|---|---|---|
+| `drivers.build(driver, cell)` — 4 drivers × {lql-cell, cli-cell} | 8 | Task 2 |
+| `sequence.sequence` graph shapes — empty, single, chain, diamond, all-independent, unsatisfiable, self-cycle, mutual cycle | 8 | Task 8 |
+| `corpus_lint` rejections — each required key missing, duplicate id, bad subcommand, bare BEGIN PATCH, missing deps | 8 | Tasks 1, 6 |
+| larql subcommands | 38 | Tasks 0, 6, 7 |
+| `ExtractLevel` values × surface (CLI, LQL) | 4 × 2 | already in the matrix |
+
+"Reasonable threshold" means the enumeration stops where the set stops being
+finite: cell *orderings* are factorial, so permutation is sampled by seed rather
+than exhausted, and that sampling is declared in Task 9 rather than pretended to
+be coverage.
+
 ## Demonstration Discipline
 
 **Every task that changes runtime behaviour ends by running on a real runner
@@ -63,42 +102,110 @@ Copied from `docs/superpowers/specs/2026-08-07-cli-and-repl-coverage-design.md`.
 
 ---
 
-### Task 0: Probe the REPL on a real runner before designing around it
+### Task 0: Probe everything likely to fail, before any code exists
 
-**Nothing in Tasks 1–9 touches the real `larql` binary** — their tests use a fake
-shell script. The load-bearing unknown is whether `printf … | larql repl`
-executes anything at all: `run_repl` constructs a `rustyline::DefaultEditor` and
-only falls back to the stdin-native `run_repl_basic` when that constructor
-*fails*. Building the driver abstraction first and finding out last is how a
-day's work becomes garbage.
-
-This task adds no harness code. It runs three invocations on a runner and
-uploads what they print.
+The three highest-risk items in this plan are attempted here, with **no harness
+code**: 38 CLI invocations whose arguments are guesses, `larql repl` on non-tty
+stdin, and a `pty.fork` runner. Each is something that, if wrong, invalidates
+work built on top of it.
 
 **Files:**
 - Modify: `.github/workflows/lql-strategy-matrix.yml`
+- Create: `scripts/lql_matrix/probe_pty.py` *(20 lines, throwaway-shaped but kept — Task 4 lifts its loop)*
 
 **Interfaces:**
 - Consumes: the `larql-bin` artifact from the existing `build` job.
-- Produces: a `repl-probe` artifact containing six capture files. Tasks 2–4 are
-  written against whatever it shows; if piping executes nothing, `drivers.build`
-  for `repl-pipe` still gets built (the capture of nothing is the finding) but
-  the workflow's expectations in Task 10 change.
+- Produces: a `probe` artifact. Task 4 lifts the verified read loop from
+  `probe_pty.py` into `run_matrix.run_under_pty`. Task 7's corpus is written
+  from the captured argument errors rather than guessed a second time.
 
-- [ ] **Step 1: Add the probe job**
+- [ ] **Step 1: Write the minimal pty probe**
+
+Create `scripts/lql_matrix/probe_pty.py`:
+
+```python
+#!/usr/bin/env python3
+"""Smallest thing that answers: can we give a child a real tty and read it back?
+
+Task 4's run_under_pty is the fiddly part of this plan — pty.fork, a select
+loop, and EIO-on-child-exit are each easy to get subtly wrong in a way that
+hangs a runner. This proves the loop on a runner before it is embedded in the
+harness. Usage: probe_pty.py <out-file> <cmd> [args...]  (stdin is forwarded)
+"""
+import errno, os, pty, select, signal, sys, time
+
+def main():
+    out, argv = sys.argv[1], sys.argv[2:]
+    payload = sys.stdin.buffer.read()
+    pid, fd = pty.fork()
+    if pid == 0:
+        try:
+            os.execvp(argv[0], argv)
+        except Exception:
+            os._exit(127)
+    if payload:
+        os.write(fd, payload)
+    deadline = time.monotonic() + 60
+    with open(out, "wb") as f:
+        while True:
+            if time.monotonic() > deadline:
+                os.kill(pid, signal.SIGKILL)
+                print("TIMEOUT", file=sys.stderr)
+                break
+            r, _, _ = select.select([fd], [], [], 1.0)
+            if not r:
+                if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                    break
+                continue
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError as e:
+                if e.errno == errno.EIO:
+                    break
+                raise
+            if not chunk:
+                break
+            f.write(chunk); f.flush()
+    os.close(fd)
+    try:
+        _, status = os.waitpid(pid, 0)
+        print(f"exit={os.waitstatus_to_exitcode(status)}", file=sys.stderr)
+    except ChildProcessError:
+        print("exit=unknown", file=sys.stderr)
+
+if __name__ == "__main__":
+    main()
+```
+
+- [ ] **Step 2: Verify the probe locally against a known-tty program**
+
+Run:
+```bash
+cd /home/metavacua/larql-vindex3-03-08-2026
+printf 'hello\n' | python3 scripts/lql_matrix/probe_pty.py /tmp/p.out \
+  bash -c 'if [ -t 0 ]; then echo TTY_YES; else echo TTY_NO; fi; read -r l; echo "GOT:$l"'
+cat /tmp/p.out
+```
+Expected: `TTY_YES` and `GOT:hello`, and the command returns rather than hanging.
+If it hangs, fix the loop **now** — this is the cheapest place it will ever be
+diagnosed.
+
+- [ ] **Step 3: Add the probe job**
 
 In `.github/workflows/lql-strategy-matrix.yml`, insert this job immediately
 after the `build:` job:
 
 ```yaml
-  # Does `larql repl` do anything when stdin is not a terminal? run_repl goes
-  # through rustyline and only falls back to the stdin-native reader when the
-  # editor FAILS TO CONSTRUCT, so piped behaviour is rustyline's and unverified.
-  # Answer this on a runner before building a driver that assumes it works.
-  repl-probe:
+  # Everything in this plan most likely to be WRONG, attempted first, with no
+  # harness code. Three risks: CLI arguments guessed from doc comments; whether
+  # `larql repl` reads non-tty stdin at all (run_repl goes through rustyline and
+  # only falls back to the stdin reader when the editor FAILS to construct); and
+  # a pty.fork read loop. Nothing here asserts. It runs things and uploads what
+  # they printed.
+  probe:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
@@ -109,83 +216,160 @@ after the `build:` job:
         run: |
           chmod +x bin/larql
           sudo apt-get update && sudo apt-get install -y libopenblas-dev util-linux
-      - name: Probe piped stdin
-        run: |
-          set -uo pipefail
           mkdir -p probe
-          printf 'SHOW MODELS;\nSTATS;\nexit\n' \
-            | timeout 60 ./bin/larql repl > probe/pipe.out 2> probe/pipe.err
-          echo "pipe exit: $?"
-      - name: Probe a pseudo-terminal
+      - name: REPL — piped stdin
         run: |
-          set -uo pipefail
           printf 'SHOW MODELS;\nSTATS;\nexit\n' \
-            | timeout 60 script -q -e -c './bin/larql repl' probe/pty.merged \
-              > probe/pty.out 2> probe/pty.err
-          echo "pty exit: $?"
-      - name: Probe one-shot for comparison
+            | timeout 60 ./bin/larql repl > probe/repl-pipe.out 2> probe/repl-pipe.err
+          echo "exit=$?" >> probe/repl-pipe.err
+      - name: REPL — pty via script(1)
         run: |
-          set -uo pipefail
+          printf 'SHOW MODELS;\nSTATS;\nexit\n' \
+            | timeout 60 script -q -e -c './bin/larql repl' probe/repl-script.merged \
+              > probe/repl-script.out 2> probe/repl-script.err
+          echo "exit=$?" >> probe/repl-script.err
+      - name: REPL — pty via probe_pty.py (the loop Task 4 will use)
+        run: |
+          printf 'SHOW MODELS;\nSTATS;\nexit\n' \
+            | python3 scripts/lql_matrix/probe_pty.py probe/repl-pty.merged \
+              ./bin/larql repl 2> probe/repl-pty.err
+      - name: One-shot lql, for comparison
+        run: |
           timeout 60 ./bin/larql lql 'SHOW MODELS; STATS;' \
             > probe/lql.out 2> probe/lql.err
-          echo "lql exit: $?"
-      - name: Show what each produced
+          echo "exit=$?" >> probe/lql.err
+      - name: All 38 subcommands — --help
+        run: |
+          set -uo pipefail
+          for c in run chat pull model link list show slice publish rm bench \
+                   dec-bench k3-ledger accuracy shannon serve repl lql extract \
+                   extract-index build compile convert hf verify diag parity \
+                   moe-locality recipe capabilities card query describe stats \
+                   validate merge filter dev; do
+            timeout 30 ./bin/larql "$c" --help > "probe/help.$c.out" 2> "probe/help.$c.err"
+            echo "$c exit=$?" >> probe/help.index
+          done
+          cat probe/help.index
+      - name: All 38 subcommands — the guessed real invocations
+        run: |
+          set -uo pipefail
+          TMP=$(mktemp -d)
+          # No vindex exists in this job. That is deliberate: it separates
+          # "the argument shape is wrong" from "the input was missing", and
+          # both answers are needed before Task 7 writes the corpus.
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            id=${line%%|*}; rest=${line#*|}
+            eval "set -- $rest"
+            timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
+            echo "$id exit=$? argv=[$rest]" >> probe/cmd.index
+          done <<EOF
+extract|extract $TMP/nomodel -o $TMP/v.vindex --level all
+extract-index|extract-index $TMP/nomodel -o $TMP/v2.vindex --level browse
+convert|convert quantize q4k --input $TMP/v.vindex --output $TMP/q.vindex
+build|build $TMP/Vindexfile -o $TMP/b.vindex
+slice|slice $TMP/v.vindex --output $TMP/s.vindex --kind browse
+compile|compile --base $TMP/nomodel --vindex $TMP/e.vlp --output $TMP/c
+link|link $TMP/v.vindex
+pull|pull chrishayuk/gemma-3-4b-it-vindex
+model|model pull HuggingFaceTB/SmolLM2-135M
+list|list
+show|show $TMP/v.vindex
+verify|verify $TMP/v.vindex
+diag|diag $TMP/v.vindex
+capabilities|capabilities
+run|run $TMP/v.vindex --prompt hi --max-tokens 2
+chat|chat $TMP/v.vindex --max-tokens 1
+serve|serve $TMP/v.vindex --port 18080
+bench|bench $TMP/v.vindex --tokens 2
+dec-bench|dec-bench
+k3-ledger|k3-ledger report
+accuracy|accuracy $TMP/v.vindex
+shannon|shannon score $TMP/v.vindex
+parity|parity $TMP/v.vindex
+moe-locality|moe-locality $TMP/v.vindex
+publish|publish $TMP/v.vindex --repo example/does-not-exist
+hf|hf upload $TMP/v.vindex --repo example/does-not-exist
+recipe|recipe validate $TMP/recipe.yaml
+card|card render $TMP/recipe.yaml
+dev|dev
+repl|repl
+lql|lql SHOW MODELS;
+query|query $TMP/graph.json --entity France
+describe|describe $TMP/graph.json France
+stats|stats $TMP/graph.json
+validate|validate $TMP/graph.json
+merge|merge $TMP/graph.json $TMP/graph.json -o $TMP/m.json
+filter|filter $TMP/graph.json --min-confidence 0.5 -o $TMP/f.json
+rm|rm $TMP/v.vindex
+EOF
+          cat probe/cmd.index
+      - name: Show every capture
+        if: always()
         run: |
           for f in probe/*; do
             echo "───── $f ($(wc -c < "$f") bytes)"
-            cat "$f" || true
+            head -40 "$f" || true
           done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: repl-probe
+          name: probe
           retention-days: 1
           path: probe/
 ```
 
-- [ ] **Step 2: Verify the workflow parses**
+The `serve`, `chat` and `repl` rows have no terminating input and are expected
+to consume their 60s timeout. That is recorded, not avoided — Task 7 needs to
+know which subcommands do not self-terminate.
+
+- [ ] **Step 4: Verify the workflow parses**
 
 Run:
 ```bash
 cd /home/metavacua/larql-vindex3-03-08-2026
 python3 -c "import yaml; d=yaml.safe_load(open('.github/workflows/lql-strategy-matrix.yml')); print('jobs:', list(d['jobs'].keys()))"
 ```
-Expected: the job list includes `repl-probe`.
+Expected: the job list includes `probe`.
 
-- [ ] **Step 3: Commit and push**
+- [ ] **Step 5: Commit and push**
 
 ```bash
-git add .github/workflows/lql-strategy-matrix.yml
-git commit -m "ci: probe whether larql repl works on non-tty stdin
+git add .github/workflows/lql-strategy-matrix.yml scripts/lql_matrix/probe_pty.py
+git commit -m "ci: probe the three riskiest assumptions before building on them
 
-run_repl goes through rustyline and only falls back to the stdin-native
-reader when the editor fails to construct, so piped behaviour is
-unverified. Three invocations, six captures, no harness code — answer
-this before building a driver that assumes it works."
+38 CLI invocations with guessed arguments, larql repl on non-tty stdin,
+and a pty.fork read loop. No harness code — it runs things and uploads
+what they printed. A guessed argument that is wrong should cost a
+capture to discover, not a corpus and a sequencer built on top of it."
 git push
 ```
 
-- [ ] **Step 4: Read the result before writing any driver code**
+- [ ] **Step 6: Read every capture before writing any code**
 
-Wait for the run, then:
 ```bash
-gh run list --repo metavacua/larql-to-sparql --workflow lql-strategy-matrix.yml --limit 1
-gh run download <run-id> --repo metavacua/larql-to-sparql --name repl-probe --dir /tmp/probe
-for f in /tmp/probe/*; do echo "── $f"; cat "$f"; done
+gh run download <run-id> --repo metavacua/larql-to-sparql --name probe --dir /tmp/probe
+cat /tmp/probe/help.index
+cat /tmp/probe/cmd.index
+for f in /tmp/probe/repl-*; do echo "── $f ($(wc -c < "$f") bytes)"; cat "$f"; done
 ```
 
-Record which of these happened, because Tasks 2–4 and 10 depend on it:
+Record the answers; each one determines later tasks:
 
 | observation | consequence |
 |---|---|
-| `pipe.out` contains `SHOW MODELS` output | piping works; `repl-pipe` proceeds as designed |
-| `pipe.out` empty, exit 0 | rustyline read nothing; `repl-pipe` still ships (the capture of nothing is the finding), and Task 10 expects empty captures |
-| `pipe` hit the 60s timeout | rustyline blocked on a non-tty; `repl-pipe` needs the timeout, and this is a real larql finding to file |
-| `pty.merged` contains output but `pipe.out` does not | pipe and pty diverge — precisely why the spec runs both |
+| a `--help` exits non-zero or prints nothing | a real CLI finding; the Task 6 corpus still includes it |
+| `cmd.<id>` stderr says an argument or flag is unknown | **the guess was wrong** — Task 7's corpus uses the corrected argv, not the guess |
+| `cmd.<id>` stderr says the input file is missing | the argument shape is right; Task 7 keeps it and declares the `needs` |
+| `repl-pipe.out` has `SHOW MODELS` output | piping works; `repl-pipe` proceeds as designed |
+| `repl-pipe.out` empty, exit 0 | rustyline read nothing; the driver still ships (a capture of nothing is the finding) and Task 4 expects empty |
+| `repl-pipe` hit its timeout | rustyline blocked on non-tty; a real larql finding, and the driver needs its timeout |
+| `repl-pty.merged` non-empty but `repl-pipe.out` empty | pipe and pty diverge — exactly why the spec runs both |
+| `repl-pty.merged` empty or `probe_pty.py` printed TIMEOUT | **the read loop is wrong** — fix it here; Task 4 lifts this loop verbatim |
 
-**Do not proceed to Task 1 until this artifact has been read.** If the plan's
-assumptions are wrong, they are wrong here, at the cost of one 10-minute job,
-not after nine tasks of driver machinery.
+**Do not start Task 1 until `cmd.index`, `help.index` and the four `repl-*`
+captures have been read.** The purpose of this task is that the plan's guesses
+fail here, cheaply, rather than nine tasks later.
 
 ---
 
@@ -443,12 +627,40 @@ def test_unknown_driver_raises():
         D.build("nope", CELL_LQL, "/bin/larql")
 
 
+# ── The full 4 drivers x 2 cell-shapes matrix. Four accept, four reject.
+#
+#              lql-cell (has "lql")      cli-cell (has "argv")
+#   lql        accept                    reject (KeyError)
+#   repl-pipe  accept                    reject (KeyError)
+#   repl-pty   accept                    reject (KeyError)
+#   cli        reject (KeyError)         accept
+#
+# The four acceptances are the tests above. The four rejections follow.
+# A driver must never fabricate a missing field: a fabricated invocation
+# would be captured and read as a real result.
+
 def test_lql_cell_under_cli_driver_raises():
-    # A cell without argv cannot run under the cli driver. Raise rather than
-    # invent an argv — a fabricated invocation would be recorded as a real one.
     import pytest
     with pytest.raises(KeyError):
         D.build("cli", CELL_LQL, "/bin/larql")
+
+
+def test_cli_cell_under_lql_driver_raises():
+    import pytest
+    with pytest.raises(KeyError):
+        D.build("lql", CELL_CLI, "/bin/larql")
+
+
+def test_cli_cell_under_repl_pipe_driver_raises():
+    import pytest
+    with pytest.raises(KeyError):
+        D.build("repl-pipe", CELL_CLI, "/bin/larql")
+
+
+def test_cli_cell_under_repl_pty_driver_raises():
+    import pytest
+    with pytest.raises(KeyError):
+        D.build("repl-pty", CELL_CLI, "/bin/larql")
 ```
 
 - [ ] **Step 2: Run it to make sure it fails**
@@ -531,7 +743,8 @@ def build(driver, cell, larql):
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd scripts/lql_matrix && python3 -m pytest drivers_test.py -q`
-Expected: PASS — 9 tests.
+Expected: PASS — 12 tests: 3 splitter, 4 acceptances and 4 rejections covering
+the whole driver x cell-shape matrix, plus the unknown-driver rejection.
 
 - [ ] **Step 5: Commit**
 
@@ -1382,7 +1595,24 @@ Expected: FAIL — `FileNotFoundError: cli-commands.jsonl`
 
 - [ ] **Step 3: Write the corpus**
 
-Create `scripts/lql_matrix/cli-commands.jsonl` with exactly these 38 lines (one per subcommand; `{{VINDEX}}`, `{{MODEL}}` and `{{TMP}}` are substituted by `run_matrix.py`):
+Create `scripts/lql_matrix/cli-commands.jsonl` with one line per subcommand.
+
+**Start from Task 0's `cmd.index` and `cmd.*.err` captures, not from the rows
+below.** Task 0 ran every one of these argument shapes against the real binary
+precisely so this corpus is written from what larql said rather than guessed a
+second time. For each subcommand:
+
+- stderr named an unknown flag or argument → **use the corrected argv**, taken
+  from that subcommand's `help.<name>.out`
+- stderr named a missing input file → the shape is right; keep it and declare
+  the `needs`
+- it consumed its timeout → keep it, and note it in `cat` as non-terminating
+
+The rows below are the shapes Task 0 probed. Where a capture showed the shape
+was wrong, the corrected row replaces it here — the guess does not survive into
+the corpus.
+
+(`{{VINDEX}}`, `{{MODEL}}` and `{{TMP}}` are substituted by `run_matrix.py`.)
 
 ```json
 {"id": "cli.extract", "cat": "produce", "argv": ["extract", "{{MODEL}}", "-o", "{{TMP}}/cli.vindex", "--level", "all"], "needs": [], "produces": ["vindex"]}
@@ -1425,7 +1655,15 @@ Create `scripts/lql_matrix/cli-commands.jsonl` with exactly these 38 lines (one 
 {"id": "cli.rm", "cat": "destroy", "argv": ["rm", "{{VINDEX}}"], "needs": ["cache-entry"], "produces": []}
 ```
 
-Several of these will fail — `cli.dec-bench` passes a flag that does not exist, `cli.publish`/`cli.hf` target a nonexistent repo, `cli.recipe`/`cli.card` need a recipe file no cell produces, the graph cells need a graph file no cell produces, `cli.serve`/`cli.chat` do not self-terminate. **That is intended.** Per the spec, nothing is skipped for an unsatisfied dependency or a guessed-inapplicable command; the capture records what larql does when asked, which is the measurement. Fixing them by removing them would be the harness deciding what is worth asking.
+Several will still fail after correction — `cli.publish`/`cli.hf` target a
+nonexistent repo, `cli.recipe`/`cli.card` need a recipe file no cell produces,
+the graph cells need a graph file no cell produces, `cli.serve`/`cli.chat` do
+not self-terminate. **That is intended and is a different thing from a wrong
+argument.** Per the spec nothing is skipped for an unsatisfied dependency or a
+guessed-inapplicable command; the capture records what larql does when asked,
+which is the measurement. Removing such a cell would be the harness deciding
+what is worth asking. Correcting a *wrong argument* is the opposite — that is
+the harness asking the question it meant to ask.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1544,6 +1782,65 @@ def test_input_cells_are_not_mutated():
     original = dict(A)
     S.sequence([A, B], 0)
     assert A == original
+
+
+# ── The eight graph shapes. Empty, single, chain and diamond are the
+# acceptance cases; all-independent, unsatisfiable, self-cycle and mutual
+# cycle are the rejection-shaped ones. None of the four may hang, drop a
+# cell, or raise — an unorderable cell still runs, with what it lacked
+# recorded, because "this breaks when its input is absent" is an
+# observation the harness exists to capture.
+
+def test_empty_input_returns_empty():
+    assert S.sequence([], 0) == []
+
+
+def test_single_cell_is_returned_with_index_zero():
+    out = S.sequence([A], 0)
+    assert _ids(out) == ["produce"] and out[0]["order_index"] == 0
+
+
+def test_diamond_orders_root_first_and_join_last():
+    root = {"id": "root", "needs": [], "produces": ["a"]}
+    left = {"id": "left", "needs": ["a"], "produces": ["b"]}
+    right = {"id": "right", "needs": ["a"], "produces": ["c"]}
+    join = {"id": "join", "needs": ["b", "c"], "produces": []}
+    out = _ids(S.sequence([join, left, right, root], 0))
+    assert out[0] == "root" and out[-1] == "join"
+
+
+def test_all_independent_cells_all_run_and_none_is_unsatisfied():
+    cells = [{"id": f"c{i}", "needs": [], "produces": []} for i in range(5)]
+    out = S.sequence(cells, 0)
+    assert len(out) == 5
+    assert all(c["unsatisfied"] == [] for c in out)
+
+
+def test_self_cycle_still_runs_and_records_what_it_lacked():
+    # A cell that needs what it itself produces can never be satisfied.
+    selfdep = {"id": "loop", "needs": ["x"], "produces": ["x"]}
+    out = S.sequence([selfdep], 0)
+    assert _ids(out) == ["loop"]
+    assert out[0]["unsatisfied"] == ["x"]
+
+
+def test_mutual_cycle_still_runs_both_and_records_both():
+    p = {"id": "p", "needs": ["y"], "produces": ["x"]}
+    q = {"id": "q", "needs": ["x"], "produces": ["y"]}
+    out = S.sequence([p, q], 0)
+    assert sorted(_ids(out)) == ["p", "q"]
+    assert out[0]["unsatisfied"] and out[1]["unsatisfied"]
+
+
+def test_a_cycle_terminates():
+    # Regression guard: the loop must not spin when nothing is ever ready.
+    import threading
+    done = threading.Event()
+    threading.Thread(
+        target=lambda: (S.sequence([{"id": "a", "needs": ["z"], "produces": []}], 0),
+                        done.set()),
+        daemon=True).start()
+    assert done.wait(5), "sequence() did not terminate on an unsatisfiable graph"
 ```
 
 - [ ] **Step 2: Run it to make sure it fails**
@@ -1613,7 +1910,8 @@ def sequence(cells, seed):
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd scripts/lql_matrix && python3 -m pytest sequence_test.py -q`
-Expected: PASS — 7 tests.
+Expected: PASS — 14 tests, covering all eight graph shapes plus determinism,
+permutation, non-mutation and a termination guard.
 
 - [ ] **Step 5: Commit**
 
@@ -1879,6 +2177,8 @@ the seed in its meta row."
 
 **Demonstration coverage.** Every task that changes runtime behaviour ends on a real runner against the real binary, and names what to read and what each outcome means before the next task starts: Task 0 (does the REPL accept piped stdin at all), Task 3 (the `lql` driver is unchanged), Task 4 (both REPL drivers produce captures), Task 6 (38 real `--help` invocations), Task 7 (38 real invocations, each non-zero classified), Task 9 (does ordering change outcomes). Tasks 1, 2, 5 and 8 are corpus data or pure functions with no runtime surface.
 
-**One risk worth stating.** Task 7's cell arguments are written from `--help` conventions and the subcommand doc comments, not from having run them. Several will be rejected for wrong flags. That is a correct first result under the spec — the capture shows what larql said — and Task 7's own demonstration step requires every non-zero cell to be classified as harness defect, larql finding, or genuinely-absent dependency before Task 8 starts. The arguments get corrected from captures rather than guessed at harder now.
+**Ordering by failure probability.** The three riskiest items — 38 guessed CLI argument shapes, `larql repl` on non-tty stdin, and a `pty.fork` read loop — are all attempted in Task 0, which writes no harness code. Task 7 then writes its corpus from Task 0's captures rather than guessing a second time, and Task 4 lifts a read loop already proven on a runner. The near-certainties (corpus regex, pure functions, leg axis, consolidation) come last, where a failure costs a fix rather than a redesign.
+
+**Exhaustive coverage of the finite sets.** `drivers.build` is enumerated over all 4 drivers × 2 cell shapes — four acceptances and four rejections, Task 2. `sequence.sequence` is enumerated over all eight graph shapes including self-cycle and mutual cycle, with a termination guard, Task 8. `corpus_lint` rejects each missing required key, duplicate ids, non-subcommands and bare `BEGIN PATCH`, Tasks 1 and 6. All 38 subcommands appear in Tasks 0, 6 and 7. Cell *orderings* are factorial and therefore sampled by seed rather than exhausted — Task 9 declares that sampling rather than presenting it as coverage.
 
 **Assumption this plan makes that Task 0 may invalidate.** Tasks 2–4 assume `larql repl` reads piped stdin. If Task 0 shows it does not, `drivers.build` and the pty runner are unchanged — a capture of nothing is still the finding — but Task 4's demonstration expectations and Task 10's outcome change. That is why Task 0 runs first and why its step 4 is a gate rather than a note.
