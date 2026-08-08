@@ -766,7 +766,7 @@ readers disagree.
 - Consumes: `drivers.build(driver, cell, larql)`, `drivers.DRIVERS` (Task 2).
 - Produces: `run_matrix.py <level> <vindex> <corpus> <out> [--driver NAME]`, default `lql`. Capture files become `<cells>/<level>.<driver>.<cell_id>.{out,err}`. Rows gain `"driver"`. Task 4 adds the pty path; Tasks 6–8 add the `cli` driver and sequencing.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `scripts/lql_matrix/run_matrix_test.py`:
 
@@ -855,12 +855,12 @@ def test_unknown_driver_is_rejected(tmp_path):
     assert r.returncode != 0
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+- [x] **Step 2: Run it to make sure it fails**
 
 Run: `cd scripts/lql_matrix && python3 -m pytest run_matrix_test.py -q`
 Expected: FAIL — `run_matrix.py` does not accept `--driver` (`ValueError: too many values to unpack`).
 
-- [ ] **Step 3: Rewrite `run_matrix.py`'s argument handling and cell loop**
+- [x] **Step 3: Rewrite `run_matrix.py`'s argument handling and cell loop**
 
 Replace the whole `def main() -> None:` body in `scripts/lql_matrix/run_matrix.py` with:
 
@@ -980,7 +980,7 @@ Finally, add this immediately above `def main() -> None:` so the module resolves
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 ```
 
-- [ ] **Step 4: Update the shim's documented API**
+- [x] **Step 4: Update the shim's documented API**
 
 In `scripts/lql_matrix/run_matrix.sh`, replace the line reading
 `#   LARQL_BIN  MODEL_ID  TMPROOT  WRAP  CELL_TIMEOUT` with:
@@ -990,12 +990,12 @@ In `scripts/lql_matrix/run_matrix.sh`, replace the line reading
 # Trailing flags pass through, e.g. --driver repl-pipe (default lql).
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cd scripts/lql_matrix && python3 -m pytest -q`
 Expected: PASS — 70 tests (64 + 6 new).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scripts/lql_matrix/run_matrix.py scripts/lql_matrix/run_matrix.sh scripts/lql_matrix/run_matrix_test.py
@@ -1007,7 +1007,7 @@ the row carries none of bucket/err_signal/err_line/stdout_head — the
 derived fields whose removal this harness depends on."
 ```
 
-- [ ] **Step 7: Demonstrate on a runner — the `lql` driver must be unchanged**
+- [x] **Step 7: Demonstrate on a runner — the `lql` driver must be unchanged**
 
 This task's whole claim is that adding `--driver` changed nothing for the
 existing path. Prove it against the real binary before building on it.
@@ -1039,6 +1039,15 @@ print('capture files present:', len(glob.glob('/tmp/d/cells/*')))"
 
 Expected: 64 cells, `{'lql'}`, no derived fields, capture files named
 `<leg>.lql.<cell>.{out,err}`. **Do not start Task 4 until this has run.**
+
+> **Step 7 result (run 31268145895, all 21 legs + model-lifecycle green).**
+> Leg `smol135.native.all`: 64 cells, `drivers == {'lql'}`, no derived field
+> present, every capture on disk, captures named
+> `smol135.native.all.lql.<cell>.{out,err}` — 128 files, 110 297 bytes. The
+> `lql` path is unchanged by the driver parameter. Task 4 is unblocked.
+>
+> The first attempt at this step failed 21/21 on two defects of mine; see
+> `docs/diagnoses/task3-matrix-demonstration.md`.
 
 ---
 
