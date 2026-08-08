@@ -57,42 +57,53 @@ fn every_shipped_lql_cell_parses() {
         let id = row["id"].as_str().unwrap_or_else(|| {
             panic!("{}:{}: cell has no string `id`", path.display(), lineno + 1)
         });
-        let lql = row["lql"].as_str().unwrap_or_else(|| {
-            panic!(
-                "{}:{}: cell {id:?} has no string `lql`",
-                path.display(),
-                lineno + 1
-            )
-        });
+        let entries: Vec<String> = row["lql"]
+            .as_array()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}:{}: cell {id:?} has no `lql` ARRAY. Statements are \
+                     authored data now — a string here is an unmigrated cell.",
+                    path.display(),
+                    lineno + 1
+                )
+            })
+            .iter()
+            .map(|v| v.as_str().expect("statement is not a string").to_string())
+            .collect();
         cells += 1;
 
-        // The same decomposition run_batch performs, including its comment
-        // stripping — testing a different split would test a different thing
-        // than the one that runs.
-        for stmt_text in larql_lql::split_statements(lql) {
-            let trimmed: String = stmt_text
-                .lines()
-                .filter(|l| !l.trim().starts_with("--"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let trimmed = trimmed.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
+        for stmt in &entries {
             statements += 1;
-            match larql_lql::parse(trimmed) {
-                Ok(_) => {}
-                Err(e) => {
-                    if !is_negative_cell(id) {
-                        failures.push(format!(
-                            "{}:{}: cell {id:?}\n    statement: {trimmed}\n    {e}",
-                            path.display(),
-                            lineno + 1
-                        ));
-                    }
+            if let Err(e) = larql_lql::parse(stmt) {
+                if !is_negative_cell(id) {
+                    failures.push(format!(
+                        "{}:{}: cell {id:?}\n    statement: {stmt}\n    {e}",
+                        path.display(),
+                        lineno + 1
+                    ));
                 }
             }
         }
+
+        // The one-shot `lql` driver hands the SPACE-JOINED cell to `run_batch`,
+        // which splits it again with this same function. If that split ever
+        // disagreed with the authored list, the three LQL drivers would stop
+        // exercising identical statement sequences and the design's
+        // driver-parity property would be silently gone. Pin it with the real
+        // splitter rather than trusting that the migration was faithful.
+        let resplit: Vec<String> = larql_lql::split_statements(&entries.join(" "))
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(
+            resplit,
+            entries,
+            "{}:{}: cell {id:?} does not survive join-then-split — the one-shot \
+             driver would run a different statement sequence than the REPL drivers",
+            path.display(),
+            lineno + 1
+        );
     }
 
     assert!(cells > 0, "corpus is empty — the path is probably wrong");

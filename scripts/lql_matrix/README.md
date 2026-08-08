@@ -65,7 +65,8 @@ the captured files itself, utf-8, truncating by codepoint); `timeout
 
 | file | role |
 |---|---|
-| `commands.jsonl` | the **vindex-level** corpus (runs per leg against its produced vindex); `{{VINDEX}}`/`{{TMP}}` placeholders |
+| `commands.jsonl` | the **vindex-level** corpus (runs per leg against its produced vindex); `{{VINDEX}}`/`{{TMP}}` placeholders. `lql` is a **list of statements**, not one string — boundaries are authored data, so no code in the harness re-derives them and there is no second implementation of LQL's splitter to drift. `crates/larql-lql/tests/matrix_corpus_wellformed.rs` parses every entry with the real parser and asserts the list survives join-then-split by larql's own `split_statements`. |
+| `drivers.py` | maps one cell to one invocation `(argv, stdin)` for each of the four drivers (`lql`, `repl-pipe`, `repl-pty`, `cli`); knows nothing about corpora, sequencing or capture |
 | `commands-model.jsonl` | the **model-level** corpus (`EXTRACT MODEL` / `USE MODEL`) — run once per model by the `model-lifecycle` job, not per leg |
 | `gen_legs.py` | enumerates the **legs** (native level grid + one-off transformation/encoding recipes) as JSON — the matrix columns |
 | `descriptor.py` | reads a produced vindex's `index.json` → `(family, dtype, quant, layers, …)`; reports only, compares against nothing |
