@@ -76,12 +76,20 @@ jobs:
       matrix: ${{ steps.g.outputs.matrix }}
       quality: ${{ steps.g.outputs.quality }}
     steps:
+      # head_commit is null on pull_request events, and this branch reaches
+      # this workflow ONLY via pull_request — so reading the marker out of the
+      # webhook payload would make it work on push and silently do nothing
+      # where it is actually needed. Read the real head commit instead.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
       - id: g
         env:
           SCOPE: ${{ github.event.inputs.scope }}
-          MSG: ${{ github.event.head_commit.message }}
           TITLE: ${{ github.event.pull_request.title }}
         run: |
+          MSG="$(git log -1 --pretty=%B)"
           set -uo pipefail
           SCOPE="${SCOPE:-all}"
           probe=false; matrix=false; quality=false

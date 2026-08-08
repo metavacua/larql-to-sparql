@@ -30,6 +30,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # macos-14 minutes are billed at 10x, and `make bench-check` cannot
+    # regress on a change that touches no Rust. Filter on the compile inputs
+    # rather than on the two compute crates alone: a bench cell can regress
+    # from a dependency change, so anything under crates/ still triggers.
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Makefile"
+      - ".github/workflows/bench-regress.yml"
   # Manual trigger so a maintainer can re-baseline after intentional
   # perf changes without waiting for the next merge to main.
   workflow_dispatch: {}
