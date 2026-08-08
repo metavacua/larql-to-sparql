@@ -8,6 +8,10 @@ This records what the captures show. It does not grade anything. Every claim
 below names the file it came from, so it can be checked against the artifact
 rather than against this summary.
 
+**This run's artifact was uploaded at `retention-days: 1` and is gone after
+2026-08-09.** Retention is now 14 days for later runs; to regenerate this one,
+dispatch `lql-strategy-matrix` with `scope: probe`.
+
 ## The known unknown is resolved: piped stdin works
 
 The design flagged one thing it refused to settle by reasoning — whether
@@ -17,8 +21,13 @@ The design flagged one thing it refused to settle by reasoning — whether
 
 It executes. `repl-pipe.out` has the banner, `SHOW MODELS;` output, and
 `Goodbye.`; `repl-pipe.err` has `Error: No backend loaded. Run USE
-"path.vindex" first.` from `STATS;`. All three statements were read, in order,
-and `larql_exit=0`.
+"path.vindex" first.` from `STATS;`. Both statements ran, in order, and
+`larql_exit=0`.
+
+The capture does *not* establish that `exit` was read: `run_repl` prints
+`Goodbye.` on `ReadlineError::Eof` as well as on `exit`, and stdin closed at
+the same moment, so the two are indistinguishable here. What is established is
+that piped statements execute — which is the question the design asked.
 
 ## The three drivers disagree, on identical input
 
@@ -26,7 +35,7 @@ Same three statements — `SHOW MODELS;`, `STATS;`, `exit` — to three drivers:
 
 | driver | SHOW MODELS | STATS | exit | outcome |
 |---|---|---|---|---|
-| `repl-pipe` | ran | ran (error) | ran | `larql_exit=0` |
+| `repl-pipe` | ran | ran (error) | indistinguishable from EOF | `larql_exit=0` |
 | `repl-script` (pty via `script -q -e`) | ran | **absent** | ran | `script_exit=0` |
 | `repl-pty` (`probe_pty.py`) | ran | **absent** | **absent** | `TIMEOUT`, `exit=-9` |
 
@@ -104,9 +113,11 @@ escape remains live for whatever the real subcommand turns out to be.
 
 - `cmd.publish.err`: `failed to download index.json from
   hf:///tmp/tmp.…/v.vindex` — a local path was turned into an `hf://` ref.
-- `cmd.repl` exited 0 immediately rather than timing out. Bare `repl` with no
-  statements is not among the non-self-terminating commands after all; `serve`,
-  `chat` and `run` still need that question answered separately.
+- `cmd.repl` exited 0 immediately rather than timing out — **with stdin closed**,
+  which is the condition in that step, not a general property. Given a tty it
+  plainly does not self-terminate: the `repl-pty` leg in this same run hit its
+  60s deadline. `serve`, `chat` and `run` are still unanswered on this point;
+  they exited 1 on the missing vindex before reaching the question.
 
 ## Harness defects this run had to fix first
 
