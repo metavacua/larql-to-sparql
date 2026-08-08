@@ -2,11 +2,14 @@
 #
 # For every CLI-invokable leg (a model + a produce recipe: extract at a level,
 # extract with a quant flag, gguf-to-vindex, or post-hoc quantize), the workflow
-# PRODUCES a vindex on the current binary, records its structural descriptor
-# (family/dtype/quant vs expected — so extraction/convert breakage or silent
-# dequant is observed, not assumed), then runs the full LQL command corpus against
-# it and records the RAW MECHANICAL OUTCOME of every cell. Discovery experiment,
-# not a pass/fail gate: the breakage is the deliverable. Legs are enumerated by
+# PRODUCES a vindex on the current binary, records what it structurally is
+# (family/dtype/quant/layers), then runs the full LQL command corpus against it
+# and reports the COMPLETE RAW OUTPUT of every cell.
+#
+# The harness reports; it does not judge. There is no verdict layer: no
+# pass/fail, no conformance oracle, no summarisation of the output into a
+# derived opinion. Reading the results is a separate activity performed on the
+# raw captures, by a human, outside this workflow. Legs are enumerated by
 # scripts/lql_matrix/gen_legs.py (no prediction-pruning — see that file).
 
 name: lql-strategy-matrix
@@ -20,11 +23,6 @@ on:
   pull_request:
     branches: [lql-strategy-matrix, main]
   workflow_dispatch:
-    inputs:
-      strict:
-        description: "Fail the run if any conformance invariant is violated"
-        type: boolean
-        default: false
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
@@ -243,7 +241,6 @@ jobs:
       OP: ${{ matrix.leg.op }}
       LEVEL: ${{ matrix.leg.level }}
       FLAGS: ${{ matrix.leg.flags }}
-      EXPECT_QUANT: ${{ matrix.leg.expect_quant }}
       CORPUS_MODEL: ${{ matrix.leg.corpus_model }}
       TOKENIZER_REPO: ${{ matrix.leg.tokenizer_repo }}
       LQL_WITH: ${{ matrix.leg.lql_with }}
@@ -346,7 +343,7 @@ jobs:
             > "out/produce-${NAME}.json"
           echo "produce ${NAME}: exit=$ec bucket=$bucket rss=${rss:-?}kb vindex=${vmb:-?}MB"
           # descriptor: what did we actually get vs what we expected?
-          python3 scripts/lql_matrix/descriptor.py "$VINDEX" "$NAME" "$EXPECT_QUANT" \
+          python3 scripts/lql_matrix/descriptor.py "$VINDEX" "$NAME" \
             > "out/descriptor-${NAME}.json" 2>/dev/null || echo '{"name":"'"$NAME"'","error":"descriptor failed"}' > "out/descriptor-${NAME}.json"
           echo "descriptor:"; cat "out/descriptor-${NAME}.json"
           # weight-family inventory (which classes the recipe produced)
@@ -376,6 +373,7 @@ jobs:
           path: |
             out/roundtrip-${{ matrix.leg.name }}.json
             out/roundtrip-produce-${{ matrix.leg.name }}.jsonl
+            out/roundtrip-cells-${{ matrix.leg.name }}/
 
       - name: Run LQL command corpus (${{ matrix.leg.name }})
         run: |
@@ -404,7 +402,7 @@ jobs:
   # Model-level lifecycle cells (EXTRACT MODEL / USE MODEL) don't read a produced
   # vindex — run them ONCE per model instead of once per leg (removes the biggest
   # duplicated extraction: the per-leg re-extract). Separate `lifecycle-*` artifacts
-  # so the conformance/aggregate `results-*` globs ignore them.
+  # so the `results-*` globs ignore them.
   model-lifecycle:
     needs: [prefetch, build]
     strategy:
@@ -481,57 +479,6 @@ jobs:
             out/lifecycle-${{ matrix.model.id }}.jsonl
             out/cells/
 
-  aggregate:
-    needs: matrix
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      - name: Build matrix report
-        run: |
-          cp artifacts/results-*/descriptor-*.json . 2>/dev/null || true
-          cp artifacts/results-*/produce-*.json . 2>/dev/null || true
-          python3 scripts/lql_matrix/aggregate.py "artifacts/results-*/results-*.jsonl" lql-matrix.md
-          cat lql-matrix.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload combined matrix
-        uses: actions/upload-artifact@v4
-        with:
-          name: lql-matrix
-          retention-days: 1
-          path: lql-matrix.md
-
-  conformance:
-    needs: matrix
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      - name: Run conformance oracle
-        env:
-          STRICT_INPUT: ${{ github.event.inputs.strict }}
-        run: |
-          STRICT=""
-          [ "$STRICT_INPUT" = "true" ] && STRICT="--strict"
-          python3 scripts/lql_matrix/conformance.py \
-            "artifacts/results-*/results-*.jsonl" conformance.md conformance.json $STRICT
-          echo "=== conformance.md ==="; cat conformance.md
-          cat conformance.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload conformance report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: conformance
-          retention-days: 1
-          path: |
-            conformance.md
-            conformance.json
-
   roundtrip:
     needs: matrix
     if: always()
@@ -557,7 +504,7 @@ jobs:
             roundtrip-catalogue.md
 
   inventory:
-    needs: [matrix, conformance]
+    needs: matrix
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -565,30 +512,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Tensor-presence + Q8 resolution
+      - name: Tensor presence
         run: |
           python3 scripts/lql_matrix/tensor_presence.py \
             "artifacts/results-*/manifest-*/listing.json" presence.json
-          python3 - <<'PY'
-          import json, glob, sys
-          sys.path.insert(0, "scripts/lql_matrix")
-          import tensor_presence as T
-          pres = json.load(open("presence.json"))
-          cj = glob.glob("artifacts/conformance/conformance.json")
-          violations = json.load(open(cj[0]))["violations"] if cj else None
-          res = T.render_q8(pres, violations, native_only=True)
-          json.dump(res, open("q8.json", "w"), indent=2)
-          md = T.q8_markdown(res)
-          open("q8.md", "w", encoding="utf-8").write(md)
-          print(md)
-          PY
-          cat q8.md >> "$GITHUB_STEP_SUMMARY"
+          cat presence.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: inventory
           retention-days: 1
-          path: |
-            presence.json
-            q8.json
-            q8.md
+          path: presence.json

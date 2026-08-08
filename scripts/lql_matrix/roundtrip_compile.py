@@ -32,7 +32,6 @@ import sys
 import time
 
 import roundtrip_matrix as M
-import run_matrix as RM
 
 INSERT_STMT = {
     "knn": ('INSERT INTO EDGES (entity, relation, target) '
@@ -154,7 +153,7 @@ def comparison_plan(jobs):
     return comparisons
 
 
-def run_jobs(jobs, larql_bin, base_hf, cell_timeout=900):
+def run_jobs(jobs, larql_bin, base_hf, cells_dir, cell_timeout=900):
     """Execute every planned job: copy the produced vindex into an isolated
     per-job working copy, run the lql batch or cli compile, and record raw
     mechanical outcomes. Impure — the only function here that shells out."""
@@ -197,16 +196,25 @@ def run_jobs(jobs, larql_bin, base_hf, cell_timeout=900):
                     larql_bin, "compile", "--base", base_hf,
                     "--vindex", j["vlp_path"], "--output", j["out_dir"]]
 
+        # COMPLETE stdout/stderr to disk, like run_matrix.py does for corpus
+        # cells. This used to capture both in memory and keep only a
+        # first-error line, so every one of the 32 round-trip jobs in a run was
+        # described by one line and the rest of what the command said was
+        # thrown away. The captures are the result.
+        os.makedirs(cells_dir, exist_ok=True)
+        outf = os.path.join(cells_dir, f"{j['id']}.out")
+        errf = os.path.join(cells_dir, f"{j['id']}.err")
         t0 = time.monotonic()
         try:
-            proc = subprocess.run(argv, capture_output=True, text=True, env=env)
-            rc, out_txt, err_txt = proc.returncode, proc.stdout, proc.stderr
+            with open(outf, "wb") as so, open(errf, "wb") as se:
+                rc = subprocess.run(argv, stdout=so, stderr=se, env=env).returncode
         except OSError as e:
-            rc, out_txt, err_txt = -1, "", str(e)
+            rc = -1
+            with open(errf, "w", encoding="utf-8") as se:
+                se.write(str(e))
+            open(outf, "a").close()
         dur_ms = int((time.monotonic() - t0) * 1000)
 
-        combined = out_txt + "\n" + err_txt
-        err_signal = 1 if RM.ERR_RE.search(combined) else 0
         out_dir = j["out_dir"]
         out_exists = os.path.isdir(out_dir)
         n_files = (len([f for f in os.listdir(out_dir)
@@ -216,10 +224,11 @@ def run_jobs(jobs, larql_bin, base_hf, cell_timeout=900):
         rows.append({
             "id": j["id"], "driver": j["driver"], "mode": j["mode"],
             "insert_form": j["insert_form"], "memit": j["memit"],
-            "exit_code": rc, "bucket": RM.bucket_for(rc),
-            "err_signal": err_signal,
-            "err_line": RM.first_error_line(combined) if err_signal else "",
-            "duration_ms": dur_ms,
+            "exit_code": rc, "duration_ms": dur_ms,
+            "stdout": os.path.relpath(outf, cells_dir),
+            "stderr": os.path.relpath(errf, cells_dir),
+            "stdout_bytes": os.path.getsize(outf),
+            "stderr_bytes": os.path.getsize(errf),
             "out_dir_exists": out_exists, "out_dir_n_files": n_files,
         })
 
@@ -249,19 +258,26 @@ def main(argv):
     ap.add_argument("--out-root", required=True)
     ap.add_argument("--produce-out", required=True)
     ap.add_argument("--diff-out", required=True)
+    # Where the COMPLETE per-job stdout/stderr land. Defaults beside the
+    # produce jsonl so the workflow's existing upload picks them up.
+    ap.add_argument("--cells-dir", default=None)
     ap.add_argument("--cell-timeout", type=int, default=900)
     ns = ap.parse_args(argv)
 
     try:
         os.makedirs(ns.out_root, exist_ok=True)
+        cells_dir = ns.cells_dir or os.path.join(
+            os.path.dirname(os.path.abspath(ns.produce_out)),
+            f"roundtrip-cells-{ns.name}")
         jobs = plan_jobs(ns.name, ns.vindex, ns.out_root)
-        produce_rows = run_jobs(jobs, ns.larql_bin, ns.hf, ns.cell_timeout)
+        produce_rows = run_jobs(jobs, ns.larql_bin, ns.hf, cells_dir,
+                                ns.cell_timeout)
         with open(ns.produce_out, "w", encoding="utf-8") as f:
             for r in produce_rows:
                 f.write(json.dumps(r) + "\n")
 
         from huggingface_hub import snapshot_download
-        base_dir = snapshot_download(ns.hf)
+        base_dir = snapshot_download(ns.hf, local_files_only=True)
 
         by_id = {j["id"]: j for j in jobs}
         comp_rows = []
