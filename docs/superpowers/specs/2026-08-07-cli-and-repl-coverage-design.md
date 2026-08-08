@@ -169,6 +169,54 @@ accident, and which the CLI corpus reaches deliberately:
 These are recorded, not skipped. A WIP surface that says so is a useful
 observation; a WIP surface the harness routes around is invisible.
 
+## Sequencing and permutation
+
+Cell count is not a constraint; each cell runs in a couple of minutes and they
+parallelise. What matters is that cells are **ordered by their real
+dependencies** and that independent orderings are **permuted** rather than fixed.
+
+### Dependencies are a DAG, not a list
+
+The CLI corpus has genuine producer → consumer → destroyer edges. A consumer run
+before its producer measures nothing about the consumer:
+
+- **producers:** `extract`, `extract-index`, `convert`, `build`, `slice`,
+  `compile` — each yields an artifact others read.
+- **registrars:** `link`, `pull` — put an artifact in the cache, which is what
+  `list`, `show`, `run`, `rm` resolve against.
+- **consumers:** `verify`, `show`, `list`, `run`, `diag`, `capabilities`,
+  `parity`, `bench`, `serve`, `publish`, `hf`, `card`, `slice`, `shannon`,
+  `accuracy` — need an artifact, and for the cache-resolving ones, a
+  registration.
+- **destroyer:** `rm` — invalidates what the consumers resolve, so it is ordered
+  last within its chain rather than excluded.
+- **graph-file commands:** `query`, `describe`, `stats`, `validate`, `merge`,
+  `filter` — depend on a graph file, not a vindex, and form their own chain.
+
+Each cell declares what it needs and what it produces. The runner sequences
+from that declaration; it does not rely on file order in the corpus.
+
+### Permutation
+
+Where two cells are independent under the DAG, their relative order is a free
+variable, and free variables get varied rather than frozen:
+
+- Permute independent consumers against each other within a leg.
+- Permute the position of `rm` and other destructive/registrational commands
+  among the consumers, so "consumer after `rm`" is exercised as well as before.
+- The long-session REPL leg (whole corpus, one session) is itself a permutation
+  axis: state accumulates, so ordering is load-bearing there by construction.
+
+A permutation is identified in the row (a seed or an explicit order id) so a
+capture can be tied back to the order that produced it. The permutation set is
+declared and reproducible, not randomised per run — an ordering-dependent
+failure has to be re-runnable.
+
+Order is **not** used to decide correctness. A cell that fails because its
+producer failed is recorded exactly as it happened; nothing is skipped for
+having an unsatisfied dependency, because "this consumer breaks when its input
+is missing" is itself an observation worth capturing.
+
 ## Termination and hangs
 
 - **pipe:** stdin closes; `run_repl` breaks on `ReadlineError::Eof`.
@@ -196,11 +244,14 @@ captures indistinguishable from "ran fine, no errors."
 ## Scale
 
 Per leg: 38 help cells + ~38 invocation cells + 64 LQL cells × 3 drivers ≈ **270
-cells**, against 64 today. Across the 21 legs of the current `smol135` filter
-that is a large multiple of present runner time, and the long-session legs add
-one more session per model.
+cells**, before permutation multiplies the independent orderings. Against 64
+today.
 
-Accepted. Recorded here so it is a known cost rather than a surprise.
+**Cell count is explicitly not a constraint.** Each cell runs in a couple of
+minutes and cells parallelise across the matrix. The binding requirements are
+dependency ordering and permutation coverage, not economy. A design that reduced
+cell count by dropping permutations or pruning "probably redundant" subcommands
+would be optimising the wrong quantity.
 
 ## Out of scope
 
