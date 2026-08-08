@@ -20,9 +20,23 @@ on:
   # on two events that the concurrency group cannot dedupe (see below).
   push:
     branches: [lql-strategy-matrix]
+  # Only fire when something that could change the RESULT changed. A docs or
+  # spec commit on this branch should not spend an hour of runners.
   pull_request:
     branches: [lql-strategy-matrix, main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "scripts/lql_matrix/**"
+      - ".github/workflows/lql-strategy-matrix.yml"
   workflow_dispatch:
+    inputs:
+      scope:
+        description: "Which parts to run"
+        type: choice
+        default: all
+        options: [all, probe, matrix, quality, none]
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
@@ -46,9 +60,57 @@ env:
   RUST_BACKTRACE: "1"
 
 jobs:
+  # Decides what this run does, so a run can be narrowed without editing the
+  # workflow. Three ways in, cheapest first:
+  #
+  #   commit message   [skip matrix] [skip probe] [skip quality] [skip ci]
+  #   dispatch input   scope = all | probe | matrix | quality | none
+  #   paths filter     (above) — a docs-only PR does not trigger at all
+  #
+  # Everything downstream hangs off these three booleans, so a narrowed run
+  # skips whole job trees rather than starting them and exiting early.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      probe: ${{ steps.g.outputs.probe }}
+      matrix: ${{ steps.g.outputs.matrix }}
+      quality: ${{ steps.g.outputs.quality }}
+    steps:
+      - id: g
+        env:
+          SCOPE: ${{ github.event.inputs.scope }}
+          MSG: ${{ github.event.head_commit.message }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -uo pipefail
+          SCOPE="${SCOPE:-all}"
+          probe=false; matrix=false; quality=false
+          case "$SCOPE" in
+            all)     probe=true;  matrix=true;  quality=true ;;
+            probe)   probe=true ;;
+            matrix)  matrix=true ;;
+            quality) quality=true ;;
+            none)    : ;;
+          esac
+          # A skip marker in the commit message or PR title turns a part off
+          # without a dispatch, which is what you want mid-iteration.
+          TEXT="${MSG:-} ${TITLE:-}"
+          case "$TEXT" in
+            *"[skip ci]"*)      probe=false; matrix=false; quality=false ;;
+          esac
+          case "$TEXT" in *"[skip probe]"*)   probe=false ;;   esac
+          case "$TEXT" in *"[skip matrix]"*)  matrix=false ;;  esac
+          case "$TEXT" in *"[skip quality]"*) quality=false ;; esac
+          {
+            echo "probe=$probe"; echo "matrix=$matrix"; echo "quality=$quality"
+          } >> "$GITHUB_OUTPUT"
+          echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality"
+
   # Enumerate every leg as JSON → consumed by the matrix via fromJSON. A malformed
   # plan fails here in seconds, before any leg runs.
   plan:
+    needs: gate
+    if: needs.gate.outputs.matrix == 'true'
     runs-on: ubuntu-latest
     outputs:
       legs: ${{ steps.gen.outputs.legs }}
@@ -154,6 +216,9 @@ jobs:
 
   # Compile larql-cli ONCE; every leg downloads the binary.
   build:
+    needs: gate
+    # The binary is needed by both the probe and the matrix.
+    if: needs.gate.outputs.probe == 'true' || needs.gate.outputs.matrix == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -179,6 +244,8 @@ jobs:
           if-no-files-found: error
 
   quality:
+    needs: gate
+    if: needs.gate.outputs.quality == 'true'
     # Loud, obviously-directed signal on the LQL command stack: fmt + clippy +
     # tests, run ALONGSIDE the matrix (NOT a dependency of it) so a red check
     # never skips the matrix — we want both signals on the same run to compare
@@ -227,7 +294,8 @@ jobs:
             && [ "${{ steps.test.outcome }}" = success ]
 
   matrix:
-    needs: [plan, prefetch, build]
+    needs: [gate, plan, prefetch, build]
+    if: needs.gate.outputs.matrix == 'true'
     strategy:
       fail-fast: false          # every leg runs even when one breaks — breakage is data
       max-parallel: 12
@@ -428,7 +496,8 @@ jobs:
   # duplicated extraction: the per-leg re-extract). Separate `lifecycle-*` artifacts
   # so the `results-*` globs ignore them.
   model-lifecycle:
-    needs: [prefetch, build]
+    needs: [gate, prefetch, build]
+    if: needs.gate.outputs.matrix == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -504,8 +573,10 @@ jobs:
             out/cells/
 
   roundtrip:
-    needs: matrix
-    if: always()
+    needs: [gate, matrix]
+    # always() so a failed leg still gets collated; the gate term so a run that
+    # never asked for the matrix does not collate nothing.
+    if: always() && needs.gate.outputs.matrix == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -528,8 +599,8 @@ jobs:
             roundtrip-catalogue.md
 
   inventory:
-    needs: matrix
-    if: always()
+    needs: [gate, matrix]
+    if: always() && needs.gate.outputs.matrix == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
