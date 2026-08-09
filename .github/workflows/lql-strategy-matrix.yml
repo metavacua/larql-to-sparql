@@ -89,6 +89,7 @@ jobs:
         env:
           SCOPE: ${{ github.event.inputs.scope }}
           TITLE: ${{ github.event.pull_request.title }}
+          EVENT: ${{ github.event_name }}
         run: |
           MSG="$(git log -1 --pretty=%B)"
           set -uo pipefail
@@ -104,7 +105,18 @@ jobs:
           esac
           # A skip marker in the commit message or PR title turns a part off
           # without a dispatch, which is what you want mid-iteration.
+          #
+          # But NOT on workflow_dispatch. A dispatch is a human asking for a
+          # specific scope right now; a marker was written earlier, in a commit
+          # whose message was about something else. Letting the older, weaker
+          # signal win made `scope=compile` unrunnable on a branch whose head
+          # commit happened to say [skip ci] — observed on runs 31306052565 and
+          # 31306096416, where the gate logged `scope=compile -> compile=false`.
           TEXT="${MSG:-} ${TITLE:-}"
+          if [ "${EVENT:-}" = "workflow_dispatch" ]; then
+            TEXT=""
+            echo "workflow_dispatch: ignoring commit/title skip markers"
+          fi
           case "$TEXT" in
             *"[skip ci]"*)      probe=false; matrix=false; quality=false; compile=false ;;
           esac
