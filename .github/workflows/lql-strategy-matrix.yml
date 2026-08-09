@@ -661,6 +661,7 @@ jobs:
       - name: Prep
         run: |
           chmod +x bin/larql
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev
           mkdir -p hf
       - name: Enumerate hf subcommands via --help
         run: |
