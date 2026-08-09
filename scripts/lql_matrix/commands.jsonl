@@ -45,9 +45,6 @@
 {"cat":"mutation","id":"delete.where","lql":["USE \"{{VINDEX}}\";","DELETE FROM EDGES WHERE entity = \"John Coyle\" AND relation = \"lives-in\";"]}
 {"cat":"mutation","id":"update.set","lql":["USE \"{{VINDEX}}\";","UPDATE EDGES SET target = \"London\" WHERE entity = \"John Coyle\" AND relation = \"lives-in\";"]}
 {"cat":"mutation","id":"merge","lql":["USE \"{{VINDEX}}\";","MERGE \"{{VINDEX}}\";"]}
-{"cat":"mutation","id":"merge.into_no_conflict","lql":["USE \"{{VINDEX}}\";","MERGE \"{{VINDEX}}\" INTO \"{{VINDEX}}\";"]}
-{"cat":"mutation","id":"merge.keep_source","lql":["USE \"{{VINDEX}}\";","MERGE \"{{VINDEX}}\" INTO \"{{VINDEX}}\" ON CONFLICT KEEP_SOURCE;"]}
-{"cat":"mutation","id":"merge.highest_confidence","lql":["USE \"{{VINDEX}}\";","MERGE \"{{VINDEX}}\" INTO \"{{VINDEX}}\" ON CONFLICT HIGHEST_CONFIDENCE;"]}
 {"cat":"mutation","id":"rebalance.basic","lql":["USE \"{{VINDEX}}\";","REBALANCE;"]}
 {"cat":"mutation","id":"rebalance.floor_ceiling","lql":["USE \"{{VINDEX}}\";","REBALANCE FLOOR 0.20 CEILING 0.95 MAX 8;"]}
 {"cat":"mutation","id":"rebalance.until_converged","lql":["USE \"{{VINDEX}}\";","REBALANCE UNTIL CONVERGED MAX 16;"]}
