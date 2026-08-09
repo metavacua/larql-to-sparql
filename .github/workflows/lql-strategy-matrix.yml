@@ -36,7 +36,7 @@ on:
         description: "Which parts to run"
         type: choice
         default: all
-        options: [all, probe, matrix, quality, compile, none]
+        options: [all, probe, matrix, quality, compile, merge, none]
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
@@ -74,6 +74,7 @@ jobs:
     outputs:
       probe: ${{ steps.g.outputs.probe }}
       compile: ${{ steps.g.outputs.compile }}
+      merge: ${{ steps.g.outputs.merge }}
       matrix: ${{ steps.g.outputs.matrix }}
       quality: ${{ steps.g.outputs.quality }}
     steps:
@@ -94,13 +95,14 @@ jobs:
           MSG="$(git log -1 --pretty=%B)"
           set -uo pipefail
           SCOPE="${SCOPE:-all}"
-          probe=false; matrix=false; quality=false; compile=false
+          probe=false; matrix=false; quality=false; compile=false; merge=false
           case "$SCOPE" in
-            all)     probe=true;  matrix=true;  quality=true; compile=true ;;
+            all)     probe=true;  matrix=true;  quality=true; compile=true; merge=true ;;
             probe)   probe=true ;;
             matrix)  matrix=true ;;
             quality) quality=true ;;
             compile) compile=true ;;
+            merge)   merge=true ;;
             none)    : ;;
           esac
           # A skip marker in the commit message or PR title turns a part off
@@ -118,15 +120,16 @@ jobs:
             echo "workflow_dispatch: ignoring commit/title skip markers"
           fi
           case "$TEXT" in
-            *"[skip ci]"*)      probe=false; matrix=false; quality=false; compile=false ;;
+            *"[skip ci]"*)      probe=false; matrix=false; quality=false; compile=false; merge=false ;;
           esac
           case "$TEXT" in *"[skip probe]"*)   probe=false ;;   esac
           case "$TEXT" in *"[skip matrix]"*)  matrix=false ;;  esac
           case "$TEXT" in *"[skip quality]"*) quality=false ;; esac
           case "$TEXT" in *"[skip compile]"*) compile=false ;; esac
+          case "$TEXT" in *"[skip merge]"*)   merge=false ;;   esac
           {
             echo "probe=$probe"; echo "matrix=$matrix"
-            echo "quality=$quality"; echo "compile=$compile"
+            echo "quality=$quality"; echo "compile=$compile"; echo "merge=$merge"
           } >> "$GITHUB_OUTPUT"
           echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality compile=$compile"
 
@@ -134,7 +137,7 @@ jobs:
   # plan fails here in seconds, before any leg runs.
   plan:
     needs: gate
-    if: needs.gate.outputs.matrix == 'true'
+    if: needs.gate.outputs.matrix == 'true' || needs.gate.outputs.merge == 'true'
     runs-on: ubuntu-latest
     outputs:
       legs: ${{ steps.gen.outputs.legs }}
@@ -192,6 +195,7 @@ jobs:
   # fallback for any 429 that still happens.
   prefetch:
     needs: plan
+    if: needs.plan.outputs.repos != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -248,7 +252,8 @@ jobs:
     if: >-
       needs.gate.outputs.probe == 'true' ||
       needs.gate.outputs.matrix == 'true' ||
-      needs.gate.outputs.compile == 'true'
+      needs.gate.outputs.compile == 'true' ||
+      needs.gate.outputs.merge == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -632,6 +637,72 @@ jobs:
             ev/*.txt
             ev/*.out
             ev/*.err
+
+  merge-evidence:
+    needs: [gate, prefetch, build]
+    if: needs.gate.outputs.merge == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prep
+        run: |
+          chmod +x bin/larql scripts/lql_matrix/run_matrix.sh
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev
+          python -m pip install --quiet huggingface_hub
+          mkdir -p me
+      - name: Fetch the input model
+        run: |
+          python - <<'PY' > me/model.path 2> me/model.err
+          from huggingface_hub import snapshot_download
+          print(snapshot_download("HuggingFaceTB/SmolLM2-135M-Instruct",
+                                  ignore_patterns=["onnx/*", "*.onnx", "*.onnx_data"]))
+          PY
+          cat me/model.path
+      - name: Extract a vindex to test MERGE against
+        run: |
+          set +e -u
+          MODEL=$(cat me/model.path)
+          timeout 3600 ./bin/larql extract "$MODEL" \
+            -o me/src.vindex --level browse > me/extract.out 2> me/extract.err
+          echo "extract exit=$?" | tee -a me/extract.out
+      - name: Run MERGE commands
+        run: |
+          mkdir -p me/out
+          LARQL_BIN=./bin/larql \
+          TMPROOT="$(mktemp -d)" \
+          CELL_TIMEOUT=300 \
+          scripts/lql_matrix/run_matrix.sh \
+            "merge-test" "me/src.vindex" scripts/lql_matrix/commands.jsonl \
+            "me/out/results.jsonl" --driver lql > me/run.out 2> me/run.err || true
+          echo "run_matrix exit=$?" >> me/run.out
+      - name: Show results
+        run: |
+          set +e
+          for f in me/*.out me/*.err; do
+            if [ -f "$f" ]; then
+              echo "───── $f ($(wc -c < "$f") bytes)"
+              head -50 "$f"
+            fi
+          done
+          echo "=== MERGE-specific cells in results ==="
+          if [ -f me/out/results.jsonl ]; then
+            grep '"id":"merge' me/out/results.jsonl || echo "no merge cells found"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: merge-evidence
+          retention-days: 14
+          path: |
+            me/
 
   quality:
     needs: gate
