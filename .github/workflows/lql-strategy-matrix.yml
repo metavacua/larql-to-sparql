@@ -610,7 +610,7 @@ jobs:
   # questions), this job runs the full corpus cells and captures {{TMP}}
   # filesystem state to verify actual output files are created.
   compile-cells:
-    needs: [gate, prefetch, build]
+    needs: [gate, build]
     if: needs.gate.outputs.compile == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -661,14 +661,14 @@ jobs:
           find out/smol135.vindex -type f | wc -l
       - name: Extract compile cells from corpus
         run: |
-          python3 - <<'PY'
+          python3 - <<'PY' > out/compile-cells.jsonl
           import json
           with open('scripts/lql_matrix/commands.jsonl') as f:
               for line in f:
                   c = json.loads(line)
                   if c.get('cat') in ['compile', 'roundtrip']:
                       print(json.dumps(c))
-          PY > out/compile-cells.jsonl
+          PY
           wc -l out/compile-cells.jsonl
       - name: Capture filesystem before
         run: |
