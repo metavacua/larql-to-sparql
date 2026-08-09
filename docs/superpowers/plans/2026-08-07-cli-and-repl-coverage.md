@@ -1053,6 +1053,24 @@ Expected: 64 cells, `{'lql'}`, no derived fields, capture files named
 
 ### Task 4: The `repl-pty` driver
 
+> **Settle before writing this task — two constraints in the plan disagree.**
+>
+> Task 0's recorded result says a pty driver must write each statement **in
+> response to a prompt**, not all up front. But Task 4's interface is specified
+> as `run_under_pty(argv, stdin_bytes, merged_path, timeout_s)` — a single
+> static payload, which is exactly the shape Task 0 refuted.
+>
+> They are reconcilable: `drivers.build` joins statements with `\n`, so a
+> prompt-driven writer can split that payload back losslessly. But that makes
+> the newline a **contract** rather than a formatting choice, and nothing
+> states or tests it. Either pass the statement list through to the pty runner,
+> or write the `\n` boundary down as contractual and pin it with a test.
+>
+> Also: `run_matrix.py` deliberately refuses `--driver repl-pty` today
+> (`IMPLEMENTED_DRIVERS`). Task 4 must add it to that tuple, or the driver
+> stays unreachable.
+
+
 `subprocess` cannot give the child a tty. This task adds a pty runner used only when `--driver repl-pty`.
 
 **Files:**

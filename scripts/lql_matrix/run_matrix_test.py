@@ -57,6 +57,18 @@ def test_capture_files_are_named_by_driver_and_contain_full_output(tmp_path):
     text = out_path.read_text()
     assert "ARGV: lql" in text
     assert (tp / rows[0]["stderr"]).read_text().strip() == "to stderr"
+    # The driver segment is the whole defence against two drivers overwriting
+    # each other's captures, and this test is named for it — so assert it,
+    # rather than passing whether or not it is there.
+    assert ".lql." in rows[0]["stdout"]
+    assert ".lql." in rows[0]["stderr"]
+
+
+def test_two_drivers_do_not_overwrite_each_other(tmp_path):
+    # The property the naming exists for, stated directly.
+    a, _ = _run(tmp_path, "lql")
+    b, _ = _run(tmp_path, "repl-pipe")
+    assert a[0]["stdout"] != b[0]["stdout"]
 
 
 def test_row_carries_no_derived_opinion(tmp_path):
@@ -104,7 +116,25 @@ def test_unknown_driver_is_rejected(tmp_path):
     r = subprocess.run([sys.executable, os.path.join(HERE, "run_matrix.py"),
                         "leg1", "/v", _corpus(tmp_path), str(out), "--driver", "nope"],
                        env=env, capture_output=True, text=True)
+    # Not just "nonzero" — that would pass if run_matrix.py died of a missing
+    # corpus or an import error. Argparse must have rejected the choice.
     assert r.returncode != 0
+    assert "nope" in r.stderr and "invalid choice" in r.stderr
+
+
+def test_an_unimplemented_driver_is_refused_rather_than_mislabelled(tmp_path):
+    # repl-pty has no pty behind it until Task 4. Accepting it would write the
+    # statements down a PIPE and label the capture `repl-pty` — Task 0 measured
+    # those two as producing different results from identical input, so the row
+    # would assert a distinction the run never made.
+    out = tmp_path / "r.jsonl"
+    env = dict(os.environ, LARQL_BIN=_fake_bin(tmp_path))
+    r = subprocess.run([sys.executable, os.path.join(HERE, "run_matrix.py"),
+                        "leg1", "/v", _corpus(tmp_path), str(out),
+                        "--driver", "repl-pty"],
+                       env=env, capture_output=True, text=True)
+    assert r.returncode != 0
+    assert "invalid choice" in r.stderr
 
 
 def test_a_driver_that_writes_no_stdin_gets_stdin_closed(tmp_path):

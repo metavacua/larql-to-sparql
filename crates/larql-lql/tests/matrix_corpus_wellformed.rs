@@ -55,11 +55,21 @@ fn every_lql_corpus() -> Vec<PathBuf> {
     found
 }
 
-/// Statements the parser is expected to reject: the corpus deliberately
-/// carries negative cells, and a corpus test that demanded everything parse
-/// would delete exactly the coverage that proves larql rejects bad input.
-/// Keyed by cell id, so a cell going from "rejected" to "accepted" still
-/// shows up as a failure here.
+/// A cell that exists to be rejected. The corpus deliberately carries these,
+/// and a test demanding that everything parse would delete exactly the
+/// coverage proving larql rejects bad input.
+///
+/// A negative cell is not exempt, it is INVERTED: at least one of its
+/// statements must still be rejected. Merely skipping them would let a cell
+/// silently become well-formed — if `SHOW FOOBAR;` grew a meaning tomorrow,
+/// the corpus would keep calling it negative and nothing would notice.
+///
+/// "At least one" rather than "all": every negative cell opens with a
+/// perfectly valid `USE "…";`. All three shipped negatives are parse-time
+/// rejects, verified against the real parser:
+///   NOT A VALID STATEMENT;  expected statement keyword, got Keyword(Not)
+///   FOOBAR;                 expected statement keyword, got Ident("FOOBAR")
+///   SHOW FOOBAR;            expected RELATIONS, LAYERS, … after SHOW
 fn is_negative_cell(id: &str) -> bool {
     id.starts_with("neg.") || id.starts_with("error.")
 }
@@ -99,10 +109,13 @@ fn every_shipped_lql_cell_parses() {
                 .collect();
             cells += 1;
 
+            let negative = is_negative_cell(id);
+            let mut rejected_here = 0usize;
             for stmt in &entries {
                 statements += 1;
                 if let Err(e) = larql_lql::parse(stmt) {
-                    if !is_negative_cell(id) {
+                    rejected_here += 1;
+                    if !negative {
                         failures.push(format!(
                             "{}:{}: cell {id:?}\n    statement: {stmt}\n    {e}",
                             path.display(),
@@ -111,6 +124,18 @@ fn every_shipped_lql_cell_parses() {
                     }
                 }
             }
+            // Inverted, not exempt — see is_negative_cell.
+            if negative && rejected_here == 0 {
+                failures.push(format!(
+                    "{}:{}: cell {id:?} is named as a NEGATIVE cell but every \
+                     statement in it now parses. Either the grammar grew a \
+                     meaning for it — in which case the cell is no longer \
+                     negative coverage and should be renamed — or the cell was \
+                     edited into validity.",
+                    path.display(),
+                    lineno + 1
+                ));
+            }
 
             // The one-shot `lql` driver hands the SPACE-JOINED cell to `run_batch`,
             // which splits it again with this same function. If that split ever
@@ -118,6 +143,17 @@ fn every_shipped_lql_cell_parses() {
             // exercising identical statement sequences and the design's
             // driver-parity property would be silently gone. Pin it with the real
             // splitter rather than trusting that the migration was faithful.
+            //
+            // This also covers `--` line comments, which a review suggested it
+            // might miss: space-joining puts a trailing comment on the same
+            // line as everything after it, so `run_batch`'s line-comment strip
+            // eats statements the newline-joining REPL drivers would run.
+            // Measured over every shape of that hazard — comment leading,
+            // trailing, standalone, and bare `--` — the guard rejects all of
+            // them, because the comment text perturbs the split. The one case
+            // that passes is `DESCRIBE "a--b";`, where `--` is inside a string
+            // literal and parity genuinely holds. A blanket ban on `--` would
+            // have failed that legitimate cell.
             let resplit: Vec<String> = larql_lql::split_statements(&entries.join(" "))
                 .iter()
                 .map(|s| s.trim().to_string())

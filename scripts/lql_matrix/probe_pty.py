@@ -32,11 +32,19 @@ def main():
             # rather than the child dying silently and reading as a clean exit.
             os._exit(127)
     if payload:
-        os.write(fd, payload)
+        # os.write may return SHORT on a blocking fd — a payload larger than
+        # the line discipline's buffer is otherwise silently truncated, and
+        # truncated input reads as larql having ignored statements. Harmless at
+        # the ~30 bytes this probe sends; not harmless for Task 4's 9-statement
+        # cells, and this loop is what Task 4 lifts.
+        view = memoryview(payload)
+        while view:
+            view = view[os.write(fd, view):]
     # Overridable so the timeout branch is testable in under a second. It is
     # the branch that hangs a runner if it is wrong, so it is the one that most
     # needs exercising, and a hardcoded 60 makes exercising it cost 60s a go.
     deadline = time.monotonic() + float(os.environ.get("PROBE_PTY_TIMEOUT", "60"))
+    reaped = None  # exit status, if the WNOHANG poll below collects it first
     with open(out, "wb") as f:
         while True:
             if time.monotonic() > deadline:
@@ -64,7 +72,15 @@ def main():
             if not r:
                 # A terminal has no EOF, so a quiet fd does not mean the child
                 # is done — poll for the child instead of blocking forever.
-                if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                # KEEP the status: this branch is the only one that reaps, and
+                # discarding it here made the final waitpid raise
+                # ChildProcessError and report `exit=unknown` for a code that
+                # had in fact been observed. It fires whenever the child exits
+                # without the master fd reaching EIO — a descendant still
+                # holding the slave open, which `serve` and `chat` can do.
+                wpid, wstatus = os.waitpid(pid, os.WNOHANG)
+                if wpid == pid:
+                    reaped = wstatus
                     break
                 continue
             try:
@@ -80,13 +96,16 @@ def main():
             f.write(chunk)
             f.flush()
     os.close(fd)
-    try:
-        _, status = os.waitpid(pid, 0)
-        print(f"exit={os.waitstatus_to_exitcode(status)}", file=sys.stderr)
-    except ChildProcessError:
-        # Already reaped by the WNOHANG poll above. Say so rather than
-        # printing a number that was never observed.
-        print("exit=unknown", file=sys.stderr)
+    if reaped is not None:
+        print(f"exit={os.waitstatus_to_exitcode(reaped)}", file=sys.stderr)
+    else:
+        try:
+            _, status = os.waitpid(pid, 0)
+            print(f"exit={os.waitstatus_to_exitcode(status)}", file=sys.stderr)
+        except ChildProcessError:
+            # Nothing reaped it and it is already gone. Say so rather than
+            # printing a number that was never observed.
+            print("exit=unknown", file=sys.stderr)
 
 
 if __name__ == "__main__":
