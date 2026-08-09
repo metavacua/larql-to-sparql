@@ -1052,191 +1052,210 @@ Expected: 64 cells, `{'lql'}`, no derived fields, capture files named
 
 ---
 
+> **Simplification note — Tasks 4–10 rewritten 2026-08-09.** The coverage
+> requirements are unchanged: 38 subcommands × (`--help` + a real invocation),
+> 4 drivers with no redundancy assumptions, per-cell REPL sessions plus a
+> long-session leg per model, dependency-ordered and permuted cells with the
+> order in the row, and verbatim `.out`/`.err`/`.merged` captures. What went is
+> mechanism:
+>
+> - **`corpus_lint.lint_cli_corpus` and the hardcoded Python `SUBCOMMANDS`
+>   tuple** — a Python re-implementation of clap's argument grammar, forbidden
+>   by the same rule that deleted `corpus_lint.py` in Task 1 and the Python
+>   splitter in Task 2. Replaced by a clap-owned test inside `larql-cli`
+>   (Tasks 6–7), which is strictly *more* coverage: it rejects a wrong argv
+>   shape with clap's own error instead of merely checking `argv[0]` is a known
+>   name.
+> - **`sequence`'s `unsatisfied` field** and the six single-shape tests that
+>   asserted its contents. The spec asks that a capture be tied to the order
+>   that produced it — `order_index` plus the meta row's `order_seed` does that.
+>   `unsatisfied` was a harness-computed opinion about a cell, and rows carry
+>   facts about the process only. The eight graph shapes survive as one
+>   parametrized test.
+> - **`run_under_pty(argv, stdin_bytes, …)`** — the static-payload shape Task 0
+>   measured as lossy. Statements now pass through as a list and are written one
+>   per prompt (Task 4).
+> - **Restated code and argued rationale** — `drivers.build`, `run_matrix.py`'s
+>   cell loop, `probe_pty.py`'s read loop and the existing tests are referenced
+>   by name rather than re-specified.
+>
+> Three references *before* Task 4 are now stale and were deliberately left
+> untouched: the File Structure rows for `corpus_lint.py`/`corpus_lint_test.py`
+> (neither exists; Task 1 records why), and the Exhaustive Coverage row for
+> `corpus_lint` rejections. The row for `sequence.sequence`'s eight graph shapes
+> is still accurate.
+
 ### Task 4: The `repl-pty` driver
 
-> **Settle before writing this task — two constraints in the plan disagree.**
->
-> Task 0's recorded result says a pty driver must write each statement **in
-> response to a prompt**, not all up front. But Task 4's interface is specified
-> as `run_under_pty(argv, stdin_bytes, merged_path, timeout_s)` — a single
-> static payload, which is exactly the shape Task 0 refuted.
->
-> They are reconcilable: `drivers.build` joins statements with `\n`, so a
-> prompt-driven writer can split that payload back losslessly. But that makes
-> the newline a **contract** rather than a formatting choice, and nothing
-> states or tests it. Either pass the statement list through to the pty runner,
-> or write the `\n` boundary down as contractual and pin it with a test.
->
-> Also: `run_matrix.py` deliberately refuses `--driver repl-pty` today
-> (`IMPLEMENTED_DRIVERS`). Task 4 must add it to that tuple, or the driver
-> stays unreachable.
+`subprocess` cannot give a child a tty, and Task 0 measured that a terminal
+loses statements written to it up front — `repl-pty` lost `STATS;` *and*
+`exit`, `script(1)` lost `STATS;`. So this driver writes **one statement per
+prompt**.
 
-
-`subprocess` cannot give the child a tty. This task adds a pty runner used only when `--driver repl-pty`.
+That supersedes one Task 2 interface detail, recorded here so the change is
+auditable: `build("repl-pty", …)` returned `(argv, b"…\nexit\n")`, and a
+prompt-paced writer would have had to split that payload back apart, making the
+`\n` a contract nothing declared or tested. The statement list passes through
+instead, so boundaries stay authored data.
 
 **Files:**
-- Modify: `scripts/lql_matrix/run_matrix.py`
-- Modify: `scripts/lql_matrix/run_matrix_test.py`
+- Modify, all under `scripts/lql_matrix/`: `drivers.py`, `drivers_test.py`, `run_matrix.py`, `run_matrix_test.py`
 
 **Interfaces:**
-- Consumes: `drivers.build("repl-pty", cell, larql)` returning stdin bytes ending in `exit\n` (Task 2).
-- Produces: `run_matrix.run_under_pty(argv: list[str], stdin_bytes: bytes, merged_path: pathlib.Path, timeout_s: int) -> int` returning the child's exit status. Writes the single merged stream a terminal produces to `merged_path`.
+- Consumes: `probe_pty.write_all` and the read loop it proves on a runner (Task 0).
+- Produces:
+  - `drivers.pty_lines(cell) -> list[str]` — the cell's statements plus `exit`; `build("repl-pty", …)` now returns `(argv, None)`.
+  - `run_matrix.run_under_pty(argv, lines, merged_path, timeout_s) -> tuple[int, list[str]]` — exit status and the lines it *actually* wrote.
+  - `repl-pty` in `IMPLEMENTED_DRIVERS`; rows for this driver gain `merged` / `merged_bytes`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-Append to `scripts/lql_matrix/run_matrix_test.py`:
+In `drivers_test.py`, replace `test_repl_pty_appends_exit_because_a_terminal_has_no_eof`
+with the same assertion against `pty_lines` (`== ['USE "v";', "STATS;", "exit"]`)
+plus `build` returning `stdin is None`, and extend the existing KeyError and
+TypeError rejection cases to cover `pty_lines`.
+
+Append to `run_matrix_test.py`:
 
 ```python
-def test_run_under_pty_gives_the_child_a_tty_and_captures_merged(tmp_path):
+def test_run_under_pty_writes_one_line_per_prompt_and_captures_merged(tmp_path):
     sys.path.insert(0, HERE)
     import pathlib
     import run_matrix as R
-    script = tmp_path / "istty"
-    script.write_text("#!/usr/bin/env bash\n"
-                      "if [ -t 0 ]; then echo TTY_YES; else echo TTY_NO; fi\n"
-                      "read -r line; echo \"GOT:$line\"\n", encoding="utf-8")
+    # Stands in for `larql repl`: a tty check, then a prompt before EVERY read.
+    # Writing all lines up front is what Task 0 measured as lossy, so a driver
+    # that did it would drop lines here exactly as it did on the runner.
+    script = tmp_path / "fakerepl"
+    script.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [ -t 0 ]; then echo TTY_YES; else echo TTY_NO; fi\n"
+        "while true; do printf 'larql> '; read -r l || exit 0;\n"
+        "  [ \"$l\" = exit ] && { echo Goodbye.; exit 0; }; echo \"RAN:$l\"; done\n",
+        encoding="utf-8")
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     merged = tmp_path / "m.merged"
-    rc = R.run_under_pty([str(script)], b"hello\n", pathlib.Path(merged), 30)
+    rc, written = R.run_under_pty([str(script)], ["A;", "B;", "exit"],
+                                  pathlib.Path(merged), 30)
     text = merged.read_text(errors="replace")
     assert "TTY_YES" in text
-    assert "GOT:hello" in text
+    assert "RAN:A;" in text and "RAN:B;" in text     # neither statement lost
+    assert "Goodbye." in text
+    assert written == ["A;", "B;", "exit"]
     assert rc == 0
 
 
 def test_repl_pty_driver_writes_a_merged_capture(tmp_path):
     rows, tp = _run(tmp_path, "repl-pty")
     assert rows[0]["driver"] == "repl-pty"
-    assert "merged" in rows[0]
-    assert (tp / rows[0]["merged"]).exists()
+    assert rows[0]["merged_bytes"] == (tp / rows[0]["merged"]).stat().st_size
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+Run: `cd scripts/lql_matrix && python3 -m pytest -q -k pty`
+Expected: FAIL — no `run_matrix.run_under_pty`, and `--driver repl-pty` rejected by `IMPLEMENTED_DRIVERS`.
 
-Run: `cd scripts/lql_matrix && python3 -m pytest run_matrix_test.py -q -k pty`
-Expected: FAIL — `AttributeError: module 'run_matrix' has no attribute 'run_under_pty'`
+- [ ] **Step 2: Implement the driver**
 
-- [ ] **Step 3: Add the pty runner**
-
-In `scripts/lql_matrix/run_matrix.py`, add `import errno`, `import fcntl`, `import pty`, `import select`, `import signal`, `import struct`, `import termios` to the import block, and add this function immediately above `def main() -> None:`:
+In `drivers.py`:
 
 ```python
-def run_under_pty(argv, stdin_bytes, merged_path, timeout_s):
-    """Run argv with a pseudo-terminal on stdin/stdout/stderr, write everything
-    the terminal carried to merged_path, and return the exit status.
+def pty_lines(cell):
+    """The lines a pty session sends, in order. `exit` is appended because a
+    terminal has no EOF — without it the session runs to the cell timeout."""
+    return [*_statements(cell), "exit"]
+```
 
-    A pty is required because `larql repl` goes through rustyline, and rustyline
-    on a pipe is not the same code path as rustyline on a terminal. Whether they
-    behave identically is exactly what the repl-pipe and repl-pty legs exist to
-    show, so the harness must be able to produce a real terminal.
+and `build("repl-pty", …)` returns `([larql, "repl"], None)`: it writes no
+stdin, because the pty runner does.
 
-    A terminal has ONE stream: stdout and stderr are interleaved as a user sees
-    them. Control sequences and \\r are written through verbatim — stripping
-    them would be post-processing, and what the terminal received is part of
-    what happened.
+`probe_pty.py` already carries the read loop, verified on a runner: `write_all`
+looping over short writes, `select` on a 1 s tick, `os.waitpid(WNOHANG)` on a
+quiet fd **keeping** the status in `reaped`, `EIO` as the pty's EOF, and
+`killpg` rather than `kill` on timeout. Read its docstrings before touching
+this — each paragraph records a measurement. Only its up-front
+`write_all(fd, payload)` is replaced.
+
+In `run_matrix.py`: add `errno`, `fcntl`, `pty`, `select`, `signal`, `struct`,
+`termios` to the imports and `from probe_pty import write_all` beside
+`import drivers`; add `"repl-pty"` to `IMPLEMENTED_DRIVERS`, deleting the
+paragraph of its comment saying the driver does not exist yet; and add above
+`main()`:
+
+```python
+PROMPT = b"larql> "  # printed before every read — the design's Capture section
+
+
+def run_under_pty(argv, lines, merged_path, timeout_s):
+    """Run argv on a pseudo-terminal, releasing one line per prompt observed.
+
+    rustyline on a pipe is not the code path rustyline takes on a terminal, and
+    whether they agree is what the two REPL legs exist to show. Task 0 measured
+    that statements written up front are LOST under a terminal, so this counts
+    prompts in the accumulated stream and writes the next line each time a new
+    one appears. That is input pacing on a live stream, not post-processing:
+    merged_path still receives every byte, control sequences and \\r included.
+
+    Returns (exit status, lines actually written) — if larql dies mid-cell the
+    tail was never sent, and the row must say what was sent, not what was meant.
     """
+    pending, written, answered, buf = list(lines), [], 0, b""
     pid, fd = pty.fork()
-    if pid == 0:  # child
+    if pid == 0:
         try:
             os.execvp(argv[0], argv)
         except Exception:
             os._exit(127)
-
-    # 80x24 so wrapping is deterministic across runners rather than inherited.
+    # 80x24 so wrapping is a property of the harness, not of the runner.
     try:
         fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
     except OSError:
         pass
-
-    if stdin_bytes:
-        os.write(fd, stdin_bytes)
-
-    deadline = time.monotonic() + timeout_s
-    with open(merged_path, "wb") as mf:
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                os.kill(pid, signal.SIGKILL)
-                break
-            r, _, _ = select.select([fd], [], [], min(remaining, 1.0))
-            if not r:
-                if os.waitpid(pid, os.WNOHANG)[0] == pid:
-                    break
-                continue
-            try:
-                chunk = os.read(fd, 65536)
-            except OSError as e:
-                if e.errno == errno.EIO:   # pty closed: child exited
-                    break
-                raise
-            if not chunk:
-                break
-            mf.write(chunk)
-            mf.flush()
-
-    os.close(fd)
-    try:
-        _, status = os.waitpid(pid, 0)
-    except ChildProcessError:
-        return -1
-    return os.waitstatus_to_exitcode(status)
+    # ... read loop lifted from probe_pty.main() with the up-front write gone,
+    # and this run after each `f.write(chunk); f.flush()`:
+    #
+    #     buf += chunk              # accumulated, because a prompt can straddle
+    #     seen = buf.count(PROMPT)  # two reads and a per-chunk count misses it
+    #     while seen > answered and pending:
+    #         line = pending.pop(0)
+    #         write_all(fd, (line + "\n").encode("utf-8"))
+    #         written.append(line)
+    #         answered += 1
+    #
+    # The deadline, killpg, `reaped`, EIO and the final waitpid are unchanged.
+    # Return (exitcode, written) instead of printing.
 ```
 
-- [ ] **Step 4: Branch the cell loop onto the pty runner**
+Then in the cell loop, branch the `t0 = time.monotonic()` … `dur_ms = …` block
+on `driver == "repl-pty"`: call `run_under_pty(argv_cmd, drivers.pty_lines(cell),
+mergedf, int(cell_timeout))`, set `stdin_repr` to `"".join(l + "\n" for l in
+written)`, and write empty `outf`/`errf` so every row indexes the same three
+paths. The other branch keeps `subprocess.run` and derives `stdin_repr` from
+`stdin_bytes` as today. The row's `"stdin"` becomes `stdin_repr`, and
+`merged` / `merged_bytes` go after `"stderr_bytes"` (`None` for other drivers).
 
-In `main()`, replace the block from `t0 = time.monotonic()` through the `dur_ms = ...` line with:
+The pty path does not use the `timeout` / `/usr/bin/time` wrapper argv — it
+execs the child directly and enforces the deadline itself — so `peak_rss_kb`
+stays `""`, the existing not-measured value.
 
-```python
-        mergedf = cells_dir / f"{level}.{driver}.{cid}.merged"
-        t0 = time.monotonic()
-        if driver == "repl-pty":
-            rc = run_under_pty(argv_cmd, stdin_bytes, mergedf, int(cell_timeout))
-            outf.write_bytes(b"")   # a terminal has one stream; these exist so
-            errf.write_bytes(b"")   # every row indexes the same three paths
-        else:
-            with outf.open("wb") as so, errf.open("wb") as se:
-                rc = subprocess.run(argv, stdout=so, stderr=se,
-                                    input=stdin_bytes).returncode
-        dur_ms = int((time.monotonic() - t0) * 1000)
-```
+- [ ] **Step 3: Verify and commit**
 
-Then add to the `row` dict, immediately after the `"stderr_bytes"` entry:
-
-```python
-            "merged": str(mergedf.relative_to(out_path.parent)) if driver == "repl-pty" else None,
-            "merged_bytes": mergedf.stat().st_size if driver == "repl-pty" else None,
-```
-
-Note the pty path does not use the `timeout`/`time` wrapper argv, because it
-execs the child directly; `run_under_pty` enforces the timeout itself and peak
-RSS is unavailable for this driver (the row records `""`, which is the existing
-"not measured" value).
-
-- [ ] **Step 5: Run the tests to verify they pass**
-
-Run: `cd scripts/lql_matrix && python3 -m pytest -q`
-Expected: PASS — 72 tests.
-
-- [ ] **Step 6: Commit**
+Run: `cd scripts/lql_matrix && python3 -m pytest -q` — expected PASS.
 
 ```bash
-git add scripts/lql_matrix/run_matrix.py scripts/lql_matrix/run_matrix_test.py
-git commit -m "harness: repl-pty driver — a real pseudo-terminal
+git add scripts/lql_matrix/drivers.py scripts/lql_matrix/drivers_test.py \
+        scripts/lql_matrix/run_matrix.py scripts/lql_matrix/run_matrix_test.py
+git commit -m "harness: repl-pty driver — a real pty, one statement per prompt
 
-larql repl goes through rustyline, and rustyline on a pipe is not the
-same code path as rustyline on a terminal. Whether they agree is what
-the two repl legs exist to show, so the harness must be able to produce
-a real tty. Control sequences and \\r are written through verbatim."
+Task 0 measured that statements written to a terminal up front are lost:
+repl-pty lost STATS; and exit, script(1) lost STATS;. The runner now
+releases one line per prompt it observes and records the lines it
+actually wrote. Control sequences and \\r are captured verbatim."
 ```
 
-- [ ] **Step 7: Demonstrate both REPL drivers on a runner**
+- [ ] **Step 4: Demonstrate both REPL drivers on a runner**
 
-The fake binary cannot tell you what rustyline does. Run the two new drivers
-against the real one on **a single leg** before extending to all of them.
-
-In the workflow step edited in Task 3, replace the single invocation with a loop
-over the three LQL drivers, hardcoded for this demonstration only (Task 5
-replaces the hardcoded list with `matrix.leg.drivers`):
+The fake binary cannot tell you what rustyline does. In the workflow step Task 3
+edited, loop the three LQL drivers (hardcoded here; Task 10 replaces the list
+with `matrix.leg.drivers`):
 
 ```yaml
           for DRV in lql repl-pipe repl-pty; do
@@ -1248,35 +1267,16 @@ replaces the hardcoded list with `matrix.leg.drivers`):
           done
 ```
 
-```bash
-git add .github/workflows/lql-strategy-matrix.yml
-git commit -m "ci: run all three LQL drivers on every leg"
-git push
-```
+Push, then read `cells/*.repl-pty.*.merged` for a multi-statement cell against
+the same cell's `.lql.*.out`:
 
-Read one leg's captures and compare the three drivers on the same cell:
-
-```bash
-gh run download <run-id> --repo metavacua/larql-to-sparql --name results-smol135.native.all --dir /tmp/d
-for drv in lql repl-pipe repl-pty; do
-  echo "══════ $drv"
-  ls /tmp/d/cells/ | grep "\.$drv\." | head -3
-  f=$(ls /tmp/d/cells/*.$drv.describe.basic.* 2>/dev/null | head -1)
-  [ -n "$f" ] && { echo "── $f ($(wc -c < "$f") bytes)"; head -20 "$f"; }
-done
-```
-
-What to check, and what each answer means:
-
-- **All three produced non-empty captures for `describe.basic`** — the drivers
-  work; proceed.
-- **`repl-pipe` captures are empty while `lql` is not** — consistent with the
-  Task 0 probe; the driver still ships, and this is a finding about larql's
-  non-interactive REPL, not a harness bug to fix.
-- **`repl-pty` capture is empty or the leg hit its timeout** — the pty runner is
-  wrong. Return to Step 3 of this task; do not proceed to Task 5.
-- **`repl-pty` contains `\r` and escape sequences** — correct and expected. They
-  stay verbatim; stripping them is a Global Constraint violation.
+- **every statement in the cell appears in `.merged`** — the pacing fixed what
+  Task 0 measured. This is the specific regression: in the probe, `STATS;`
+  produced no output and no error under either pty mechanism.
+- **a statement is still missing, or the leg timed out** — the pacing is wrong.
+  Return to Step 2; do not proceed.
+- **`.merged` is full of `\r` and `^[[?2004h`** — correct, and they stay.
+- **`repl-pipe` differs from `lql`** — a finding about larql, not a harness bug.
 
 **Do not start Task 5 until these captures have been read.**
 
@@ -1285,19 +1285,17 @@ What to check, and what each answer means:
 ### Task 5: Driver axis in `gen_legs.py`
 
 **Files:**
-- Modify: `scripts/lql_matrix/gen_legs.py`
-- Modify: `scripts/lql_matrix/gen_legs_test.py`
+- Modify: `scripts/lql_matrix/gen_legs.py`, `scripts/lql_matrix/gen_legs_test.py`
 
 **Interfaces:**
-- Consumes: `drivers.DRIVERS` (Task 2).
 - Produces: every leg dict gains `"drivers": list[str]` and `"long_session": bool`. Task 10's workflow reads both.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 Append to `scripts/lql_matrix/gen_legs_test.py`:
 
 ```python
-def test_every_leg_declares_its_drivers():
+def test_every_leg_declares_drivers_from_the_known_set():
     legs = G.build_legs()
     assert all(lg["drivers"] for lg in legs)
     assert all(set(lg["drivers"]) <= {"lql", "repl-pipe", "repl-pty", "cli"} for lg in legs)
@@ -1321,48 +1319,30 @@ def test_long_session_legs_use_a_repl_driver():
     for lg in G.build_legs():
         if lg["long_session"]:
             assert "lql" not in lg["drivers"]
+
+
+def test_every_model_has_a_cli_leg():
+    cli = {lg["name"].split(".", 1)[0] for lg in G.build_legs() if lg["drivers"] == ["cli"]}
+    assert cli == {m for m, _ in G.SAFETENSORS}
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+Run: `cd scripts/lql_matrix && python3 -m pytest gen_legs_test.py -q` — expected FAIL, `KeyError: 'drivers'`.
 
-Run: `cd scripts/lql_matrix && python3 -m pytest gen_legs_test.py -q`
-Expected: FAIL — `KeyError: 'drivers'`
+- [ ] **Step 2: Add the axis**
 
-- [ ] **Step 3: Add the axis**
+Give `leg()` two more keyword parameters, `drivers=("lql",)` and
+`long_session=False`, and put `"drivers": list(drivers)` and
+`"long_session": long_session` in the dict it returns. Then in `build_legs()`:
 
-In `scripts/lql_matrix/gen_legs.py`, change the `leg()` signature and body to:
-
-```python
-def leg(name, hf, op, level="all", flags="",
-        source_kind="safetensors", corpus_model=None, tokenizer_repo="",
-        roundtrip=False, lql_with="", drivers=("lql",), long_session=False):
-    return {"name": name, "hf": hf, "corpus_model": corpus_model or hf,
-            "source_kind": source_kind, "op": op, "level": level, "flags": flags,
-            "tokenizer_repo": tokenizer_repo,
-            "roundtrip": roundtrip, "lql_with": lql_with,
-            "drivers": list(drivers), "long_session": long_session}
-```
-
-In `build_legs()`, change the native-extraction loop to request all three LQL drivers:
-
-```python
-    # 1. NATIVE EXTRACTION — full level grid per model, native precision (f16).
-    for mid, hf in SAFETENSORS:
-        for lv in LEVELS:
-            rt = mid in ("smol135", "smol135base") and lv in ("inference", "all")
-            legs.append(leg(f"{mid}.native.{lv}", hf, "extract", level=lv,
-                            roundtrip=rt,
-                            drivers=("lql", "repl-pipe", "repl-pty")))
-```
-
-Then append, immediately before `return legs`:
+- section 1 (native extraction) passes `drivers=("lql", "repl-pipe", "repl-pty")`;
+- immediately before `return legs`, append two loops over `SAFETENSORS`:
 
 ```python
     # 4. LONG SESSION — the whole corpus through ONE repl session per model.
     #    The only thing that exercises state accumulating across commands.
-    #    Ordering is load-bearing here and cells contaminate each other by
-    #    design; that is the point, and it is why this is a separate leg
-    #    rather than a replacement for the per-cell backbone.
+    #    Cells contaminate each other by design; that is the point, and it is
+    #    why this is a separate leg rather than a replacement for the per-cell
+    #    backbone.
     for mid, hf in SAFETENSORS:
         legs.append(leg(f"{mid}.longsession", hf, "extract", level="all",
                         drivers=("repl-pipe", "repl-pty"), long_session=True))
@@ -1370,31 +1350,25 @@ Then append, immediately before `return legs`:
     # 5. CLI SURFACE — every subcommand, help and real invocation. Driven per
     #    model because most subcommands need a produced vindex.
     for mid, hf in SAFETENSORS:
-        legs.append(leg(f"{mid}.cli", hf, "extract", level="all",
-                        drivers=("cli",)))
+        legs.append(leg(f"{mid}.cli", hf, "extract", level="all", drivers=("cli",)))
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 3: Verify and commit**
 
-Run: `cd scripts/lql_matrix && python3 -m pytest -q`
-Expected: PASS — 76 tests.
-
-- [ ] **Step 5: Verify the leg count under the active filter**
-
-Run:
 ```bash
-cd scripts/lql_matrix && LQL_MATRIX_ONLY="smol135,smol135base" python3 gen_legs.py \
+cd scripts/lql_matrix && python3 -m pytest -q
+LQL_MATRIX_ONLY="smol135,smol135base" python3 gen_legs.py \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d),'legs'); [print(' ',l['name'],l['drivers'],'long' if l['long_session'] else '') for l in d]"
 ```
-Expected: 25 legs — the 21 existing plus `smol135.longsession`, `smol135base.longsession`, `smol135.cli`, `smol135base.cli`.
 
-- [ ] **Step 6: Commit**
+Expected: PASS, and 25 legs — the 21 existing plus `smol135.longsession`,
+`smol135base.longsession`, `smol135.cli`, `smol135base.cli`.
 
 ```bash
 git add scripts/lql_matrix/gen_legs.py scripts/lql_matrix/gen_legs_test.py
 git commit -m "harness: driver axis, long-session legs, cli legs
 
-Native legs now declare all three LQL drivers. One long-session leg per
+Native legs declare all three LQL drivers. One long-session leg per
 model sends the whole corpus through a single repl session — the only
 thing that exercises cross-command state, and excluded from the lql
 driver because a one-shot batch starts a fresh Session each time."
@@ -1406,140 +1380,152 @@ driver because a one-shot batch starts a fresh Session each time."
 
 ---
 
-### Task 6: `cli-help.jsonl` — every subcommand's help
+### Task 6: `cli-help.jsonl` — every subcommand's help, validated by clap
+
+The corpus is validated by **clap**, which owns the argument grammar, in a test
+module inside `larql-cli` — the same shape as Task 1's
+`matrix_corpus_wellformed.rs`, which validates the LQL corpus with LQL's own
+parser. There is no Python subcommand list and no Python argv checker; a second
+implementation of clap's grammar would drift from it, and Task 0 spent ten
+captures discovering that guessed argv shapes are wrong.
 
 **Files:**
 - Create: `scripts/lql_matrix/cli-help.jsonl`
-- Modify: `scripts/lql_matrix/corpus_lint.py`
-- Modify: `scripts/lql_matrix/corpus_lint_test.py`
+- Create: `crates/larql-cli/src/matrix_cli_corpus.rs`
+- Modify: `crates/larql-cli/src/main.rs` — one `#[cfg(test)] mod` line
+- Modify: `scripts/lql_matrix/run_matrix.py` — `IMPLEMENTED_DRIVERS`
 
 **Interfaces:**
-- Consumes: `corpus_lint._rows` (Task 1).
-- Produces: `corpus_lint.lint_cli_corpus(path: str, require_deps: bool) -> list[str]` and `corpus_lint.SUBCOMMANDS: tuple[str, ...]` — the 38 lowercase subcommand names. Task 7 reuses both.
+- Consumes: `crate::Cli` via `clap::CommandFactory` (private to the crate root, visible to a child module — the existing `trampoline_tests` module is the precedent).
+- Produces: `cargo test -p larql-cli --bin larql matrix_cli_corpus`, and helpers Task 7 extends.
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `scripts/lql_matrix/corpus_lint_test.py`:
+Add `#[cfg(test)]\nmod matrix_cli_corpus;` beside the existing `mod` lines in
+`crates/larql-cli/src/main.rs`, and create
+`crates/larql-cli/src/matrix_cli_corpus.rs`:
 
-```python
-def test_cli_corpus_requires_argv(tmp_path):
-    p = tmp_path / "c.jsonl"
-    p.write_text(json.dumps({"id": "x", "cat": "cli"}) + "\n", encoding="utf-8")
-    assert any("argv" in s for s in L.lint_cli_corpus(str(p), require_deps=False))
+```rust
+//! The CLI corpora are well-formed according to CLAP, not according to a copy
+//! of clap. `Cli::command()` is the exact grammar the binary parses with, so a
+//! wrong argv shape fails here with clap's own error instead of costing a CI
+//! leg — which is what the ten corrected rows in
+//! docs/diagnoses/task0-cli-repl-probe.md cost the first time.
+//!
+//! Asserts nothing about what a command DOES. Whether an accepted invocation
+//! succeeds, errors or times out is the run's business, in the captures.
+use clap::CommandFactory;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
 
+struct Row { line: usize, id: String, argv: Vec<String>, raw: serde_json::Value }
 
-def test_cli_help_corpus_covers_every_subcommand():
-    path = os.path.join(HERE, "cli-help.jsonl")
-    assert L.lint_cli_corpus(path, require_deps=False) == []
-    seen = {json.loads(l)["argv"][0] for l in open(path, encoding="utf-8") if l.strip()}
-    assert seen == set(L.SUBCOMMANDS), f"missing: {set(L.SUBCOMMANDS) - seen}"
+/// Every row of a corpus under `scripts/lql_matrix/`, read the way
+/// `crates/larql-lql/tests/matrix_corpus_wellformed.rs` reads the LQL corpora.
+/// `{{VINDEX}}`/`{{MODEL}}`/`{{TMP}}` stay unsubstituted — clap parses them as
+/// ordinary strings, so keep placeholders out of typed positions (a numeric
+/// value_parser rejects `{{TMP}}`).
+fn corpus(name: &str) -> Vec<Row> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scripts/lql_matrix").join(name);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()).map(|(i, l)| {
+        let raw: serde_json::Value = serde_json::from_str(l)
+            .unwrap_or_else(|e| panic!("{name}:{}: not JSON: {e}", i + 1));
+        let id = raw["id"].as_str().expect("cell has no string `id`").to_string();
+        let argv = raw["argv"].as_array()
+            .unwrap_or_else(|| panic!("{name}:{}: cell {id:?} has no `argv` array", i + 1))
+            .iter().map(|v| v.as_str().expect("argv entry is not a string").to_string())
+            .collect();
+        Row { line: i + 1, id, argv, raw }
+    }).collect()
+}
 
+/// Every subcommand clap knows, minus clap's own auto-generated `help`.
+fn subcommands() -> BTreeSet<String> {
+    crate::Cli::command().get_subcommands()
+        .map(|s| s.get_name().to_string()).filter(|n| n != "help").collect()
+}
 
-def test_subcommand_list_matches_the_rust_source():
-    # If someone adds a subcommand to main.rs, this fails until the corpus
-    # covers it. A subcommand nothing invokes is a subcommand nothing tests.
-    import re
-    root = os.path.abspath(os.path.join(HERE, "..", ".."))
-    src = open(os.path.join(root, "crates/larql-cli/src/main.rs"), encoding="utf-8").read()
-    body = re.search(r"enum Commands \{(.*?)\n\}", src, re.S).group(1)
-    variants = re.findall(r"^\s{4}([A-Z]\w+)", body, re.M)
-    def kebab(v):
-        return re.sub(r"(?<!^)(?=[A-Z])", "-", v).lower()
-    assert sorted(kebab(v) for v in variants) == sorted(L.SUBCOMMANDS)
+/// The argv the binary would see.
+fn full_argv(r: &Row) -> Vec<String> {
+    std::iter::once("larql".to_string()).chain(r.argv.iter().cloned()).collect()
+}
+
+/// The subcommands a corpus invokes. One it never invokes is one nothing tests.
+fn covered(rows: &[Row]) -> BTreeSet<String> {
+    rows.iter().map(|r| r.argv[0].clone()).collect()
+}
+
+#[test]
+fn cli_help_corpus_covers_every_subcommand_and_every_row_renders_help() {
+    let rows = corpus("cli-help.jsonl");
+    let (want, got) = (subcommands(), covered(&rows));
+    assert_eq!(got, want, "uncovered: {:?}", want.difference(&got));
+    let cmd = crate::Cli::command();
+    for r in &rows {
+        match cmd.clone().try_get_matches_from(full_argv(r)) {
+            Err(e) if e.kind() == clap::error::ErrorKind::DisplayHelp => {}
+            other => panic!("cli-help.jsonl:{}: cell {:?} did not render help: {:?}",
+                            r.line, r.id, other.err().map(|e| e.to_string())),
+        }
+    }
+}
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+Run: `cargo test -p larql-cli --bin larql matrix_cli_corpus` — expected FAIL,
+`cannot read …/cli-help.jsonl`.
 
-Run: `cd scripts/lql_matrix && python3 -m pytest corpus_lint_test.py -q`
-Expected: FAIL — `AttributeError: module 'corpus_lint' has no attribute 'lint_cli_corpus'`
+- [ ] **Step 2: Generate the help corpus**
 
-- [ ] **Step 3: Add the CLI lint and the subcommand list**
+The 38 names in clap's kebab-case form. They are exact values; the test above
+guards them against drift, so nothing hand-maintains a second copy.
 
-Append to `scripts/lql_matrix/corpus_lint.py`:
-
-```python
-# Every subcommand in crates/larql-cli/src/main.rs `enum Commands`, in clap's
-# kebab-case form. Kept here as data so a test can compare it against the Rust
-# source: a subcommand nothing invokes is a subcommand nothing tests.
-SUBCOMMANDS = (
-    "run", "chat", "pull", "model", "link", "list", "show", "slice", "publish",
-    "rm", "bench", "dec-bench", "k3-ledger", "accuracy", "shannon", "serve",
-    "repl", "lql", "extract", "extract-index", "build", "compile", "convert",
-    "hf", "verify", "diag", "parity", "moe-locality", "recipe", "capabilities",
-    "card", "query", "describe", "stats", "validate", "merge", "filter", "dev",
-)
-
-_CLI_REQUIRED = ("id", "cat", "argv")
-
-
-def lint_cli_corpus(path, require_deps):
-    """Return a list of problems in a CLI corpus. Empty list means clean.
-
-    require_deps=True additionally demands `needs` and `produces` lists, which
-    the sequencer uses to order cells.
-    """
-    problems = []
-    seen = {}
-    for n, row in _rows(path):
-        for key in _CLI_REQUIRED:
-            if key not in row:
-                problems.append(f"{path}:{n}: missing required key {key!r}")
-        cid = row.get("id")
-        if cid in seen:
-            problems.append(f"{path}:{n}: duplicate id {cid!r} (first at line {seen[cid]})")
-        elif cid is not None:
-            seen[cid] = n
-        argv = row.get("argv")
-        if isinstance(argv, list) and argv and argv[0] not in SUBCOMMANDS:
-            problems.append(f"{path}:{n}: {argv[0]!r} is not a larql subcommand")
-        if require_deps:
-            for key in ("needs", "produces"):
-                if not isinstance(row.get(key), list):
-                    problems.append(f"{path}:{n}: cell {cid!r} missing {key!r} list")
-    return problems
-```
-
-- [ ] **Step 4: Generate the help corpus**
-
-Run:
 ```bash
 cd /home/metavacua/larql-vindex3-03-08-2026
 python3 - <<'PY'
-import json, sys
-sys.path.insert(0, "scripts/lql_matrix")
-from corpus_lint import SUBCOMMANDS
-rows = [{"id": f"help.{c}", "cat": "cli-help", "argv": [c, "--help"]} for c in SUBCOMMANDS]
+import json
+SUBCOMMANDS = """run chat pull model link list show slice publish rm bench
+dec-bench k3-ledger accuracy shannon serve repl lql extract extract-index
+build compile convert hf verify diag parity moe-locality recipe capabilities
+card query describe stats validate merge filter dev""".split()
+assert len(SUBCOMMANDS) == 38, len(SUBCOMMANDS)
 with open("scripts/lql_matrix/cli-help.jsonl", "w", encoding="utf-8") as f:
-    for r in rows:
-        f.write(json.dumps(r) + "\n")
-print(len(rows), "help cells")
+    for c in SUBCOMMANDS:
+        f.write(json.dumps({"id": f"help.{c}", "cat": "cli-help",
+                            "argv": [c, "--help"]}) + "\n")
+print(len(SUBCOMMANDS), "help cells")
 PY
 ```
-Expected: `38 help cells`
 
-- [ ] **Step 5: Run the tests to verify they pass**
+Expected: `38 help cells`, and the cargo test above now passes. If it reports an
+uncovered name, clap has a subcommand this list does not — add it; that is the
+drift the test exists to catch.
 
-Run: `cd scripts/lql_matrix && python3 -m pytest -q`
-Expected: PASS — 79 tests.
+- [ ] **Step 3: Make `--driver cli` reachable, then commit**
 
-- [ ] **Step 6: Commit**
+Add `"cli"` to `run_matrix.IMPLEMENTED_DRIVERS` and delete the paragraph of its
+comment that says the `cli-*.jsonl` corpora do not exist yet.
 
 ```bash
-git add scripts/lql_matrix/cli-help.jsonl scripts/lql_matrix/corpus_lint.py scripts/lql_matrix/corpus_lint_test.py
-git commit -m "harness: --help cell for all 38 subcommands
+cd scripts/lql_matrix && python3 -m pytest -q
+cd /home/metavacua/larql-vindex3-03-08-2026 && cargo test -p larql-cli --bin larql matrix_cli_corpus
+git add scripts/lql_matrix/cli-help.jsonl scripts/lql_matrix/run_matrix.py \
+        crates/larql-cli/src/matrix_cli_corpus.rs crates/larql-cli/src/main.rs
+git commit -m "harness: a --help cell for all 38 subcommands, checked by clap
 
-A test compares the subcommand list against enum Commands in main.rs,
-so adding a subcommand fails the harness until a cell covers it. The
+The corpus is validated with Cli::command(), the same grammar the binary
+parses with, so a name clap does not know fails locally instead of on a
+runner. Adding a subcommand fails the test until a cell covers it. The
 matrix previously drove 4 of 38."
 ```
 
-- [ ] **Step 7: Demonstrate 38 real `--help` invocations on a runner**
+- [ ] **Step 4: Demonstrate 38 real `--help` invocations on a runner**
 
-This is the cheapest possible real exercise of the `cli` driver — no vindex, no
-model, no network — so it isolates "does the cli driver invoke correctly" from
-"do the subcommands work".
-
-Add to the workflow step, inside the driver loop added in Task 4:
+The cheapest real exercise of the `cli` driver — no vindex, no model, no
+network — so it isolates "does the driver invoke correctly" from "do the
+subcommands work". Inside the driver loop from Task 4:
 
 ```yaml
             if [ "$DRV" = "cli" ]; then
@@ -1549,32 +1535,11 @@ Add to the workflow step, inside the driver loop added in Task 4:
             fi
 ```
 
-and add `cli` to the hardcoded driver list for this demonstration.
-
-```bash
-git add .github/workflows/lql-strategy-matrix.yml
-git commit -m "ci: run the 38 --help cells through the cli driver"
-git push
-```
-
-Read the result:
-
-```bash
-gh run download <run-id> --repo metavacua/larql-to-sparql --name results-smol135.native.all --dir /tmp/d
-python3 -c "
-import json,glob
-rows=[json.loads(l) for f in glob.glob('/tmp/d/results-*.cli.help.jsonl') for l in open(f) if l.strip()]
-cells=[r for r in rows if r.get('type')!='meta']
-print(len(cells),'help cells')
-bad=[(r['id'],r['exit_code']) for r in cells if r['exit_code']!=0]
-print('non-zero exits:',bad)
-empty=[r['id'] for r in cells if r['stdout_bytes']==0]
-print('empty stdout:',empty)"
-```
-
-Expected: 38 cells. A subcommand whose `--help` exits non-zero or prints nothing
-is a real finding about the CLI — record it, do not "fix" the cell to make it
-pass. **Do not start Task 7 until these have been read.**
+Add `cli` to the hardcoded driver list, push, and read the 38 rows' exit codes
+and `stdout_bytes`. Task 0 measured 38 of 38 at `exit=0`; a subcommand whose
+`--help` now exits non-zero or prints nothing is a real finding about the CLI —
+record it, do not edit the cell to make it pass. **Do not start Task 7 until
+these have been read.**
 
 ---
 
@@ -1582,67 +1547,79 @@ pass. **Do not start Task 7 until these have been read.**
 
 **Files:**
 - Create: `scripts/lql_matrix/cli-commands.jsonl`
-- Modify: `scripts/lql_matrix/corpus_lint_test.py`
+- Modify: `crates/larql-cli/src/matrix_cli_corpus.rs`
 
 **Interfaces:**
-- Consumes: `corpus_lint.lint_cli_corpus(path, require_deps=True)`, `corpus_lint.SUBCOMMANDS` (Task 6).
-- Produces: a corpus whose cells each carry `needs: list[str]` and `produces: list[str]` over the artifact vocabulary `{"vindex", "cache-entry", "graph-file", "recipe", "vlp"}`. Task 8's sequencer consumes it.
+- Consumes: `corpus`, `subcommands`, `covered` (Task 6).
+- Produces: a corpus whose cells each carry `needs: list[str]` and `produces: list[str]` over the vocabulary `{"vindex", "cache-entry", "graph-file", "recipe", "vlp"}`. Task 8's sequencer consumes it.
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `scripts/lql_matrix/corpus_lint_test.py`:
+Append to `crates/larql-cli/src/matrix_cli_corpus.rs`:
 
-```python
-def test_cli_commands_corpus_is_clean_and_covers_every_subcommand():
-    path = os.path.join(HERE, "cli-commands.jsonl")
-    assert L.lint_cli_corpus(path, require_deps=True) == []
-    seen = {json.loads(l)["argv"][0] for l in open(path, encoding="utf-8") if l.strip()}
-    assert seen == set(L.SUBCOMMANDS), f"never invoked: {sorted(set(L.SUBCOMMANDS) - seen)}"
+```rust
+#[test]
+fn cli_commands_corpus_invokes_every_subcommand_with_argv_clap_accepts() {
+    let rows = corpus("cli-commands.jsonl");
+    let (want, got) = (subcommands(), covered(&rows));
+    assert_eq!(got, want, "never invoked: {:?}", want.difference(&got));
+    let cmd = crate::Cli::command();
+    for r in &rows {
+        // The six rows Task 0 could not settle ship with a marker, which clap
+        // would happily accept as a free-form string value. Fail on it here.
+        for a in &r.argv {
+            assert!(!a.contains("TAKE FROM PROBE"),
+                    "cli-commands.jsonl:{}: cell {:?} still has a placeholder: {a:?}", r.line, r.id);
+        }
+        // Ok(_) is the bar, not "clap did not crash". A row that only reaches
+        // DisplayHelp or MissingRequiredArgument is not a real invocation —
+        // exactly the shapes Task 0 measured as wrong (shannon, dec-bench,
+        // dev, card, hf, k3-ledger).
+        if let Err(e) = cmd.clone().try_get_matches_from(full_argv(r)) {
+            panic!("cli-commands.jsonl:{}: cell {:?} is not a real invocation:\n{e}", r.line, r.id);
+        }
+    }
+}
 
-
-def test_cli_commands_artifacts_come_from_a_closed_vocabulary():
-    path = os.path.join(HERE, "cli-commands.jsonl")
-    vocab = {"vindex", "cache-entry", "graph-file", "recipe", "vlp"}
-    for line in open(path, encoding="utf-8"):
-        if not line.strip():
-            continue
-        d = json.loads(line)
-        assert set(d["needs"]) <= vocab, f"{d['id']}: unknown needs {d['needs']}"
-        assert set(d["produces"]) <= vocab, f"{d['id']}: unknown produces {d['produces']}"
+#[test]
+fn cli_commands_artifacts_come_from_a_closed_vocabulary() {
+    const VOCAB: [&str; 5] = ["vindex", "cache-entry", "graph-file", "recipe", "vlp"];
+    for r in corpus("cli-commands.jsonl") {
+        for key in ["needs", "produces"] {
+            let list = r.raw[key].as_array()
+                .unwrap_or_else(|| panic!("cli-commands.jsonl:{}: {:?} has no {key:?} list", r.line, r.id));
+            for v in list {
+                let a = v.as_str().expect("artifact is not a string");
+                assert!(VOCAB.contains(&a),
+                        "cli-commands.jsonl:{}: {:?} unknown {key} {a:?}", r.line, r.id);
+            }
+        }
+    }
+}
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+Run: `cargo test -p larql-cli --bin larql matrix_cli_corpus` — expected FAIL,
+`cannot read …/cli-commands.jsonl`.
 
-Run: `cd scripts/lql_matrix && python3 -m pytest corpus_lint_test.py -q -k cli_commands`
-Expected: FAIL — `FileNotFoundError: cli-commands.jsonl`
+- [ ] **Step 2: Write the corpus**
 
-- [ ] **Step 3: Write the corpus**
+One line per subcommand, minimum; more where a subcommand has distinct modes.
+`{{VINDEX}}`, `{{MODEL}}` and `{{TMP}}` are substituted by `run_matrix.py` and
+must stay out of typed positions, since the test above parses them literally.
 
-Create `scripts/lql_matrix/cli-commands.jsonl` with one line per subcommand.
-
-**Start from Task 0's `cmd.index` and `cmd.*.err` captures, not from the rows
-below.** Task 0 ran every one of these argument shapes against the real binary
-precisely so this corpus is written from what larql said rather than guessed a
-second time. For each subcommand:
-
-- stderr named an unknown flag or argument → **use the corrected argv**, taken
-  from that subcommand's `help.<name>.out`
-- stderr named a missing input file → the shape is right; keep it and declare
-  the `needs`
-- it consumed its timeout → keep it, and note it in `cat` as non-terminating
-
-The rows below are the shapes Task 0 probed. Where a capture showed the shape
-was wrong, the corrected row replaces it here — the guess does not survive into
-the corpus.
-
-(`{{VINDEX}}`, `{{MODEL}}` and `{{TMP}}` are substituted by `run_matrix.py`.)
+**Six rows below are marked `TAKE FROM PROBE` because nobody knows their shape
+yet.** Task 0 recorded only "enumerate subcommands" for them. Do not guess a
+third time: read the argument shape out of the probe artifact's
+`help.<name>.out` (regenerate with a `lql-strategy-matrix` dispatch at
+`scope: probe` if it has expired), and let the Step 1 test confirm it — clap
+rejects a wrong shape locally now, which is what makes this cheap.
 
 ```json
 {"id": "cli.extract", "cat": "produce", "argv": ["extract", "{{MODEL}}", "-o", "{{TMP}}/cli.vindex", "--level", "all"], "needs": [], "produces": ["vindex"]}
 {"id": "cli.extract-index", "cat": "produce", "argv": ["extract-index", "{{MODEL}}", "-o", "{{TMP}}/cli-idx.vindex", "--level", "browse"], "needs": [], "produces": ["vindex"]}
 {"id": "cli.convert", "cat": "produce", "argv": ["convert", "quantize", "q4k", "--input", "{{VINDEX}}", "--output", "{{TMP}}/cli-q4k.vindex"], "needs": ["vindex"], "produces": ["vindex"]}
 {"id": "cli.build", "cat": "produce", "argv": ["build", "{{TMP}}/Vindexfile", "-o", "{{TMP}}/cli-build.vindex"], "needs": [], "produces": ["vindex"]}
-{"id": "cli.slice", "cat": "produce", "argv": ["slice", "{{VINDEX}}", "--output", "{{TMP}}/cli-slice.vindex", "--kind", "browse"], "needs": ["vindex"], "produces": ["vindex"]}
+{"id": "cli.slice", "cat": "produce", "argv": ["slice", "{{VINDEX}}", "--output", "{{TMP}}/cli-slice.vindex", "--preset", "TAKE FROM PROBE: help.slice.out lists --parts/--preset values"], "needs": ["vindex"], "produces": ["vindex"]}
 {"id": "cli.compile", "cat": "produce", "argv": ["compile", "--base", "{{MODEL}}", "--vindex", "{{TMP}}/empty.vlp", "--output", "{{TMP}}/cli-compiled"], "needs": ["vlp"], "produces": []}
 {"id": "cli.link", "cat": "register", "argv": ["link", "{{VINDEX}}"], "needs": ["vindex"], "produces": ["cache-entry"]}
 {"id": "cli.pull", "cat": "register", "argv": ["pull", "chrishayuk/gemma-3-4b-it-vindex"], "needs": [], "produces": ["cache-entry"]}
@@ -1652,25 +1629,25 @@ the corpus.
 {"id": "cli.verify", "cat": "consume", "argv": ["verify", "{{VINDEX}}"], "needs": ["vindex"], "produces": []}
 {"id": "cli.diag", "cat": "consume", "argv": ["diag", "{{VINDEX}}"], "needs": ["vindex"], "produces": []}
 {"id": "cli.capabilities", "cat": "consume", "argv": ["capabilities"], "needs": [], "produces": []}
-{"id": "cli.run", "cat": "consume", "argv": ["run", "{{VINDEX}}", "--prompt", "Paris is the capital of", "--max-tokens", "4"], "needs": ["vindex"], "produces": []}
+{"id": "cli.run", "cat": "consume", "argv": ["run", "{{VINDEX}}", "Paris is the capital of", "--max-tokens", "4"], "needs": ["vindex"], "produces": []}
 {"id": "cli.chat", "cat": "consume", "argv": ["chat", "{{VINDEX}}", "--max-tokens", "1"], "needs": ["vindex"], "produces": []}
 {"id": "cli.serve", "cat": "consume", "argv": ["serve", "{{VINDEX}}", "--port", "18080"], "needs": ["vindex"], "produces": []}
 {"id": "cli.bench", "cat": "consume", "argv": ["bench", "{{VINDEX}}", "--tokens", "4"], "needs": ["vindex"], "produces": []}
-{"id": "cli.dec-bench", "cat": "consume", "argv": ["dec-bench", "--help-me-fail"], "needs": [], "produces": []}
-{"id": "cli.k3-ledger", "cat": "consume", "argv": ["k3-ledger", "report"], "needs": [], "produces": []}
+{"id": "cli.dec-bench", "cat": "consume", "argv": ["dec-bench", "TAKE FROM PROBE: help.dec-bench.out — bare invocation only printed help"], "needs": [], "produces": []}
+{"id": "cli.k3-ledger", "cat": "consume", "argv": ["k3-ledger", "TAKE FROM PROBE: help.k3-ledger.out — 'report' is not a subcommand"], "needs": [], "produces": []}
 {"id": "cli.accuracy", "cat": "consume", "argv": ["accuracy", "{{VINDEX}}"], "needs": ["vindex"], "produces": []}
-{"id": "cli.shannon", "cat": "consume", "argv": ["shannon", "score", "{{VINDEX}}"], "needs": ["vindex"], "produces": []}
+{"id": "cli.shannon", "cat": "consume", "argv": ["shannon", "TAKE FROM PROBE: help.shannon.out — shannon <COMMAND>"], "needs": ["vindex"], "produces": []}
 {"id": "cli.parity", "cat": "consume", "argv": ["parity", "{{VINDEX}}"], "needs": ["vindex"], "produces": []}
 {"id": "cli.moe-locality", "cat": "consume", "argv": ["moe-locality", "{{VINDEX}}"], "needs": ["vindex"], "produces": []}
 {"id": "cli.publish", "cat": "consume", "argv": ["publish", "{{VINDEX}}", "--repo", "example/does-not-exist"], "needs": ["vindex"], "produces": []}
-{"id": "cli.hf", "cat": "consume", "argv": ["hf", "upload", "{{VINDEX}}", "--repo", "example/does-not-exist"], "needs": ["vindex"], "produces": []}
+{"id": "cli.hf", "cat": "consume", "argv": ["hf", "TAKE FROM PROBE: help.hf.out — 'upload' is not a subcommand"], "needs": ["vindex"], "produces": []}
 {"id": "cli.recipe", "cat": "consume", "argv": ["recipe", "validate", "{{TMP}}/recipe.yaml"], "needs": ["recipe"], "produces": []}
-{"id": "cli.card", "cat": "consume", "argv": ["card", "render", "{{TMP}}/recipe.yaml"], "needs": ["recipe"], "produces": []}
-{"id": "cli.dev", "cat": "consume", "argv": ["dev", "--help"], "needs": [], "produces": []}
+{"id": "cli.card", "cat": "consume", "argv": ["card", "TAKE FROM PROBE: help.card.out — card <COMMAND>"], "needs": ["recipe"], "produces": []}
+{"id": "cli.dev", "cat": "consume", "argv": ["dev", "TAKE FROM PROBE: help.dev.out — needs a subcommand"], "needs": [], "produces": []}
 {"id": "cli.repl", "cat": "consume", "argv": ["repl"], "needs": [], "produces": []}
 {"id": "cli.lql", "cat": "consume", "argv": ["lql", "SHOW MODELS;"], "needs": [], "produces": []}
-{"id": "cli.query", "cat": "graph", "argv": ["query", "{{TMP}}/graph.json", "--entity", "France"], "needs": ["graph-file"], "produces": []}
-{"id": "cli.describe", "cat": "graph", "argv": ["describe", "{{TMP}}/graph.json", "France"], "needs": ["graph-file"], "produces": []}
+{"id": "cli.query", "cat": "graph", "argv": ["query", "--graph", "{{TMP}}/graph.json", "France"], "needs": ["graph-file"], "produces": []}
+{"id": "cli.describe", "cat": "graph", "argv": ["describe", "--graph", "{{TMP}}/graph.json", "France"], "needs": ["graph-file"], "produces": []}
 {"id": "cli.stats", "cat": "graph", "argv": ["stats", "{{TMP}}/graph.json"], "needs": ["graph-file"], "produces": []}
 {"id": "cli.validate", "cat": "graph", "argv": ["validate", "{{TMP}}/graph.json"], "needs": ["graph-file"], "produces": []}
 {"id": "cli.merge", "cat": "graph", "argv": ["merge", "{{TMP}}/graph.json", "{{TMP}}/graph.json", "-o", "{{TMP}}/merged.json"], "needs": ["graph-file"], "produces": ["graph-file"]}
@@ -1678,74 +1655,62 @@ the corpus.
 {"id": "cli.rm", "cat": "destroy", "argv": ["rm", "{{VINDEX}}"], "needs": ["cache-entry"], "produces": []}
 ```
 
-Several will still fail after correction — `cli.publish`/`cli.hf` target a
+Several rows will still fail at run time — `cli.publish`/`cli.hf` target a
 nonexistent repo, `cli.recipe`/`cli.card` need a recipe file no cell produces,
 the graph cells need a graph file no cell produces, `cli.serve`/`cli.chat` do
-not self-terminate. **That is intended and is a different thing from a wrong
-argument.** Per the spec nothing is skipped for an unsatisfied dependency or a
-guessed-inapplicable command; the capture records what larql does when asked,
-which is the measurement. Removing such a cell would be the harness deciding
-what is worth asking. Correcting a *wrong argument* is the opposite — that is
-the harness asking the question it meant to ask.
+not self-terminate. **That is intended, and is a different thing from a wrong
+argument.** Nothing is skipped for an unsatisfied dependency or a
+guessed-inapplicable command; what larql does when asked is the measurement.
+Correcting a *wrong argument* is the opposite — that is the harness asking the
+question it meant to ask.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+Also present by design and not to be pruned: the WIP surfaces the design names
+(`build --compile`, `show` on an unimplemented programme, `vector-extract`
+components), and `repl`/`lql` as plain subcommands even though they are their
+own drivers.
 
-Run: `cd scripts/lql_matrix && python3 -m pytest -q`
-Expected: PASS — 81 tests.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Verify and commit**
 
 ```bash
-git add scripts/lql_matrix/cli-commands.jsonl scripts/lql_matrix/corpus_lint_test.py
+cargo test -p larql-cli --bin larql matrix_cli_corpus
+cd scripts/lql_matrix && python3 -m pytest -q
+git add scripts/lql_matrix/cli-commands.jsonl crates/larql-cli/src/matrix_cli_corpus.rs
 git commit -m "harness: a real invocation for every one of the 38 subcommands
 
-Each cell declares needs/produces over a closed artifact vocabulary so
-the sequencer can order them. Cells that cannot succeed in CI still run
-— an unsatisfied dependency or a missing remote is recorded, not
-skipped, because what larql does when asked is the measurement."
+Every row must reach Ok(_) through clap's own parser, so a shape that
+only prints help or reports a missing required argument fails locally —
+the ten shapes Task 0 had to correct on a runner. Cells that cannot
+succeed in CI still run: an unsatisfied dependency or an unreachable
+remote is recorded, not skipped."
 ```
 
-- [ ] **Step 6: Demonstrate the real invocations on a runner**
+- [ ] **Step 4: Demonstrate the real invocations on a runner**
 
-Wire `cli-commands.jsonl` in beside `cli-help.jsonl` in the same workflow
-branch, push, and read every capture:
+Wire `cli-commands.jsonl` in beside `cli-help.jsonl`, push, and read the stderr
+of every non-zero cell. Expect many. Place each in exactly one bucket:
 
-```bash
-git add .github/workflows/lql-strategy-matrix.yml
-git commit -m "ci: run the 38 real CLI invocations"
-git push
-gh run download <run-id> --repo metavacua/larql-to-sparql --name results-smol135.native.all --dir /tmp/d
-python3 -c "
-import json,glob
-rows=[json.loads(l) for f in glob.glob('/tmp/d/results-*.cli.commands.jsonl') for l in open(f) if l.strip()]
-cells=[r for r in rows if r.get('type')!='meta']
-for r in sorted(cells,key=lambda x:x['id']):
-    print(f\"{r['id']:<22} exit={r['exit_code']:<5} out={r['stdout_bytes']:>7}B err={r['stderr_bytes']:>7}B\")"
-```
+- **the cell's arguments are wrong** — fix the cell; a harness defect.
+- **larql rejected a valid request** — leave it; this is the finding.
+- **the dependency genuinely is not there** — leave it; the cell still runs.
 
-Then read the stderr of every non-zero cell. Expect many failures — wrong flags
-in this plan's guesses, missing recipe and graph files, unreachable repos,
-`serve`/`chat` hitting the timeout. Classify each into exactly one of:
-
-- **the cell's arguments are wrong** — fix the cell, this is a harness defect
-- **larql rejected a valid request** — leave the cell, this is the finding
-- **the dependency genuinely is not there** — leave the cell; Task 8's sequencer
-  will record it as `unsatisfied` and it still runs
-
-Do not resolve the third category by deleting cells. **Do not start Task 8 until
-every non-zero cell has been placed in one of these three buckets.**
+Do not resolve the third bucket by deleting cells. **Do not start Task 8 until
+every non-zero cell has been placed in a bucket.**
 
 ---
 
 ### Task 8: Dependency ordering and deterministic permutation
 
 **Files:**
-- Create: `scripts/lql_matrix/sequence.py`
-- Create: `scripts/lql_matrix/sequence_test.py`
+- Create: `scripts/lql_matrix/sequence.py`, `scripts/lql_matrix/sequence_test.py`
 
 **Interfaces:**
 - Consumes: cells with `id`, `needs`, `produces` (Task 7).
-- Produces: `sequence.sequence(cells: list[dict], seed: int) -> list[dict]` returning the cells reordered, each gaining `"order_index": int` and `"unsatisfied": list[str]`. Task 9 calls it from `run_matrix.py`.
+- Produces: `sequence.sequence(cells: list[dict], seed: int) -> list[dict]` — the cells reordered, each a copy carrying `"order_index": int`. Task 9 calls it from `run_matrix.py`.
+
+There is no `unsatisfied` field. The spec asks that a capture be tied to the
+order that produced it; `order_index` plus the meta row's `order_seed` does
+that. A per-cell list of what the graph could not supply is the harness forming
+an opinion about a cell, and rows carry facts about the process only.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1754,6 +1719,8 @@ Create `scripts/lql_matrix/sequence_test.py`:
 ```python
 import os
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
 import sequence as S
@@ -1768,110 +1735,70 @@ def _ids(cells):
     return [c["id"] for c in cells]
 
 
+# All eight graph shapes. Empty, single, chain and diamond are the acceptance
+# cases; all-independent, unsatisfiable, self-cycle and mutual cycle are the
+# rejection-shaped ones. None may hang, drop a cell or raise — an unorderable
+# cell still runs, because "this breaks when its input is absent" is an
+# observation the harness exists to capture.
+SHAPES = {
+    "empty": [],
+    "single": [A],
+    "chain": [B, A],
+    "diamond": [{"id": "join", "needs": ["b", "c"], "produces": []},
+                {"id": "left", "needs": ["a"], "produces": ["b"]},
+                {"id": "right", "needs": ["a"], "produces": ["c"]},
+                {"id": "root", "needs": [], "produces": ["a"]}],
+    "independent": [{"id": f"c{i}", "needs": [], "produces": []} for i in range(5)],
+    "unsatisfiable": [A, D],
+    "self-cycle": [{"id": "loop", "needs": ["x"], "produces": ["x"]}],
+    "mutual-cycle": [{"id": "p", "needs": ["y"], "produces": ["x"]},
+                     {"id": "q", "needs": ["x"], "produces": ["y"]}],
+}
+
+
+@pytest.mark.parametrize("name", sorted(SHAPES))
+def test_every_shape_terminates_emitting_each_cell_once_with_a_dense_index(name):
+    import threading
+    cells = SHAPES[name]
+    box = []
+    t = threading.Thread(target=lambda: box.append(S.sequence(cells, 3)), daemon=True)
+    t.start()
+    t.join(5)
+    assert box, f"sequence() did not terminate on the {name} graph"
+    out = box[0]
+    assert sorted(_ids(out)) == sorted(_ids(cells))
+    assert [c["order_index"] for c in out] == list(range(len(out)))
+
+
 def test_producer_precedes_its_consumers():
     out = _ids(S.sequence([B, C, A], seed=0))
     assert out.index("produce") < out.index("consume1")
     assert out.index("produce") < out.index("consume2")
 
 
+def test_diamond_orders_root_first_and_join_last():
+    out = _ids(S.sequence(SHAPES["diamond"], 0))
+    assert out[0] == "root" and out[-1] == "join"
+
+
 def test_same_seed_gives_the_same_order():
     assert _ids(S.sequence([B, C, A], 7)) == _ids(S.sequence([B, C, A], 7))
 
 
-def test_different_seeds_can_permute_independent_cells():
+def test_different_seeds_permute_independent_cells():
     orders = {tuple(_ids(S.sequence([B, C, A], s))) for s in range(12)}
     assert len(orders) > 1, "independent cells must actually permute"
-
-
-def test_every_cell_appears_exactly_once():
-    out = _ids(S.sequence([B, C, A, D], 3))
-    assert sorted(out) == sorted(["produce", "consume1", "consume2", "orphan"])
-
-
-def test_unsatisfiable_cell_still_runs_and_is_marked():
-    out = S.sequence([A, D], 0)
-    orphan = [c for c in out if c["id"] == "orphan"][0]
-    assert orphan["unsatisfied"] == ["graph-file"]
-    satisfied = [c for c in out if c["id"] == "produce"][0]
-    assert satisfied["unsatisfied"] == []
-
-
-def test_order_index_is_dense_and_matches_position():
-    out = S.sequence([B, C, A, D], 5)
-    assert [c["order_index"] for c in out] == list(range(len(out)))
 
 
 def test_input_cells_are_not_mutated():
     original = dict(A)
     S.sequence([A, B], 0)
     assert A == original
-
-
-# ── The eight graph shapes. Empty, single, chain and diamond are the
-# acceptance cases; all-independent, unsatisfiable, self-cycle and mutual
-# cycle are the rejection-shaped ones. None of the four may hang, drop a
-# cell, or raise — an unorderable cell still runs, with what it lacked
-# recorded, because "this breaks when its input is absent" is an
-# observation the harness exists to capture.
-
-def test_empty_input_returns_empty():
-    assert S.sequence([], 0) == []
-
-
-def test_single_cell_is_returned_with_index_zero():
-    out = S.sequence([A], 0)
-    assert _ids(out) == ["produce"] and out[0]["order_index"] == 0
-
-
-def test_diamond_orders_root_first_and_join_last():
-    root = {"id": "root", "needs": [], "produces": ["a"]}
-    left = {"id": "left", "needs": ["a"], "produces": ["b"]}
-    right = {"id": "right", "needs": ["a"], "produces": ["c"]}
-    join = {"id": "join", "needs": ["b", "c"], "produces": []}
-    out = _ids(S.sequence([join, left, right, root], 0))
-    assert out[0] == "root" and out[-1] == "join"
-
-
-def test_all_independent_cells_all_run_and_none_is_unsatisfied():
-    cells = [{"id": f"c{i}", "needs": [], "produces": []} for i in range(5)]
-    out = S.sequence(cells, 0)
-    assert len(out) == 5
-    assert all(c["unsatisfied"] == [] for c in out)
-
-
-def test_self_cycle_still_runs_and_records_what_it_lacked():
-    # A cell that needs what it itself produces can never be satisfied.
-    selfdep = {"id": "loop", "needs": ["x"], "produces": ["x"]}
-    out = S.sequence([selfdep], 0)
-    assert _ids(out) == ["loop"]
-    assert out[0]["unsatisfied"] == ["x"]
-
-
-def test_mutual_cycle_still_runs_both_and_records_both():
-    p = {"id": "p", "needs": ["y"], "produces": ["x"]}
-    q = {"id": "q", "needs": ["x"], "produces": ["y"]}
-    out = S.sequence([p, q], 0)
-    assert sorted(_ids(out)) == ["p", "q"]
-    assert out[0]["unsatisfied"] and out[1]["unsatisfied"]
-
-
-def test_a_cycle_terminates():
-    # Regression guard: the loop must not spin when nothing is ever ready.
-    import threading
-    done = threading.Event()
-    threading.Thread(
-        target=lambda: (S.sequence([{"id": "a", "needs": ["z"], "produces": []}], 0),
-                        done.set()),
-        daemon=True).start()
-    assert done.wait(5), "sequence() did not terminate on an unsatisfiable graph"
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+Run: `cd scripts/lql_matrix && python3 -m pytest sequence_test.py -q` — expected FAIL, `ModuleNotFoundError: No module named 'sequence'`.
 
-Run: `cd scripts/lql_matrix && python3 -m pytest sequence_test.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'sequence'`
-
-- [ ] **Step 3: Write the implementation**
+- [ ] **Step 2: Write the implementation**
 
 Create `scripts/lql_matrix/sequence.py`:
 
@@ -1879,19 +1806,16 @@ Create `scripts/lql_matrix/sequence.py`:
 #!/usr/bin/env python3
 """Order cells by declared dependencies, permuting the independent ones.
 
-Cells are not an unordered set. A consumer run before its producer measures
-nothing about the consumer — `verify` on a vindex that does not exist yet
-reports a missing directory, not anything about verify.
+A consumer run before its producer measures nothing about the consumer —
+`verify` on a vindex that does not exist yet reports a missing directory, not
+anything about verify. Where two cells are independent, their relative order is
+a free variable, and free variables get varied rather than frozen: `seed`
+selects the permutation, deterministically, so an ordering-dependent failure is
+re-runnable.
 
-Where two cells are independent under the dependency relation, their relative
-order is a free variable, and free variables get varied rather than frozen:
-`seed` selects a permutation. It is deterministic, so an ordering-dependent
-failure is re-runnable.
-
-A cell whose needs are never produced is NOT dropped. It runs last with
-`unsatisfied` recording what was missing, because "this command breaks when
-its input is absent" is an observation worth capturing. Ordering is never
-used to decide correctness.
+A cell whose needs are never produced is NOT dropped — it runs at the end.
+Ordering is never used to decide correctness, and this module records no
+opinion about a cell beyond where it ran.
 
 Pure: no I/O, no subprocess, no logging.
 """
@@ -1899,8 +1823,8 @@ import random
 
 
 def sequence(cells, seed):
-    """Return cells reordered, each a copy carrying `order_index` and
-    `unsatisfied`. Input dicts are not mutated."""
+    """Return cells reordered, each a copy carrying `order_index`.
+    Input dicts are not mutated."""
     rng = random.Random(seed)
     remaining = [dict(c) for c in cells]
     satisfied = set()
@@ -1909,34 +1833,24 @@ def sequence(cells, seed):
     while remaining:
         ready = [c for c in remaining if set(c.get("needs", [])) <= satisfied]
         if not ready:
-            # Nothing can be satisfied: emit the rest in a seeded order with
-            # their missing artifacts recorded. Never skipped.
-            rest = list(remaining)
-            rng.shuffle(rest)
-            for c in rest:
-                c["unsatisfied"] = sorted(set(c.get("needs", [])) - satisfied)
-                ordered.append(c)
-            remaining = []
+            # Nothing can ever become ready (a cycle, or an artifact no cell
+            # produces). Emit the rest in a seeded order rather than looping.
+            rng.shuffle(remaining)
+            ordered.extend(remaining)
             break
         pick = ready[rng.randrange(len(ready))]
-        pick["unsatisfied"] = []
         ordered.append(pick)
         satisfied.update(pick.get("produces", []))
         remaining.remove(pick)
 
     for i, c in enumerate(ordered):
         c["order_index"] = i
-        c.setdefault("unsatisfied", [])
     return ordered
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 3: Verify and commit**
 
-Run: `cd scripts/lql_matrix && python3 -m pytest sequence_test.py -q`
-Expected: PASS — 14 tests, covering all eight graph shapes plus determinism,
-permutation, non-mutation and a termination guard.
-
-- [ ] **Step 5: Commit**
+Run: `cd scripts/lql_matrix && python3 -m pytest -q` — expected PASS.
 
 ```bash
 git add scripts/lql_matrix/sequence.py scripts/lql_matrix/sequence_test.py
@@ -1945,8 +1859,7 @@ git commit -m "harness: dependency ordering with deterministic permutation
 A consumer run before its producer measures nothing about the consumer.
 Independent cells are permuted by seed rather than frozen in file order,
 deterministically so an ordering-dependent failure is re-runnable. A
-cell whose needs are never produced still runs, with the missing
-artifacts recorded — nothing is skipped."
+cell whose needs are never produced still runs — nothing is skipped."
 ```
 
 ---
@@ -1954,35 +1867,29 @@ artifacts recorded — nothing is skipped."
 ### Task 9: Sequence the corpus in `run_matrix.py` and record the order
 
 **Files:**
-- Modify: `scripts/lql_matrix/run_matrix.py`
-- Modify: `scripts/lql_matrix/run_matrix_test.py`
+- Modify: `scripts/lql_matrix/run_matrix.py`, `scripts/lql_matrix/run_matrix_test.py`
 
 **Interfaces:**
 - Consumes: `sequence.sequence(cells, seed)` (Task 8).
-- Produces: `run_matrix.py` accepts `--order-seed N` (default `0`); rows gain `"order_index"`, `"unsatisfied"`, and the meta row gains `"order_seed"`.
+- Produces: `run_matrix.py` accepts `--order-seed N` (default `0`); rows gain `"order_index"` and the meta row gains `"order_seed"`.
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `scripts/lql_matrix/run_matrix_test.py`:
 
 ```python
-def _corpus_with_deps(tmp_path):
-    p = tmp_path / "dep.jsonl"
-    rows = [
+def test_producer_runs_before_consumer_and_the_order_is_recorded(tmp_path):
+    out = tmp_path / "r.jsonl"
+    corpus = tmp_path / "dep.jsonl"
+    corpus.write_text("\n".join(json.dumps(r) for r in [
         {"id": "consumer", "cat": "c", "argv": ["verify", "{{VINDEX}}"],
          "needs": ["vindex"], "produces": []},
         {"id": "producer", "cat": "p", "argv": ["extract", "m", "-o", "v"],
          "needs": [], "produces": ["vindex"]},
-    ]
-    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    return str(p)
-
-
-def test_producer_runs_before_consumer_and_order_is_recorded(tmp_path):
-    out = tmp_path / "r.jsonl"
+    ]) + "\n", encoding="utf-8")
     env = dict(os.environ, LARQL_BIN=_fake_bin(tmp_path), CELL_TIMEOUT="30")
     subprocess.run([sys.executable, os.path.join(HERE, "run_matrix.py"),
-                    "leg1", "/v", _corpus_with_deps(tmp_path), str(out),
+                    "leg1", "/v", str(corpus), str(out),
                     "--driver", "cli", "--order-seed", "1"],
                    env=env, check=True, capture_output=True)
     rows = [json.loads(l) for l in open(out, encoding="utf-8") if l.strip()]
@@ -1992,106 +1899,59 @@ def test_producer_runs_before_consumer_and_order_is_recorded(tmp_path):
     ids = [c["id"] for c in cells]
     assert ids.index("producer") < ids.index("consumer")
     assert [c["order_index"] for c in cells] == [0, 1]
-    assert all(c["unsatisfied"] == [] for c in cells)
 ```
 
-- [ ] **Step 2: Run it to make sure it fails**
+Run: `cd scripts/lql_matrix && python3 -m pytest run_matrix_test.py -q -k order` — expected FAIL, `unrecognized arguments: --order-seed`.
 
-Run: `cd scripts/lql_matrix && python3 -m pytest run_matrix_test.py -q -k order`
-Expected: FAIL — `unrecognized arguments: --order-seed`
+- [ ] **Step 2: Wire the sequencer in**
 
-- [ ] **Step 3: Wire the sequencer in**
+In `run_matrix.py`: `import sequence` beside `import drivers`; add
+`ap.add_argument("--order-seed", type=int, default=0, help="permutation seed
+for cells independent under needs/produces")`; put `"order_seed": ns.order_seed`
+in the `meta` dict after `"driver"`; and add `"order_index": c.get("order_index")`
+to the `row` dict after `"cat"`.
 
-In `scripts/lql_matrix/run_matrix.py`:
-
-1. Add `import sequence` next to `import drivers`.
-2. Add to the argument parser, after the `--driver` line:
-
-```python
-    ap.add_argument("--order-seed", type=int, default=0,
-                    help="permutation seed for cells independent under needs/produces")
-```
-
-3. After `level, vindex, corpus, out, driver = ...`, add:
-
-```python
-    order_seed = ns.order_seed
-```
-
-4. Add `"order_seed": order_seed,` to the `meta` dict, immediately after `"driver": driver,`.
-
-5. Replace the corpus read
+The cell loop currently streams the corpus line by line. Sequencing needs the
+whole list first, so read it up front and hand it to the sequencer:
 
 ```python
     with open(corpus, encoding="utf-8") as cf:
-        cells = [json.loads(l) for l in cf if l.strip()]
+        cells = sequence.sequence(
+            [json.loads(l) for l in cf if l.strip()], ns.order_seed)
+    for c in cells:
 ```
 
-with
+- [ ] **Step 3: Verify and commit**
 
-```python
-    with open(corpus, encoding="utf-8") as cf:
-        cells = [json.loads(l) for l in cf if l.strip()]
-    cells = sequence.sequence(cells, order_seed)
-```
-
-6. Add to the `row` dict, immediately after `"cat": cat,`:
-
-```python
-            "order_index": c.get("order_index"),
-            "unsatisfied": c.get("unsatisfied", []),
-```
-
-- [ ] **Step 4: Run the tests to verify they pass**
-
-Run: `cd scripts/lql_matrix && python3 -m pytest -q`
-Expected: PASS — 89 tests.
-
-- [ ] **Step 5: Commit**
+Run: `cd scripts/lql_matrix && python3 -m pytest -q` — expected PASS.
 
 ```bash
 git add scripts/lql_matrix/run_matrix.py scripts/lql_matrix/run_matrix_test.py
 git commit -m "harness: sequence the corpus by dependencies, record the order
 
 --order-seed selects the permutation of independent cells; the seed is
-in the meta row and each cell carries order_index and unsatisfied, so a
-capture can be tied back to the ordering that produced it."
+in the meta row and each cell carries order_index, so a capture can be
+tied back to the ordering that produced it."
 ```
 
-- [ ] **Step 6: Demonstrate that ordering changes outcomes, on a runner**
+- [ ] **Step 4: Demonstrate that ordering changes outcomes, on a runner**
 
-Permutation is only worth having if order actually matters. Prove it by running
-the CLI corpus twice with different seeds and diffing the outcomes.
-
-Add `--order-seed "${ORDER_SEED}"` to the cli invocations and push twice, once
-with `ORDER_SEED: 1` and once with `ORDER_SEED: 2`, then:
-
-```bash
-python3 -c "
-import json,glob,sys
-def outcomes(d):
-    rows=[json.loads(l) for f in glob.glob(d+'/results-*.cli.commands.jsonl') for l in open(f) if l.strip()]
-    return {r['id']:r['exit_code'] for r in rows if r.get('type')!='meta'}
-a,b=outcomes('/tmp/seed1'),outcomes('/tmp/seed2')
-diff={k:(a[k],b[k]) for k in a if a.get(k)!=b.get(k)}
-print('cells whose outcome changed with ordering:',diff or 'none')"
-```
-
-Either answer is informative and neither blocks progress: a non-empty diff means
-ordering is load-bearing and permutation is earning its cost; an empty diff for
-these seeds means these cells are order-independent, which is worth knowing and
-does not mean permutation should be removed. Record which you saw.
+Add `--order-seed "${ORDER_SEED}"` to the cli invocations and run the CLI corpus
+twice, with `ORDER_SEED: 1` and `ORDER_SEED: 2`, then diff `{id: exit_code}`
+between the two downloads. A non-empty diff means ordering is load-bearing and
+permutation is earning its cost; an empty diff means these cells are
+order-independent for these seeds, which is worth knowing and is not a reason to
+remove permutation. Record which you saw; neither answer blocks Task 10.
 
 ---
 
 ### Task 10: Consolidate the workflow onto the declared driver list
 
 Tasks 3, 4, 6, 7 and 9 each wired their piece in and demonstrated it, so the
-workflow currently drives a **hardcoded** driver list. This task replaces that
-with `matrix.leg.drivers` from Task 5, so a leg runs exactly the drivers it
-declares and the long-session and cli legs take effect. It is the only task
-whose whole content is cleanup, and by construction nothing here is unproven —
-every driver it references has already produced captures on a runner.
+workflow drives a **hardcoded** driver list. This replaces it with
+`matrix.leg.drivers` from Task 5, so a leg runs exactly the drivers it declares
+and the long-session and cli legs take effect. Nothing here is unproven — every
+driver it references has already produced captures on a runner.
 
 **Files:**
 - Modify: `.github/workflows/lql-strategy-matrix.yml`
@@ -2102,8 +1962,8 @@ every driver it references has already produced captures on a runner.
 
 - [ ] **Step 1: Replace the hardcoded driver list with the declared one**
 
-In `.github/workflows/lql-strategy-matrix.yml`, replace the step named
-`Run LQL command corpus (${{ matrix.leg.name }})` in the `matrix` job with:
+Replace the step named `Run LQL command corpus (${{ matrix.leg.name }})` in the
+`matrix` job with:
 
 ```yaml
       - name: Run corpora per driver (${{ matrix.leg.name }})
@@ -2112,31 +1972,24 @@ In `.github/workflows/lql-strategy-matrix.yml`, replace the step named
           VINDEX="out/${NAME}.vindex"
           for DRV in $DRIVERS; do
             case "$DRV" in
-              cli)
-                for CORPUS in cli-help cli-commands; do
-                  echo "=== ${NAME} / ${DRV} / ${CORPUS} ==="
-                  LARQL_BIN=./bin/larql MODEL_ID="${CORPUS_MODEL}" \
-                  TMPROOT="$(mktemp -d)" CELL_TIMEOUT=900 \
-                  scripts/lql_matrix/run_matrix.sh \
-                    "${NAME}" "$VINDEX" "scripts/lql_matrix/${CORPUS}.jsonl" \
-                    "out/results-${NAME}.${DRV}.${CORPUS}.jsonl" \
-                    --driver "$DRV" --order-seed "${ORDER_SEED}"
-                done ;;
-              *)
-                echo "=== ${NAME} / ${DRV} ==="
-                LARQL_BIN=./bin/larql MODEL_ID="${CORPUS_MODEL}" \
-                TMPROOT="$(mktemp -d)" CELL_TIMEOUT=900 \
-                scripts/lql_matrix/run_matrix.sh \
-                  "${NAME}" "$VINDEX" scripts/lql_matrix/commands.jsonl \
-                  "out/results-${NAME}.${DRV}.jsonl" \
-                  --driver "$DRV" --order-seed "${ORDER_SEED}" ;;
+              cli) CORPORA="cli-help cli-commands" ;;
+              *)   CORPORA="commands" ;;
             esac
+            for CORPUS in $CORPORA; do
+              echo "=== ${NAME} / ${DRV} / ${CORPUS} ==="
+              LARQL_BIN=./bin/larql MODEL_ID="${CORPUS_MODEL}" \
+              TMPROOT="$(mktemp -d)" CELL_TIMEOUT=900 \
+              scripts/lql_matrix/run_matrix.sh \
+                "${NAME}" "$VINDEX" "scripts/lql_matrix/${CORPUS}.jsonl" \
+                "out/results-${NAME}.${DRV}.${CORPUS}.jsonl" \
+                --driver "$DRV" --order-seed "${ORDER_SEED}"
+            done
           done
 ```
 
 - [ ] **Step 2: Add the driver and seed env vars**
 
-In the `matrix` job's `env:` block, after the `LQL_WITH:` line, add:
+In the `matrix` job's `env:` block, after `LQL_WITH:`:
 
 ```yaml
       DRIVERS: ${{ join(matrix.leg.drivers, ' ') }}
@@ -2144,37 +1997,25 @@ In the `matrix` job's `env:` block, after the `LQL_WITH:` line, add:
 ```
 
 `ORDER_SEED` is the run number so successive runs explore different orderings
-while any single run stays reproducible from the seed recorded in its meta row.
+while any single run stays reproducible from the seed in its meta row.
 
-- [ ] **Step 3: Widen the upload glob**
+- [ ] **Step 3: Verify the workflow, and that no suppression came in**
 
-In the `Upload leg results` step, replace the line
-`            out/results-${{ matrix.leg.name }}.jsonl`
-with:
+The `Upload leg results` glob is already `out/results-${{ matrix.leg.name
+}}.*.jsonl` (widened in Task 3), so it covers the new names unchanged.
 
-```yaml
-            out/results-${{ matrix.leg.name }}.*.jsonl
-```
-
-- [ ] **Step 4: Verify the workflow parses and the driver join renders**
-
-Run:
 ```bash
 cd /home/metavacua/larql-vindex3-03-08-2026
 python3 -c "import yaml; d=yaml.safe_load(open('.github/workflows/lql-strategy-matrix.yml')); print('YAML OK, jobs:', list(d['jobs'].keys()))"
-grep -n 'DRIVERS:\|ORDER_SEED:\|--driver\|results-.*\*\.jsonl' .github/workflows/lql-strategy-matrix.yml
+grep -n 'DRIVERS:\|ORDER_SEED:\|--driver\|--order-seed' .github/workflows/lql-strategy-matrix.yml
+grep -n '2>/dev/null\|>/dev/null\||| true' .github/workflows/lql-strategy-matrix.yml | grep -v ':\s*#'
 ```
-Expected: `YAML OK`, and the grep shows `DRIVERS`, `ORDER_SEED`, two `--driver` uses and the widened glob.
 
-- [ ] **Step 5: Confirm no suppression was introduced**
+Expected: `YAML OK`; `DRIVERS`, `ORDER_SEED`, `--driver` and `--order-seed`
+present; and **no output** from the third grep. Any hit there is a Global
+Constraint violation and must be removed before committing.
 
-Run:
-```bash
-grep -n '2>/dev/null\|>/dev/null\|| true' .github/workflows/lql-strategy-matrix.yml | grep -v '^\s*[0-9]*:\s*#'
-```
-Expected: no output. Any hit is a Global Constraint violation and must be removed before committing.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/lql-strategy-matrix.yml
@@ -2190,18 +2031,18 @@ the seed in its meta row."
 
 ## Self-Review
 
-**Spec coverage.** Every section of `2026-08-07-cli-and-repl-coverage-design.md` maps to a task: principles → Global Constraints (and asserted by `test_row_carries_no_derived_opinion`, Task 3); four drivers → Tasks 2–4; session granularity → Task 5 (`long_session` legs); capture → Tasks 3–4; the three corpora → Tasks 1, 6, 7; WIP surfaces → Task 7 (`build`, `show`, `dev` cells reach them); sequencing and permutation → Tasks 8–9; termination and hangs → Task 2 (`exit` for pty) and Task 4 (pty timeout); scale → no task needed, it is an accepted consequence.
+**Spec coverage.** Every section of `2026-08-07-cli-and-repl-coverage-design.md` maps to a task: principles → Global Constraints (and asserted by `test_row_carries_no_derived_opinion`, Task 3); four drivers → Tasks 2–4; session granularity → Task 5 (`long_session` legs); capture → Tasks 3–4; the three corpora → Tasks 1, 6, 7; WIP surfaces → Task 7 (`build`, `show` cells reach them); sequencing and permutation → Tasks 8–9; termination and hangs → Task 4 (`exit` as the last pty line, plus the pty deadline) and the existing `timeout --kill-after=10` for the other drivers; scale → no task needed, it is an accepted consequence.
 
 **Deliberately deferred:** the spec's `.merged` capture is produced only for `repl-pty` (Task 4), which is the only driver that has one — `repl-pipe` keeps separate `.out`/`.err`, as the spec's capture table describes.
 
-**Placeholder scan.** No TBDs, no "add error handling", no "similar to Task N". Every code step carries the code to type; every test step names the command and the expected result.
+**Where grammars are owned.** No Python re-implements a grammar anything else already owns. The LQL corpus is checked by LQL's own parser (`crates/larql-lql/tests/matrix_corpus_wellformed.rs`, Task 1); the CLI corpora are checked by clap's own `Cli::command()` (`crates/larql-cli/src/matrix_cli_corpus.rs`, Tasks 6–7); statement boundaries are authored data with no splitter anywhere in the harness (Task 2). The `corpus_lint.py` this plan originally specified does not exist and must not be written.
 
-**Type consistency.** `drivers.build(driver, cell, larql) -> (argv, stdin_bytes)` is defined in Task 2 and called identically in Tasks 3 and 4. `sequence.sequence(cells, seed) -> list[dict]` is defined in Task 8 and called in Task 9. `corpus_lint.lint_lql_corpus(path)` (Task 1) and `lint_cli_corpus(path, require_deps)` (Task 6) share `_rows`. `SUBCOMMANDS` is defined once in Task 6 and consumed by Tasks 6 and 7. Row keys `driver`, `order_index`, `unsatisfied`, `merged` are introduced in Tasks 3, 9, 9, 4 and read only after.
+**Type consistency.** `drivers.build(driver, cell, larql) -> (argv, stdin_bytes)` is defined in Task 2 and called in Tasks 3–4; `drivers.pty_lines(cell) -> list[str]` is added in Task 4 and called only from the pty branch. `sequence.sequence(cells, seed) -> list[dict]` is defined in Task 8 and called in Task 9. Row keys `driver`, `merged`/`merged_bytes` and `order_index` are introduced in Tasks 3, 4 and 9 and read only after.
 
-**Demonstration coverage.** Every task that changes runtime behaviour ends on a real runner against the real binary, and names what to read and what each outcome means before the next task starts: Task 0 (does the REPL accept piped stdin at all), Task 3 (the `lql` driver is unchanged), Task 4 (both REPL drivers produce captures), Task 6 (38 real `--help` invocations), Task 7 (38 real invocations, each non-zero classified), Task 9 (does ordering change outcomes). Tasks 1, 2, 5 and 8 are corpus data or pure functions with no runtime surface.
+**Demonstration coverage.** Every task that changes runtime behaviour ends on a real runner against the real binary, naming what to read and what each outcome means: Task 0 (does the REPL accept piped stdin), Task 3 (the `lql` driver is unchanged), Task 4 (both REPL drivers produce captures, and `STATS;` is no longer lost), Task 6 (38 real `--help` invocations), Task 7 (38 real invocations, each non-zero bucketed), Task 9 (does ordering change outcomes). Tasks 1, 2, 5 and 8 are corpus data, leg data or pure functions with no runtime surface.
 
-**Ordering by failure probability.** The three riskiest items — 38 guessed CLI argument shapes, `larql repl` on non-tty stdin, and a `pty.fork` read loop — are all attempted in Task 0, which writes no harness code. Task 7 then writes its corpus from Task 0's captures rather than guessing a second time, and Task 4 lifts a read loop already proven on a runner. The near-certainties (corpus regex, pure functions, leg axis, consolidation) come last, where a failure costs a fix rather than a redesign.
+**Ordering by failure probability.** The three riskiest items — 38 guessed CLI argument shapes, `larql repl` on non-tty stdin, and a `pty.fork` read loop — were all attempted in Task 0, which wrote no harness code. Task 7 writes its corpus from Task 0's captures rather than guessing again, and clap now rejects a wrong shape locally, so the six rows Task 0 could not settle cost a test run rather than a CI leg. Task 4 lifts a read loop already proven on a runner.
 
-**Exhaustive coverage of the finite sets.** `drivers.build` is enumerated over all 4 drivers × 2 cell shapes — four acceptances and four rejections, Task 2. `sequence.sequence` is enumerated over all eight graph shapes including self-cycle and mutual cycle, with a termination guard, Task 8. `corpus_lint` rejects each missing required key, duplicate ids, non-subcommands and bare `BEGIN PATCH`, Tasks 1 and 6. All 38 subcommands appear in Tasks 0, 6 and 7. Cell *orderings* are factorial and therefore sampled by seed rather than exhausted — Task 9 declares that sampling rather than presenting it as coverage.
+**Exhaustive coverage of the finite sets.** `drivers.build` is enumerated over all 4 drivers × 2 cell shapes — four acceptances and four rejections, Task 2. `sequence.sequence` is enumerated over all eight graph shapes including self-cycle and mutual cycle, with a termination guard, in one parametrized test, Task 8. All 38 subcommands appear in Tasks 0, 6 and 7, and clap enforces that the set is complete rather than a hand-maintained list. Cell *orderings* are factorial and therefore sampled by seed rather than exhausted — Task 9 declares that sampling rather than presenting it as coverage.
 
-**Assumption this plan makes that Task 0 may invalidate.** Tasks 2–4 assume `larql repl` reads piped stdin. If Task 0 shows it does not, `drivers.build` and the pty runner are unchanged — a capture of nothing is still the finding — but Task 4's demonstration expectations and Task 10's outcome change. That is why Task 0 runs first and why its step 4 is a gate rather than a note.
+**Assumption Task 0 settled.** Tasks 2–4 assumed `larql repl` reads piped stdin; Task 0 measured that it does. What Task 0 also measured — that a terminal loses statements written ahead of the prompt — is why Task 4 passes the statement list through and paces it against the prompt rather than writing one static payload.
