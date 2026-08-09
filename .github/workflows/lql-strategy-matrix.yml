@@ -544,6 +544,25 @@ jobs:
           if [ -d "$D" ]; then find "$D" -type f -printf '%s\t%P\n' | sort -k2 >> ev/20-listings.txt
           else echo "(directory was not created)" >> ev/20-listings.txt; fi
           cat ev/11-missingdir.out ev/11-missingdir.err
+      - name: WHICH file is missing? (strace the failing call)
+        run: |
+          set +e -u
+          sudo apt-get install -y strace
+          echo "=== index.json of the source vindex ===" > ev/12-strace.txt
+          cat ev/src.vindex/index.json >> ev/12-strace.txt
+          echo >> ev/12-strace.txt
+          mkdir -p ev/out-strace
+          strace -f -e trace=openat,stat,mkdir -o ev/strace.raw -- \
+            timeout 3600 ./bin/larql lql \
+            "USE \"ev/src.vindex\"; COMPILE CURRENT INTO MODEL \"ev/out-strace\" FORMAT safetensors;" \
+            > ev/12-strace.out 2> ev/12-strace.err
+          echo "exit=$?" >> ev/12-strace.err
+          echo "=== every ENOENT, in order ===" >> ev/12-strace.txt
+          grep ENOENT ev/strace.raw >> ev/12-strace.txt
+          echo "=== the LAST 40 file syscalls before it died ===" >> ev/12-strace.txt
+          tail -40 ev/strace.raw >> ev/12-strace.txt
+          cat ev/12-strace.txt
+
       - name: Q2 decisive — do the three FORMAT variants differ AT ALL?
         run: |
           set +e -u
