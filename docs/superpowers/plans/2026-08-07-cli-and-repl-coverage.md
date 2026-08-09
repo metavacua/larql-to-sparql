@@ -530,7 +530,7 @@ grammar's minimal accepted form, `MERGE "{{VINDEX}}";`. Nothing else changed —
 - [x] **Step 5: Verify**
 
 `cargo test -p larql-lql --test matrix_corpus_wellformed` passes; the full
-`cargo test -p larql-lql` suite passes (726 + 236 across its targets) so
+`cargo test -p larql-lql` suite passes across its targets so
 exporting `split_statements` broke nothing; `cargo fmt --check` clean and
 `cargo clippy --tests` at 0 warnings.
 
@@ -575,7 +575,7 @@ That is the run's business and belongs in the captures.
     writes no stdin. Task 3 calls this from `run_matrix.py`.
   - No `split_statements`. Deliberately.
 
-- [ ] **Step 1: Migrate the corpus with the real splitter, once**
+- [x] **Step 1: Migrate the corpus with the real splitter, once**
 
 A throwaway Rust test emits the list-shaped corpus using
 `larql_lql::split_statements`, trimming each entry (the splitter returns
@@ -583,7 +583,7 @@ A throwaway Rust test emits the list-shaped corpus using
 test. Splitting 64 cells by hand or in Python would reintroduce exactly the
 second implementation this task exists to remove.
 
-- [ ] **Step 2: Update the corpus test, and add the round-trip guard**
+- [x] **Step 2: Update the corpus test, and add the round-trip guard**
 
 `matrix_corpus_wellformed.rs` reads `lql` as an array and parses each entry —
 simpler than before, since it no longer splits. Then the guard that keeps
@@ -601,13 +601,13 @@ let resplit: Vec<String> = larql_lql::split_statements(&joined)
 assert_eq!(resplit, entries, "cell {id:?} does not survive join/split");
 ```
 
-- [ ] **Step 3: Keep the existing matrix leg runnable**
+- [x] **Step 3: Keep the existing matrix leg runnable**
 
 `run_matrix.py` does `subst(c["lql"])` and would break on a list — invisibly,
 because the matrix legs are currently gated off. One line: join the list at the
 use site. Every commit leaves the harness runnable.
 
-- [ ] **Step 4: Write the failing driver test**
+- [x] **Step 4: Write the failing driver test**
 
 `scripts/lql_matrix/drivers_test.py` — no splitter tests, because there is no
 splitter. The full 4 drivers x 2 cell-shapes matrix, four acceptances and four
@@ -676,12 +676,12 @@ def test_a_string_lql_cell_is_rejected_not_silently_iterated():
                 "/bin/larql")
 ```
 
-- [ ] **Step 5: Run it to make sure it fails**
+- [x] **Step 5: Run it to make sure it fails**
 
 Run: `cd scripts/lql_matrix && python3 -m pytest drivers_test.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'drivers'`
 
-- [ ] **Step 6: Write the implementation**
+- [x] **Step 6: Write the implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -742,13 +742,14 @@ def build(driver, cell, larql):
     raise ValueError(f"unknown driver {driver!r}; expected one of {DRIVERS}")
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `cd scripts/lql_matrix && python3 -m pytest drivers_test.py -q`
-Expected: PASS — 10 tests covering the whole driver x cell-shape matrix plus
-the unknown-driver and unmigrated-string rejections.
+Expected: PASS. (Counts in this plan have drifted as later work added tests —
+run the suite for the current number rather than trusting a figure written
+before the tests existed.)
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Corpus migration, Rust guard, `run_matrix.py` join and the driver module go in
 together: each alone leaves the harness in a state where a cell shape and its
@@ -993,7 +994,7 @@ In `scripts/lql_matrix/run_matrix.sh`, replace the line reading
 - [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cd scripts/lql_matrix && python3 -m pytest -q`
-Expected: PASS — 70 tests (64 + 6 new).
+Expected: PASS. (Do not pin a count here — the suite has since grown past it.)
 
 - [x] **Step 6: Commit**
 

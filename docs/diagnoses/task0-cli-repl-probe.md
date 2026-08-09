@@ -8,9 +8,11 @@ This records what the captures show. It does not grade anything. Every claim
 below names the file it came from, so it can be checked against the artifact
 rather than against this summary.
 
-**This run's artifact was uploaded at `retention-days: 1` and is gone after
-2026-08-09.** Retention is now 14 days for later runs; to regenerate this one,
-dispatch `lql-strategy-matrix` with `scope: probe`.
+**This run's artifact was uploaded at `retention-days: 1`.** It was expected to
+expire on 2026-08-09; checked that day it was still present and downloadable
+(`expired=false`, 163 files), so GitHub's retention is a floor rather than a
+deadline — do not rely on either reading. Retention is 14 days for later runs;
+to regenerate this one, dispatch `lql-strategy-matrix` with `scope: probe`.
 
 ## The known unknown is resolved: piped stdin works
 
@@ -36,7 +38,7 @@ Same three statements — `SHOW MODELS;`, `STATS;`, `exit` — to three drivers:
 | driver | SHOW MODELS | STATS | exit | outcome |
 |---|---|---|---|---|
 | `repl-pipe` | ran | ran (error) | indistinguishable from EOF | `larql_exit=0` |
-| `repl-script` (pty via `script -q -e`) | ran | **absent** | ran | `script_exit=0` |
+| `repl-script` (pty via `script -q -e`) | ran | **absent** | indistinguishable from EOF | `script_exit=0` |
 | `repl-pty` (`probe_pty.py`) | ran | **absent** | **absent** | `TIMEOUT`, `exit=-9` |
 
 `repl-script.out` shows the tty echoing all three lines up front, then one
@@ -98,7 +100,12 @@ do not operate on a vindex.
 
 ## HuggingFace stayed out of it
 
-`HF_ENDPOINT=http://127.0.0.1:1` held. No capture mentions `huggingface.co`.
+`HF_ENDPOINT=http://127.0.0.1:1` held. No capture shows a *request* to
+`huggingface.co`. (The string itself does appear — `probe/help.pull.out:14`
+documents the collections URL — so the earlier wording here, "no capture
+mentions huggingface.co", was checkable and false. What the artifact can
+establish is the error text at the endpoint boundary plus the absence of any
+success; positive proof of no egress would need runner-level network logging.)
 `cmd.model.err` and `cmd.publish.err` both end in `request error: io:
 Connection refused`, and `cmd.pull.err` fails to fetch `index.json`. Each row
 still shows that clap accepted the argv and how far `run()` got, which is what

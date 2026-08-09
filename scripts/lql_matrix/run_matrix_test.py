@@ -182,3 +182,59 @@ def test_a_driver_that_writes_no_stdin_gets_stdin_closed(tmp_path):
     rows = [json.loads(l) for l in open(out, encoding="utf-8") if l.strip()]
     row = [x for x in rows if x.get("type") != "meta"][0]
     assert (tmp_path / row["stdout"]).read_text().strip() == "EOF_REACHED"
+
+
+def test_row_indexes_the_real_invocation_not_a_paraphrase_of_the_cell(tmp_path):
+    # Verification found this behaviour changed with nothing testing it: the
+    # row's `sent` field paraphrased the cell, and was replaced by `argv` and
+    # `stdin` as drivers.build actually returned them. The JSONL row is the
+    # harness's whole index into its captures, so a row that describes
+    # something other than what ran is the same defect class as a row that
+    # summarises output.
+    rows, _ = _run(tmp_path, "repl-pipe")
+    row = rows[0]
+    assert "sent" not in row, "the paraphrasing field is back"
+    assert row["argv"][-1] == "repl", f"argv does not name the invocation: {row['argv']}"
+    # Every statement, in order, exactly as written to the child.
+    assert row["stdin"] == 'USE "/nonexistent.vindex";\nSTATS;\n'
+
+    lql_rows, _ = _run(tmp_path, "lql")
+    lql_row = lql_rows[0]
+    assert lql_row["stdin"] is None, "the lql driver writes no stdin"
+    assert lql_row["argv"][-2:] == ["lql", 'USE "/nonexistent.vindex"; STATS;']
+
+
+def test_the_version_probe_does_not_inherit_the_harness_stdin(tmp_path):
+    # Sibling of the cell-loop DEVNULL fix, and the one verification found
+    # untested. capture_output redirects stdout and stderr but NOT stdin, so a
+    # binary that reads stdin on --version blocks the provenance probe for its
+    # full 30s timeout — on the harness's own stdin, not on anything larql did.
+    reader = tmp_path / "larql"
+    reader.write_text(
+        "#!/usr/bin/env bash\n"
+        # --version reads stdin; every other invocation returns at once.
+        'if [ "$1" = "--version" ]; then cat >/dev/null; echo "fake 0.0"; exit 0; fi\n'
+        "echo ran\n",
+        encoding="utf-8")
+    reader.chmod(reader.stat().st_mode | stat.S_IEXEC)
+
+    out = tmp_path / "r.jsonl"
+    env = dict(os.environ, LARQL_BIN=str(reader), CELL_TIMEOUT="15")
+    proc = subprocess.Popen([sys.executable, os.path.join(HERE, "run_matrix.py"),
+                             "leg1", "/v", _corpus(tmp_path), str(out),
+                             "--driver", "lql"],
+                            env=env, stdin=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise AssertionError(
+            "the --version probe blocked on inherited stdin: it needs "
+            "stdin=subprocess.DEVNULL, which capture_output does not provide")
+    finally:
+        if proc.stdin:
+            proc.stdin.close()
+    rows = [json.loads(l) for l in open(out, encoding="utf-8") if l.strip()]
+    assert [r for r in rows if r.get("type") == "meta"][0]["larql_version"] == "fake 0.0"
