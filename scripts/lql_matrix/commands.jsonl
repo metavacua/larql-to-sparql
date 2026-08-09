@@ -51,7 +51,7 @@
 {"cat":"patch","id":"patch.begin","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/patch.begin.vlp\";"]}
 {"cat":"patch","id":"patch.begin_named","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/matrix-test.vlp\";"]}
 {"cat":"patch","id":"patch.begin_insert_save","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/patch.begin_insert_save.vlp\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\");","SAVE PATCH;"]}
-{"cat":"patch","id":"patch.full_lifecycle","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"mlc.vlp\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\");","SAVE PATCH;","SHOW PATCHES;","APPLY PATCH \"mlc.vlp\";","REMOVE PATCH \"mlc.vlp\";"]}
+{"cat":"patch","id":"patch.full_lifecycle","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/mlc.vlp\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\");","SAVE PATCH;","SHOW PATCHES;","APPLY PATCH \"{{TMP}}/mlc.vlp\";","REMOVE PATCH \"{{TMP}}/mlc.vlp\";"]}
 {"cat":"compact","id":"compact.minor","lql":["USE \"{{VINDEX}}\";","COMPACT MINOR;"]}
 {"cat":"compact","id":"compact.major","lql":["USE \"{{VINDEX}}\";","COMPACT MAJOR;"]}
 {"cat":"compact","id":"compact.major_full","lql":["USE \"{{VINDEX}}\";","COMPACT MAJOR FULL;"]}
