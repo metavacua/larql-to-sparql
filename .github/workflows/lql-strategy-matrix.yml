@@ -664,20 +664,22 @@ jobs:
           echo "patch tests exit=$?" | tee -a ev/patch-results.jsonl
           echo "tmproot contents:" | tee -a ev/patch-state.txt
           ls -lR "$TMPROOT" 2>&1 | tee -a ev/patch-state.txt
-      - name: Extract the patch lifecycle capture files
+      - name: Show patch lifecycle cell outputs
         run: |
           set +e -u
-          mkdir -p ev/patch-cells
-          # Copy only patch-related cells from the captures
-          find out/cells -name "*patch*" -type f 2>/dev/null | while read f; do
-            cp "$f" ev/patch-cells/ 2>/dev/null || true
-          done
-          # Also copy full_lifecycle since that's our main test
-          find out/cells -name "*full_lifecycle*" -type f 2>/dev/null | while read f; do
-            cp "$f" ev/patch-cells/ 2>/dev/null || true
-          done
-          echo "captured $(ls -1 ev/patch-cells | wc -l) patch cell files"
-          ls -la ev/patch-cells
+          echo "=== patch.full_lifecycle stdout ===" | tee -a ev/patch-cells-summary.txt
+          if [ -f "ev/cells/patch.lql.patch.full_lifecycle.out" ]; then
+            cat "ev/cells/patch.lql.patch.full_lifecycle.out" | tee -a ev/patch-cells-summary.txt
+          else
+            echo "(file not found)" | tee -a ev/patch-cells-summary.txt
+          fi
+          echo | tee -a ev/patch-cells-summary.txt
+          echo "=== patch.full_lifecycle stderr ===" | tee -a ev/patch-cells-summary.txt
+          if [ -f "ev/cells/patch.lql.patch.full_lifecycle.err" ]; then
+            cat "ev/cells/patch.lql.patch.full_lifecycle.err" | tee -a ev/patch-cells-summary.txt
+          else
+            echo "(file not found)" | tee -a ev/patch-cells-summary.txt
+          fi
       - name: Show every capture
         if: always()
         run: |
@@ -698,7 +700,9 @@ jobs:
             ev/*.out
             ev/*.err
             ev/*.jsonl
-            ev/patch-cells/
+            ev/cells/patch.lql.patch*.out
+            ev/cells/patch.lql.patch*.err
+            ev/cells/patch.lql.insert.in_patch.*
 
   quality:
     needs: gate
