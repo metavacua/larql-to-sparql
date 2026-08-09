@@ -229,8 +229,14 @@ jobs:
   # Compile larql-cli ONCE; every leg downloads the binary.
   build:
     needs: gate
-    # The binary is needed by both the probe and the matrix.
-    if: needs.gate.outputs.probe == 'true' || needs.gate.outputs.matrix == 'true'
+    # The binary is needed by the probe, the matrix, AND the compile evidence
+    # job. Adding a gate scope without adding it here silently skips the new
+    # job — a skipped dependency skips its dependents — which is exactly what
+    # happened to compile-evidence on run 31306052565.
+    if: >-
+      needs.gate.outputs.probe == 'true' ||
+      needs.gate.outputs.matrix == 'true' ||
+      needs.gate.outputs.compile == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
