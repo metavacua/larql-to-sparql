@@ -36,7 +36,7 @@ on:
         description: "Which parts to run"
         type: choice
         default: all
-        options: [all, probe, matrix, quality, compile, none]
+        options: [all, probe, matrix, quality, compile, patch, none]
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
@@ -76,6 +76,7 @@ jobs:
       compile: ${{ steps.g.outputs.compile }}
       matrix: ${{ steps.g.outputs.matrix }}
       quality: ${{ steps.g.outputs.quality }}
+      patch: ${{ steps.g.outputs.patch }}
     steps:
       # head_commit is null on pull_request events, and this branch reaches
       # this workflow ONLY via pull_request — so reading the marker out of the
@@ -94,13 +95,14 @@ jobs:
           MSG="$(git log -1 --pretty=%B)"
           set -uo pipefail
           SCOPE="${SCOPE:-all}"
-          probe=false; matrix=false; quality=false; compile=false
+          probe=false; matrix=false; quality=false; compile=false; patch=false
           case "$SCOPE" in
-            all)     probe=true;  matrix=true;  quality=true; compile=true ;;
+            all)     probe=true;  matrix=true;  quality=true; compile=true; patch=true ;;
             probe)   probe=true ;;
             matrix)  matrix=true ;;
             quality) quality=true ;;
             compile) compile=true ;;
+            patch)   patch=true ;;
             none)    : ;;
           esac
           # A skip marker in the commit message or PR title turns a part off
@@ -124,11 +126,12 @@ jobs:
           case "$TEXT" in *"[skip matrix]"*)  matrix=false ;;  esac
           case "$TEXT" in *"[skip quality]"*) quality=false ;; esac
           case "$TEXT" in *"[skip compile]"*) compile=false ;; esac
+          case "$TEXT" in *"[skip patch]"*)  patch=false ;; esac
           {
             echo "probe=$probe"; echo "matrix=$matrix"
-            echo "quality=$quality"; echo "compile=$compile"
+            echo "quality=$quality"; echo "compile=$compile"; echo "patch=$patch"
           } >> "$GITHUB_OUTPUT"
-          echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality compile=$compile"
+          echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality compile=$compile patch=$patch"
 
   # Enumerate every leg as JSON → consumed by the matrix via fromJSON. A malformed
   # plan fails here in seconds, before any leg runs.
@@ -248,7 +251,8 @@ jobs:
     if: >-
       needs.gate.outputs.probe == 'true' ||
       needs.gate.outputs.matrix == 'true' ||
-      needs.gate.outputs.compile == 'true'
+      needs.gate.outputs.compile == 'true' ||
+      needs.gate.outputs.patch == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -603,6 +607,98 @@ jobs:
             ev/*.txt
             ev/*.out
             ev/*.err
+
+  patch-evidence:
+    needs: [gate, build]
+    if: needs.gate.outputs.patch == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prep
+        run: |
+          chmod +x bin/larql
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev
+          python -m pip install --quiet huggingface_hub
+          mkdir -p ev
+      - name: Restore HF snapshot (smol135)
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/huggingface
+          key: hf-snapshot-HuggingFaceTB--SmolLM2-135M-Instruct-v2
+      - name: Fetch the input model
+        run: |
+          set +e -u
+          python - <<'PY' > ev/input-model.path 2> ev/input-model.err
+          from huggingface_hub import snapshot_download
+          print(snapshot_download("HuggingFaceTB/SmolLM2-135M-Instruct",
+                                  local_files_only=False,
+                                  ignore_patterns=["onnx/*", "*.onnx", "*.onnx_data"]))
+          PY
+          SRC=$(cat ev/input-model.path)
+          echo "input snapshot: $SRC" | tee ev/00-input-model.txt
+      - name: Extract a vindex to test patches against
+        run: |
+          set +e -u
+          timeout 3600 ./bin/larql extract HuggingFaceTB/SmolLM2-135M-Instruct \
+            -o ev/src.vindex --level browse > ev/01-extract.out 2> ev/01-extract.err
+          echo "extract exit=$?" | tee -a ev/01-extract.out
+      - name: Run patch lifecycle tests from corpus
+        run: |
+          set +e -u
+          TMPROOT=$(mktemp -d)
+          LARQL_BIN=./bin/larql \
+          MODEL_ID="HuggingFaceTB/SmolLM2-135M-Instruct" \
+          TMPROOT="$TMPROOT" \
+          CELL_TIMEOUT=900 \
+          python3 scripts/lql_matrix/run_matrix.py \
+            "patch" "ev/src.vindex" scripts/lql_matrix/commands.jsonl \
+            "ev/patch-results.jsonl" --driver lql
+          echo "patch tests exit=$?" | tee -a ev/patch-results.jsonl
+          echo "tmproot contents:" | tee -a ev/patch-state.txt
+          ls -lR "$TMPROOT" 2>&1 | tee -a ev/patch-state.txt
+      - name: Extract the patch lifecycle capture files
+        run: |
+          set +e -u
+          mkdir -p ev/patch-cells
+          # Copy only patch-related cells from the captures
+          find out/cells -name "*patch*" -type f 2>/dev/null | while read f; do
+            cp "$f" ev/patch-cells/ 2>/dev/null || true
+          done
+          # Also copy full_lifecycle since that's our main test
+          find out/cells -name "*full_lifecycle*" -type f 2>/dev/null | while read f; do
+            cp "$f" ev/patch-cells/ 2>/dev/null || true
+          done
+          echo "captured $(ls -1 ev/patch-cells | wc -l) patch cell files"
+          ls -la ev/patch-cells
+      - name: Show every capture
+        if: always()
+        run: |
+          set +e
+          for f in ev/*.{out,err,txt,jsonl}; do
+            if [ -f "$f" ]; then
+              echo "───── $f ($(wc -c < "$f") bytes)"
+              head -40 "$f"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: patch-evidence
+          retention-days: 14
+          path: |
+            ev/*.txt
+            ev/*.out
+            ev/*.err
+            ev/*.jsonl
+            ev/patch-cells/
 
   quality:
     needs: gate
