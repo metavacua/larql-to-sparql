@@ -517,16 +517,33 @@ jobs:
       - name: Q1+Q2 — INTO MODEL, dir pre-created, three FORMAT variants
         run: |
           set +e -u
+          SNAP=scripts/lql_matrix/fs-snapshot.sh
+          # Roots, not guessed paths. `ev` because COMPILE builds into a
+          # STAGING directory that is a SIBLING of its target (<base>.tmp.<pid>)
+          # and renames it into place — listing only the target cannot tell
+          # "wrote nothing" from "wrote somewhere I did not look", which is the
+          # error that produced the last two wrong readings of this command.
+          # /tmp and the HF cache because nothing has established that a vindex
+          # is self-contained.
+          ROOTS=(ev /tmp "$HOME/.cache/huggingface")
+
           run_case() {   # $1 = case id, $2 = FORMAT clause (may be empty)
             local id="$1" fmt="$2" dir="ev/out-$1"
-            mkdir -p "$dir"          # PRE-CREATED: removes the missing-dir variable
+            mkdir -p "$dir"          # target exists; staging is a SIBLING of it
+            bash "$SNAP" snap "ev/fs-$id.before" "${ROOTS[@]}" > /dev/null
             timeout 3600 ./bin/larql lql \
               "USE \"ev/src.vindex\"; COMPILE CURRENT INTO MODEL \"$dir\" $fmt;" \
               > "ev/10-$id.out" 2> "ev/10-$id.err"
             echo "exit=$?" >> "ev/10-$id.err"
-            echo "── $id  (clause: '${fmt:-<none>}')" >> ev/20-listings.txt
-            find "$dir" -type f -printf '%s\t%P\n' | sort -k2 >> ev/20-listings.txt
-            echo >> ev/20-listings.txt
+            bash "$SNAP" snap "ev/fs-$id.after" "${ROOTS[@]}" > /dev/null
+            {
+              echo "════════ $id  (clause: '${fmt:-<none>}')"
+              echo "-- target dir contents --"
+              find "$dir" -type f -printf '%s\t%P\n' | sort -k2
+              echo "-- WHOLE-TREE DIFF (this is the evidence) --"
+              bash "$SNAP" diff "ev/fs-$id.before" "ev/fs-$id.after"
+              echo
+            } >> ev/20-listings.txt
           }
           run_case safetensors "FORMAT safetensors"
           run_case gguf        "FORMAT gguf"
@@ -536,14 +553,30 @@ jobs:
         run: |
           set +e -u
           D="ev/out-missingdir/nested"     # deliberately not created
+          bash scripts/lql_matrix/fs-snapshot.sh snap ev/fs-missing.before \
+            ev /tmp "$HOME/.cache/huggingface" > /dev/null
           timeout 3600 ./bin/larql lql \
             "USE \"ev/src.vindex\"; COMPILE CURRENT INTO MODEL \"$D\" FORMAT safetensors;" \
             > ev/11-missingdir.out 2> ev/11-missingdir.err
           echo "exit=$?" >> ev/11-missingdir.err
-          echo "── missingdir" >> ev/20-listings.txt
-          if [ -d "$D" ]; then find "$D" -type f -printf '%s\t%P\n' | sort -k2 >> ev/20-listings.txt
-          else echo "(directory was not created)" >> ev/20-listings.txt; fi
+          bash scripts/lql_matrix/fs-snapshot.sh snap ev/fs-missing.after \
+            ev /tmp "$HOME/.cache/huggingface" > /dev/null
+          {
+            echo "════════ missingdir"
+            if [ -d "$D" ]; then find "$D" -type f -printf '%s\t%P\n' | sort -k2
+            else echo "(target directory was not created)"; fi
+            echo "-- WHOLE-TREE DIFF --"
+            bash scripts/lql_matrix/fs-snapshot.sh diff ev/fs-missing.before ev/fs-missing.after
+          } >> ev/20-listings.txt
           cat ev/11-missingdir.out ev/11-missingdir.err
+      - name: AST — what the parser actually builds (run it, do not read it)
+        run: |
+          set +e -u
+          cargo test -p larql-lql --test ast_dump -- --nocapture \
+            > ev/02-ast.out 2> ev/02-ast.err
+          echo "exit=$?" >> ev/02-ast.err
+          cat ev/02-ast.out
+
       - name: WHICH file is missing? (strace the failing call)
         run: |
           set +e -u
