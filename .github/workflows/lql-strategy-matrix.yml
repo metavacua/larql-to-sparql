@@ -614,6 +614,8 @@ jobs:
     if: needs.gate.outputs.compile == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      MODEL: "HuggingFaceTB/SmolLM2-135M-Instruct"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
@@ -625,7 +627,7 @@ jobs:
         with:
           python-version: '3.12'
       - id: slug
-        run: echo "slug=HuggingFaceTB--SmolLM2-135M-Instruct" >> "$GITHUB_OUTPUT"
+        run: echo "slug=${MODEL//\//--}" >> "$GITHUB_OUTPUT"
       - name: Restore HF snapshot
         uses: actions/cache/restore@v5
         with:
@@ -636,24 +638,24 @@ jobs:
           chmod +x bin/larql scripts/lql_matrix/run_matrix.sh
           sudo apt-get update && sudo apt-get install -y libopenblas-dev
           python -m pip install --quiet huggingface_hub
-          mkdir -p out tmp-cells
+          mkdir -p out
       - name: Resolve HF model
         run: |
           python - <<'PY'
           import os
           from huggingface_hub import snapshot_download
-          IGNORE = ["onnx/*", "*.onnx", "*.onnx_data"]
-          repo = "HuggingFaceTB/SmolLM2-135M-Instruct"
+          IGNORE = ["onnx/*", "*.onnx", "*.onnx_data"]   # keep in step with the prefetch job
+          repo = os.environ["MODEL"]
           try:
-              print(f"resolved from cache: {snapshot_download(repo, local_files_only=True)}")
+              print(f"resolved from cache, no hub request: {snapshot_download(repo, local_files_only=True)}")
           except Exception as e:
-              print(f"cache miss ({type(e).__name__}), fetching from hub")
-              print(snapshot_download(repo, ignore_patterns=IGNORE))
+              print(f"::warning::HF cache MISS for {repo} ({type(e).__name__}) - falling back to a hub fetch")
+              print(f"fetched from hub: {snapshot_download(repo, ignore_patterns=IGNORE)}")
           PY
       - name: Extract vindex at level all
         run: |
           set +e
-          timeout 3600 ./bin/larql extract HuggingFaceTB/SmolLM2-135M-Instruct \
+          timeout 3600 ./bin/larql extract "$MODEL" \
             -o out/smol135.vindex --level all > out/extract.out 2> out/extract.err
           echo "extract exit=$?" | tee -a out/extract.err
           find out/smol135.vindex -type f | wc -l
@@ -677,7 +679,7 @@ jobs:
         run: |
           set +e -u
           LARQL_BIN=./bin/larql \
-          MODEL_ID="HuggingFaceTB/SmolLM2-135M-Instruct" \
+          MODEL_ID="$MODEL" \
           TMPROOT="$(mktemp -d)" \
           CELL_TIMEOUT=900 \
           scripts/lql_matrix/run_matrix.sh \
@@ -700,9 +702,9 @@ jobs:
         run: |
           set +e
           echo "=== compile-cells results ==="
-          cat out/results-compile.jsonl | head -20
+          head -20 out/results-compile.jsonl
           echo "=== filesystem diff ==="
-          cat out/fs-diff.txt | head -50
+          head -50 out/fs-diff.txt
           echo "=== cell captures ==="
           ls -lh out/cells/ 2>/dev/null | head -20
       - name: Upload results
