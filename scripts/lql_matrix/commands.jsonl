@@ -26,6 +26,7 @@
 {"cat":"inference","id":"explain.infer","lql":["USE \"{{VINDEX}}\";","EXPLAIN INFER \"The capital of France is\" TOP 5;"]}
 {"cat":"browse","id":"explain.walk","lql":["USE \"{{VINDEX}}\";","EXPLAIN WALK \"The capital of France is\" LAYERS 5-15;"]}
 {"cat":"browse","id":"stats","lql":["USE \"{{VINDEX}}\";","STATS;"]}
+{"cat":"browse","id":"stats.explicit_path","lql":["STATS \"{{VINDEX}}\";"]}
 {"cat":"browse","id":"show.relations","lql":["USE \"{{VINDEX}}\";","SHOW RELATIONS;"]}
 {"cat":"browse","id":"show.relations_examples","lql":["USE \"{{VINDEX}}\";","SHOW RELATIONS WITH EXAMPLES;"]}
 {"cat":"browse","id":"show.layers","lql":["USE \"{{VINDEX}}\";","SHOW LAYERS;"]}
