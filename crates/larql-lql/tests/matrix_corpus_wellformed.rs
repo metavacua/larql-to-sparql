@@ -173,7 +173,7 @@ fn every_shipped_lql_cell_parses() {
     assert!(cells > 0, "corpora are empty — the path is probably wrong");
     assert!(
         failures.is_empty(),
-        "{} of {cells} cells ({statements} statements) contain unparseable LQL:\n\n{}",
+        "{} problem(s) across {cells} cells ({statements} statements):\n\n{}",
         failures.len(),
         failures.join("\n\n")
     );

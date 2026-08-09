@@ -89,7 +89,8 @@ def test_exit_status_survives_a_descendant_holding_the_terminal(tmp_path):
     # ChildProcessError and printed `exit=unknown` for a code that had in fact
     # been observed. That is fixed.
     #
-    # NO TEST HERE DISCRIMINATES, and this one does not claim to. A review
+    # THIS test does not discriminate, and does not claim to — the other tests
+    # in this file each kill a mutant; the blanket phrasing here was wrong. A review
     # predicted the poll would win "whenever the child exits without the master
     # reaching EIO — a descendant still holding the slave open". Measured on
     # Linux with an instrumented copy, that state is unreachable: a plain
@@ -111,3 +112,35 @@ def test_exit_status_survives_a_descendant_holding_the_terminal(tmp_path):
         assert "exit=7" in err, f"expected exit=7, got {err!r}"
     finally:
         subprocess.run(["pkill", "-x", "sleep"], capture_output=True)
+
+
+def test_write_all_loops_over_short_writes(tmp_path):
+    # Closes a gap verification found: the short-write loop was changed
+    # behaviour with nothing testing it. The end-to-end case is untestable —
+    # a payload large enough to force a short write to a pty master deadlocks
+    # against an echoing child (measured: 40 KB to `cat` hangs) — so the loop
+    # is exercised against a writer that is short by construction.
+    sys.path.insert(0, HERE)
+    import probe_pty
+
+    written = bytearray()
+    calls = []
+
+    def short_write(fd, view):
+        n = min(7, len(view))          # never accepts more than 7 bytes
+        written.extend(bytes(view[:n]))
+        calls.append(n)
+        return n
+
+    payload = b"USE \"v\";\nSTATS;\nSHOW MODELS;\nexit\n"
+    probe_pty.write_all(99, payload, _write=short_write)
+    assert bytes(written) == payload, "payload was truncated"
+    assert len(calls) > 1, "the fixture did not actually force a short write"
+
+
+def test_write_all_refuses_to_spin_when_no_progress_is_possible():
+    sys.path.insert(0, HERE)
+    import probe_pty
+    import pytest
+    with pytest.raises(OSError):
+        probe_pty.write_all(99, b"abc", _write=lambda fd, view: 0)

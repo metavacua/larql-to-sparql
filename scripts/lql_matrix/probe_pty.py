@@ -20,6 +20,31 @@ import sys
 import time
 
 
+def write_all(fd, payload, _write=os.write):
+    """Write every byte of `payload` to `fd`, looping over short writes.
+
+    os.write may return SHORT on a blocking fd, so a single call can silently
+    truncate — and truncated input reads as larql having ignored statements
+    rather than as the harness having dropped them. Harmless at the ~30 bytes
+    this probe sends; not harmless for Task 4's 9-statement cells, and this is
+    the code Task 4 lifts.
+
+    `_write` is injectable because the end-to-end case cannot be tested: a
+    payload large enough to force a short write to a pty master DEADLOCKS
+    against a child that echoes — the master's output buffer fills, the child
+    blocks writing and so stops reading, and the parent's write never returns.
+    Measured: 40 KB to `cat` hangs. So the loop is verified here against a fd
+    whose writes are short by construction, which is the only place the
+    behaviour is reachable at all.
+    """
+    view = memoryview(payload)
+    while view:
+        n = _write(fd, view)
+        if n <= 0:  # no progress possible; refuse to spin forever
+            raise OSError(f"write to fd {fd} returned {n}")
+        view = view[n:]
+
+
 def main():
     out, argv = sys.argv[1], sys.argv[2:]
     payload = sys.stdin.buffer.read()
@@ -32,14 +57,7 @@ def main():
             # rather than the child dying silently and reading as a clean exit.
             os._exit(127)
     if payload:
-        # os.write may return SHORT on a blocking fd — a payload larger than
-        # the line discipline's buffer is otherwise silently truncated, and
-        # truncated input reads as larql having ignored statements. Harmless at
-        # the ~30 bytes this probe sends; not harmless for Task 4's 9-statement
-        # cells, and this loop is what Task 4 lifts.
-        view = memoryview(payload)
-        while view:
-            view = view[os.write(fd, view):]
+        write_all(fd, payload)
     # Overridable so the timeout branch is testable in under a second. It is
     # the branch that hangs a runner if it is wrong, so it is the one that most
     # needs exercising, and a hardcoded 60 makes exercising it cost 60s a go.
