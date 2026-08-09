@@ -63,11 +63,12 @@ jobs:
   # Decides what this run does, so a run can be narrowed without editing the
   # workflow. Three ways in, cheapest first:
   #
-  #   commit message   [skip matrix] [skip probe] [skip quality] [skip ci]
-  #   dispatch input   scope = all | probe | matrix | quality | none
+  #   commit message   [skip matrix] [skip probe] [skip quality] [skip compile]
+  #                     [skip hf] [skip ci]
+  #   dispatch input   scope = all | probe | matrix | quality | compile | hf | none
   #   paths filter     (above) — a docs-only PR does not trigger at all
   #
-  # Everything downstream hangs off these three booleans, so a narrowed run
+  # Everything downstream hangs off these five booleans, so a narrowed run
   # skips whole job trees rather than starting them and exiting early.
   gate:
     runs-on: ubuntu-latest
@@ -666,49 +667,36 @@ jobs:
       - name: Enumerate hf subcommands via --help
         run: |
           set +e
-          echo "=== larql hf --help ===" > hf/hf-help.txt
-          timeout 30 ./bin/larql hf --help >> hf/hf-help.txt 2>&1
-          echo "exit=$?" >> hf/hf-help.txt
-
-          echo "=== larql hf download --help ===" > hf/hf-download-help.txt
-          timeout 30 ./bin/larql hf download --help >> hf/hf-download-help.txt 2>&1
-          echo "exit=$?" >> hf/hf-download-help.txt
-
-          echo "=== larql hf publish --help ===" > hf/hf-publish-help.txt
-          timeout 30 ./bin/larql hf publish --help >> hf/hf-publish-help.txt 2>&1
-          echo "exit=$?" >> hf/hf-publish-help.txt
-
-          echo "=== larql hf visibility --help ===" > hf/hf-visibility-help.txt
-          timeout 30 ./bin/larql hf visibility --help >> hf/hf-visibility-help.txt 2>&1
-          echo "exit=$?" >> hf/hf-visibility-help.txt
+          # One shape (--help on hf and each of its subcommands) run as a
+          # loop instead of four hand-copied echo/timeout/echo blocks — see
+          # the CMDS loop below and the probe job's own CMDS array for the
+          # same idiom already established in this file.
+          for sub in "" download publish visibility; do
+            f="hf/hf${sub:+-$sub}-help.txt"
+            echo "=== larql hf ${sub:+$sub }--help ===" > "$f"
+            timeout 30 ./bin/larql hf $sub --help >> "$f" 2>&1
+            echo "exit=$?" >> "$f"
+          done
       - name: Test hf subcommand invocations (expected to fail on network/auth)
         run: |
           set +e
           TMP=$(mktemp -d)
-
-          echo "=== larql hf download (no args, shows usage) ===" > hf/hf-download-noargs.txt
-          timeout 30 ./bin/larql hf download >> hf/hf-download-noargs.txt 2>&1
-          echo "exit=$?" >> hf/hf-download-noargs.txt
-
-          echo "=== larql hf download example/repo ===" > hf/hf-download-invocation.txt
-          timeout 30 ./bin/larql hf download example/repo >> hf/hf-download-invocation.txt 2>&1
-          echo "exit=$?" >> hf/hf-download-invocation.txt
-
-          echo "=== larql hf publish (no args, shows usage) ===" > hf/hf-publish-noargs.txt
-          timeout 30 ./bin/larql hf publish >> hf/hf-publish-noargs.txt 2>&1
-          echo "exit=$?" >> hf/hf-publish-noargs.txt
-
-          echo "=== larql hf publish $TMP/vindex --repo example/repo ===" > hf/hf-publish-invocation.txt
-          timeout 30 ./bin/larql hf publish "$TMP/vindex" --repo example/repo >> hf/hf-publish-invocation.txt 2>&1
-          echo "exit=$?" >> hf/hf-publish-invocation.txt
-
-          echo "=== larql hf visibility (no args, shows usage) ===" > hf/hf-visibility-noargs.txt
-          timeout 30 ./bin/larql hf visibility >> hf/hf-visibility-noargs.txt 2>&1
-          echo "exit=$?" >> hf/hf-visibility-noargs.txt
-
-          echo "=== larql hf visibility example/repo --public ===" > hf/hf-visibility-invocation.txt
-          timeout 30 ./bin/larql hf visibility example/repo --public >> hf/hf-visibility-invocation.txt 2>&1
-          echo "exit=$?" >> hf/hf-visibility-invocation.txt
+          CMDS=(
+            "download-noargs|download|(no args, shows usage)"
+            "download-invocation|download example/repo|"
+            "publish-noargs|publish|(no args, shows usage)"
+            "publish-invocation|publish $TMP/vindex --repo example/repo|"
+            "visibility-noargs|visibility|(no args, shows usage)"
+            "visibility-invocation|visibility example/repo --public|"
+          )
+          for line in "${CMDS[@]}"; do
+            id=${line%%|*}; tail=${line#*|}; rest=${tail%%|*}; note=${tail#*|}
+            f="hf/hf-${id}.txt"
+            echo "=== larql hf $rest${note:+ $note} ===" > "$f"
+            set -- $rest
+            timeout 30 ./bin/larql hf "$@" >> "$f" 2>&1
+            echo "exit=$?" >> "$f"
+          done
       - name: Show every capture
         if: always()
         run: |
