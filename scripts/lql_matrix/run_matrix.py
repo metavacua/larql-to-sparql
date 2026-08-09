@@ -50,6 +50,21 @@ import drivers  # noqa: E402  (needs the sys.path line above)
 
 RSS_RE = re.compile(r"Maximum resident set size.*?:\s*(\d+)")
 
+# The drivers this runner can actually execute — NOT drivers.DRIVERS, which is
+# the full vocabulary including ones only later tasks implement.
+#
+# `repl-pty` needs a pseudo-terminal (Task 4). Offering it here before that
+# exists would write the statements down a PIPE and then label the capture
+# `<level>.repl-pty.<cell>.out` with a row saying "driver": "repl-pty" — a
+# reader would attribute pipe behaviour to a terminal. Task 0 measured those
+# two as producing DIFFERENT results from identical input, so the mislabel
+# would destroy exactly the distinction the two drivers exist to draw.
+#
+# `cli` needs the cli-*.jsonl corpora (Tasks 6-7); against the shipped LQL
+# corpora every cell would raise KeyError('argv'), and only after N captures
+# had already been written.
+IMPLEMENTED_DRIVERS = ("lql", "repl-pipe")
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(
@@ -58,7 +73,7 @@ def main() -> None:
     ap.add_argument("vindex")
     ap.add_argument("corpus")
     ap.add_argument("out")
-    ap.add_argument("--driver", default="lql", choices=drivers.DRIVERS)
+    ap.add_argument("--driver", default="lql", choices=IMPLEMENTED_DRIVERS)
     ns = ap.parse_args()
     level, vindex, corpus, out, driver = (
         ns.level, ns.vindex, ns.corpus, ns.out, ns.driver)
@@ -167,9 +182,18 @@ def main() -> None:
             # An INDEX into the captures, not a description of them. `stdout`
             # and `stderr` name the files holding the complete output; nothing
             # here is derived from their contents.
+            #
+            # `argv` and `stdin` are what the driver ACTUALLY produced, not the
+            # cell re-read. The previous `"sent": cell.get("lql") or
+            # cell.get("argv")` was a paraphrase and was wrong in two ways: it
+            # omitted the `exit` that repl-pty appends to stdin, and `or`
+            # picked `lql` regardless of driver. A row that paraphrases what
+            # ran is the same failure as a row that summarises output.
             row = {
                 "level": level, "driver": driver, "id": cid, "cat": cat,
-                "sent": cell.get("lql") or cell.get("argv"),
+                "argv": argv_cmd,
+                "stdin": None if stdin_bytes is None
+                         else stdin_bytes.decode("utf-8", "replace"),
                 "exit_code": rc, "duration_ms": dur_ms,
                 "peak_rss_kb": peak_rss_kb,
                 "stdout": str(outf.relative_to(out_path.parent)),

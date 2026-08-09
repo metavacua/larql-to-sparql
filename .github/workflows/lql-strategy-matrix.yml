@@ -632,7 +632,11 @@ jobs:
             if [ -f "$VINDEX/$f" ]; then cp "$VINDEX/$f" "$MDIR/"
             else echo "absent: $VINDEX/$f" >> "$MDIR/copy.log"; fi
           done
-          [ -f "$MDIR/copy.log" ] && cat "$MDIR/copy.log"
+          # `if`, not `&&` — safe today only because this is not the step's
+          # last command and the step runs under `set +e`. The hazard is
+          # positional, so an append or reorder would reintroduce the bug that
+          # killed all 21 legs of run 31267330863.
+          if [ -f "$MDIR/copy.log" ]; then cat "$MDIR/copy.log"; fi
 
           # filename -> size for every vindex file. On failure the stderr is kept
           # and no `{}` is fabricated: an empty listing must mean "no files", never
