@@ -56,9 +56,12 @@ exists to take.
 root-causes its command down to a real Rust-level defect — the way `COMPILE …
 INTO MODEL`'s missing `index.json` write was found this session — it **does
 not fix it**. It reports the finding, precisely, with the evidence that
-established it, and stops. The point of this audit is to get the harness to a
-state where such a finding can be trusted; acting on it is later, separate
-work.
+established it, and stops there. A real, uncorrected LARQL defect is not a gap
+in this audit's coverage — it is the test signal that proves the harness can
+correctly detect and report a real problem instead of masking it. Fixing it
+would remove exactly the case this audit needs to verify the CI against. This
+is not a staged or eventual exclusion: fixing LARQL/LQL is not this audit's
+job, on this pass or on any pass.
 
 A unit that finds nothing wrong reports that too, honestly, rather than
 manufacturing a finding to justify the dispatch.
@@ -243,8 +246,8 @@ dispatch, this stays bounded:
    value any more than any other capture-derived claim has been this session.
 4. Produces one ranked document: confirmed harness fixes ready to merge,
    contested/overlapping fixes needing reconciliation, and out-of-scope
-   Rust-level findings carried forward as a punch list for later, separate
-   work.
+   Rust-level findings recorded as evidence that the harness can surface a real
+   defect — not as a backlog for this or any other effort to act on.
 
 **No auto-merge.** 57 independently-produced branches get presented, not
 merged — the same standing rule this session has followed for every
@@ -252,7 +255,10 @@ risky/irreversible action.
 
 ## Out of scope
 
-- Fixing LARQL's Rust source (report-only, this round).
+- Fixing LARQL's Rust source. Report-only, not staged, not deferred — a real
+  uncorrected LARQL defect is the signal this audit exists to detect and
+  verify against, not a queue of work for this or any future CI or LARQL
+  effort to clear.
 - New `.github/workflows/*.yml` files — everyone works in the existing file.
 - Auto-merging any unit's branch.
 - A fix-loop / re-review cycle beyond the one review pass per unit — findings
