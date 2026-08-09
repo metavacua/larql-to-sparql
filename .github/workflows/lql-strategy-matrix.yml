@@ -36,7 +36,7 @@ on:
         description: "Which parts to run"
         type: choice
         default: all
-        options: [all, probe, matrix, quality, none]
+        options: [all, probe, matrix, quality, compile, none]
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
@@ -73,6 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       probe: ${{ steps.g.outputs.probe }}
+      compile: ${{ steps.g.outputs.compile }}
       matrix: ${{ steps.g.outputs.matrix }}
       quality: ${{ steps.g.outputs.quality }}
     steps:
@@ -92,27 +93,30 @@ jobs:
           MSG="$(git log -1 --pretty=%B)"
           set -uo pipefail
           SCOPE="${SCOPE:-all}"
-          probe=false; matrix=false; quality=false
+          probe=false; matrix=false; quality=false; compile=false
           case "$SCOPE" in
-            all)     probe=true;  matrix=true;  quality=true ;;
+            all)     probe=true;  matrix=true;  quality=true; compile=true ;;
             probe)   probe=true ;;
             matrix)  matrix=true ;;
             quality) quality=true ;;
+            compile) compile=true ;;
             none)    : ;;
           esac
           # A skip marker in the commit message or PR title turns a part off
           # without a dispatch, which is what you want mid-iteration.
           TEXT="${MSG:-} ${TITLE:-}"
           case "$TEXT" in
-            *"[skip ci]"*)      probe=false; matrix=false; quality=false ;;
+            *"[skip ci]"*)      probe=false; matrix=false; quality=false; compile=false ;;
           esac
           case "$TEXT" in *"[skip probe]"*)   probe=false ;;   esac
           case "$TEXT" in *"[skip matrix]"*)  matrix=false ;;  esac
           case "$TEXT" in *"[skip quality]"*) quality=false ;; esac
+          case "$TEXT" in *"[skip compile]"*) compile=false ;; esac
           {
-            echo "probe=$probe"; echo "matrix=$matrix"; echo "quality=$quality"
+            echo "probe=$probe"; echo "matrix=$matrix"
+            echo "quality=$quality"; echo "compile=$compile"
           } >> "$GITHUB_OUTPUT"
-          echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality"
+          echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality compile=$compile"
 
   # Enumerate every leg as JSON → consumed by the matrix via fromJSON. A malformed
   # plan fails here in seconds, before any leg runs.
@@ -438,6 +442,130 @@ jobs:
           # the next morning.
           retention-days: 14
           path: probe/
+
+  # ── EVIDENCE, not argument ─────────────────────────────────────────────────
+  # What does `COMPILE ... INTO MODEL` actually produce? Prior claims about this
+  # path were made by reading source and were wrong repeatedly. This job runs it
+  # and uploads what appeared on disk. It asserts NOTHING; the artifact is the
+  # answer.
+  #
+  # Three questions, each with its own control:
+  #   Q1 Does INTO MODEL work at all when the output directory ALREADY EXISTS?
+  #      (control: a second run into a dir that does NOT exist)
+  #   Q2 Does the FORMAT clause change the output?
+  #      (control: safetensors vs gguf vs no FORMAT at all, same vindex)
+  #   Q3 Is the output the same KIND of thing as the input model?
+  #      (control: the input HF snapshot's own file listing, side by side)
+  compile-evidence:
+    needs: [gate, build]
+    if: needs.gate.outputs.compile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prep
+        run: |
+          chmod +x bin/larql
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev
+          python -m pip install --quiet huggingface_hub
+          mkdir -p ev
+      - name: Fetch the input model and record ITS file list
+        run: |
+          set +e -u
+          python - <<'PY' > ev/input-model.path 2> ev/input-model.err
+          from huggingface_hub import snapshot_download
+          print(snapshot_download("HuggingFaceTB/SmolLM2-135M-Instruct",
+                                  ignore_patterns=["onnx/*", "*.onnx", "*.onnx_data"]))
+          PY
+          SRC=$(cat ev/input-model.path)
+          echo "input snapshot: $SRC" | tee ev/00-input-listing.txt
+          find "$SRC" -type f -printf '%s\t%P\n' | sort -k2 >> ev/00-input-listing.txt
+          cat ev/00-input-listing.txt
+      - name: Extract a vindex to compile from
+        run: |
+          set +e -u
+          timeout 3600 ./bin/larql extract HuggingFaceTB/SmolLM2-135M-Instruct \
+            -o ev/src.vindex --level all > ev/01-extract.out 2> ev/01-extract.err
+          echo "extract exit=$?" | tee -a ev/01-extract.out
+          find ev/src.vindex -type f -printf '%s\t%P\n' | sort -k2 > ev/01-vindex-listing.txt
+          cat ev/01-vindex-listing.txt
+      - name: Q1+Q2 — INTO MODEL, dir pre-created, three FORMAT variants
+        run: |
+          set +e -u
+          run_case() {   # $1 = case id, $2 = FORMAT clause (may be empty)
+            local id="$1" fmt="$2" dir="ev/out-$1"
+            mkdir -p "$dir"          # PRE-CREATED: removes the missing-dir variable
+            timeout 3600 ./bin/larql lql \
+              "USE \"ev/src.vindex\"; COMPILE CURRENT INTO MODEL \"$dir\" $fmt;" \
+              > "ev/10-$id.out" 2> "ev/10-$id.err"
+            echo "exit=$?" >> "ev/10-$id.err"
+            echo "── $id  (clause: '${fmt:-<none>}')" >> ev/20-listings.txt
+            find "$dir" -type f -printf '%s\t%P\n' | sort -k2 >> ev/20-listings.txt
+            echo >> ev/20-listings.txt
+          }
+          run_case safetensors "FORMAT safetensors"
+          run_case gguf        "FORMAT gguf"
+          run_case noformat    ""
+          cat ev/20-listings.txt
+      - name: Q1 control — INTO MODEL into a directory that does NOT exist
+        run: |
+          set +e -u
+          D="ev/out-missingdir/nested"     # deliberately not created
+          timeout 3600 ./bin/larql lql \
+            "USE \"ev/src.vindex\"; COMPILE CURRENT INTO MODEL \"$D\" FORMAT safetensors;" \
+            > ev/11-missingdir.out 2> ev/11-missingdir.err
+          echo "exit=$?" >> ev/11-missingdir.err
+          echo "── missingdir" >> ev/20-listings.txt
+          if [ -d "$D" ]; then find "$D" -type f -printf '%s\t%P\n' | sort -k2 >> ev/20-listings.txt
+          else echo "(directory was not created)" >> ev/20-listings.txt; fi
+          cat ev/11-missingdir.out ev/11-missingdir.err
+      - name: Q2 decisive — do the three FORMAT variants differ AT ALL?
+        run: |
+          set +e -u
+          # Content hashes, not just names. If FORMAT is honoured these differ.
+          for id in safetensors gguf noformat; do
+            echo "── $id"
+            find "ev/out-$id" -type f -exec sha256sum {} \; | sed "s|ev/out-$id/||" | sort -k2
+          done > ev/30-hashes.txt
+          cat ev/30-hashes.txt
+          echo "=== diff safetensors vs gguf ==="
+          diff <(sed -n '/── safetensors/,/── gguf/p' ev/30-hashes.txt | grep -v '──') \
+               <(sed -n '/── gguf/,/── noformat/p' ev/30-hashes.txt | grep -v '──')
+          echo "(diff exit=$? — 0 means the FORMAT clause changed nothing)"
+      - name: Q3 — is the output the same kind of thing as the input?
+        run: |
+          set +e -u
+          echo "=== INPUT model file names ==="   > ev/40-kind.txt
+          cut -f2 ev/00-input-listing.txt | tail -n +2 | sort >> ev/40-kind.txt
+          echo "=== OUTPUT of INTO MODEL (safetensors clause) ===" >> ev/40-kind.txt
+          find ev/out-safetensors -type f -printf '%P\n' | sort >> ev/40-kind.txt
+          echo "=== the vindex we compiled FROM ===" >> ev/40-kind.txt
+          cut -f2 ev/01-vindex-listing.txt | sort >> ev/40-kind.txt
+          cat ev/40-kind.txt
+      - name: Show every capture
+        if: always()
+        run: |
+          set +e
+          for f in ev/*.out ev/*.err ev/*.txt; do
+            echo "───── $f ($(wc -c < "$f") bytes)"
+            cat "$f"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compile-evidence
+          retention-days: 14
+          path: |
+            ev/*.txt
+            ev/*.out
+            ev/*.err
 
   quality:
     needs: gate
