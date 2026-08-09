@@ -639,7 +639,7 @@ jobs:
             ev/*.err
 
   merge-evidence:
-    needs: [gate, prefetch, build]
+    needs: [gate, build]
     if: needs.gate.outputs.merge == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
