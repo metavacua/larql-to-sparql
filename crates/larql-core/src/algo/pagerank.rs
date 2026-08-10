@@ -39,7 +39,7 @@ pub fn pagerank(
     let n = entities.len();
     if n == 0 {
         return PageRankResult {
-            ranks: HashMap::new(),
+            ranks: HashMap::default(),
             iterations: 0,
             converged: true,
         };

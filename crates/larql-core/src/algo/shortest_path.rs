@@ -97,8 +97,8 @@ fn search_internal(
     weight_fn: fn(&Edge) -> f64,
     heuristic: fn(&str, &str) -> f64,
 ) -> PathResult {
-    let mut dist: HashMap<String, f64> = HashMap::new();
-    let mut prev: HashMap<String, Edge> = HashMap::new();
+    let mut dist: HashMap<String, f64> = HashMap::default();
+    let mut prev: HashMap<String, Edge> = HashMap::default();
     let mut heap = BinaryHeap::new();
     let mut nodes_explored = 0;
 

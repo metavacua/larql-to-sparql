@@ -20,7 +20,7 @@ impl MockProvider {
     pub fn new() -> Self {
         Self {
             name: "mock/empty".to_string(),
-            knowledge: HashMap::new(),
+            knowledge: HashMap::default(),
             call_count: AtomicUsize::new(0),
         }
     }
@@ -28,7 +28,7 @@ impl MockProvider {
     /// Create a mock provider with the given knowledge entries.
     /// Each entry is (prompt_suffix, answer, probability).
     pub fn with_knowledge(entries: Vec<(String, String, f64)>) -> Self {
-        let mut knowledge = HashMap::new();
+        let mut knowledge = HashMap::default();
         for (prompt, answer, prob) in entries {
             knowledge.insert(prompt, (answer, prob));
         }

@@ -71,7 +71,7 @@ pub fn extract_bfs(
     graph: &mut Graph,
     callbacks: &mut dyn BfsCallbacks,
 ) -> BfsResult {
-    let mut visited: HashSet<String> = HashSet::new();
+    let mut visited: HashSet<String> = HashSet::default();
     let mut queue: VecDeque<(String, u32)> = seeds.iter().map(|s| (s.clone(), 0u32)).collect();
 
     let mut total_passes: usize = 0;

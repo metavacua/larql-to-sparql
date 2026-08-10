@@ -43,7 +43,7 @@ thiserror = { version = "2", default-features = false }
 # avoids pulling that in; src/collections.rs supplies a fixed-seed FNV-1a
 # hasher instead. See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
 # Task 7, pattern 4: std-collection-needs-no-std-hasher.
-hashbrown = { version = "0.15", default-features = false }
+hashbrown = { version = "0.15", default-features = false, features = ["serde"] }
 
 [features]
 default = ["http", "msgpack"]

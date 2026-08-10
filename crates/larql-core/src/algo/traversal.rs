@@ -26,12 +26,12 @@ pub struct TraversalResult {
 
 /// Breadth-first search from a source entity.
 pub fn bfs(graph: &Graph, source: &str, max_depth: usize) -> TraversalResult {
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut discovered: HashSet<String> = HashSet::new();
+    let mut visited: HashSet<String> = HashSet::default();
+    let mut discovered: HashSet<String> = HashSet::default();
     let mut queue: VecDeque<(String, usize)> = VecDeque::new();
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
-    let mut depths = HashMap::new();
+    let mut depths = HashMap::default();
     let mut max_depth_reached = 0;
 
     queue.push_back((source.to_string(), 0));
@@ -66,12 +66,12 @@ pub fn bfs(graph: &Graph, source: &str, max_depth: usize) -> TraversalResult {
 
 /// Depth-first search from a source entity.
 pub fn dfs(graph: &Graph, source: &str, max_depth: usize) -> TraversalResult {
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut discovered: HashSet<String> = HashSet::new();
+    let mut visited: HashSet<String> = HashSet::default();
+    let mut discovered: HashSet<String> = HashSet::default();
     let mut stack: Vec<(String, usize)> = vec![(source.to_string(), 0)];
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
-    let mut depths = HashMap::new();
+    let mut depths = HashMap::default();
     let mut max_depth_reached = 0;
     discovered.insert(source.to_string());
 
