@@ -11,6 +11,16 @@
 //! is checksum integrity only; see `build`'s module doc for why.
 
 #![deny(missing_docs)]
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale. Like
+// larql-models, this crate's real modules (build/ spawns subprocesses;
+// estimate/ makes HTTP calls) are heavily native -- applying only the
+// confirmed-safe crate-level attribute here and letting the next real
+// CI round show which modules need pattern-3 whole-module exclusion,
+// rather than guessing.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
 
 mod build;
 mod build_id;

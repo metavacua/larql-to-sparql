@@ -12,12 +12,27 @@ categories = ["data-structures", "encoding"]
 [dependencies]
 larql-models = { path = "../larql-models" }
 larql-vindex-spec = { path = "../larql-vindex-spec" }
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+sha2 = "0.10"
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. reqwest and serde_yaml moved into this same
+# table: reqwest is inherently native (networking, no wasm32v1-none
+# support upstream at all); serde_yaml has no no_std/alloc mode either
+# (confirmed via its own source on docs.rs -- no #![no_std], no cfg
+# gating around std usage, not just undocumented). Both were also
+# unconditional [dependencies] before this, same transitive-poisoning
+# risk larql-models hit with safetensors/memmap2 (see its Cargo.toml).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = "0.9"
-sha2 = "0.10"
 thiserror = { workspace = true }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde_yaml = "0.9"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 larql-vindex-spec = { path = "../larql-vindex-spec", features = ["test-utils"] }
