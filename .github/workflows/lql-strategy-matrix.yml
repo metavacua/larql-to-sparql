@@ -454,11 +454,7 @@ jobs:
         if: always()
         with:
           name: probe
-          # 14, not 1. docs/diagnoses/task0-cli-repl-probe.md cites this
-          # artifact file-by-file so its claims can be checked rather than
-          # taken on trust, and a 1-day retention makes that promise expire
-          # the next morning.
-          retention-days: 14
+          retention-days: 1
           path: probe/
 
   # ── EVIDENCE, not argument ─────────────────────────────────────────────────
@@ -631,7 +627,7 @@ jobs:
         if: always()
         with:
           name: compile-evidence
-          retention-days: 14
+          retention-days: 1
           path: |
             ev/*.txt
             ev/*.out
@@ -888,10 +884,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: results-${{ matrix.leg.name }}
-          # 14, not 1. These captures ARE the result — diagnoses cite them
-          # cell by cell so the claims can be checked, and a one-day retention
-          # makes that promise expire overnight.
-          retention-days: 14
+          retention-days: 1
           path: |
             out/results-${{ matrix.leg.name }}.*.jsonl
             out/produce-${{ matrix.leg.name }}.json
