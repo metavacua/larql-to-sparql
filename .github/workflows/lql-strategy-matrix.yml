@@ -126,7 +126,7 @@ jobs:
           case "$TEXT" in *"[skip matrix]"*)  matrix=false ;;  esac
           case "$TEXT" in *"[skip quality]"*) quality=false ;; esac
           case "$TEXT" in *"[skip compile]"*) compile=false ;; esac
-          case "$TEXT" in *"[skip rm]"*) rm=false ;; esac
+          case "$TEXT" in *"[skip rm]"*)      rm=false ;;      esac
           {
             echo "probe=$probe"; echo "matrix=$matrix"
             echo "quality=$quality"; echo "compile=$compile"; echo "rm=$rm"
@@ -651,24 +651,36 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - id: slug
+        run: echo "slug=${MODEL//\//--}" >> "$GITHUB_OUTPUT"
+        env:
+          MODEL: HuggingFaceTB/SmolLM2-135M-Instruct
       - name: Restore HF snapshot cache
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/huggingface
-          key: hf-snapshot-smol135-v2
+          key: hf-snapshot-${{ steps.slug.outputs.slug }}-v2
       - name: Prep
         run: |
           chmod +x bin/larql
           sudo apt-get update && sudo apt-get install -y libopenblas-dev
           python -m pip install --quiet huggingface_hub
           mkdir -p ev
-      - name: Fetch the input model and cache it
+      - name: Resolve input model snapshot
         run: |
           set +e -u
-          python - <<'PY' > ev/input-model.path 2> ev/input-model.err
+          python - <<'PY'
           from huggingface_hub import snapshot_download
-          print(snapshot_download("HuggingFaceTB/SmolLM2-135M-Instruct",
-                                  ignore_patterns=["onnx/*", "*.onnx", "*.onnx_data"]))
+          IGNORE = ["onnx/*", "*.onnx", "*.onnx_data"]   # keep in step with the prefetch job
+          repo = "HuggingFaceTB/SmolLM2-135M-Instruct"
+          # local_files_only first: the prefetch/matrix jobs already warmed
+          # this cache under the same slugged key, so the normal path makes
+          # zero hub requests. The fallback only fires on a real cache miss.
+          try:
+              print(f"resolved from cache, no hub request: {snapshot_download(repo, local_files_only=True)}")
+          except Exception as e:
+              print(f"::warning::HF cache MISS for {repo} ({type(e).__name__}) - falling back to a hub fetch")
+              print(f"fetched from hub: {snapshot_download(repo, ignore_patterns=IGNORE)}")
           PY
       - name: Extract a vindex
         run: |
@@ -679,44 +691,46 @@ jobs:
       - name: Test the destroy path — link, verify, remove, re-verify
         run: |
           set +e -u
-          # Link the vindex with a shorthand name
-          ./bin/larql link ev/test.vindex --as test-rm-name > ev/02-link.out 2> ev/02-link.err
-          link_exit=$?
-          echo "link exit=$link_exit" | tee -a ev/02-link.err
+          # Roots, not guessed paths — same rationale as compile-evidence's
+          # Q1+Q2 step. `ev` covers the original `ev/test.vindex` that
+          # `link` points at (rm_cmd.rs's documented invariant is that this
+          # is never touched); `$HOME/.cache/larql` covers the registry
+          # symlink that `link`/`rm` actually create and remove; /tmp and
+          # the HF cache because nothing has established a vindex is
+          # self-contained, and rm's HF-entry branch (not exercised by this
+          # local-entry test) deletes from the HF hub cache.
+          SNAP=scripts/lql_matrix/fs-snapshot.sh
+          ROOTS=(ev /tmp "$HOME/.cache/larql" "$HOME/.cache/huggingface")
 
-          # Verify it was registered
+          bash "$SNAP" snap ev/fs-link.before "${ROOTS[@]}" > /dev/null
+          ./bin/larql link ev/test.vindex --as test-rm-name > ev/02-link.out 2> ev/02-link.err
+          echo "link exit=$?" | tee -a ev/02-link.err
+          bash "$SNAP" snap ev/fs-link.after "${ROOTS[@]}" > /dev/null
+
           ./bin/larql list > ev/03-list-before.out 2> ev/03-list-before.err
           echo "list (before rm) exit=$?" | tee -a ev/03-list-before.err
 
-          # Remove it
+          bash "$SNAP" snap ev/fs-rm.before "${ROOTS[@]}" > /dev/null
           ./bin/larql rm test-rm-name -y > ev/04-rm.out 2> ev/04-rm.err
-          rm_exit=$?
-          echo "rm exit=$rm_exit" | tee -a ev/04-rm.err
+          echo "rm exit=$?" | tee -a ev/04-rm.err
+          bash "$SNAP" snap ev/fs-rm.after "${ROOTS[@]}" > /dev/null
 
-          # Verify it was removed
           ./bin/larql list > ev/05-list-after.out 2> ev/05-list-after.err
           echo "list (after rm) exit=$?" | tee -a ev/05-list-after.err
 
-          # Check if test-rm-name is still in the list
           {
-            echo "=== DESTROY PATH TEST RESULTS ==="
-            echo "Link exit code: $link_exit"
-            echo "Rm exit code: $rm_exit"
+            echo "=== link — WHOLE-TREE DIFF (this is the evidence) ==="
+            bash "$SNAP" diff ev/fs-link.before ev/fs-link.after
+            echo
+            echo "=== rm — WHOLE-TREE DIFF (this is the evidence) ==="
+            bash "$SNAP" diff ev/fs-rm.before ev/fs-rm.after
+            echo
             echo "--- List output BEFORE rm ---"
             cat ev/03-list-before.out
             echo "--- List output AFTER rm ---"
             cat ev/05-list-after.out
-            if grep -q "test-rm-name" ev/03-list-before.out; then
-              echo "PASS: test-rm-name was in the list before rm"
-            else
-              echo "FAIL: test-rm-name was NOT in the list before rm"
-            fi
-            if grep -q "test-rm-name" ev/05-list-after.out; then
-              echo "FAIL: test-rm-name is STILL in the list after rm"
-            else
-              echo "PASS: test-rm-name was removed from the list"
-            fi
-          } | tee ev/06-summary.txt
+          } > ev/06-summary.txt
+          cat ev/06-summary.txt
       - name: Show every capture
         if: always()
         run: |
