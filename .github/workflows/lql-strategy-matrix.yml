@@ -434,14 +434,18 @@ jobs:
             # must arrive as TWO arguments (`lql` and `SHOW MODELS;`), and an
             # unquoted split would make it three and mask the real behaviour.
             eval "set -- $rest"
-            # Chat is a long-running, non-self-terminating command that reads
-            # from stdin. Provide EOF (empty input) so it recognizes end of
-            # input and exits gracefully rather than timing out indefinitely.
-            if [ "$id" = "chat" ]; then
-              echo | timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
-            else
-              timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
-            fi
+            # Close stdin for every row rather than letting it inherit the
+            # runner's, matching run_matrix.py's stdin=DEVNULL convention
+            # (see its comment ~line 160: an inherited stdin makes a cell's
+            # behaviour depend on how the runner was invoked). `chat` and
+            # `repl` both read stdin in a loop and would otherwise burn the
+            # full 60s timeout instead of exiting on EOF; Task 0 (run_matrix.py
+            # ~line 165) measured `repl` exiting 0 at once on closed stdin, and
+            # `run_chat`'s `read_line` (crates/larql-cli/src/commands/primary/
+            # run_cmd.rs) returns Ok(0) the same way. `/dev/null` is a true
+            # closed stdin, not a piped empty line, so no row is left
+            # depending on this loop's own inherited terminal/pipe stdin.
+            timeout 60 ./bin/larql "$@" < /dev/null > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
             echo "$id exit=$? argc=$# argv=[$rest]" >> probe/cmd.index
           done
           cat probe/cmd.index
