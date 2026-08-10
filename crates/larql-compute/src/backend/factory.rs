@@ -39,9 +39,14 @@
 //! [`crate::default_backend`] (which is always CPU and made the old
 //! `metal_ready_for_q4` check vacuous).
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 use super::ComputeBackend;
-use std::fmt;
-use std::str::FromStr;
+// core::fmt/core::str::FromStr are the same items std re-exports --
+// portable regardless of target, no cfg needed.
+use core::fmt;
+use core::str::FromStr;
 
 /// Which backend a caller is asking for.
 ///

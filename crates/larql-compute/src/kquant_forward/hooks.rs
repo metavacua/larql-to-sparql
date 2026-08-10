@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::collections::HashMap;
 
 use larql_models::ModelWeights;
 use ndarray::Array2;
@@ -34,7 +34,7 @@ pub fn predict_kquant_hidden_hooked(
     let mut scratch = larql_models::DequantScratch::new();
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
 
     for layer in 0..weights.num_layers {
         let inserted = insert_q4k_layer_tensors(&mut scratch, weights, index, layer)?;

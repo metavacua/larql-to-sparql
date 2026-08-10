@@ -7,7 +7,7 @@
 //! copy of the lookup and its length check, which is the duplication
 //! that produced two of the bugs found on this rung.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 
 /// Resolve a layer's per-head attention sinks, if the architecture has them.
 ///

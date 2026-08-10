@@ -1,6 +1,8 @@
 //! Raw-logits forward passes used by target-delta optimisation and Apollo.
 
-use std::ops::Range;
+// core::ops::Range is the same type std::ops::Range re-exports --
+// portable regardless of target, no cfg needed.
+use core::ops::Range;
 
 use super::super::embed::embed_tokens_pub;
 use super::super::layer::run_layer_with_ffn;

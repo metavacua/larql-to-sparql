@@ -10,7 +10,10 @@
 //! delegation; no behaviour changes vs. the pre-ADR direct-VectorIndex
 //! call sites.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use alloc::sync::Arc;
 
 /// Number of FFN components per layer (gate / up / down).
 ///

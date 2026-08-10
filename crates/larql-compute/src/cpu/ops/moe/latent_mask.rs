@@ -39,7 +39,15 @@
 //! Default off — absent env, every call is a no-op and output is
 //! byte-identical.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+// core::sync::atomic is the same module std re-exports -- portable
+// regardless of target, no cfg needed. OnceLock has no core/alloc
+// equivalent (needs real thread-safety), but it's only used inside
+// this file's native-only `active()` below.
+use core::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
 use crate::options;
@@ -117,6 +125,18 @@ static CALLS: AtomicU64 = AtomicU64::new(0);
 ///
 /// Resolved once per process: this is an experiment switch, not a runtime
 /// knob, and caching keeps the hot path free of `getenv`.
+///
+/// wasm32v1-none has no `std::env`/`std::fs` at all, so there is no
+/// mechanism to configure this probe there in the first place --
+/// `None` (the same value as an unset env var natively) is the
+/// honestly-correct answer, not a stub. Keeping the same public
+/// signature means every caller compiles unchanged on both targets.
+#[cfg(target_arch = "wasm32")]
+pub fn active() -> Option<&'static LatentMask> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn active() -> Option<&'static LatentMask> {
     static CFG: OnceLock<Option<LatentMask>> = OnceLock::new();
     CFG.get_or_init(|| {
@@ -200,7 +220,7 @@ impl LatentMask {
                 })
                 .collect();
             scored.select_nth_unstable_by(keep_blocks - 1, |a, b| {
-                b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal)
             });
             for &(_, b) in &scored[..keep_blocks] {
                 let start = b * self.block;
@@ -225,7 +245,7 @@ impl LatentMask {
                     v[b as usize]
                         .abs()
                         .partial_cmp(&v[a as usize].abs())
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .unwrap_or(core::cmp::Ordering::Equal)
                 });
                 for &i in &idx[..keep] {
                     retained[i as usize] = true;
@@ -271,16 +291,27 @@ impl LatentMask {
 /// channel index across layers produces uniform marginals even when every
 /// layer has a perfectly stable subset. An earlier version did exactly that
 /// and wrongly concluded there was no stable subset.
+#[cfg(not(target_arch = "wasm32"))]
 static STATS: std::sync::Mutex<Vec<Vec<u64>>> = std::sync::Mutex::new(Vec::new());
 /// Pairwise co-selection counts (row-major `n×n`), sampled. Marginal counts
 /// cannot answer whether a channel ORDERING exists: uniform marginals are
 /// compatible with both "no structure" and "strongly correlated groups".
 /// Only the pairwise matrix separates those.
+#[cfg(not(target_arch = "wasm32"))]
 static COSTATS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
 static COSTATS_SAMPLES: AtomicU64 = AtomicU64::new(0);
 /// Accumulate the (expensive, O(kept²)) pair matrix on 1 call in N.
 const COSTATS_SAMPLE_EVERY: u64 = 64;
 
+/// No-op on wasm32: same reasoning as `active()` above -- there is no
+/// `std::env`/`std::fs` mechanism to enable stats collection there at
+/// all, so this matches exactly what happens natively when
+/// `ENV_LATENT_STATS` is unset (the common case; this is opt-in
+/// tooling, not part of any hot path's normal behavior).
+#[cfg(target_arch = "wasm32")]
+pub fn record_stats(_layer: usize, _retained: &[bool]) {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn record_stats(layer: usize, retained: &[bool]) {
     if options::env_value(ENV_LATENT_STATS).is_none() {
         return;
@@ -326,8 +357,13 @@ pub fn record_stats(layer: usize, retained: &[bool]) {
     }
 }
 
+/// No-op on wasm32: same reasoning as `record_stats` above.
+#[cfg(target_arch = "wasm32")]
+pub fn dump_stats() {}
+
 /// Write the accumulated per-channel survival counts. Call once at exit.
 /// No-op when stats collection was never enabled.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn dump_stats() {
     let Some(path) = options::env_value(ENV_LATENT_STATS) else {
         return;

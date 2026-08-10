@@ -92,9 +92,11 @@ extern crate alloc;
 ))]
 extern crate blas_src;
 
+mod alloc_prelude;
 pub mod async_compute_backend;
 pub mod attention;
 pub mod backend;
+mod collections;
 // Both directly depend on larql_models::{connectors,encoders}, which
 // are themselves wholesale wasm32-excluded (mmap/file-loading
 // pipelines, see crates/larql-models/src/lib.rs) -- confirmed via grep

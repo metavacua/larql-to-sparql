@@ -31,6 +31,10 @@ rayon = "1.10"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 ndarray = { version = "0.16", default-features = false }
+# See crates/larql-core/Cargo.toml for the pattern-4 (std-collection-
+# needs-no-std-hasher) rationale -- this crate's own HashMap/HashSet
+# usage needs it too.
+hashbrown = { version = "0.15", default-features = false }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
