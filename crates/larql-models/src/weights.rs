@@ -106,7 +106,7 @@ impl<'a> From<&'a ModelWeights> for WeightsView<'a> {
     }
 }
 
-impl std::ops::Deref for WeightsView<'_> {
+impl core::ops::Deref for WeightsView<'_> {
     type Target = ModelWeights;
     fn deref(&self) -> &ModelWeights {
         self.weights
