@@ -428,19 +428,20 @@ jobs:
             "filter|filter $TMP/graph.json --min-confidence 0.5 -o $TMP/f.json"
             "rm|rm $TMP/v.vindex"
           )
+          # Close stdin for the whole loop rather than per-invocation — same
+          # convention as run_matrix.py's stdin=subprocess.DEVNULL (see the
+          # rationale and the `repl` finding there, scripts/lql_matrix/run_matrix.py:160).
+          # repl-pipe/pty tests run explicitly with piped input and don't come
+          # through this loop.
           for line in "${CMDS[@]}"; do
             id=${line%%|*}; rest=${line#*|}
             # eval so the row's own quoting survives into argv: the lql row
             # must arrive as TWO arguments (`lql` and `SHOW MODELS;`), and an
             # unquoted split would make it three and mask the real behaviour.
             eval "set -- $rest"
-            # Explicitly close stdin (< /dev/null) for commands that don't read it.
-            # Inherited stdin makes test behaviour depend on invocation context
-            # (e.g., repl would hang if stdin is a terminal). repl-pipe/pty tests
-            # run explicitly with piped input and don't come through this loop.
-            timeout 60 ./bin/larql "$@" < /dev/null > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
+            timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
             echo "$id exit=$? argc=$# argv=[$rest]" >> probe/cmd.index
-          done
+          done < /dev/null
           cat probe/cmd.index
       - name: Show every capture
         if: always()
