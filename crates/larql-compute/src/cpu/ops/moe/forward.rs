@@ -4,6 +4,14 @@
 //! `weight_layout`, so Gemma-style hybrid MoE choices are metadata rather
 //! than hidden branches in the hot path.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::borrow::Cow;
+#[cfg(target_arch = "wasm32")]
+use alloc::borrow::Cow;
+
 use crate::MoeLayerWeights;
 
 use super::cache::try_cached_dequant;
@@ -29,10 +37,23 @@ pub fn cpu_moe_forward(
     // Per-stage timing for bottleneck diagnosis.  Enable with
     // `LARQL_MOE_FWD_TIMING=1`.  Cached in TLS to avoid syscalls
     // per call on the hot path.
+    //
+    // wasm32v1-none has neither std::env, std::time::Instant, nor
+    // thread_local! -- every timing statement in this function is
+    // individually cfg'd out there (same shape as expert/q4k.rs's
+    // run_single_expert_kq_q8k_into) rather than the whole function,
+    // since this one (unlike expert/f32.rs's run_single_expert_into)
+    // has real production callers (larql-inference's forward pass) and
+    // `timing` never affects the returned value, only what gets
+    // printed -- the core routing/expert-execution logic stays
+    // completely unconditional and unchanged throughout.
+    #[cfg(not(target_arch = "wasm32"))]
     thread_local! {
         static FWD_TIMING: bool = options::env_flag(options::ENV_MOE_FWD_TIMING);
     }
+    #[cfg(not(target_arch = "wasm32"))]
     let timing = FWD_TIMING.with(|t| *t);
+    #[cfg(not(target_arch = "wasm32"))]
     let t_start = std::time::Instant::now();
 
     let hidden = h.len();
@@ -75,9 +96,11 @@ pub fn cpu_moe_forward(
     };
 
     // Debug: print routing per layer if MOE_DEBUG=1
-    static DEBUG_LAYER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    // core::sync::atomic is the same module std re-exports -- portable
+    // regardless of target, no cfg needed.
+    static DEBUG_LAYER: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
     if let Some(logits) = debug_logits.as_ref() {
-        let layer_n = DEBUG_LAYER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 30;
+        let layer_n = DEBUG_LAYER.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % 30;
         let h_rms = (h.iter().map(|v| v * v).sum::<f32>() / h.len() as f32).sqrt();
         let hn_rms =
             (expert_input.iter().map(|v| v * v).sum::<f32>() / expert_input.len() as f32).sqrt();
@@ -125,14 +148,15 @@ pub fn cpu_moe_forward(
     // integer and f32 paths must read rows at this stride; the activation
     // is zero-padded to match, contributing zero to every dot product.
     let weight_cols = moe.gate_up_cols(hidden);
-    let expert_input_w: std::borrow::Cow<'_, [f32]> = if weight_cols == hidden {
-        std::borrow::Cow::Borrowed(&expert_input)
+    let expert_input_w: Cow<'_, [f32]> = if weight_cols == hidden {
+        Cow::Borrowed(&expert_input)
     } else {
         let mut padded = vec![0.0f32; weight_cols];
         padded[..hidden].copy_from_slice(&expert_input);
-        std::borrow::Cow::Owned(padded)
+        Cow::Owned(padded)
     };
 
+    #[cfg(not(target_arch = "wasm32"))]
     let t_pre_par = t_start.elapsed();
 
     // Integer direct-from-mmap path: quantise expert_input to Q8_K once per
@@ -145,40 +169,30 @@ pub fn cpu_moe_forward(
     let kq_direct = matches!(format, crate::QuantFormat::Q4_K | crate::QuantFormat::Q6_K)
         && weight_cols.is_multiple_of(256)
         && !super::q4k_direct_disabled();
+    #[cfg(not(target_arch = "wasm32"))]
     let t_q8k_quant_start = std::time::Instant::now();
     let expert_input_q8k = kq_direct.then(|| quantize_x_to_q8k(&expert_input_w));
+    #[cfg(not(target_arch = "wasm32"))]
     let t_q8k_quant = t_q8k_quant_start.elapsed();
+    #[cfg(not(target_arch = "wasm32"))]
     let t_par_start = std::time::Instant::now();
 
-    // Per-rayon-thread scratch buffers (gate_out / up_out / act / act_q8k /
-    // out).  Allocated lazily on first hit, reused across all subsequent
-    // expert calls on the same worker.  Replaces the prior pattern of
-    // `vec![0; ...]` allocs per expert call (5 distinct heap allocs per
-    // call × K=8 × 30 layers = 1200 allocs/token, with occasional 150 µs
-    // spikes from the allocator's slow path that drag par_iter wall up).
-    thread_local! {
-        static SCRATCH: std::cell::RefCell<Option<ExpertScratch>> =
-            const { std::cell::RefCell::new(None) };
-    }
-
-    use rayon::prelude::*;
     // Add expert `ei`'s weighted contribution (`w * down(act(gate·x)·up·x)`)
-    // into `dst`. Shared by the rayon fold and the spin-pool path so both
-    // compute the identical arithmetic; only the parallel *schedule* differs.
-    let add_expert = |ei: usize, w: f32, dst: &mut [f32]| {
-        let Some(&gate_up_bytes) = moe.experts_gate_up.get(ei) else {
-            return;
-        };
-        let Some(&down_bytes) = moe.experts_down.get(ei) else {
-            return;
-        };
-        // This expert's combine rule + bias rows (empty slices when the
-        // architecture has none — the pre-bias behaviour, bit for bit).
-        let mlp = moe.expert_mlp(ei);
-        SCRATCH.with(|cell| {
-            let mut borrow = cell.borrow_mut();
-            let scratch =
-                borrow.get_or_insert_with(|| ExpertScratch::new(hidden, inter, inter_padded));
+    // into `dst`, given its own scratch buffers. Shared by every scheduling
+    // path below (native thread_local-backed, native spin-pool, and wasm32
+    // sequential) so all compute the identical arithmetic; only *how the
+    // scratch is obtained* and *which schedule runs the calls* differ.
+    let add_expert_with_scratch =
+        |scratch: &mut ExpertScratch, ei: usize, w: f32, dst: &mut [f32]| {
+            let Some(&gate_up_bytes) = moe.experts_gate_up.get(ei) else {
+                return;
+            };
+            let Some(&down_bytes) = moe.experts_down.get(ei) else {
+                return;
+            };
+            // This expert's combine rule + bias rows (empty slices when the
+            // architecture has none — the pre-bias behaviour, bit for bit).
+            let mlp = moe.expert_mlp(ei);
             if scratch.gate_out.len() != inter
                 || scratch.act.len() != inter_padded
                 || scratch.out.len() != hidden
@@ -242,6 +256,30 @@ pub fn cpu_moe_forward(
             for (a, &v) in dst.iter_mut().zip(expert_contribution.iter()) {
                 *a += w * v;
             }
+        };
+
+    // Per-rayon-thread scratch buffers (gate_out / up_out / act / act_q8k /
+    // out).  Allocated lazily on first hit, reused across all subsequent
+    // expert calls on the same worker.  Replaces the prior pattern of
+    // `vec![0; ...]` allocs per expert call (5 distinct heap allocs per
+    // call × K=8 × 30 layers = 1200 allocs/token, with occasional 150 µs
+    // spikes from the allocator's slow path that drag par_iter wall up).
+    #[cfg(not(target_arch = "wasm32"))]
+    thread_local! {
+        static SCRATCH: std::cell::RefCell<Option<ExpertScratch>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use rayon::prelude::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let add_expert = |ei: usize, w: f32, dst: &mut [f32]| {
+        SCRATCH.with(|cell| {
+            let mut borrow = cell.borrow_mut();
+            let scratch =
+                borrow.get_or_insert_with(|| ExpertScratch::new(hidden, inter, inter_padded));
+            add_expert_with_scratch(scratch, ei, w, dst);
         });
     };
 
@@ -251,8 +289,29 @@ pub fn cpu_moe_forward(
     /// pool keeps its measured expert-parallel schedule (8×2 > 8), while
     /// GPT-OSS's top-4 (4×2 ≤ 8) — which left half the pool idle on
     /// every layer — switches to row-parallel.
+    #[cfg(not(target_arch = "wasm32"))]
     const EXPERT_PARALLEL_MIN_FILL: usize = 2;
 
+    // wasm32v1-none has no OS threads at all -- neither the spin pool
+    // nor rayon exist there, so every active (non-zero-weight) expert
+    // runs sequentially through the same add_expert_with_scratch core
+    // both native paths call, accumulating in selection order (the
+    // same order the native rayon `fold`/`reduce` reference produces).
+    // One scratch buffer for the whole call, since there is no
+    // concurrent access to guard against.
+    #[cfg(target_arch = "wasm32")]
+    let expert_out = {
+        let mut acc = vec![0.0f32; hidden];
+        let mut scratch = ExpertScratch::new(hidden, inter, inter_padded);
+        for (&ei, &w) in expert_indices.iter().zip(expert_weights.iter()) {
+            if w != 0.0 {
+                add_expert_with_scratch(&mut scratch, ei, w, &mut acc);
+            }
+        }
+        acc
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
     let expert_out = if crate::cpu::spin_pool::enabled() {
         let active: Vec<(usize, f32)> = expert_indices
             .iter()
@@ -340,8 +399,13 @@ pub fn cpu_moe_forward(
             )
     };
 
+    #[cfg(not(target_arch = "wasm32"))]
     let t_par = t_par_start.elapsed();
-    let t_sum = std::time::Duration::ZERO;
+    // core::time::Duration is the same type std re-exports -- portable
+    // regardless of target, no cfg needed (unlike Instant, it's a plain
+    // data structure with no OS dependency).
+    #[cfg(not(target_arch = "wasm32"))]
+    let t_sum = core::time::Duration::ZERO;
 
     // Both-sides variant of the latent probe: mask the SAME channels on the
     // aggregated expert output, the analogue of masking the pooled latent
@@ -356,10 +420,13 @@ pub fn cpu_moe_forward(
     }
 
     // Post-experts output policy (Gemma 4: `post_feedforward_layernorm_2`)
+    #[cfg(not(target_arch = "wasm32"))]
     let t_post_start = std::time::Instant::now();
     let result = moe_post_expert_output(&expert_out, moe, norm_offset, eps);
+    #[cfg(not(target_arch = "wasm32"))]
     let t_post = t_post_start.elapsed();
 
+    #[cfg(not(target_arch = "wasm32"))]
     if timing {
         eprintln!(
             "[cpu_moe_forward] K={} pre_par={:.0}us q8k_quant={:.0}us \
