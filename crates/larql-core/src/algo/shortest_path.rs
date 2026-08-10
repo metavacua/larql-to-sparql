@@ -1,5 +1,7 @@
 //! Shortest path algorithms — Dijkstra and A*.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use ::core::cmp::Ordering;
 #[cfg(target_arch = "wasm32")]
 use alloc::collections::BinaryHeap;

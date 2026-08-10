@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use ::core::cell::RefCell;
 #[cfg(target_arch = "wasm32")]
 use alloc::collections::VecDeque;

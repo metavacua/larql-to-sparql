@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::collections::HashMap;
 

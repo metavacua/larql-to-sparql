@@ -3,13 +3,19 @@
 // See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
 // Task 7, pattern 2: own-crate-missing-no_std.
 #![cfg_attr(target_arch = "wasm32", no_std)]
+// #[macro_use] brings alloc's vec!/format!/etc. macros into scope crate-
+// wide, mirroring how std's own macros are ambiently available -- unlike
+// the Vec/String *types*, which still need per-file imports (see
+// src/prelude.rs, pattern 5).
 #[cfg(target_arch = "wasm32")]
+#[macro_use]
 extern crate alloc;
 
 pub mod algo;
 mod collections;
 pub mod core;
 pub mod engine;
+mod prelude;
 // std::fs-based; no filesystem exists on wasm32v1-none. Pattern 3:
 // native-only-io-module. Whole module excluded rather than patched --
 // there is no alloc/core equivalent for file I/O to fall back to.

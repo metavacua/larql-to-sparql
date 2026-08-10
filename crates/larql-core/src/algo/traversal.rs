@@ -1,6 +1,8 @@
 //! BFS and DFS traversal with depth tracking and visit order.
 
 #[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+#[cfg(target_arch = "wasm32")]
 use alloc::collections::VecDeque;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::VecDeque;

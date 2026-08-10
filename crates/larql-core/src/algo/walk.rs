@@ -3,6 +3,8 @@
 //! `Graph::walk()` follows a sequence of relations, picking the highest-confidence
 //! edge at each hop. This module provides alternative strategies.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::core::edge::Edge;
 use crate::core::graph::Graph;
 

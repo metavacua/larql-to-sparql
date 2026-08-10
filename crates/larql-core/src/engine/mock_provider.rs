@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use ::core::sync::atomic::{AtomicUsize, Ordering};
 use crate::collections::HashMap;
 
