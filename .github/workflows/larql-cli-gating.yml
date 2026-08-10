@@ -33,6 +33,16 @@ jobs:
           - larql-vindex
           - larql-vindex-spec
           - larql-factory
+          # Discovered mid-campaign via pattern 8 (sibling-path-
+          # dependency-not-yet-gated): these are transitive deps of
+          # larql-kv/larql-vindex/larql-inference/larql-cli that weren't
+          # in the original matrix. Without a direct leg, a green
+          # larql-kv leg would be the only signal that these three are
+          # actually correct -- adding them here gives each an isolated
+          # result instead of an inferred one.
+          - larql-boundary
+          - larql-execution
+          - larql-router-protocol
         features: [default, no-default-features]
     steps:
       - uses: actions/checkout@v6
