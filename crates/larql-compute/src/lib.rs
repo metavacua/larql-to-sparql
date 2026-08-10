@@ -95,8 +95,15 @@ extern crate blas_src;
 pub mod async_compute_backend;
 pub mod attention;
 pub mod backend;
+// Both directly depend on larql_models::{connectors,encoders}, which
+// are themselves wholesale wasm32-excluded (mmap/file-loading
+// pipelines, see crates/larql-models/src/lib.rs) -- confirmed via grep
+// no other module in this crate references either, so the exclusion
+// carries through cleanly.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod connectors;
 pub mod cpu;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod encoders;
 pub mod ffn;
 pub mod forward;
