@@ -36,6 +36,9 @@
 use super::component::{ComponentContract, ComponentCoordinate};
 use super::coordinate::BankCoordinate;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// What a required component is *for*, independent of where it is stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentRequirement {

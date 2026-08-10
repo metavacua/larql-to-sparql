@@ -13,6 +13,9 @@ use super::direct_moe::{
     down_at, gate_at, router_at, up_at, HIDDEN, INTERMEDIATE, POPULATION, TOP_K,
 };
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Every checkpoint, computed from the layer's definition.
 pub struct Oracle {
     pub router_scores: Vec<f32>,

@@ -33,6 +33,9 @@ use super::consts::{
 };
 use super::error::{ExecutionError, OperandUnsuitability};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Resolved bytes, with the encoding and access pattern that read them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundTensor<'a> {

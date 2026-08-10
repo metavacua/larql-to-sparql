@@ -23,6 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::VindexError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 // ═══════════════════════════════════════════════════════════════
 // Patch data types
 // ═══════════════════════════════════════════════════════════════

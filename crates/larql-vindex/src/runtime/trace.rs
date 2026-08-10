@@ -17,6 +17,9 @@
 
 use super::router::SelectedExpert;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Receives internal checkpoints during execution.
 ///
 /// Every method defaults to doing nothing, so the production sink is a single

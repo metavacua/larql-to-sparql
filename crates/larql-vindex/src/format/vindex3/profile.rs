@@ -28,6 +28,9 @@ use serde::{Deserialize, Serialize};
 
 use super::variants::{StoredVariant, VariantCatalogue, VariantDefect};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Profile name every container carries: full-fidelity execution.
 pub const PROFILE_EXACT: &str = "exact";
 

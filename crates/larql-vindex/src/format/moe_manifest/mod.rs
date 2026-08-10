@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 //! The MoE programme manifest (format spec §8).
 //!
 //! The physical index stores tensor regions; this manifest gives them meaning;

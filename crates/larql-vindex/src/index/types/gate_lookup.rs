@@ -4,6 +4,9 @@ use ndarray::{Array1, Array2};
 
 use super::FeatureMeta;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Gate KNN and feature metadata lookup.
 ///
 /// This is the minimal read-only surface needed by graph browsing and

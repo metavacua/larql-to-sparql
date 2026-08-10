@@ -16,6 +16,9 @@ use std::path::Path;
 use super::filenames::INDEX_JSON;
 use crate::config::VindexConfig;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// The model id a vindex was built from, or `None` when the directory has no
 /// readable `index.json` or records no model.
 ///

@@ -13,6 +13,9 @@ use crate::index::storage::gate_store::{gate_matmul, gemv};
 use crate::index::storage::vindex_storage::VindexStorage;
 use crate::index::types::*;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl VectorIndex {
     /// Gate KNN: find the top-K features at a layer whose gate vectors have
     /// the highest dot product with the input residual. Uses BLAS matmul.

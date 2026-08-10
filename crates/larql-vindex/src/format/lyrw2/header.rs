@@ -9,6 +9,9 @@ use super::consts::{FORMAT_VERSION, HEADER_BYTES, HEADER_FLAG_MULTI_SEGMENT, MAG
 use super::error::Lyrw2Error;
 use super::wire::{push_u16, push_u32, read_u16, read_u32};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Fixed-size prelude describing what tables follow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lyrw2Header {

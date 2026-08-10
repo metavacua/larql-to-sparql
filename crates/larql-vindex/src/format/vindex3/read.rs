@@ -23,6 +23,9 @@ use crate::format::lyrw2::read::Lyrw2Reader;
 use crate::format::moe_manifest::{MoeLayer, MoeManifest};
 use crate::VindexError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Wrap an IO failure with what was being read, keeping the original kind so a
 /// caller can still branch on NotFound vs PermissionDenied.
 fn contextual_io(what: &str, e: std::io::Error) -> VindexError {

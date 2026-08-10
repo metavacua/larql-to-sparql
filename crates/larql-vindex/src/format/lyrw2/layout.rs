@@ -12,6 +12,9 @@ use super::consts::{
 };
 use super::plan::Lyrw2Plan;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Byte offsets of each table, plus where the payload starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lyrw2Layout {

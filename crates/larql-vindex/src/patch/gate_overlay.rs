@@ -20,6 +20,9 @@ use std::sync::{Arc, RwLock};
 
 use ndarray::Array1;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-layer contiguous row snapshot. Built on first `score_layer`
 /// call at a layer, dropped by any mutation touching that layer.
 /// Memory cost: one f32 per element per cached layer (doubles the

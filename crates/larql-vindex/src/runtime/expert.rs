@@ -15,6 +15,9 @@ use super::bank::BoundExpert;
 use super::error::ExecutionError;
 use super::kernels::{activate, dot};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Run one expert over `input`, returning its unweighted output.
 pub fn forward(
     expert: &BoundExpert<'_>,

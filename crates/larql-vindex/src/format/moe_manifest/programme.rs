@@ -13,6 +13,9 @@
 
 use crate::format::lyrw2::region_role::RegionRole;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A registered expert programme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Programme {

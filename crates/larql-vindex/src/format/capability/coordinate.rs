@@ -12,6 +12,9 @@
 
 use crate::format::lyrw2::region_role::RegionRole;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Where a region lives, precisely enough to act on.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RegionCoordinate {

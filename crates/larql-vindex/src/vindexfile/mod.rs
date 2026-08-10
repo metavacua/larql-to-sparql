@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 //! Vindexfile — declarative model builds.
 //!
 //! A Vindexfile is like a Dockerfile for model knowledge. It specifies a base

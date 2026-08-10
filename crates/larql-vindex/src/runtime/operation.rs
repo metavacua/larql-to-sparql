@@ -28,6 +28,9 @@ use super::reduction::BoundReduction;
 use super::router::BoundRouter;
 use super::transform::{BoundTransform, TransformStage};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// An immutable, fully-bound routed MoE operation for one layer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoundMoeOperation<'a> {

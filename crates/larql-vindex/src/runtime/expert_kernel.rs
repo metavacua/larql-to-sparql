@@ -55,6 +55,9 @@ use super::expert;
 use super::projection::BoundProjection;
 use super::tensor::BoundTensor;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// The block encoding the incumbent expert kernel reads.
 const INCUMBENT_Q4K_FORMAT: RegionFormat = RegionFormat::Q4K;
 

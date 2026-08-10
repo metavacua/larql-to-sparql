@@ -11,6 +11,9 @@ use rayon::prelude::*;
 
 use crate::index::core::VectorIndex;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl VectorIndex {
     /// Direct Q4K/Q6K matmul — Y = X @ W.T, where W is the FFN matrix
     /// stored as Q4K/Q6K bytes in the vindex. Decodes and FMAs fused,

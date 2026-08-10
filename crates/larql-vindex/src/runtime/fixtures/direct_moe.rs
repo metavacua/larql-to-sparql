@@ -28,6 +28,9 @@ use super::super::reduction::BoundReduction;
 use super::super::router::{BoundExpertScaling, BoundRouter, RouterKernel};
 use super::super::tensor::BoundTensor;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub const HIDDEN: usize = 4;
 pub const INTERMEDIATE: usize = 3;
 pub const POPULATION: usize = 5;

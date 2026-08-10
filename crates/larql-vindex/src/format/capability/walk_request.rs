@@ -25,6 +25,9 @@
 
 use super::coordinate::BankCoordinate;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// How a query vector reaches WALK.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WalkInput {

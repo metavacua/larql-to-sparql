@@ -21,6 +21,9 @@ use crate::format::filenames::{layer_weights_filename, LAYERS_DIR};
 use crate::VindexError;
 use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Format tag written into the file header. Extend as new formats land.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -19,6 +19,9 @@ use crate::index::{FeatureMeta, VectorIndex, WalkHit, WalkTrace};
 use super::format::VindexPatch;
 use super::gate_overlay::GateOverlay;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Oversampling factor for the base KNN query when the overlay has
 /// gate overrides and/or tombstoned deletions at the queried layer.
 /// Overrides can re-score base hits and tombstones remove them, so

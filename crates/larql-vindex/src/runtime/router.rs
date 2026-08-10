@@ -16,6 +16,9 @@ use larql_compute::{MoeExpertScalePolicy, MoeTopKWeightPolicy};
 use super::error::ExecutionError;
 use super::tensor::BoundTensor;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One expert selected for a token, with the weight it contributes at.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SelectedExpert {

@@ -34,6 +34,9 @@ use super::component::{ComponentCoordinate, SelectedComponent};
 use super::coordinate::BankCoordinate;
 use crate::format::moe_manifest::programme::RoleAlternative;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A region an operation would read, with the fidelity that feeds the fold.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedRegion {

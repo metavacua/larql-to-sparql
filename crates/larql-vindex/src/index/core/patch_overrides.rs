@@ -8,6 +8,9 @@
 use super::VectorIndex;
 use crate::index::types::{OverrideSlot, PatchOverrides};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl PatchOverrides for VectorIndex {
     fn down_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
         self.metadata

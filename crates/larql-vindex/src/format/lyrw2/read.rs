@@ -22,6 +22,9 @@ use super::region_schema::RegionSchema;
 use super::segment::SegmentDescriptor;
 use super::wire::read_u64;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A resolved region: where its bytes are, and what they mean.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedRegion {

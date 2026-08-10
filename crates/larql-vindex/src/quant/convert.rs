@@ -37,6 +37,9 @@ use crate::format::fp4_codec::{write_fp4_projection, write_fp8_projection};
 
 use super::scan::{scan_vindex, Dtype, ScanConfig, VindexComplianceReport};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Policy A / B / C from `fp4-precision-policy.md`. Gate stays at
 /// source dtype in every policy (see FP4 gate caveat in §2 of that
 /// spec); only up + down vary.

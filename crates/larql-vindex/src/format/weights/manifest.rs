@@ -20,6 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use super::write_kquant::QuantBlockFormat;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One manifest entry describing one Q4_K/Q6_K-encoded tensor slice.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Q4kManifestEntry {

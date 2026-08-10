@@ -21,6 +21,9 @@ use std::path::Path;
 
 use super::knn_store::{KnnEntry, KnnStore};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 const MAGIC: &[u8; 4] = b"LKNN";
 const VERSION: u32 = 1;
 const U32_BYTES: usize = std::mem::size_of::<u32>();

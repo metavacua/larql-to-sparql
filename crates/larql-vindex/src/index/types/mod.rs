@@ -19,6 +19,9 @@
 
 use larql_models::TopKEntry;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 mod ffn_row;
 mod fp4_ffn;
 mod gate_lookup;

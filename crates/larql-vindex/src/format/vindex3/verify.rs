@@ -26,6 +26,9 @@
 use super::read::Vindex3Container;
 use crate::format::lyrw2::region_role::RegionRole;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A structural defect that would stop this container binding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContainerDefect {

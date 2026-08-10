@@ -19,6 +19,9 @@ use crate::format::generation::V3_CURRENT_SCHEMA;
 
 pub use super::profile::PROFILE_EXACT;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// `index.json` as a VINDEX3 container writes it.
 ///
 /// `segments` maps a segment *key* to the number of physical files under it.

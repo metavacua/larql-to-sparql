@@ -26,6 +26,9 @@ use super::consts::FUSED_PROJECTION_HALVES;
 use super::error::ExecutionError;
 use super::tensor::BoundTensor;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Which physical arrangement a projection was stored in.
 ///
 /// Defined once, here, and used by the executor, its diagnostics and the

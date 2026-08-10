@@ -43,6 +43,14 @@ pub mod profile;
 pub mod read;
 /// Conformance fixture A, public so integration tests and future gate arms can
 /// build a real container without duplicating its frozen dimensions.
+///
+/// Not `#[cfg(test)]` (so integration tests in `tests/` can reach it), but
+/// genuinely native-only regardless: `segment_bytes_for`/`staging_path`
+/// stage real LYRW segments through `std::fs`/`std::env::temp_dir` --
+/// no filesystem on wasm32v1-none. Confirmed via grep that every caller
+/// outside this crate's own `extract`/`format::huggingface` (already
+/// native-gated) is itself inside a `#[cfg(test)] mod tests` block.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod test_support;
 pub mod variants;
 pub mod verify;

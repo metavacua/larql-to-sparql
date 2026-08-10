@@ -39,6 +39,9 @@ use super::coordinate::{AbsenceKind, RegionCoordinate};
 use super::role::{OperandAvailability, ReferenceSupport, RoleCapability};
 use super::selection::BankSelection;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Whether this build could execute an alternative through the generic path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReferenceExecution {

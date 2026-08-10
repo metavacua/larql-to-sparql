@@ -69,6 +69,9 @@
 
 use std::ops::Range;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Page indices spanned by a byte range, inclusive of both ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PageSpan {

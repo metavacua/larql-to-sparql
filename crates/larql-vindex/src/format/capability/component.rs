@@ -25,6 +25,9 @@ use super::authority::Fidelity;
 use super::coordinate::{AbsenceKind, RegionCoordinate};
 use super::role::ReferenceSupport;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// The five durable weight classes the serving ABI freezes (§4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum WeightClass {

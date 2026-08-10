@@ -13,6 +13,9 @@ use crate::index::FeatureMeta;
 use super::format::{decode_gate_vector, PatchOp, VindexPatch};
 use super::overlay::PatchedVindex;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Decode-check every embedded vector in `patch` before any overlay
 /// state is mutated, so a corrupt vector rejects the patch wholesale.
 /// Without this, `apply_patch` used to drop the vector while still

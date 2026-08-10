@@ -14,6 +14,9 @@ use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER as VINDEX_FFN_COM
 use crate::index::types::QuantizedFfnAccess;
 use crate::VectorIndex;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 const _: () = {
     // Pin that the trait's component constants match the wire format's.
     // Mismatch would silently slice fewer/more components (or the wrong

@@ -17,6 +17,9 @@ use super::expert_kernel::ExpertKernel;
 use super::projection::BoundProjection;
 use super::tensor::BoundTensor;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One expert: its gated projection and its down projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundExpert<'a> {

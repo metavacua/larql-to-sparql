@@ -11,6 +11,9 @@ use super::region_format::{Packing, RegionFormat};
 use super::region_role::RegionRole;
 use super::wire::{push_u16, push_u32, read_u16, read_u32};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One region's declared shape and encoding, shared by every entry in a bank.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegionSchema {

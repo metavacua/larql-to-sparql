@@ -11,6 +11,9 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Max-heap element (best score first).
 #[derive(Clone, Copy)]
 struct MaxScored {

@@ -25,6 +25,9 @@ use serde::{Deserialize, Serialize};
 
 use super::gate_overlay::GateOverlay;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A single entry in the retrieval-override KNN store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnnEntry {

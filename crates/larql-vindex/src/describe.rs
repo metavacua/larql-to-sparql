@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 //! DESCRIBE types — DescribeEdge and LabelSource.
 //!
 //! These represent the output of a DESCRIBE operation on an entity.

@@ -27,6 +27,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct VindexModelConfig {
     pub model_type: String,

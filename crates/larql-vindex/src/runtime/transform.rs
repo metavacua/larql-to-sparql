@@ -18,6 +18,9 @@ use super::error::ExecutionError;
 use super::kernels::dot;
 use super::tensor::BoundTensor;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Where a transform sits relative to the bank.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TransformStage {

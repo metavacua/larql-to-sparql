@@ -13,6 +13,9 @@ use crate::config::hnsw::HnswBuildConfig;
 use crate::index::core::VectorIndex;
 use crate::index::storage::vindex_storage::VindexStorage;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl VectorIndex {
     /// Enable HNSW search. Indexes are built lazily on first query per layer.
     ///

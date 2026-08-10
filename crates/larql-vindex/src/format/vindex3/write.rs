@@ -29,6 +29,9 @@ use crate::format::filenames::INDEX_JSON;
 use crate::format::moe_manifest::MoeManifest;
 use crate::VindexError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Filename of the MoE programme manifest within a container.
 pub const MOE_MANIFEST_JSON: &str = "moe_manifest.json";
 /// Extension for a LYRW v2 segment file.

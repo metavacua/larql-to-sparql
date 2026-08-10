@@ -37,6 +37,9 @@ use std::path::Path;
 use crate::format::filenames::INDEX_JSON;
 use crate::VindexError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// An `index.json` schema revision.
 ///
 /// A newtype so no API can accept a bare `u32` and call it a generation. The

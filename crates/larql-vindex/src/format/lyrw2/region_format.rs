@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 //! Region encodings and packings (spec §6.4).
 //!
 //! Like roles, unrecognised tags are preserved rather than rejected — a reader

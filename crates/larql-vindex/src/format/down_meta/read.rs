@@ -19,6 +19,9 @@ use super::{
     TOP_K_RECORD_BYTES, U32_BYTES,
 };
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Bytes of one per-feature record for a given `top_k_count`, with
 /// overflow checked — `top_k_count` comes straight from the file header.
 fn record_byte_size(top_k_count: usize) -> Result<usize, VindexError> {

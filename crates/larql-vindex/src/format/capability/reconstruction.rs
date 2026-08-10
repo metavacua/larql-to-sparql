@@ -42,6 +42,9 @@ use crate::format::lyrw2::region_role::RegionRole;
 use super::authority::Fidelity;
 use super::coordinate::RegionCoordinate;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// How one logical checkpoint tensor is recovered from stored regions.
 ///
 /// A bounded vocabulary that reverses the extractor's physical encodings —

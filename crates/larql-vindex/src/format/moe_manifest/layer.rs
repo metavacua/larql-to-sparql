@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use super::bank_ref::BankRef;
 use super::router::Router;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// The space a layer's experts consume and produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

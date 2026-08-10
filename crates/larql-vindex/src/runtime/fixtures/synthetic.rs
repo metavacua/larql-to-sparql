@@ -46,6 +46,9 @@ use super::super::reduction::BoundReduction;
 use super::super::router::{BoundExpertScaling, BoundRouter, RouterKernel};
 use super::super::tensor::BoundTensor;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Catalogue variant these operands claim to come from.
 const VARIANT: &str = "synthetic";
 /// The router is manifest-addressed, not a bank region, so it has no role.

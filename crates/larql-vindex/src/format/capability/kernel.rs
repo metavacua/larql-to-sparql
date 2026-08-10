@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 //! Kernel identity and maturity (spec §10).
 //!
 //! Deliberately outside the traversal's vocabulary. Traversal answers "are the

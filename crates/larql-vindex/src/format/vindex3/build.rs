@@ -49,6 +49,9 @@ use crate::format::moe_manifest::layer::MoeLayer;
 use crate::format::moe_manifest::MoeManifest;
 use crate::VindexError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Every segment key a container declares appears exactly once. A repeat means
 /// the caller would have silently overwritten a bank it had already written.
 const SEGMENT_DECLARED_ONCE: u32 = 1;

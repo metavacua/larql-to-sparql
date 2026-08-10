@@ -30,6 +30,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::capability::authority::Fidelity;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One physically present encoding of a region set.
 ///
 /// `storage` is a segment key relative to the container root, the same

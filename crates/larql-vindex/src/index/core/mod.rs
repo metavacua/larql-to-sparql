@@ -33,6 +33,9 @@ use super::storage::{FfnStore, GateStore, MetadataStore, MmapStorage};
 // keep using `crate::index::core::{VectorIndex, FeatureMeta, …}` paths.
 pub use super::types::*;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 mod fp4_ffn;
 mod gate_lookup;
 mod native_ffn;

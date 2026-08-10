@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 //! Little-endian field access over fixed-width descriptor slices.
 //!
 //! Every descriptor in LYRW v2 is a fixed-size record read from a known

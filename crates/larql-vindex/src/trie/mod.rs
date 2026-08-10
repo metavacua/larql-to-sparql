@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 // ── Serialised probe format ───────────────────────────────────────────────────
 
 #[derive(Deserialize)]

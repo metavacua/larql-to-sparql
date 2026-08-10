@@ -20,6 +20,9 @@ use crate::format::lyrw2::region_role::RegionRole;
 
 use super::authority::Fidelity;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One physically present, profile-selected region.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedRegion {

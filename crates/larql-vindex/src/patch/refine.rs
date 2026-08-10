@@ -18,6 +18,9 @@
 
 use ndarray::Array1;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Input to the refine pass: a single fact's identifying coordinates
 /// plus the unrefined gate vector synthesised at INSERT time.
 #[derive(Debug, Clone)]

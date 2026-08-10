@@ -12,6 +12,9 @@ use ndarray::{Array1, Array2};
 
 use crate::format::filenames::ROUTER_WEIGHTS_BIN;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// MoE router weights for all layers.
 pub struct RouterIndex {
     /// Per-layer router weight matrices: `[num_experts, hidden_size]`

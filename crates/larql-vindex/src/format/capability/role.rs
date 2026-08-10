@@ -18,6 +18,9 @@ use crate::format::lyrw2::region_format::{Packing, RegionFormat};
 
 use super::coordinate::{AbsenceKind, RegionCoordinate};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Whether the bytes exist.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OperandAvailability {

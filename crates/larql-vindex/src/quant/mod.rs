@@ -15,8 +15,12 @@
 //! `crate::index::fp4_storage` and `crate::format::fp4_storage`.
 
 pub mod convert;
+// memmap2-backed.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod convert_q4k;
 pub mod registry;
+// memmap2 + reqwest-backed.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod scan;
 
 pub use registry::{lookup, QuantFormatInfo, QUANT_FORMATS};
@@ -24,10 +28,12 @@ pub use registry::{lookup, QuantFormatInfo, QUANT_FORMATS};
 pub use convert::{
     vindex_to_fp4, Fp4ConvertConfig, Fp4ConvertReport, Policy, ProjectionAction, ProjectionOutcome,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use convert_q4k::{
     add_feature_major_down, vindex_to_q4k, AddFeatureMajorDownReport, Q4kConvertConfig,
     Q4kConvertReport,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use scan::{
     scan_projection, scan_vindex, BucketQuantiles, ComplianceThreshold, Dtype, GranularityStats,
     LayerStats, ProjectionReport, ScanConfig, VindexComplianceReport, PROJECTIONS,

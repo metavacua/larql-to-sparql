@@ -22,6 +22,9 @@ use super::trace::{CollectedTrace, NoTrace, TraceSink};
 use super::transform::{apply_stage, TransformStage};
 use larql_compute::MoeTopKWeightPolicy;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Run the operation over one token's residual, returning its contribution.
 ///
 /// The returned vector is the **delta**, not the updated residual: adding it

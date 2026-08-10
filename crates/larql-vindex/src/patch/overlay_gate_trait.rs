@@ -17,6 +17,9 @@ use crate::index::{
 
 use super::overlay::PatchedVindex;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl GateLookup for PatchedVindex {
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)> {
         self.gate_knn(layer, residual, top_k)

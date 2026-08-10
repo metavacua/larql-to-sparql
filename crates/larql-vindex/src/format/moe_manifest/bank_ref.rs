@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use super::programme::Programme;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// An expert's own operand dimensions.
 ///
 /// For a latent bank these are the latent width, not the residual width — the

@@ -12,6 +12,9 @@ use super::header::Lyrw2Header;
 use super::region_schema::RegionSchema;
 use super::segment::SegmentDescriptor;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// The complete declaration of one segment file's tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lyrw2Plan {

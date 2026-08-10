@@ -2,6 +2,9 @@ use std::path::PathBuf;
 
 use crate::config::ExtractLevel;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Debug, thiserror::Error)]
 pub enum VindexError {
     #[error("not a directory: {0}")]

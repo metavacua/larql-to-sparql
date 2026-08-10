@@ -9,6 +9,9 @@
 
 use super::consts::FORMAT_VERSION;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Lyrw2Error {
     #[error("not a LYRW file: magic was {found:#010x}, expected {expected:#010x}")]

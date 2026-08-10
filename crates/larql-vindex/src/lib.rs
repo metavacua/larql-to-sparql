@@ -33,12 +33,24 @@
 #[macro_use]
 extern crate alloc;
 
+mod alloc_prelude;
+mod collections;
+pub use collections::{FnvHasher, HashMap, HashSet};
+
 // ── Module structure ──
+// `extract`/`walker`/`clustering` build a vindex from safetensors/GGUF and
+// generate cluster labels from curated vocab files -- fundamentally
+// filesystem + tokenizer-model operations (memmap2/tokenizers/safetensors),
+// confirmed via the crate's own module docs and a CI round showing every
+// touched file in these trees erroring on one of those, or on the
+// already-native-gated `larql_models::loading` module. Pattern 3.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod clustering;
 pub mod config;
 pub mod describe;
 pub mod engine;
 pub mod error;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod extract;
 pub mod format;
 pub mod index;
@@ -47,12 +59,15 @@ pub mod patch;
 pub mod quant;
 pub mod runtime;
 pub mod trie;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod walker;
 // Back-compat alias — the top-level lifecycle dir was renamed
 // `storage/` → `engine/` in the 2026-04-25 round-2 cleanup. The name
 // `storage` was confusing because `index/storage/` held the actual
 // data substores. Drop this alias once external callers migrate.
 pub use engine as storage;
+// `madvise` hints -- an OS mmap operation, no wasm32v1-none equivalent.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mmap_util;
 pub mod vindexfile;
 

@@ -26,6 +26,9 @@
 use super::authority::Fidelity;
 use super::component::{ComponentContract, TensorKind};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A byte extent. The deduplication key for residency and accounting.
 ///
 /// Deliberately excludes the variant: identity is about *which bytes*, and two

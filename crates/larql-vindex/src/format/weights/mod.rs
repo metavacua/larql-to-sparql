@@ -16,11 +16,17 @@
 //!                (`load_model_weights`, `find_tokenizer_path`).
 
 mod capabilities;
+// memmap2-backed weight loaders.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod load;
 pub mod manifest;
 pub mod mla_absorb;
 mod ple_sidecar;
+// safetensors-backed writer.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod write_f32;
+// References crate::extract::{callbacks,stage_labels} (native-only).
+#[cfg(not(target_arch = "wasm32"))]
 pub mod write_kquant;
 
 #[cfg(test)]

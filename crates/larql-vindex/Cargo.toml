@@ -72,6 +72,10 @@ rand = { version = "0.8", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 base64 = { version = "0.22", default-features = false }
 bytes = { version = "1", default-features = false }
+# core's f32/f64 lack sqrt/exp/tanh/round/etc. (pattern 6).
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+# std::collections::HashMap/HashSet have no core/alloc equivalent (pattern 4).
+hashbrown = { version = "0.15", default-features = false }
 
 [features]
 default = []

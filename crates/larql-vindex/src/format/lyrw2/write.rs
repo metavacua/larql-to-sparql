@@ -24,6 +24,9 @@ use super::plan::Lyrw2Plan;
 use super::wire::push_u64;
 use crate::VindexError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Where the writer expects the next region to belong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegionCursor {

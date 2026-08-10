@@ -28,6 +28,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// How faithful a region or profile is to the source checkpoint (§9.2).
 ///
 /// `Ord` is the authority lattice: greater is stronger. The fold is a

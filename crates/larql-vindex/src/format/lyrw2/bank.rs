@@ -13,6 +13,9 @@ use super::browse_mode::BrowseMode;
 use super::consts::BANK_DESCRIPTOR_BYTES;
 use super::wire::{push_u16, push_u32, read_u16, read_u32};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// What kind of population a bank holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BankKind {

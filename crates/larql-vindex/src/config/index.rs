@@ -13,6 +13,9 @@ use super::compliance::LayerBands;
 use super::model::VindexModelConfig;
 use super::quantization::{Fp4Config, QuantFormat};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct VindexConfig {
     /// Format version.

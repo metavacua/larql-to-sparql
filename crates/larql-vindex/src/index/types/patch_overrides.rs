@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 //! `PatchOverrides` — overlay-vector hooks.
 
 /// One patched slot at a layer, as enumerated by

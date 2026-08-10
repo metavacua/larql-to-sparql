@@ -28,6 +28,9 @@ use super::operation::{OperationCapability, OperationFailure};
 use super::plan::{OperationPlan, PlanChoice, QualifiedAlternative};
 use super::traversal::BankCapabilityReport;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// The physical components a profile resolved to.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ResolvedDocumentSelection {

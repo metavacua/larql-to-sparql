@@ -39,6 +39,9 @@ use super::plan::{
 use super::role::ReferenceSupport;
 use super::walk_request::{validate_query_vector, PartialPolicy, WalkRequest};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One way to reach a bank's gate rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateAccess {

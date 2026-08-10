@@ -12,6 +12,9 @@
 //! they're encoded.
 
 // ── Top-level config / sidecars ─────────────────────────────────────────
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub const INDEX_JSON: &str = "index.json";
 pub const TOKENIZER_JSON: &str = "tokenizer.json";
 pub const TOKENIZER_CONFIG_JSON: &str = "tokenizer_config.json";

@@ -9,6 +9,9 @@ use sha2::{Digest, Sha256};
 use crate::error::VindexError;
 use crate::format::filenames::*;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Compute SHA256 checksum of a file. Returns hex string.
 pub fn sha256_file(path: &Path) -> Result<String, VindexError> {
     let mut file = std::fs::File::open(path)?;

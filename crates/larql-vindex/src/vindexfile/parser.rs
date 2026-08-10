@@ -4,6 +4,9 @@ use std::path::Path;
 
 use crate::error::VindexError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Parsed Vindexfile.
 #[derive(Debug, Clone)]
 pub struct Vindexfile {

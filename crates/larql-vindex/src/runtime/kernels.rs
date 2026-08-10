@@ -28,6 +28,9 @@
 
 use larql_compute::Activation;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// `out[r] = dot(matrix_row(r), x)`, with rows supplied by the caller.
 ///
 /// Taking a row-reader rather than a slice is what lets one implementation

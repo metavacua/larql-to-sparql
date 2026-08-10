@@ -49,6 +49,9 @@ use crate::VindexError;
 
 use super::write::{ContainerSpec, SegmentSource};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Schema indices within the routed bank. Two regions per expert.
 const SCHEMA_GATE_UP: u16 = 0;
 const SCHEMA_DOWN: u16 = 1;

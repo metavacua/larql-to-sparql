@@ -9,6 +9,9 @@
 
 use super::consts::PAIR_ID_UNPAIRED;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A registered region role, or an unrecognised tag preserved verbatim.
 ///
 /// `Ord` follows the registry tag, so ordering is the spec's role order rather

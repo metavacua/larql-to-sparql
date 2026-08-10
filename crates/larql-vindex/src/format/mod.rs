@@ -10,8 +10,12 @@ pub mod fp4_codec;
 pub mod generation;
 #[cfg(test)]
 mod generation_tests;
+// reqwest/hf-hub-backed download+publish -- no network on wasm32v1-none.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod huggingface;
 pub mod le_floats;
+// memmap2/tokenizers-backed vindex loader.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod load;
 pub mod lyrw2;
 pub mod moe_manifest;

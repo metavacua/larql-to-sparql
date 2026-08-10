@@ -26,6 +26,9 @@ use super::authority::Fidelity;
 use super::coordinate::RegionCoordinate;
 use super::plan::QualifiedOperationRoute;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Why an operation cannot run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OperationFailure {

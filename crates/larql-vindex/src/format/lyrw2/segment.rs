@@ -12,6 +12,9 @@
 use super::consts::SEGMENT_DESCRIPTOR_BYTES;
 use super::wire::{push_u16, push_u32, read_u16, read_u32};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// The slice of a bank's entries carried by one file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SegmentDescriptor {

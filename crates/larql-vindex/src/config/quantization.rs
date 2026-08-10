@@ -12,6 +12,9 @@ use crate::format::filenames::{DOWN_FEATURES_FP8_BIN, GATE_VECTORS_FP4_BIN, UP_F
 
 use super::compliance::ComplianceGate;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-vindex quant scheme. Mirrors the `quant` enum in the v1 wire
 /// schema (`crates/larql-vindex-spec/schema/vindex-v1.schema.json`):
 /// readers accept `"none"`, `"q4k"`, and `"kquant"`; writers continue

@@ -15,6 +15,9 @@ use crate::format::lyrw2::region_format::RegionFormat;
 
 use super::axis::Axis;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Why an execution could not run to completion.
 ///
 /// `PartialEq` without `Eq`: `NonFiniteRouterScore` carries the offending

@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 //! Little-endian f32 ⇄ byte codecs shared by the on-disk formats
 //! (`config::dtype`, `patch::format`, `quant::convert`).
 //!
