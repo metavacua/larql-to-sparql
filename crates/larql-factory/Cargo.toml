@@ -38,6 +38,9 @@ thiserror = { version = "2", default-features = false }
 # digest output is a fixed-size GenericArray, not heap-allocated, so
 # no_std alone (no alloc feature) is sufficient here.
 sha2 = { version = "0.10", default-features = false }
+# core's f64 has no transcendental math (.powi()) -- see
+# crates/larql-models/Cargo.toml for the pattern-6 rationale.
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 
 [dev-dependencies]
 larql-vindex-spec = { path = "../larql-vindex-spec", features = ["test-utils"] }

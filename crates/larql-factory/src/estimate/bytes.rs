@@ -12,6 +12,9 @@
 //! Good enough for "should this be a $3 build or a $150 one", not for
 //! reconciling against a real manifest.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use larql_vindex_spec::StorageDtype;
 
 use super::dims::ModelDims;
