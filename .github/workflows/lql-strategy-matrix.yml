@@ -409,6 +409,7 @@ jobs:
             "bench|bench $TMP/v.vindex --tokens 2"
             "dec-bench|dec-bench"
             "k3-ledger|k3-ledger report"
+            "k3-ledger-formats|k3-ledger formats"
             "accuracy|accuracy $TMP/v.vindex"
             "shannon|shannon score $TMP/v.vindex"
             "parity|parity $TMP/v.vindex"
