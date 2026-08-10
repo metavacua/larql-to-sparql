@@ -10,28 +10,32 @@ keywords = ["knowledge-graph", "llm", "interpretability", "graph"]
 categories = ["data-structures", "science"]
 
 [dependencies]
-thiserror = { workspace = true }
-
 # HTTP provider — optional so pure graph usage has zero network deps
 reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
 
 # Binary serialization via MessagePack
 rmp-serde = { version = "1", optional = true }
 
-# serde/serde_json default to their "std" feature, which doesn't exist on
-# wasm32v1-none (core+alloc only) -- E0463 "can't find crate for `std`",
-# cascading into thousands of downstream errors inside serde_core itself.
-# Native builds keep the workspace-inherited std-enabled declaration;
-# wasm32 builds get an independent alloc-only declaration. See
+# serde/serde_json/thiserror default to their "std" feature, which doesn't
+# exist on wasm32v1-none (core+alloc only) -- E0463 "can't find crate for
+# `std`". For serde_core this cascaded into thousands of downstream errors;
+# thiserror's std usage is directly #[cfg(feature = "std")]-gated in its
+# own source (confirmed via docs.rs), so disabling it is the documented,
+# supported path -- not a workaround. thiserror's derive macro is
+# unconditional (its only Cargo feature is "std"), so no functionality is
+# lost. Native builds keep the workspace-inherited std-enabled
+# declarations; wasm32 builds get independent alloc-only/no-std ones. See
 # docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
 # Task 7, pattern: dependency-default-std-feature.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 
 [features]
 default = ["http", "msgpack"]
