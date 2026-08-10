@@ -109,6 +109,26 @@ def test_condition_missing_on_existing_job_is_caught():
     assert old_style_check(reader_from_dict(files)) is False
 
 
+def test_new_unexpected_job_without_condition_is_caught():
+    """A job added later that isn't in EXPECTED_JOBS at all (e.g. a fresh
+    job someone appends to larql-core.yml after this script was written)
+    must still be required to carry the gating condition -- it shouldn't
+    be able to slip in ungated just because it predates no expectation."""
+    files = make_clean_fixture()
+    files["larql-core.yml"] = (
+        "jobs:\n"
+        + _job_block("test", with_condition=True)
+        + "\n"
+        + _job_block("coverage", with_condition=True)
+        + "\n"
+        + _job_block("lint", with_condition=False)
+    )
+    result = evaluate(reader_from_dict(files))
+    assert not is_clean(result)
+    assert ("larql-core.yml", "lint") in result["extra_unguarded"]
+    assert result["checked_jobs"] == EXPECTED_JOB_COUNT + 1
+
+
 def test_leaked_condition_into_excluded_file_is_caught():
     files = make_clean_fixture()
     files["release.yml"] = "jobs:\n" + _job_block("build", with_condition=True) + "\n"
@@ -145,6 +165,7 @@ def test_job_deleted_entirely_is_caught_by_new_logic_but_not_old():
 TESTS = [
     test_clean_fixture_passes,
     test_condition_missing_on_existing_job_is_caught,
+    test_new_unexpected_job_without_condition_is_caught,
     test_leaked_condition_into_excluded_file_is_caught,
     test_job_deleted_entirely_is_caught_by_new_logic_but_not_old,
 ]

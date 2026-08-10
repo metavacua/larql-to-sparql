@@ -24,6 +24,15 @@ CONDITION_SUBSTR = f"github.head_ref != '{BRANCH}'"
 # commit Task 6 landed. A job appearing here that later disappears from
 # the file (renamed, deleted, whole file gutted) must fail the check --
 # that's the property scripts/test_verify_gating_skip.py mutates for.
+#
+# This dict is not regenerated from the live files by anything -- it's a
+# one-time snapshot for this branch's discovery window (see Task 6 in
+# docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md),
+# not an ongoing CI gate (grep .github/workflows/ for this script's name:
+# nothing invokes it). If a job is renamed/added on this branch after
+# this snapshot, this dict will silently drift from reality -- acceptable
+# for a short-lived verification script, but worth re-deriving before
+# reusing this pattern anywhere longer-lived.
 EXPECTED_JOBS = {
     "bench-regress.yml": ["bench"],
     "larql-boundary.yml": ["test", "coverage"],
