@@ -633,55 +633,6 @@ jobs:
             ev/*.out
             ev/*.err
 
-  # Model command coverage — what does `model pull` and `model --help`
-  # actually produce when the hub is unreachable? This evidence job captures
-  # the raw output, exit codes, and argv so the claim "the Model subcommand
-  # is tested" can be verified by reading the captures, not by assertion.
-  model-evidence:
-    needs: [gate, build]
-    if: needs.gate.outputs.compile == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      HF_ENDPOINT: http://127.0.0.1:1
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v4
-        with:
-          name: larql-bin
-          path: bin
-      - name: Prep
-        run: |
-          chmod +x bin/larql
-          sudo apt-get update && sudo apt-get install -y libopenblas-dev
-          mkdir -p ev
-      - name: model --help
-        run: |
-          set +e
-          timeout 60 ./bin/larql model --help > ev/01-model-help.out 2> ev/01-model-help.err
-          echo "exit=$?" >> ev/01-model-help.err
-      - name: model pull <hf-id>
-        run: |
-          set +e
-          timeout 60 ./bin/larql model pull HuggingFaceTB/SmolLM2-135M > ev/02-model-pull.out 2> ev/02-model-pull.err
-          echo "exit=$?" >> ev/02-model-pull.err
-      - name: Show every capture
-        if: always()
-        run: |
-          set +e
-          for f in ev/*.out ev/*.err; do
-            echo "───── $f ($(wc -c < "$f") bytes)"
-            head -40 "$f"
-          done
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: model-evidence
-          retention-days: 14
-          path: |
-            ev/*.out
-            ev/*.err
-
   quality:
     needs: gate
     if: needs.gate.outputs.quality == 'true'
