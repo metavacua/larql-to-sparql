@@ -8,6 +8,15 @@
 //! hidden state (shape `[1, hidden_dim]`). The caller applies `final_norm +
 //! lm_head` to get logits — see `larql_inference::forward::hidden_to_raw_logits`.
 
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale. Applying
+// only the confirmed-safe crate-level attribute here and letting the
+// next real CI round show which modules need pattern-3 whole-module
+// exclusion, rather than guessing.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
+
 #[cfg(any(
     target_os = "linux",
     target_os = "freebsd",

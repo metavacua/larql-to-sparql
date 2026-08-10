@@ -70,6 +70,20 @@
 //! `ternary_matvec` parallel-path template instead — see the
 //! unknown-format contract in [`quant_route`].
 
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale. Unlike
+// larql-models/larql-factory, this crate's rayon dependency has zero
+// no_std support at all (no libm-style feature swap exists) -- unlike
+// patterns 1/6, there is no substitute to reach for, so this is likely
+// to need much more aggressive pattern-3 whole-module exclusion once a
+// real CI round shows which modules are rayon/ndarray-BLAS-bound
+// throughout vs. pure data-shape definitions. Applying only the
+// confirmed-safe crate-level attribute here rather than guessing which
+// ~20 modules survive by inspection alone.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
+
 #[cfg(any(
     target_os = "linux",
     target_os = "freebsd",

@@ -20,6 +20,9 @@
 //!   thresholds in log-prob units so they transfer across positions and
 //!   model checkpoints.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use crate::frame::BoundaryAgreement;
 
 /// All per-boundary confidence fields produced by Phase 2.
@@ -114,7 +117,7 @@ fn argmax(logits: &[f32]) -> usize {
     logits
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(i, _)| i)
         .unwrap_or(0)
 }

@@ -24,6 +24,15 @@
 
 // BLAS provided by larql-compute dependency (no direct blas_src needed)
 
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale. Applying
+// only the confirmed-safe crate-level attribute here and letting the
+// next real CI round show which modules need pattern-3 whole-module
+// exclusion, rather than guessing.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
+
 // ── Module structure ──
 pub mod clustering;
 pub mod config;

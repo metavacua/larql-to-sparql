@@ -47,7 +47,25 @@
 //! them directly would turn this enum from execution semantics into a catalogue
 //! of everything that can go wrong operationally.
 
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale.
+// core::error::Error was stabilized in 1.81 (workspace MSRV 1.88), so
+// unlike patterns 1/4/6 there is no substitute crate needed here -- just
+// a source swap. core::fmt is the same API as std::fmt (fmt is not a
+// std-only concept), and Box needs alloc explicitly since no_std has no
+// prelude Box.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
+#[cfg(target_arch = "wasm32")]
+use alloc::boxed::Box;
+#[cfg(target_arch = "wasm32")]
+use core::error::Error;
+#[cfg(target_arch = "wasm32")]
+use core::fmt;
+#[cfg(not(target_arch = "wasm32"))]
 use std::error::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fmt;
 
 /// The response a refusal requires.

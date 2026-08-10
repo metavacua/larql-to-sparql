@@ -1,4 +1,13 @@
 #![forbid(unsafe_code)]
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale. Applied
+// here too even though this is a [[bin]] target expected to remain
+// permanently native (its whole point is CLI file/network/GPU I/O) --
+// per the standing instruction to treat every crate the same way and
+// let the compiler reveal the boundary rather than assume it in
+// advance. A #![no_std] fn main() with no #[no_main]/custom entry point
+// will very likely fail differently than the library crates did; that
+// failure signature becomes the next real pattern to classify.
+#![cfg_attr(target_arch = "wasm32", no_std)]
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::type_complexity)]
 // Architectural lints suppressed crate-wide:
