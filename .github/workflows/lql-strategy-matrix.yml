@@ -434,7 +434,11 @@ jobs:
             # must arrive as TWO arguments (`lql` and `SHOW MODELS;`), and an
             # unquoted split would make it three and mask the real behaviour.
             eval "set -- $rest"
-            timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
+            # Explicitly close stdin (< /dev/null) for commands that don't read it.
+            # Inherited stdin makes test behaviour depend on invocation context
+            # (e.g., repl would hang if stdin is a terminal). repl-pipe/pty tests
+            # run explicitly with piped input and don't come through this loop.
+            timeout 60 ./bin/larql "$@" < /dev/null > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
             echo "$id exit=$? argc=$# argv=[$rest]" >> probe/cmd.index
           done
           cat probe/cmd.index
