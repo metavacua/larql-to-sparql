@@ -63,8 +63,8 @@ jobs:
   # Decides what this run does, so a run can be narrowed without editing the
   # workflow. Three ways in, cheapest first:
   #
-  #   commit message   [skip matrix] [skip probe] [skip quality] [skip ci]
-  #   dispatch input   scope = all | probe | matrix | quality | none
+  #   commit message   [skip matrix] [skip probe] [skip quality] [skip compile] [skip serve] [skip ci]
+  #   dispatch input   scope = all | probe | matrix | quality | compile | serve | none
   #   paths filter     (above) — a docs-only PR does not trigger at all
   #
   # Everything downstream hangs off these three booleans, so a narrowed run
@@ -95,15 +95,23 @@ jobs:
           MSG="$(git log -1 --pretty=%B)"
           set -uo pipefail
           SCOPE="${SCOPE:-all}"
-          probe=false; matrix=false; quality=false; compile=false; serve=false
+          # One list drives init, `scope=all`, the named-scope match, the
+          # `[skip X]` markers, and the output emission — adding a part is a
+          # one-word change here instead of a coordinated multi-site edit.
+          # (The YAML-side sites — the `outputs:` block above, the
+          # dispatch `options` list, and `build`'s `if:` — can't loop over a
+          # bash array and stay manual; see the comment on `build` below for
+          # what happens when one of those is missed.)
+          PARTS="probe matrix quality compile serve"
+          for p in $PARTS; do declare "$p=false"; done
           case "$SCOPE" in
-            all)     probe=true;  matrix=true;  quality=true; compile=true; serve=true ;;
-            probe)   probe=true ;;
-            matrix)  matrix=true ;;
-            quality) quality=true ;;
-            compile) compile=true ;;
-            serve)   serve=true ;;
-            none)    : ;;
+            all)  for p in $PARTS; do declare "$p=true"; done ;;
+            none) : ;;
+            *)
+              for p in $PARTS; do
+                if [ "$SCOPE" = "$p" ]; then declare "$p=true"; fi
+              done
+              ;;
           esac
           # A skip marker in the commit message or PR title turns a part off
           # without a dispatch, which is what you want mid-iteration.
@@ -120,18 +128,17 @@ jobs:
             echo "workflow_dispatch: ignoring commit/title skip markers"
           fi
           case "$TEXT" in
-            *"[skip ci]"*)      probe=false; matrix=false; quality=false; compile=false; serve=false ;;
+            *"[skip ci]"*) for p in $PARTS; do declare "$p=false"; done ;;
           esac
-          case "$TEXT" in *"[skip probe]"*)   probe=false ;;   esac
-          case "$TEXT" in *"[skip matrix]"*)  matrix=false ;;  esac
-          case "$TEXT" in *"[skip quality]"*) quality=false ;; esac
-          case "$TEXT" in *"[skip compile]"*) compile=false ;; esac
-          case "$TEXT" in *"[skip serve]"*)   serve=false ;;    esac
+          for p in $PARTS; do
+            case "$TEXT" in *"[skip $p]"*) declare "$p=false" ;; esac
+          done
           {
-            echo "probe=$probe"; echo "matrix=$matrix"
-            echo "quality=$quality"; echo "compile=$compile"; echo "serve=$serve"
+            for p in $PARTS; do echo "$p=${!p}"; done
           } >> "$GITHUB_OUTPUT"
-          echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality compile=$compile serve=$serve"
+          line="scope=$SCOPE ->"
+          for p in $PARTS; do line="$line $p=${!p}"; done
+          echo "$line"
 
   # Enumerate every leg as JSON → consumed by the matrix via fromJSON. A malformed
   # plan fails here in seconds, before any leg runs.
@@ -624,8 +631,10 @@ jobs:
         run: |
           set +e
           for f in ev/*.out ev/*.err ev/*.txt; do
-            echo "───── $f ($(wc -c < "$f") bytes)"
-            cat "$f"
+            if [ -f "$f" ]; then
+              echo "───── $f ($(wc -c < "$f") bytes)"
+              cat "$f"
+            fi
           done
       - uses: actions/upload-artifact@v4
         if: always()
@@ -645,6 +654,8 @@ jobs:
     if: needs.gate.outputs.serve == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      HF: HuggingFaceTB/SmolLM2-135M-Instruct
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
@@ -658,10 +669,9 @@ jobs:
         run: |
           chmod +x bin/larql
           sudo apt-get update && sudo apt-get install -y libopenblas-dev curl
-          python -m pip install --quiet huggingface_hub
           mkdir -p ev
       - id: slug
-        run: echo "slug=HuggingFaceTB--SmolLM2-135M-Instruct" >> "$GITHUB_OUTPUT"
+        run: echo "slug=${HF//\//--}" >> "$GITHUB_OUTPUT"
       - name: Restore HF snapshot
         uses: actions/cache/restore@v5
         with:
@@ -673,18 +683,22 @@ jobs:
           python - <<'PY'
           import os
           from huggingface_hub import snapshot_download
-          IGNORE = ["onnx/*", "*.onnx", "*.onnx_data"]
-          repo = "HuggingFaceTB/SmolLM2-135M-Instruct"
+          IGNORE = ["onnx/*", "*.onnx", "*.onnx_data"]   # keep in step with the prefetch job
+          repo = os.environ["HF"]
+          # The prefetch job warmed this cache, so the normal path makes zero
+          # hub requests. The fallback exists only for a cache eviction between
+          # jobs; it is logged loudly because it is the condition that produced
+          # the 429 storm, and a silent re-download would hide its return.
           try:
-              print(f"resolved from cache: {snapshot_download(repo, local_files_only=True)}")
+              print(f"resolved from cache, no hub request: {snapshot_download(repo, local_files_only=True)}")
           except Exception as e:
-              print(f"::warning::HF cache MISS ({type(e).__name__}) - fetching from hub")
+              print(f"::warning::HF cache MISS for {repo} ({type(e).__name__}) - falling back to a hub fetch")
               print(f"fetched from hub: {snapshot_download(repo, ignore_patterns=IGNORE)}")
           PY
       - name: Extract a vindex
         run: |
           set +e -u
-          timeout 3600 ./bin/larql extract HuggingFaceTB/SmolLM2-135M-Instruct \
+          timeout 3600 ./bin/larql extract "$HF" \
             -o ev/src.vindex --level inference > ev/01-extract.out 2> ev/01-extract.err
           echo "extract exit=$?" | tee -a ev/01-extract.out
           find ev/src.vindex -type f -printf '%s\t%P\n' | sort -k2 > ev/01-vindex-listing.txt
