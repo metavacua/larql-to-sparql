@@ -23,12 +23,28 @@
 //! recovers a layer index from a global counter mod 30, which is not an
 //! attribution a measurement can rest on.
 
+// This whole file's real machinery (TraceWriter, open_sink, sink,
+// record_into) is native-only: it is a File/BufWriter-backed sink
+// gated by an env var, and wasm32v1-none has neither std::fs nor
+// std::env at all. TraceWriter is confirmed unused outside this file
+// (grep), so it's wholesale native-only rather than surgically split.
+// buffer()/record() -- the only two items anything else in the crate
+// calls -- get wasm32 stubs matching the "tracing disabled" behavior
+// that already happens natively whenever the env var is unset.
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Mutex, OnceLock};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::options;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Selected expert ids per token, for one MoE block call.
 pub type BlockRouting = Vec<Vec<usize>>;
@@ -37,11 +53,13 @@ pub type BlockRouting = Vec<Vec<usize>>;
 ///
 /// Generic over the sink so the record format and the per-layer `seq`
 /// bookkeeping are testable without touching the filesystem or process env.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct TraceWriter<W: Write> {
     out: W,
     seq: HashMap<usize, usize>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<W: Write> TraceWriter<W> {
     pub fn new(out: W) -> Self {
         Self {
@@ -95,6 +113,7 @@ impl<W: Write> TraceWriter<W> {
 /// Split from [`sink`] so both open arms are testable: the `OnceLock` there
 /// resolves once per process, pinned to whatever environment the test binary
 /// started with.
+#[cfg(not(target_arch = "wasm32"))]
 fn open_sink(path: Option<String>) -> Option<Mutex<TraceWriter<BufWriter<File>>>> {
     let path = path?;
     match File::create(&path) {
@@ -110,6 +129,7 @@ fn open_sink(path: Option<String>) -> Option<Mutex<TraceWriter<BufWriter<File>>>
 }
 
 /// Process-wide sink, resolved once from the environment on first use.
+#[cfg(not(target_arch = "wasm32"))]
 fn sink() -> Option<&'static Mutex<TraceWriter<BufWriter<File>>>> {
     static SINK: OnceLock<Option<Mutex<TraceWriter<BufWriter<File>>>>> = OnceLock::new();
     SINK.get_or_init(|| open_sink(options::env_nonempty_value(options::ENV_MOE_ROUTE_TRACE)))
@@ -120,6 +140,16 @@ fn sink() -> Option<&'static Mutex<TraceWriter<BufWriter<File>>>> {
 ///
 /// Returning `None` is what keeps the untraced path allocation-free: the caller
 /// holds an `Option` and never builds the per-token id vectors at all.
+///
+/// wasm32v1-none has neither std::fs nor std::env, so tracing can never
+/// be turned on there -- `None` unconditionally, the same value the
+/// native path returns whenever the env var is unset.
+#[cfg(target_arch = "wasm32")]
+pub fn buffer(_tokens: usize) -> Option<BlockRouting> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn buffer(tokens: usize) -> Option<BlockRouting> {
     sink().map(|_| Vec::with_capacity(tokens))
 }
@@ -128,6 +158,10 @@ pub fn buffer(tokens: usize) -> Option<BlockRouting> {
 ///
 /// A diagnostic must not take down a scoring run, so I/O and lock failures are
 /// reported and swallowed rather than propagated.
+#[cfg(target_arch = "wasm32")]
+pub fn record(_layer: usize, _experts: Option<BlockRouting>) {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn record(layer: usize, experts: Option<BlockRouting>) {
     let (Some(experts), Some(sink)) = (experts, sink()) else {
         return;
@@ -137,6 +171,7 @@ pub fn record(layer: usize, experts: Option<BlockRouting>) {
 
 /// Split from [`record`] for the same reason as [`open_sink`]: the global
 /// sink cannot be configured in-process, and the failure arms deserve tests.
+#[cfg(not(target_arch = "wasm32"))]
 fn record_into<W: Write>(sink: &Mutex<TraceWriter<W>>, layer: usize, experts: &BlockRouting) {
     match sink.lock() {
         Ok(mut writer) => {

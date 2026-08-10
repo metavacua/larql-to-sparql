@@ -51,42 +51,58 @@ pub fn dispatch(q6k_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> V
     // rayon work-stealing overhead. Same rationale as
     // `q4_common::q4k_matvec_into`.
     const CHUNK_ROWS: usize = 32;
-    use rayon::prelude::*;
     let q6k_ref = q6k_data;
     let x_ref = x;
-    out.par_chunks_mut(CHUNK_ROWS)
-        .enumerate()
-        .for_each(|(chunk_idx, chunk_slots)| {
-            let row_base = chunk_idx * CHUNK_ROWS;
-            for (local_r, out_val) in chunk_slots.iter_mut().enumerate() {
-                let row = row_base + local_r;
-                if row >= num_rows {
-                    break;
-                }
-                let row_start = row * bytes_per_row;
-                let mut acc = 0.0f32;
-
-                for sb in 0..superblocks {
-                    let block = &q6k_ref[row_start + sb * Q6K_BLOCK_SIZE..][..Q6K_BLOCK_SIZE];
-                    let scales = &block[192..208];
-                    let d_bits = u16::from_le_bytes([block[208], block[209]]);
-                    let d = f16_to_f32(d_bits);
-                    let x_base = sb * 256;
-
-                    for (j, &scale) in scales.iter().enumerate() {
-                        let sc = d * (scale as i8) as f32;
-                        let vals = q6k_subblock_vals(block, j);
-                        let x_sub = &x_ref[x_base + j * 16..x_base + j * 16 + 16];
-                        let mut sub = 0.0f32;
-                        for (v, xi) in vals.iter().zip(x_sub) {
-                            sub += *v as f32 * xi;
-                        }
-                        acc += sc * sub;
-                    }
-                }
-                *out_val = acc;
+    // Shared per-chunk body: identical arithmetic on both targets, only
+    // the schedule differs. rayon has zero no_std support (pattern 9),
+    // so wasm32 (no OS threads at all) runs chunks sequentially via
+    // safe `slice::chunks_mut` instead -- same shape as
+    // cpu/spin_pool.rs's par_chunks_mut wasm32 fallback, kept as its
+    // own local branch here (rather than switching this call site to
+    // spin_pool::par_chunks_mut) so this kernel's native scheduling
+    // stays exactly as tuned, unaffected by LARQL_SPIN_POOL.
+    let chunk_body = |chunk_idx: usize, chunk_slots: &mut [f32]| {
+        let row_base = chunk_idx * CHUNK_ROWS;
+        for (local_r, out_val) in chunk_slots.iter_mut().enumerate() {
+            let row = row_base + local_r;
+            if row >= num_rows {
+                break;
             }
-        });
+            let row_start = row * bytes_per_row;
+            let mut acc = 0.0f32;
+
+            for sb in 0..superblocks {
+                let block = &q6k_ref[row_start + sb * Q6K_BLOCK_SIZE..][..Q6K_BLOCK_SIZE];
+                let scales = &block[192..208];
+                let d_bits = u16::from_le_bytes([block[208], block[209]]);
+                let d = f16_to_f32(d_bits);
+                let x_base = sb * 256;
+
+                for (j, &scale) in scales.iter().enumerate() {
+                    let sc = d * (scale as i8) as f32;
+                    let vals = q6k_subblock_vals(block, j);
+                    let x_sub = &x_ref[x_base + j * 16..x_base + j * 16 + 16];
+                    let mut sub = 0.0f32;
+                    for (v, xi) in vals.iter().zip(x_sub) {
+                        sub += *v as f32 * xi;
+                    }
+                    acc += sc * sub;
+                }
+            }
+            *out_val = acc;
+        }
+    };
+    #[cfg(target_arch = "wasm32")]
+    for (chunk_idx, chunk_slots) in out.chunks_mut(CHUNK_ROWS).enumerate() {
+        chunk_body(chunk_idx, chunk_slots);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        out.par_chunks_mut(CHUNK_ROWS)
+            .enumerate()
+            .for_each(|(chunk_idx, chunk_slots)| chunk_body(chunk_idx, chunk_slots));
+    }
     out
 }
 

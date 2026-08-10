@@ -19,7 +19,25 @@
 //! path. The forward driver's [`set_current_layer`] call is one relaxed atomic
 //! store per MoE layer. See `examples/walk_ffn_v1_moe_within_expert.rs`.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+// core::sync::atomic is the same module std re-exports -- portable
+// regardless of target, no cfg needed. RwLock/Arc<...>-backed ROUTING
+// storage has no core/alloc equivalent (needs real synchronization);
+// set_routing/set_current_layer/prune_act's real bodies are native-only.
+// Their only in-scope caller for `cargo build` is prune_act (from
+// cpu/ops/moe/{forward,expert/q4k}.rs); set_routing/set_current_layer
+// are only ever called from an example binary (examples/
+// walk_ffn_v1_moe_within_expert.rs, out of scope for a library build),
+// so on wasm32 they're a same-signature no-op that leaves ACTIVE
+// permanently false -- the exact state this "off by default" research
+// instrument already starts in, matching the doc comment's own
+// definition of "byte-identical to the un-instrumented path."
+use core::sync::atomic::{AtomicBool, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::AtomicUsize;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Arc, RwLock};
 
 /// How the kept features are chosen inside each expert.
@@ -75,12 +93,18 @@ impl WithinExpertRouting {
 }
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+#[cfg(not(target_arch = "wasm32"))]
 static CURRENT_LAYER: AtomicUsize = AtomicUsize::new(0);
+#[cfg(not(target_arch = "wasm32"))]
 static ROUTING: RwLock<Option<Arc<WithinExpertRouting>>> = RwLock::new(None);
 
 /// Install (or replace) the within-expert routing schedule. `None` disables it
 /// and restores byte-exact parity with the un-instrumented path. Flips the
 /// fast-path [`ACTIVE`] flag accordingly.
+#[cfg(target_arch = "wasm32")]
+pub fn set_routing(_routing: Option<WithinExpertRouting>) {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn set_routing(routing: Option<WithinExpertRouting>) {
     let active = routing.is_some();
     {
@@ -94,6 +118,10 @@ pub fn set_routing(routing: Option<WithinExpertRouting>) {
 /// calls. Called once per MoE layer by the forward driver before the
 /// per-position expert loop (layers run sequentially, so a single atomic store
 /// is sufficient — all of a layer's expert workers read the same value).
+#[cfg(target_arch = "wasm32")]
+pub fn set_current_layer(_layer: usize) {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn set_current_layer(layer: usize) {
     CURRENT_LAYER.store(layer, Ordering::Relaxed);
 }
@@ -110,6 +138,16 @@ pub fn is_active() -> bool {
 /// `act[..inter]` holds the post-activation features; padding columns
 /// (`inter..`) are already zero and are left untouched. No-op (a single relaxed
 /// atomic load) when no routing is installed.
+///
+/// ACTIVE can never become true on wasm32 (set_routing is a no-op
+/// there), so this always takes the fast no-op path -- kept as an
+/// explicit wasm32 stub rather than relying on that implicitly, since
+/// the real body also references the native-only ROUTING/CURRENT_LAYER
+/// statics.
+#[cfg(target_arch = "wasm32")]
+pub fn prune_act(_act: &mut [f32], _inter: usize) {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn prune_act(act: &mut [f32], inter: usize) {
     if !ACTIVE.load(Ordering::Relaxed) {
         return;
