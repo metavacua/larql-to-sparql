@@ -13,7 +13,9 @@ mod scratch;
 #[cfg(test)]
 mod tests;
 
-pub use self::f32::{run_single_expert, run_single_expert_into};
+pub use self::f32::run_single_expert;
+#[cfg(not(target_arch = "wasm32"))]
+pub use self::f32::run_single_expert_into;
 pub use self::norm::{pre_experts_norm, run_single_expert_with_norm};
 pub use self::q4k::{
     quantize_h_norm_for_q4k, run_single_expert_kq_q8k_into, run_single_expert_kq_q8k_parallel_into,

@@ -3,6 +3,7 @@ use crate::cpu::ops::q4k_q8k_dot::{
     q4k_q8k_matvec_into, q6k_q8k_matvec_into, quantize_x_to_q8k, quantize_x_to_q8k_into,
     Q8KActivation,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use crate::options;
 
 /// One integer matvec, dispatched by the store's weight format. The two
@@ -183,9 +184,20 @@ pub fn run_single_expert_kq_q8k_into<'s>(
 ) -> &'s [f32] {
     // Per-stage timing for kernel diagnosis.  Enable with
     // `LARQL_KERNEL_TIMING=1`.  Cached in TLS to avoid syscall per call.
+    //
+    // wasm32v1-none has neither std::env (nothing to read the flag from)
+    // nor std::time::Instant (no OS clock) nor thread_local! (no
+    // threads) -- every timing statement below is cfg'd out there
+    // rather than the whole function, since (unlike run_single_expert_
+    // into in f32.rs) this one *is* called from portable code
+    // (run_single_expert's wasm32 branch). The core numerical logic
+    // (the matvec/combine/prune/quantise calls) is never conditional on
+    // `timing` and stays completely unchanged/unconditional throughout.
+    #[cfg(not(target_arch = "wasm32"))]
     thread_local! {
         static KERNEL_TIMING: bool = options::env_flag(options::ENV_KERNEL_TIMING);
     }
+    #[cfg(not(target_arch = "wasm32"))]
     let timing = KERNEL_TIMING.with(|t| *t);
 
     // Gate/up column count = the activation's quantised width (the STORED,
@@ -215,6 +227,7 @@ pub fn run_single_expert_kq_q8k_into<'s>(
     let gate_bytes = &gate_up_bytes[..half];
     let up_bytes = &gate_up_bytes[half..2 * half];
 
+    #[cfg(not(target_arch = "wasm32"))]
     let mut t = std::time::Instant::now();
     // Back-to-back gate + up matvecs.  Tried fused-gate+up via
     // `q4k_q8k_gate_up_into` (2026-05-01): bench was within noise on the
@@ -232,7 +245,9 @@ pub fn run_single_expert_kq_q8k_into<'s>(
         cols,
         format,
     );
+    #[cfg(not(target_arch = "wasm32"))]
     let t_gate = if timing { Some(t.elapsed()) } else { None };
+    #[cfg(not(target_arch = "wasm32"))]
     if timing {
         t = std::time::Instant::now();
     }
@@ -245,7 +260,9 @@ pub fn run_single_expert_kq_q8k_into<'s>(
         cols,
         format,
     );
+    #[cfg(not(target_arch = "wasm32"))]
     let t_up = if timing { Some(t.elapsed()) } else { None };
+    #[cfg(not(target_arch = "wasm32"))]
     if timing {
         t = std::time::Instant::now();
     }
@@ -259,7 +276,9 @@ pub fn run_single_expert_kq_q8k_into<'s>(
         let u = scratch.up_out[j] + mlp.up_bias(j);
         scratch.act[j] = mlp.rule.combine(g, u);
     }
+    #[cfg(not(target_arch = "wasm32"))]
     let t_act = if timing { Some(t.elapsed()) } else { None };
+    #[cfg(not(target_arch = "wasm32"))]
     if timing {
         t = std::time::Instant::now();
     }
@@ -275,7 +294,9 @@ pub fn run_single_expert_kq_q8k_into<'s>(
     // caller-owned scratch buffer (no allocation on the hot path —
     // eliminates the 150 µs alloc spikes that drag par_iter wall up).
     quantize_x_to_q8k_into(&mut scratch.act_q8k, &scratch.act);
+    #[cfg(not(target_arch = "wasm32"))]
     let t_act_q8k = if timing { Some(t.elapsed()) } else { None };
+    #[cfg(not(target_arch = "wasm32"))]
     if timing {
         t = std::time::Instant::now();
     }
@@ -290,8 +311,10 @@ pub fn run_single_expert_kq_q8k_into<'s>(
         format,
     );
     mlp.add_down_bias(&mut scratch.out);
+    #[cfg(not(target_arch = "wasm32"))]
     let t_down = if timing { Some(t.elapsed()) } else { None };
 
+    #[cfg(not(target_arch = "wasm32"))]
     if timing {
         eprintln!(
             "[expert_q4k_q8k] gate={:.0}us up={:.0}us act={:.0}us \

@@ -1,3 +1,11 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::borrow::Cow;
+#[cfg(target_arch = "wasm32")]
+use alloc::borrow::Cow;
+
 use super::super::cache::{try_cached_dequant, ExpertF32};
 use super::super::math::{matmul_vec, matmul_vec_into};
 use super::q4k::run_single_expert_kq_q8k_into;
@@ -44,12 +52,12 @@ pub fn run_single_expert(
     // The gate/up matrices' STORED row width (block-padded by the writer).
     // Both paths read rows at this stride and pad the input to match.
     let weight_cols = crate::stored_gate_up_cols(gate_up_bytes.len(), inter, format, hidden);
-    let h_w: std::borrow::Cow<'_, [f32]> = if weight_cols == hidden {
-        std::borrow::Cow::Borrowed(h_norm)
+    let h_w: Cow<'_, [f32]> = if weight_cols == hidden {
+        Cow::Borrowed(h_norm)
     } else {
         let mut padded = vec![0.0f32; weight_cols];
         padded[..hidden].copy_from_slice(h_norm);
-        std::borrow::Cow::Owned(padded)
+        Cow::Owned(padded)
     };
 
     // Integer direct-from-mmap path (NEON SDOT on aarch64), Q4_K or Q6_K.
@@ -64,43 +72,70 @@ pub fn run_single_expert(
         && weight_cols.is_multiple_of(256)
         && !super::super::q4k_direct_disabled()
     {
-        thread_local! {
-            static SCRATCH: std::cell::RefCell<Option<ExpertScratch>> =
-                const { std::cell::RefCell::new(None) };
+        // thread_local! has no core/alloc equivalent at all (no threads on
+        // wasm32v1-none to be local to). Native keeps the persistent
+        // per-thread scratch (reused across calls, the optimization this
+        // whole branch exists for); wasm32 (single execution context, no
+        // real concurrency to guard against) allocates fresh scratch each
+        // call instead -- numerically identical, just without the
+        // cross-call reuse. Same "correctness over performance" tradeoff
+        // as cpu/ops/moe/cache.rs's wasm32 cache-miss-always path.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut scratch = ExpertScratch::new(hidden, inter, inter_padded);
+            let mut hb = Q8KActivation::with_capacity(0);
+            quantize_x_to_q8k_into(&mut hb, &h_w);
+            let h2 = run_single_expert_kq_q8k_into(
+                &mut scratch,
+                &hb,
+                gate_up_bytes,
+                down_bytes,
+                inter,
+                format,
+                mlp,
+            );
+            return h2.to_vec();
         }
-        // Quantise h_norm into a per-thread scratch buffer too, reusing
-        // capacity across calls.  Same pattern as ExpertScratch — the
-        // h_norm is the same length on every call from the HTTP path, so
-        // resize is a no-op after the first hit.
-        thread_local! {
-            static H_Q8K: std::cell::RefCell<Q8KActivation> =
-                std::cell::RefCell::new(Q8KActivation::with_capacity(0));
-        }
-        return SCRATCH.with(|cell| {
-            let mut borrow = cell.borrow_mut();
-            let scratch =
-                borrow.get_or_insert_with(|| ExpertScratch::new(hidden, inter, inter_padded));
-            if scratch.gate_out.len() != inter
-                || scratch.act.len() != inter_padded
-                || scratch.out.len() != hidden
-            {
-                *scratch = ExpertScratch::new(hidden, inter, inter_padded);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            thread_local! {
+                static SCRATCH: std::cell::RefCell<Option<ExpertScratch>> =
+                    const { std::cell::RefCell::new(None) };
             }
-            H_Q8K.with(|hcell| {
-                let mut hb = hcell.borrow_mut();
-                quantize_x_to_q8k_into(&mut hb, &h_w);
-                let h2 = run_single_expert_kq_q8k_into(
-                    scratch,
-                    &hb,
-                    gate_up_bytes,
-                    down_bytes,
-                    inter,
-                    format,
-                    mlp,
-                );
-                h2.to_vec()
-            })
-        });
+            // Quantise h_norm into a per-thread scratch buffer too, reusing
+            // capacity across calls.  Same pattern as ExpertScratch — the
+            // h_norm is the same length on every call from the HTTP path, so
+            // resize is a no-op after the first hit.
+            thread_local! {
+                static H_Q8K: std::cell::RefCell<Q8KActivation> =
+                    std::cell::RefCell::new(Q8KActivation::with_capacity(0));
+            }
+            return SCRATCH.with(|cell| {
+                let mut borrow = cell.borrow_mut();
+                let scratch =
+                    borrow.get_or_insert_with(|| ExpertScratch::new(hidden, inter, inter_padded));
+                if scratch.gate_out.len() != inter
+                    || scratch.act.len() != inter_padded
+                    || scratch.out.len() != hidden
+                {
+                    *scratch = ExpertScratch::new(hidden, inter, inter_padded);
+                }
+                H_Q8K.with(|hcell| {
+                    let mut hb = hcell.borrow_mut();
+                    quantize_x_to_q8k_into(&mut hb, &h_w);
+                    let h2 = run_single_expert_kq_q8k_into(
+                        scratch,
+                        &hb,
+                        gate_up_bytes,
+                        down_bytes,
+                        inter,
+                        format,
+                        mlp,
+                    );
+                    h2.to_vec()
+                })
+            });
+        }
     }
 
     let gate_up_w = try_cached_dequant(gate_up_bytes, format, 2 * inter * weight_cols)
@@ -143,6 +178,17 @@ pub fn run_single_expert(
 /// `h_norm` is already pre-normed (see `pre_experts_norm`).  Returns a
 /// borrow of `scratch.out` so the caller can `clone_from_slice` into the
 /// per-shard accumulator before reusing the scratch for the next expert.
+///
+/// Native-only: confirmed via grep zero production call sites in this
+/// workspace (only tests/mod.rs exercises it) -- unlike
+/// `run_single_expert` above (called from expert/norm.rs), so nothing
+/// portable depends on it. Its per-stage `std::time::Instant` timing
+/// instrumentation (`LARQL_MOE_EXPERT_TIMING=1`) touches ~15 call
+/// sites across two branches; gating the whole function is safer and
+/// more honest than either a large unverified duplication or leaving
+/// this file's other function unreachable behind a partial fix. A
+/// documented gap, same shape as cpu/ops/moe/forward.rs's add_expert.
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub fn run_single_expert_into<'s>(
     scratch: &'s mut ExpertScratch,
@@ -168,12 +214,12 @@ pub fn run_single_expert_into<'s>(
     // Stored gate/up row width (block-padded by the writer); the input is
     // zero-padded to match when they differ. See `run_single_expert`.
     let weight_cols = crate::stored_gate_up_cols(gate_up_bytes.len(), inter, format, hidden);
-    let h_w: std::borrow::Cow<'_, [f32]> = if weight_cols == hidden {
-        std::borrow::Cow::Borrowed(h_norm)
+    let h_w: Cow<'_, [f32]> = if weight_cols == hidden {
+        Cow::Borrowed(h_norm)
     } else {
         let mut padded = vec![0.0f32; weight_cols];
         padded[..hidden].copy_from_slice(h_norm);
-        std::borrow::Cow::Owned(padded)
+        Cow::Owned(padded)
     };
     debug_assert_eq!(scratch.gate_out.len(), inter);
     debug_assert_eq!(scratch.up_out.len(), inter);
