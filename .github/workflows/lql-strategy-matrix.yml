@@ -374,7 +374,7 @@ jobs:
             echo "$c exit=$?" >> probe/help.index
           done
           cat probe/help.index
-      - name: All 38 subcommands — the guessed real invocations
+      - name: The guessed real invocations, one row per subcommand or variant
         run: |
           set +e -u
           TMP=$(mktemp -d)
@@ -394,9 +394,9 @@ jobs:
             "convert-quantize-q4k|convert quantize q4k --input $TMP/v.vindex --output $TMP/q.vindex"
             "convert-quantize-fp4|convert quantize fp4 --input $TMP/v.vindex --output $TMP/fp4.vindex"
             "convert-gguf-to-vindex|convert gguf-to-vindex $TMP/nomodel.gguf -o $TMP/gguf.vindex"
-            "convert-safetensors|convert safetensors-to-vindex $TMP/nomodel -o $TMP/st.vindex"
-            "convert-ggufinfo|convert gguf-info $TMP/nomodel.gguf"
-            "convert-add-feature-major|convert add-feature-major-down --input $TMP/q.vindex"
+            "convert-safetensors-to-vindex|convert safetensors-to-vindex $TMP/nomodel -o $TMP/st.vindex"
+            "convert-gguf-info|convert gguf-info $TMP/nomodel.gguf"
+            "convert-add-feature-major-down|convert add-feature-major-down --input $TMP/q.vindex"
             "build|build $TMP/Vindexfile -o $TMP/b.vindex"
             "slice|slice $TMP/v.vindex --output $TMP/s.vindex --kind browse"
             "compile|compile --base $TMP/nomodel --vindex $TMP/e.vlp --output $TMP/c"
