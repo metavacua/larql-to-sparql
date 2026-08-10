@@ -13,6 +13,7 @@
 extern crate alloc;
 
 pub mod architectures;
+mod collections;
 pub mod config;
 pub mod connectors;
 pub mod defaults;

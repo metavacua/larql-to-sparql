@@ -49,6 +49,10 @@ thiserror = { version = "2", default-features = false }
 # un-gated dependency," a *feature flag* on an already-gated one can
 # reintroduce the same poisoning).
 ndarray = { version = "0.16", default-features = false }
+# See crates/larql-core/Cargo.toml for the pattern-4 (std-collection-
+# needs-no-std-hasher) rationale -- same fix, this crate's own HashMap/
+# HashSet usage (weights.rs) needs it too.
+hashbrown = { version = "0.15", default-features = false, features = ["serde"] }
 
 [features]
 default = []

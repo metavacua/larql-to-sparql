@@ -20,6 +20,9 @@ use crate::prelude::*;
 /// spelling, since the tensors come from `transformers`' per-head
 /// RMSNorm on Q and K rather than anything family-specific.
 pub(crate) mod qk_norm {
+    #[cfg(target_arch = "wasm32")]
+    use crate::prelude::*;
+
     /// Query-norm weight, relative to a layer prefix.
     const Q_SUFFIX: &str = "self_attn.q_norm.weight";
     /// Key-norm weight, relative to a layer prefix.
@@ -63,6 +66,9 @@ pub(crate) mod qk_norm {
 /// tensor per layer (GPT-OSS's MXFP4 blocks) name them differently and
 /// do not use this.
 pub(crate) mod moe_experts {
+    #[cfg(target_arch = "wasm32")]
+    use crate::prelude::*;
+
     /// Router weight, relative to a layer prefix.
     const ROUTER_SUFFIX: &str = "mlp.gate.weight";
 
@@ -163,6 +169,9 @@ pub(crate) mod moe_experts {
 /// the architecture that advertises them — a drift here means the backend
 /// asks for a key that exists under another name and silently gets nothing.
 pub(crate) mod mxfp4_dequantised {
+    #[cfg(target_arch = "wasm32")]
+    use crate::prelude::*;
+
     /// Container segment the loader nests dequantised experts under.
     const EXPERTS_PREFIX: &str = "block_sparse_moe.experts";
     /// Mixtral's name for the gate projection.
@@ -249,6 +258,9 @@ pub(crate) mod mxfp4_dequantised {
 /// byte-identical because the names come from `transformers`'
 /// `*Attention` module layout, not from anything model-specific.
 pub(crate) mod attn_bias {
+    #[cfg(target_arch = "wasm32")]
+    use crate::prelude::*;
+
     /// Query-projection bias, relative to a layer prefix.
     const Q_SUFFIX: &str = "self_attn.q_proj.bias";
     /// Key-projection bias, relative to a layer prefix.

@@ -2,10 +2,19 @@
 
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
+use crate::collections::{HashMap, HashSet};
 use crate::ModelArchitecture;
+// Mmap is inherently native (no filesystem/mmap on wasm32v1-none). Its
+// one field (ModelWeights::packed_mmaps) and every site that touches it
+// are gated below rather than excluding this whole file -- WeightArray
+// and ModelWeights are otherwise-portable types referenced from
+// architectures/gpt_oss.rs and config/architecture.rs (confirmed via
+// grep before making this call), so excluding the file wholesale would
+// have broken those. See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
+// Task 7.
+#[cfg(not(target_arch = "wasm32"))]
 use memmap2::Mmap;
 use ndarray::ArcArray2;
-use std::collections::{HashMap, HashSet};
 
 /// Type alias for weight tensors — ArcArray2 supports both owned and shared storage.
 /// Owned: from safetensors loading (heap). Shared: from mmap (zero-copy).
@@ -149,6 +158,9 @@ pub struct ModelWeights {
     pub raw_bytes: HashMap<String, Vec<u8>>,
     /// Memory-mapped files for large packed-byte tensors (experts_packed.bin, etc.).
     /// Each entry maps a file name to its Mmap handle so the OS can page-in on demand.
+    /// Absent on wasm32 (no mmap there) -- `get_packed_bytes` falls back
+    /// to `raw_bytes` unconditionally on that target instead.
+    #[cfg(not(target_arch = "wasm32"))]
     pub packed_mmaps: HashMap<String, Mmap>,
     /// Tensors skipped during loading because their dtype is not convertible to f32.
     /// Each entry is `(tensor_key, dtype_name)`. Integer tensors (attention masks,
@@ -191,6 +203,7 @@ impl ModelWeights {
     /// Checks mmap ranges first (production: large packed files), then
     /// falls back to `raw_bytes` (tests and small in-memory tensors).
     pub fn get_packed_bytes(&self, key: &str) -> Option<&[u8]> {
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some((file, offset, length)) = self.packed_byte_ranges.get(key) {
             if let Some(mmap) = self.packed_mmaps.get(file) {
                 let end = offset.checked_add(*length)?;
@@ -276,7 +289,7 @@ impl ModelWeights {
             .collect();
         for key in &keys_to_remove {
             if let Some(arr) = self.tensors.remove(key) {
-                freed += arr.len() * std::mem::size_of::<f32>();
+                freed += arr.len() * core::mem::size_of::<f32>();
             }
         }
         // Also drop FFN bias vectors
@@ -288,7 +301,7 @@ impl ModelWeights {
             .collect();
         for key in &vec_keys {
             if let Some(v) = self.vectors.remove(key) {
-                freed += v.len() * std::mem::size_of::<f32>();
+                freed += v.len() * core::mem::size_of::<f32>();
             }
         }
         // Drop packed expert byte tensors (Gemma 4 A4B experts.gate_up_proj / experts.down_proj)
@@ -323,6 +336,7 @@ impl ModelWeights {
                 freed += length;
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
         if !packed_keys.is_empty() {
             let referenced_files: HashSet<&str> = self
                 .packed_byte_ranges
@@ -357,7 +371,7 @@ impl ModelWeights {
             .collect();
         for key in &keys_to_remove {
             if let Some(arr) = self.tensors.remove(key) {
-                freed += arr.len() * std::mem::size_of::<f32>();
+                freed += arr.len() * core::mem::size_of::<f32>();
             }
         }
         let vec_keys: Vec<String> = self
@@ -368,7 +382,7 @@ impl ModelWeights {
             .collect();
         for key in &vec_keys {
             if let Some(v) = self.vectors.remove(key) {
-                freed += v.len() * std::mem::size_of::<f32>();
+                freed += v.len() * core::mem::size_of::<f32>();
             }
         }
         freed
@@ -383,7 +397,7 @@ impl ModelWeights {
     /// Replaces `lm_head` with an empty array so the ModelWeights struct
     /// remains valid.
     pub fn drop_lm_head(&mut self) -> usize {
-        let freed = self.lm_head.len() * std::mem::size_of::<f32>();
+        let freed = self.lm_head.len() * core::mem::size_of::<f32>();
         self.lm_head = ndarray::ArcArray2::from_shape_vec((0, 0), Vec::new())
             .expect("empty 0x0 array is always valid");
         freed
@@ -396,7 +410,7 @@ impl ModelWeights {
     ///
     /// Typical savings: ~2.7 GB for 4B / ~5.6 GB for 31B.
     pub fn drop_embed(&mut self) -> usize {
-        let freed = self.embed.len() * std::mem::size_of::<f32>();
+        let freed = self.embed.len() * core::mem::size_of::<f32>();
         self.embed = ndarray::ArcArray2::from_shape_vec((0, 0), Vec::new())
             .expect("empty 0x0 array is always valid");
         freed
