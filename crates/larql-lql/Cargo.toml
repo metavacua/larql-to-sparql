@@ -10,7 +10,11 @@ description = "LQL parser, executor, and REPL for LARQL"
 [dependencies]
 larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
-larql-core = { path = "../larql-core" }
+# default-features = false: see crates/larql-inference/Cargo.toml's
+# comment on this same edge -- larql-core's default features ("http",
+# "msgpack") pull in reqwest/rmp-serde, and Cargo unifies features
+# across the whole resolved graph, not per edge.
+larql-core = { path = "../larql-core", default-features = false }
 larql-inference = { path = "../larql-inference" }
 larql-models = { path = "../larql-models" }
 larql-vindex = { path = "../larql-vindex" }

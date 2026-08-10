@@ -12,7 +12,13 @@ name = "larql"
 path = "src/main.rs"
 
 [dependencies]
-larql-core = { path = "../larql-core" }
+# default-features = false: see crates/larql-inference/Cargo.toml's
+# comment on this same edge -- larql-core's default features ("http",
+# "msgpack") pull in reqwest/rmp-serde, and Cargo unifies features
+# across the whole resolved graph, not per edge. No source in this
+# crate references larql_core's http/msgpack-gated APIs (confirmed via
+# grep).
+larql-core = { path = "../larql-core", default-features = false }
 larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-inference = { path = "../larql-inference" }
@@ -23,6 +29,21 @@ larql-vindex = { path = "../larql-vindex" }
 larql-vindex-spec = { path = "../larql-vindex-spec" }
 larql-factory = { path = "../larql-factory" }
 clap = { version = "4", features = ["derive", "env"] }
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. Note: this crate is a [[bin]] target whose
+# main.rs itself implicitly requires std (no #![no_std]), so this alone
+# will not get larql-cli itself compiling on wasm32v1-none -- it only
+# clears the dependency-level std wall so the *next* boundary (the bin's
+# own use of std) becomes visible instead of being masked by it.
+# base64/ndarray have a genuine no_std mode; everything else below is
+# inherently native (terminal progress bars, networking, native
+# tokenizer bindings, mmap-based file loading, OS threads, filesystem)
+# -- pattern 9, no wasm32 entry at all.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 indicatif = "0.17"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 base64 = "0.22"
@@ -41,21 +62,12 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # is omitted — not test-only, the CLI needs this at runtime.
 tempfile = "3"
 
-# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
-# std-feature) rationale. Note: this crate is a [[bin]] target whose
-# main.rs itself implicitly requires std (no #![no_std]), so this alone
-# will not get larql-cli itself compiling on wasm32v1-none -- it only
-# clears the dependency-level std wall so the *next* boundary (the bin's
-# own use of std) becomes visible instead of being masked by it.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
+base64 = { version = "0.22", default-features = false }
+ndarray = { version = "0.16", default-features = false }
 
 [features]
 default = ["gpu"]

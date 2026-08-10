@@ -21,7 +21,19 @@ larql-compute = { path = "../larql-compute" }
 # Apple-only sibling backend.  Optional + activated by the local
 # `gpu` feature; non-Mac builds skip the dep graph entirely.
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
-larql-core = { path = "../larql-core" }
+# default-features = false: larql-core's default features ("http",
+# "msgpack") pull in reqwest/rmp-serde. Refinement of pattern 7/8: a
+# workspace sibling's *default features*, if left enabled at even ONE
+# call site anywhere in the resolved graph, apply everywhere that
+# dependency is used -- Cargo unifies features across the whole build,
+# not per edge. larql-vindex already restricts this correctly; this
+# crate's un-restricted declaration was silently re-poisoning the
+# wasm32 build for every crate depending on both (confirmed via
+# `cargo tree --target wasm32v1-none -i js-sys`, a metadata-only
+# inspection, not a build/check/test -- traced larql-kv's persistent
+# E0463 cascade to exactly this edge). No source in this crate
+# references larql_core's http/msgpack-gated APIs (confirmed via grep).
+larql-core = { path = "../larql-core", default-features = false }
 larql-vindex = { path = "../larql-vindex" }
 larql-execution = { path = "../larql-execution" }
 # larql-router-protocol is already self-gating (its own Cargo.toml/
