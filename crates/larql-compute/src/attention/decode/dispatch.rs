@@ -5,6 +5,9 @@ use crate::attention::SharedKV;
 use super::gqa_step::gqa_attention_decode_step_windowed;
 use super::q4k_direct::run_attention_block_decode_step_q4k_direct;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Decode-step attention with optional GPU-accelerated projections
 /// (Q/K/V/O matmuls route through `ComputeBackend::matmul_transb` when
 /// `backend` is `Some`). GQA softmax + weighted-V stays on CPU —
@@ -168,7 +171,7 @@ pub fn run_attention_block_decode_step_backend(
         softcap,
         crate::attention::sinks::resolve(
             arch.attn_sinks_key(layer),
-            &weights.vectors,
+            |k| weights.vectors.get(k).map(|v| v.as_slice()),
             num_q,
             layer,
         ),

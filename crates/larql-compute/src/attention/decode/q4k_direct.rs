@@ -5,6 +5,9 @@ use crate::attention::SharedKV;
 use super::dispatch::attn_int8_enabled;
 use super::gqa_step::gqa_attention_decode_step;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Int8 decode-step projection: `[1, num_rows] = qw × x_q8k`. The activation
 /// is pre-quantised ONCE by the caller (Q/K/V share `h_norm`'s Q8_K form).
 /// The per-call kernels are single-threaded, so rows are rayon-chunked here
@@ -315,7 +318,7 @@ pub fn decode_step_attend_q4k_direct(
         softcap,
         crate::attention::sinks::resolve(
             arch.attn_sinks_key(layer),
-            &weights.vectors,
+            |k| weights.vectors.get(k).map(|v| v.as_slice()),
             num_q,
             layer,
         ),

@@ -5,6 +5,9 @@
 
 use ndarray::ArrayView1;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Vector dot product: a · b → scalar.
 #[inline]
 pub fn dot(a: &ArrayView1<f32>, b: &ArrayView1<f32>) -> f32 {

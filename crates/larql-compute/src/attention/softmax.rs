@@ -24,6 +24,9 @@
 //! Architectures without sinks pass `None` and get an ordinary softmax
 //! summing to one.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Softmax `scores` in place, optionally against an attention sink.
 ///
 /// With `sink: None` the result sums to 1. With `sink: Some(s)` the

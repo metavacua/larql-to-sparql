@@ -122,7 +122,7 @@ pub fn predict_kquant_prefill_with_state(
     let mut timings = CachedTimings::default();
     // Forward-local dequant scratch — per-forward derived state; `weights`
     // stays immutable. Readers resolve via with_scratch (scratch ∪ canonical).
-    let mut scratch = larql_models::DequantScratch::new();
+    let mut scratch = larql_models::DequantScratch::default();
 
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
@@ -235,7 +235,7 @@ pub fn predict_kquant_decode_step(
         return None;
     }
     let mut timings = CachedTimings::default();
-    let mut scratch = larql_models::DequantScratch::new();
+    let mut scratch = larql_models::DequantScratch::default();
 
     // 1-row embed + 1-row PLE for the new token.
     let mut h = embed_tokens_pub(weights, &[token_id]);
@@ -774,7 +774,7 @@ pub fn attention_decode_step_native(
         softcap,
         crate::attention::sinks::resolve(
             arch.attn_sinks_key(layer),
-            &weights.vectors,
+            |k| weights.vectors.get(k).map(|v| v.as_slice()),
             num_q,
             layer,
         ),

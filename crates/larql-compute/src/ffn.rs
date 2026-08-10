@@ -23,6 +23,9 @@ pub use weight::{
 
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Number of elements in one Q4_K / Q8_K super-block (the block size
 /// both formats share). Hidden sizes that are not a multiple of this
 /// value can't use the block-quantised wire formats — dispatch checks

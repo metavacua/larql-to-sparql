@@ -478,7 +478,12 @@ fn run_attention_block_core(
     // Attention sinks: one learned logit per query head, competing in the
     // softmax and then discarded (GPT-OSS). Absent for every other
     // architecture, in which case the softmax is the ordinary one.
-    let sinks = super::sinks::resolve(arch.attn_sinks_key(layer), &weights.vectors, num_q, layer);
+    let sinks = super::sinks::resolve(
+        arch.attn_sinks_key(layer),
+        |k| weights.vectors.get(k).map(|v| v.as_slice()),
+        num_q,
+        layer,
+    );
     let reduced_qk_weights = reduced_qk_rank.map(|rank| {
         gqa_reduced_qk_all_weights(
             &q_rope, &k_rope, num_q, head_dim, reps, scale, seq_len, softcap, sinks, rank,

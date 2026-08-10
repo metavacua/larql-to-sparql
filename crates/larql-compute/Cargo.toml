@@ -35,6 +35,9 @@ ndarray = { version = "0.16", default-features = false }
 # needs-no-std-hasher) rationale -- this crate's own HashMap/HashSet
 # usage needs it too.
 hashbrown = { version = "0.15", default-features = false }
+# core's f32/f64 lack sqrt/exp/tanh/round/etc. (pattern 6) -- see
+# alloc_prelude.rs for the rationale, same fix as larql-core/-models/-factory.
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
