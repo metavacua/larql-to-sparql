@@ -120,7 +120,7 @@ jobs:
             echo "workflow_dispatch: ignoring commit/title skip markers"
           fi
           case "$TEXT" in
-            *"[skip ci]"*)      probe=false; matrix=false; quality=false; compile=false ;;
+            *"[skip ci]"*)      probe=false; matrix=false; quality=false; compile=false; rm=false ;;
           esac
           case "$TEXT" in *"[skip probe]"*)   probe=false ;;   esac
           case "$TEXT" in *"[skip matrix]"*)  matrix=false ;;  esac
@@ -651,6 +651,11 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - name: Restore HF snapshot cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/huggingface
+          key: hf-snapshot-smol135-v2
       - name: Prep
         run: |
           chmod +x bin/larql
