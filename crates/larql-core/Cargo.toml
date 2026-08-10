@@ -44,6 +44,12 @@ thiserror = { version = "2", default-features = false }
 # hasher instead. See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
 # Task 7, pattern 4: std-collection-needs-no-std-hasher.
 hashbrown = { version = "0.15", default-features = false, features = ["serde"] }
+# f64::ln() (mock_provider.rs) is a std-only inherent method -- core's f64
+# has no transcendental math, since that needs a libm implementation and
+# std links against the platform's. libm is the standard pure-Rust,
+# no_std-compatible replacement (free functions, e.g. libm::log(x) for
+# ln). Pattern 6: core-f64-lacks-transcendental-math.
+libm = { version = "0.2", default-features = false }
 
 [features]
 default = ["http", "msgpack"]

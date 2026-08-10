@@ -54,7 +54,7 @@ impl Edge {
 
     pub fn with_metadata(mut self, key: &str, value: serde_json::Value) -> Self {
         self.metadata
-            .get_or_insert_with(HashMap::new)
+            .get_or_insert_with(HashMap::default)
             .insert(key.to_string(), value);
         self
     }
