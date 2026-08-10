@@ -36,7 +36,7 @@ on:
         description: "Which parts to run"
         type: choice
         default: all
-        options: [all, probe, matrix, quality, compile, none]
+        options: [all, probe, matrix, quality, compile, rm, none]
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
@@ -74,6 +74,7 @@ jobs:
     outputs:
       probe: ${{ steps.g.outputs.probe }}
       compile: ${{ steps.g.outputs.compile }}
+      rm: ${{ steps.g.outputs.rm }}
       matrix: ${{ steps.g.outputs.matrix }}
       quality: ${{ steps.g.outputs.quality }}
     steps:
@@ -94,13 +95,14 @@ jobs:
           MSG="$(git log -1 --pretty=%B)"
           set -uo pipefail
           SCOPE="${SCOPE:-all}"
-          probe=false; matrix=false; quality=false; compile=false
+          probe=false; matrix=false; quality=false; compile=false; rm=false
           case "$SCOPE" in
-            all)     probe=true;  matrix=true;  quality=true; compile=true ;;
+            all)     probe=true;  matrix=true;  quality=true; compile=true; rm=true ;;
             probe)   probe=true ;;
             matrix)  matrix=true ;;
             quality) quality=true ;;
             compile) compile=true ;;
+            rm)      rm=true ;;
             none)    : ;;
           esac
           # A skip marker in the commit message or PR title turns a part off
@@ -124,11 +126,12 @@ jobs:
           case "$TEXT" in *"[skip matrix]"*)  matrix=false ;;  esac
           case "$TEXT" in *"[skip quality]"*) quality=false ;; esac
           case "$TEXT" in *"[skip compile]"*) compile=false ;; esac
+          case "$TEXT" in *"[skip rm]"*) rm=false ;; esac
           {
             echo "probe=$probe"; echo "matrix=$matrix"
-            echo "quality=$quality"; echo "compile=$compile"
+            echo "quality=$quality"; echo "compile=$compile"; echo "rm=$rm"
           } >> "$GITHUB_OUTPUT"
-          echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality compile=$compile"
+          echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality compile=$compile rm=$rm"
 
   # Enumerate every leg as JSON → consumed by the matrix via fromJSON. A malformed
   # plan fails here in seconds, before any leg runs.
@@ -248,7 +251,8 @@ jobs:
     if: >-
       needs.gate.outputs.probe == 'true' ||
       needs.gate.outputs.matrix == 'true' ||
-      needs.gate.outputs.compile == 'true'
+      needs.gate.outputs.compile == 'true' ||
+      needs.gate.outputs.rm == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -627,6 +631,99 @@ jobs:
         if: always()
         with:
           name: compile-evidence
+          retention-days: 2
+          path: |
+            ev/*.txt
+            ev/*.out
+            ev/*.err
+
+  rm-evidence:
+    needs: [gate, build]
+    if: needs.gate.outputs.rm == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prep
+        run: |
+          chmod +x bin/larql
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev
+          python -m pip install --quiet huggingface_hub
+          mkdir -p ev
+      - name: Fetch the input model and cache it
+        run: |
+          set +e -u
+          python - <<'PY' > ev/input-model.path 2> ev/input-model.err
+          from huggingface_hub import snapshot_download
+          print(snapshot_download("HuggingFaceTB/SmolLM2-135M-Instruct",
+                                  ignore_patterns=["onnx/*", "*.onnx", "*.onnx_data"]))
+          PY
+      - name: Extract a vindex
+        run: |
+          set +e -u
+          timeout 3600 ./bin/larql extract HuggingFaceTB/SmolLM2-135M-Instruct \
+            -o ev/test.vindex --level browse > ev/01-extract.out 2> ev/01-extract.err
+          echo "extract exit=$?" | tee -a ev/01-extract.out
+      - name: Test the destroy path — link, verify, remove, re-verify
+        run: |
+          set +e -u
+          # Link the vindex with a shorthand name
+          ./bin/larql link ev/test.vindex --as test-rm-name > ev/02-link.out 2> ev/02-link.err
+          link_exit=$?
+          echo "link exit=$link_exit" | tee -a ev/02-link.err
+
+          # Verify it was registered
+          ./bin/larql list > ev/03-list-before.out 2> ev/03-list-before.err
+          echo "list (before rm) exit=$?" | tee -a ev/03-list-before.err
+
+          # Remove it
+          ./bin/larql rm test-rm-name -y > ev/04-rm.out 2> ev/04-rm.err
+          rm_exit=$?
+          echo "rm exit=$rm_exit" | tee -a ev/04-rm.err
+
+          # Verify it was removed
+          ./bin/larql list > ev/05-list-after.out 2> ev/05-list-after.err
+          echo "list (after rm) exit=$?" | tee -a ev/05-list-after.err
+
+          # Check if test-rm-name is still in the list
+          {
+            echo "=== DESTROY PATH TEST RESULTS ==="
+            echo "Link exit code: $link_exit"
+            echo "Rm exit code: $rm_exit"
+            echo "--- List output BEFORE rm ---"
+            cat ev/03-list-before.out
+            echo "--- List output AFTER rm ---"
+            cat ev/05-list-after.out
+            if grep -q "test-rm-name" ev/03-list-before.out; then
+              echo "PASS: test-rm-name was in the list before rm"
+            else
+              echo "FAIL: test-rm-name was NOT in the list before rm"
+            fi
+            if grep -q "test-rm-name" ev/05-list-after.out; then
+              echo "FAIL: test-rm-name is STILL in the list after rm"
+            else
+              echo "PASS: test-rm-name was removed from the list"
+            fi
+          } | tee ev/06-summary.txt
+      - name: Show every capture
+        if: always()
+        run: |
+          set +e
+          for f in ev/*.out ev/*.err ev/*.txt; do
+            echo "───── $f ($(wc -c < "$f") bytes)"
+            cat "$f"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rm-evidence
           retention-days: 2
           path: |
             ev/*.txt
