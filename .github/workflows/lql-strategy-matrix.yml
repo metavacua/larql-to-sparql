@@ -403,7 +403,7 @@ jobs:
             "verify|verify $TMP/v.vindex"
             "diag|diag $TMP/v.vindex"
             "capabilities|capabilities"
-            "run|run $TMP/v.vindex --prompt hi --max-tokens 2"
+            "run|run $TMP/v.vindex hi --max-tokens 2"
             "chat|chat $TMP/v.vindex --max-tokens 1"
             "serve|serve $TMP/v.vindex --port 18080"
             "bench|bench $TMP/v.vindex --tokens 2"
