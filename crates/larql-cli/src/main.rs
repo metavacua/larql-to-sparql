@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::type_complexity)]
 // Architectural lints suppressed crate-wide:

@@ -1,0 +1,117 @@
+name: larql-cli-gating
+
+on:
+  push:
+    branches: [gating/larql-cli-wasm-and-safe]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wasm32v1-none:
+    name: wasm32v1-none / ${{ matrix.crate }} / ${{ matrix.os }} / ${{ matrix.features }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+        crate:
+          - larql-cli
+          - larql-core
+          - larql-compute
+          - larql-compute-metal
+          - larql-inference
+          - larql-kv
+          - larql-models
+          - larql-lql
+          - larql-vindex
+          - larql-vindex-spec
+          - larql-factory
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Install OpenBLAS (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features
+          else
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }}
+          fi
+
+  forbid-unsafe:
+    name: forbid-unsafe / larql-cli / ${{ matrix.os }} / ${{ matrix.features }}
+    needs: wasm32v1-none
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install OpenBLAS (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
+      - name: cargo build (forbid unsafe_code)
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build -p larql-cli --no-default-features
+          else
+            cargo build -p larql-cli
+          fi
