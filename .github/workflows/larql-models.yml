@@ -25,6 +25,10 @@ on:
       - '.github/workflows/larql-models.yml'
   workflow_dispatch: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test · ${{ matrix.os }}

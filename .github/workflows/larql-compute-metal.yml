@@ -30,6 +30,10 @@ on:
       - '.github/workflows/larql-compute-metal.yml'
   workflow_dispatch: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test · macos-14

@@ -44,6 +44,10 @@ on:
 env:
   LARQL_SPIN_POOL: 0
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test · ${{ matrix.os }}
