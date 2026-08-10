@@ -15,48 +15,21 @@ cancelled, which is real waste and PR-checks clutter, not just cosmetic.
 
 Usage: verify_concurrency.py [ref]   (defaults to HEAD; reads via `git show`)
 """
-import subprocess
 import sys
 
 import yaml
 
-# All 17 workflow files that fire on this branch's PR (16 Task-6-gated +
-# larql-cli-gating.yml itself). release.yml is excluded: tag-only trigger,
-# never fires here, so an absent concurrency block there is irrelevant.
-EXPECTED_FILES = [
-    "bench-regress.yml",
-    "larql-boundary.yml",
-    "larql-cli-gating.yml",
-    "larql-cli.yml",
-    "larql-compute-metal.yml",
-    "larql-compute.yml",
-    "larql-core.yml",
-    "larql-demos.yml",
-    "larql-factory.yml",
-    "larql-inference.yml",
-    "larql-kv.yml",
-    "larql-lql.yml",
-    "larql-models.yml",
-    "larql-server.yml",
-    "larql-vindex.yml",
-    "quality.yml",
-    "shannon-verify.yml",
-]
+from verify_gating_skip import EXPECTED_JOBS, git_show_reader
 
-
-def git_show_reader(ref):
-    def read(relpath):
-        path = f".github/workflows/{relpath}"
-        result = subprocess.run(
-            ["git", "show", f"{ref}:{path}"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise FileNotFoundError(f"{path} not found at {ref}: {result.stderr.strip()}")
-        return result.stdout
-
-    return read
+# All 17 workflow files that fire on this branch's PR: the 16 Task-6-gated
+# files (EXPECTED_JOBS' keys) plus larql-cli-gating.yml itself, which isn't
+# in EXPECTED_JOBS (that dict is specifically the set Task 6 branch-gated;
+# larql-cli-gating.yml was never a candidate for that gate, since it's the
+# workflow we want to keep running). Derived rather than hand-copied so the
+# two scripts' file sets can't silently drift apart. release.yml is
+# excluded: tag-only trigger, never fires here, so an absent concurrency
+# block there is irrelevant.
+EXPECTED_FILES = list(EXPECTED_JOBS) + ["larql-cli-gating.yml"]
 
 
 def evaluate(read):

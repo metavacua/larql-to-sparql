@@ -41,25 +41,29 @@ jobs:
         with:
           targets: wasm32v1-none
 
-      - name: Install OpenBLAS (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
-
-      - name: Install OpenBLAS (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
-          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
-          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
-          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+      # No OpenBLAS install here (unlike forbid-unsafe below): every BLAS
+      # dependency in this workspace is gated behind
+      # cfg(target_os = "linux"/"macos"/"windows"), and wasm32v1-none's
+      # target_os is "none" -- confirmed via `cargo tree --target
+      # wasm32v1-none -e normal,build -p <crate>` showing no openblas-src
+      # in the graph for any of the 11 matrixed crates. Installing it here
+      # would be pure dead time on every one of the 66 legs.
 
       - name: Install protoc (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: choco install protoc -y --no-progress
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32v1-none-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32v1-none-
 
       - name: cargo build --target wasm32v1-none
         shell: bash
@@ -104,6 +108,17 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: choco install protoc -y --no-progress
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-forbid-unsafe-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-forbid-unsafe-
 
       - name: cargo build (forbid unsafe_code)
         shell: bash

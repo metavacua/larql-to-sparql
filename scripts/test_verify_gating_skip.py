@@ -27,13 +27,6 @@ from verify_gating_skip import (
     is_clean,
 )
 
-CONDITION_LINE = f"      if: {CONDITION_SUBSTR}\n"
-MERGED_MUTANTS_CONDITION = (
-    "      if: github.event_name == 'pull_request' && "
-    f"{CONDITION_SUBSTR}\n"
-)
-
-
 def _job_block(job_name, with_condition, merged_mutants=False):
     lines = [f"  {job_name}:", "    runs-on: ubuntu-latest"]
     if with_condition:

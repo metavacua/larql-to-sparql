@@ -26,14 +26,18 @@ pub use engine::chain::{chain_tokens, ChainResult};
 pub use engine::provider::{ModelProvider, PredictionResult, TokenPrediction};
 pub use engine::templates::TemplateRegistry;
 
+// One cfg over one grouped use-tree instead of six repeated attributes --
+// same set of re-exports, same public paths (larql_core::CheckpointLog,
+// etc.), just one place to remember the gate when adding the next one.
 #[cfg(not(target_arch = "wasm32"))]
-pub use io::checkpoint::CheckpointLog;
-#[cfg(not(target_arch = "wasm32"))]
-pub use io::format::Format;
-#[cfg(not(target_arch = "wasm32"))]
-pub use io::json::{load_json, save_json};
-#[cfg(not(target_arch = "wasm32"))]
-pub use io::{from_bytes, load, load_with_format, save, save_with_format, to_bytes};
+pub use io::{
+    checkpoint::CheckpointLog,
+    csv::{load_csv, save_csv},
+    format::Format,
+    json::{load_json, save_json},
+    packed::{from_packed_bytes, load_packed, save_packed, to_packed_bytes},
+    from_bytes, load, load_with_format, save, save_with_format, to_bytes,
+};
 
 pub use algo::components::{are_connected, connected_components};
 pub use algo::diff::{diff, ChangedEdge, GraphDiff};
@@ -46,7 +50,3 @@ pub use algo::pagerank::{pagerank, PageRankResult};
 pub use algo::shortest_path::{astar, shortest_path, shortest_path_with_weight, PathResult};
 pub use algo::traversal::{bfs as bfs_traversal, dfs, TraversalResult};
 pub use algo::walk::{walk_all_paths, WalkResult};
-#[cfg(not(target_arch = "wasm32"))]
-pub use io::csv::{load_csv, save_csv};
-#[cfg(not(target_arch = "wasm32"))]
-pub use io::packed::{from_packed_bytes, load_packed, save_packed, to_packed_bytes};
