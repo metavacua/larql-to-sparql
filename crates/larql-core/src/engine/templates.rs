@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+// HashMap has no core/alloc equivalent (needs a hasher); see
+// algo/shortest_path.rs for the pattern-4 rationale.
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
 
 /// A prompt template for probing a specific relation.

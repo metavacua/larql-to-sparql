@@ -1,7 +1,16 @@
 //! Shortest path algorithms — Dijkstra and A*.
 
-use std::cmp::Ordering;
+use ::core::cmp::Ordering;
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::BinaryHeap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::{BinaryHeap, HashMap};
+// HashMap has no core/alloc equivalent (needs a hasher). Left unresolved
+// on wasm32 deliberately -- the "cannot find type `HashMap`" errors this
+// produces are the clean signal for pattern 4 (std-collection-needs-
+// no-std-hasher), not masked behind a "can't find crate std" cascade.
+// See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
+// Task 7.
 
 use crate::core::edge::Edge;
 use crate::core::graph::Graph;

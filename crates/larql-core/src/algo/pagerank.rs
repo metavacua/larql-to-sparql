@@ -1,5 +1,8 @@
 //! PageRank — iterative importance ranking for graph entities.
 
+// HashMap has no core/alloc equivalent (needs a hasher); see
+// shortest_path.rs for the pattern-4 rationale.
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
 
 use crate::core::graph::Graph;

@@ -1,5 +1,10 @@
 //! BFS and DFS traversal with depth tracking and visit order.
 
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::VecDeque;
+// HashMap/HashSet have no core/alloc equivalent (need a hasher); see
+// algo/shortest_path.rs for the pattern-4 rationale.
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::core::edge::Edge;

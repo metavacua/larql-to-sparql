@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
+use ::core::hash::{Hash, Hasher};
+// HashMap has no core/alloc equivalent (needs a hasher); see
+// algo/shortest_path.rs for the pattern-4 rationale.
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 
 use super::enums::SourceType;
 
