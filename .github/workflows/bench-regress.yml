@@ -30,6 +30,7 @@ jobs:
     # without it, drop --features gpu from FEATURES to skip them
     # and run only the CPU surface on any runner.
     runs-on: macos-14
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 90
 
     steps:

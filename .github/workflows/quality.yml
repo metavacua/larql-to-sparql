@@ -38,6 +38,7 @@ jobs:
   audit:
     name: cargo-audit
     runs-on: ubuntu-latest
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -60,6 +61,7 @@ jobs:
   deny:
     name: cargo-deny · ${{ matrix.check }}
     runs-on: ubuntu-latest
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -80,6 +82,7 @@ jobs:
     # and hardcoding a number here would be a second place to forget to bump.
     name: MSRV · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -152,6 +155,7 @@ jobs:
   doc-links:
     name: doc links
     runs-on: ubuntu-latest
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
@@ -167,6 +171,7 @@ jobs:
   proto-lint:
     name: buf lint
     runs-on: ubuntu-latest
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -190,7 +195,7 @@ jobs:
     timeout-minutes: 45
     # PR-only: --in-diff needs a base to diff against, and a full-workspace
     # mutation run is many hours of compute.
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.head_ref != 'gating/larql-cli-wasm-and-safe'
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7

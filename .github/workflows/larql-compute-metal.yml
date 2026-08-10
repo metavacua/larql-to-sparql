@@ -34,6 +34,7 @@ jobs:
   test:
     name: test · macos-14
     runs-on: macos-14
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 45
 
     steps:

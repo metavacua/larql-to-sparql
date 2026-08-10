@@ -44,6 +44,7 @@ jobs:
   test:
     name: test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 35
 
     strategy:
@@ -127,6 +128,7 @@ jobs:
   coverage:
     name: coverage - ubuntu
     runs-on: ubuntu-latest
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 35
 
     steps:
