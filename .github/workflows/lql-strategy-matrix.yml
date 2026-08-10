@@ -374,7 +374,7 @@ jobs:
             echo "$c exit=$?" >> probe/help.index
           done
           cat probe/help.index
-      - name: All 38 subcommands — the guessed real invocations
+      - name: All subcommands — the guessed real invocations
         run: |
           set +e -u
           TMP=$(mktemp -d)
@@ -409,6 +409,14 @@ jobs:
             "bench|bench $TMP/v.vindex --tokens 2"
             "dec-bench|dec-bench"
             "k3-ledger|k3-ledger report"
+            # `formats` is the k3-ledger subcommand this row actually runs
+            # (rather than just canary-rejects): it's the pure/no-network
+            # early-return case documented in k3_ledger/mod.rs ("pure/runtime
+            # split is load-bearing here"; see the Formats special-case,
+            # returned before fetch::Repo::new / fetch::load_geometry are
+            # ever reached). Any other k3-ledger subcommand added to that
+            # early-return set later is a candidate for the same treatment
+            # here.
             "k3-ledger-formats|k3-ledger formats"
             "accuracy|accuracy $TMP/v.vindex"
             "shannon|shannon score $TMP/v.vindex"
