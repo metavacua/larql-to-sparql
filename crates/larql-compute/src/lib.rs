@@ -100,6 +100,15 @@ pub mod async_compute_backend;
 pub mod attention;
 pub mod backend;
 mod collections;
+// `forward::hooks`' capture structs (e.g. `HookState::pre_layer`) have
+// `pub` fields typed with this crate's own portable `HashMap`/`HashSet` --
+// a public field can't have a type built from a private component
+// (rustc: "type is private" once a downstream crate needs to resolve a
+// trait bound through it, e.g. `.get()`), so these items must be
+// reachable even though the module itself stays private. See
+// crates/larql-models/src/lib.rs for the confirmed instance of this
+// landmine and the same fix.
+pub use collections::{FnvHasher, HashMap, HashSet};
 // Both directly depend on larql_models::{connectors,encoders}, which
 // are themselves wholesale wasm32-excluded (mmap/file-loading
 // pipelines, see crates/larql-models/src/lib.rs) -- confirmed via grep

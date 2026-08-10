@@ -24,6 +24,14 @@ extern crate alloc;
 // instead, same shape as weights.rs's Mmap field.
 pub mod architectures;
 mod collections;
+// `ModelWeights::vectors`/`tensors`/etc. and `DequantScratch` are `pub` and
+// resolve (on wasm32) to this crate's own `HashMap<K, V, BuildHasherDefault
+// <FnvHasher>>` -- a public field can't have a type built from a private
+// component (rustc reports "type is private" once a downstream crate's
+// code needs to resolve a trait bound through it, e.g. calling `.get()`),
+// so the collections module's own items must be reachable even though the
+// module itself stays private (its internal layout isn't API).
+pub use collections::{FnvHasher, HashMap, HashSet};
 pub mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod connectors;

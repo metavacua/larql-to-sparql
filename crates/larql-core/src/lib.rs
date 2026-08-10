@@ -13,6 +13,15 @@ extern crate alloc;
 
 pub mod algo;
 mod collections;
+// Several `pub` struct fields across this crate (e.g. `PageRankResult::
+// ranks`, `Graph::sources`) resolve to this crate's own portable
+// `HashMap` -- a public field can't have a type built from a private
+// component (rustc: "type is private" once a downstream crate's code
+// needs to resolve a trait bound through it, e.g. calling `.get()`), so
+// these items must be reachable even though the module itself stays
+// private. See crates/larql-models/src/lib.rs for the confirmed instance
+// of this landmine and the same fix.
+pub use collections::{FnvHasher, HashMap, HashSet};
 pub mod core;
 pub mod engine;
 mod prelude;

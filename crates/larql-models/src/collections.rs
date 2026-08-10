@@ -4,12 +4,12 @@
 //! duplicated per-crate since Rust modules don't cross crate boundaries.
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use std::collections::{HashMap, HashSet};
+pub use std::collections::{HashMap, HashSet};
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) type HashMap<K, V> = hashbrown::HashMap<K, V, ::core::hash::BuildHasherDefault<FnvHasher>>;
+pub type HashMap<K, V> = hashbrown::HashMap<K, V, ::core::hash::BuildHasherDefault<FnvHasher>>;
 #[cfg(target_arch = "wasm32")]
-pub(crate) type HashSet<K> = hashbrown::HashSet<K, ::core::hash::BuildHasherDefault<FnvHasher>>;
+pub type HashSet<K> = hashbrown::HashSet<K, ::core::hash::BuildHasherDefault<FnvHasher>>;
 
 #[cfg(target_arch = "wasm32")]
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
@@ -17,7 +17,7 @@ const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) struct FnvHasher(u64);
+pub struct FnvHasher(u64);
 
 #[cfg(target_arch = "wasm32")]
 impl Default for FnvHasher {
