@@ -89,10 +89,10 @@ def find_pairs(descriptors):
         if cli_key in descriptors and lql_key in descriptors:
             pair_key = f"{model}.{level}"
             if pair_key not in pairs:
-                pairs[pair_key] = {"cli": None, "lql": None}
+                pairs[pair_key] = {"native": None, "lql": None}
             pairs[pair_key][desc["op"]] = desc
 
-    return {k: v for k, v in pairs.items() if v["cli"] and v["lql"]}
+    return {k: v for k, v in pairs.items() if v["native"] and v["lql"]}
 
 
 def main():
@@ -112,7 +112,7 @@ def main():
     for pair_key in sorted(pairs.keys()):
         pair = pairs[pair_key]
 
-        cli_desc = load_descriptor(pair["cli"]["path"])
+        cli_desc = load_descriptor(pair["native"]["path"])
         lql_desc = load_descriptor(pair["lql"]["path"])
 
         cli_dtype = cli_desc.get("dtype")
