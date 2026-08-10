@@ -12,17 +12,31 @@
 #[macro_use]
 extern crate alloc;
 
+// connectors/, detect/, encoders/, loading/, speech/ are excluded
+// wholesale on wasm32: all five are fundamentally file/mmap-loading
+// pipelines (std::fs, std::path, memmap2/safetensors throughout --
+// confirmed via CI, not guessed), with no cross-reference from any
+// portable module (grepped ModelError/connectors::*/encoders::*
+// usage across architectures/, config/, multimodal/, validation/,
+// vectors/, tensor_keys/, defaults/ before excluding -- none found).
+// Unlike weights.rs (kept, field-gated internally instead) these
+// modules have no otherwise-portable surface worth carving out.
 pub mod architectures;
 mod collections;
 pub mod config;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod connectors;
 pub mod defaults;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod detect;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod encoders;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod loading;
 pub mod multimodal;
 mod prelude;
 pub mod quant;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod speech;
 pub(crate) mod tensor_keys;
 #[cfg(any(test, feature = "test-utils"))]
@@ -37,6 +51,7 @@ pub use config::{
     YarnRopeScaling, LAYER_TYPE_FULL_ATTENTION, LAYER_TYPE_SLIDING_ATTENTION, ROPE_TYPE_DEFAULT,
     ROPE_TYPE_LINEAR, ROPE_TYPE_LLAMA3, ROPE_TYPE_YARN,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use detect::{
     detect_architecture, detect_architecture_validated, detect_from_json,
     detect_from_json_validated, ModelError,
@@ -70,6 +85,7 @@ pub use vectors::{
 };
 pub use weights::{DequantScratch, ModelWeights, WeightArray, WeightsView};
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use loading::{
     is_ffn_tensor, load_gguf, load_gguf_validated, load_model_dir, load_model_dir_filtered,
     load_model_dir_filtered_validated, load_model_dir_validated, load_model_dir_walk_only,
