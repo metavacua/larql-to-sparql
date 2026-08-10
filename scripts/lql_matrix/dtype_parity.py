@@ -8,6 +8,17 @@ the known dtype divergence (CLI f16 vs LQL f32) is captured and surfaced.
 Design: matches legs by (model_id, level) across the (native, lql) operations.
 Reports findings per pair, with no judgment layer — just the observed dtypes.
 
+`dtype` is whatever descriptor.py's `dtype` field declares (index.json's own
+self-report), not a byte-level observation of the produced weight files — this
+can only ever say "declared dtypes agree/disagree", not "the actual bytes
+disagree".
+
+A (model, level) with only one side present (e.g. the lql leg's extract
+crashed and produced no descriptor) is not reported here — this mirrors the
+prior version's behavior; see the matrix-audit for the open discussion of
+whether a missing-side leg should get an explicit row instead of being
+dropped.
+
 Usage: dtype_parity.py [<descriptors_glob>] [<output_file>]
 
 Defaults:
@@ -19,6 +30,9 @@ import sys
 import re
 import glob
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gen_legs import _model_id  # noqa: E402  (needs the sys.path line above)
 
 _LEG_RE = re.compile(r"descriptor-(.+?)\.json$")
 
@@ -32,67 +46,57 @@ def load_descriptor(path):
         return {"error": f"{type(e).__name__}: {e}"}
 
 
-def extract_leg_info(filename):
-    """Extract model, op, and level from a descriptor filename.
+def _glob_all(pattern):
+    """Flat + recursive glob, deduped, deterministic order — matches
+    tensor_presence.collect()'s discovery so both scripts in the same
+    inventory job see the same files regardless of how
+    actions/upload-artifact laid out the tree."""
+    seen = set()
+    paths = []
+    for p in sorted(glob.glob(pattern)) + sorted(glob.glob("**/" + pattern, recursive=True)):
+        if p not in seen:
+            seen.add(p)
+            paths.append(p)
+    return sorted(paths)
 
-    Examples:
-    - descriptor-smol135.native.inference.json → ("smol135", "native", "inference")
-    - descriptor-qwen05.lql.default.json → ("qwen05", "lql", "default")
+
+def find_pairs(glob_pattern):
+    """Group descriptor files by (model, level) and keep only groups that
+    have both a native (CLI) and lql leg present.
+
+    Examples of the filename shape being parsed:
+    - descriptor-smol135.native.inference.json -> model=smol135 op=native level=inference
+    - descriptor-qwen05.lql.default.json       -> model=qwen05  op=lql    level=default
     """
-    m = _LEG_RE.search(filename)
-    if not m:
-        return None
-
-    name = m.group(1)
-    parts = name.split(".")
-    if len(parts) >= 3:
-        model = parts[0]
+    groups = {}
+    for desc_file in _glob_all(glob_pattern):
+        m = _LEG_RE.search(Path(desc_file).name)
+        if not m:
+            continue
+        leg_name = m.group(1)
+        parts = leg_name.split(".")
+        if len(parts) < 3:
+            continue
+        model = _model_id(leg_name)
         op = parts[1]
         level = ".".join(parts[2:])
-        return (model, op, level)
-    return None
+        groups.setdefault((model, level), {})[op] = desc_file
+
+    return {
+        f"{model}.{level}": legs
+        for (model, level), legs in groups.items()
+        if "native" in legs and "lql" in legs
+    }
 
 
-def find_descriptors(glob_pattern):
-    """Find all descriptor JSON files matching the glob."""
-    descriptors = {}
-
-    for desc_file in sorted(glob.glob(glob_pattern)):
-        path = Path(desc_file)
-        info = extract_leg_info(path.name)
-        if info:
-            key = f"{info[0]}.{info[1]}.{info[2]}"
-            descriptors[key] = {
-                "path": desc_file,
-                "model": info[0],
-                "op": info[1],
-                "level": info[2],
-            }
-
-    return descriptors
-
-
-def find_pairs(descriptors):
-    """Find paired native (CLI) vs lql legs.
-
-    A pair is (model, level) with both .native and .lql variants present.
-    """
-    pairs = {}
-
-    for key, desc in descriptors.items():
-        model = desc["model"]
-        level = desc["level"]
-
-        cli_key = f"{model}.native.{level}"
-        lql_key = f"{model}.lql.{level}"
-
-        if cli_key in descriptors and lql_key in descriptors:
-            pair_key = f"{model}.{level}"
-            if pair_key not in pairs:
-                pairs[pair_key] = {"native": None, "lql": None}
-            pairs[pair_key][desc["op"]] = desc
-
-    return {k: v for k, v in pairs.items() if v["native"] and v["lql"]}
+def leg_summary(desc):
+    """The fixed per-leg shape written into the output for both sides of a
+    pair — one place to extend if a new field is needed."""
+    return {
+        "dtype": desc.get("dtype"),
+        "produced": desc.get("produced"),
+        "error": desc.get("error"),
+    }
 
 
 def main():
@@ -100,45 +104,27 @@ def main():
     glob_pattern = args[0] if args else "artifacts/results-*/descriptor-*.json"
     out_file = args[1] if len(args) > 1 else "dtype-parity.json"
 
-    # Find all descriptors
-    descriptors = find_descriptors(glob_pattern)
+    pairs = find_pairs(glob_pattern)
 
-    # Find paired legs
-    pairs = find_pairs(descriptors)
-
-    # Load and analyze each pair
     results = []
-
     for pair_key in sorted(pairs.keys()):
-        pair = pairs[pair_key]
-
-        cli_desc = load_descriptor(pair["native"]["path"])
-        lql_desc = load_descriptor(pair["lql"]["path"])
-
-        cli_dtype = cli_desc.get("dtype")
-        lql_dtype = lql_desc.get("dtype")
-
-        result = {
+        legs = pairs[pair_key]
+        cli_desc = load_descriptor(legs["native"])
+        lql_desc = load_descriptor(legs["lql"])
+        results.append({
             "pair": pair_key,
-            "cli": {
-                "dtype": cli_dtype,
-                "produced": cli_desc.get("produced"),
-                "error": cli_desc.get("error"),
-            },
-            "lql": {
-                "dtype": lql_dtype,
-                "produced": lql_desc.get("produced"),
-                "error": lql_desc.get("error"),
-            },
-        }
-        results.append(result)
+            "cli": leg_summary(cli_desc),
+            "lql": leg_summary(lql_desc),
+        })
 
-    # Write output
     Path(out_file).write_text(json.dumps(results, indent=2), encoding="utf-8")
-    print(f"dtype-parity: {len(results)} pairs")
+    # "declared" because dtype comes from index.json's own self-report, not
+    # from re-reading the produced weight bytes.
+    print(f"dtype-parity (declared dtypes): {len(results)} pairs")
     for r in results:
-        cli_dt = r["cli"]["dtype"]
-        lql_dt = r["lql"]["dtype"]
+        cli, lql = r["cli"], r["lql"]
+        cli_dt = f"ERROR({cli['error']})" if cli["error"] else cli["dtype"]
+        lql_dt = f"ERROR({lql['error']})" if lql["error"] else lql["dtype"]
         print(f"  {r['pair']}: cli={cli_dt} lql={lql_dt}")
 
 
