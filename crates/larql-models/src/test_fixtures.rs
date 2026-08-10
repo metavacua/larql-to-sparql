@@ -13,9 +13,12 @@
 //! backends). Only the generic `TinyModel` builder lives here — it's
 //! the one the moved-down forward-pass tests in `larql-compute` need.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
+use crate::collections::HashMap;
 use crate::{detect_from_json, ModelWeights, WeightArray};
 use ndarray::Array2;
-use std::collections::HashMap;
 
 /// Build a synthetic `ModelWeights` with all tensors populated.
 ///
@@ -44,8 +47,8 @@ pub fn make_test_weights() -> ModelWeights {
     });
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
     let mut rng_state = 0xdeadbeef_u64;
 
     // LCG giving values in [-scale, +scale]
@@ -92,10 +95,11 @@ pub fn make_test_weights() -> ModelWeights {
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
         per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
@@ -251,8 +255,8 @@ fn gemma3_test_weights_inner(arch_json: serde_json::Value, num_layers: usize) ->
     const HEAD_DIM: usize = 8;
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
     let q_dim = NUM_Q * HEAD_DIM;
     let kv_dim = NUM_KV * HEAD_DIM;
@@ -324,10 +328,11 @@ fn gemma3_test_weights_inner(arch_json: serde_json::Value, num_layers: usize) ->
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
         per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
@@ -375,8 +380,8 @@ pub fn make_starcoder2_test_weights() -> ModelWeights {
     });
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
     let q_dim = NUM_Q * HEAD_DIM;
     let kv_dim = NUM_KV * HEAD_DIM;
@@ -451,10 +456,11 @@ pub fn make_starcoder2_test_weights() -> ModelWeights {
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
         per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
@@ -538,9 +544,8 @@ pub fn make_synthetic_e2b_like_weights() -> ModelWeights {
     let vocab_size = 32;
     let ple_dim = 4;
 
-    let mut tensors: std::collections::HashMap<String, WeightArray> =
-        std::collections::HashMap::new();
-    let mut vectors: std::collections::HashMap<String, Vec<f32>> = std::collections::HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
     let mut seed = 0xe2b_0000_u64;
     let mut next_seed = || {
@@ -627,10 +632,11 @@ pub fn make_synthetic_e2b_like_weights() -> ModelWeights {
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: std::collections::HashMap::new(),
-        packed_mmaps: std::collections::HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: std::collections::HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
         per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
@@ -802,8 +808,8 @@ fn q4k_test_weights_from_json(
     let head_dim = hidden / num_q;
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
     let mut seed = 0xc0ffee_u64;
     let mut next_seed = || {
@@ -878,10 +884,11 @@ fn q4k_test_weights_from_json(
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
         per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
@@ -923,8 +930,8 @@ pub fn make_test_q4k_weights_silu() -> ModelWeights {
     });
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
     let mut seed = 0xdeadc0de_u64;
     let mut next_seed = || {
@@ -986,10 +993,11 @@ pub fn make_test_q4k_weights_silu() -> ModelWeights {
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
         per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
@@ -1011,6 +1019,11 @@ pub fn make_test_q4k_weights_silu() -> ModelWeights {
 ///
 /// Public so inference-side fixtures (`make_test_q4k_vindex` etc.)
 /// that stay in `larql-inference/src/test_utils.rs` can reuse it.
+///
+/// memmap2 has zero wasm32 support at all (no filesystem/anonymous-
+/// mapping concept on wasm32v1-none) -- native-only, matching
+/// weights.rs's own packed_mmaps field gating.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn arc_mmap_from_bytes(payload: &[u8]) -> std::sync::Arc<memmap2::Mmap> {
     let mut anon = memmap2::MmapMut::map_anon(payload.len().max(1)).expect("anon mmap");
     if !payload.is_empty() {
@@ -1076,9 +1089,9 @@ pub fn make_test_gemma4_moe_weights() -> ModelWeights {
     });
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
-    let mut raw_bytes: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
+    let mut raw_bytes: HashMap<String, Vec<u8>> = HashMap::default();
 
     let mut seed = 0xb000_1eef_u64;
     let mut next_seed = || {
@@ -1191,9 +1204,10 @@ pub fn make_test_gemma4_moe_weights() -> ModelWeights {
         tensors,
         vectors,
         raw_bytes,
-        packed_mmaps: HashMap::new(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
         per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
