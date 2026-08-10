@@ -11,10 +11,12 @@ rather than against this summary.
 **This run's artifact was uploaded at `retention-days: 1`.** It was expected to
 expire on 2026-08-09; checked that day it was still present and downloadable
 (`expired=false`, 163 files), so GitHub's retention is a floor rather than a
-deadline — do not rely on either reading. Retention stays at 1 day for every
-artifact this workflow produces; the point is to force re-measurement against
-current state rather than accumulate captures that go stale as fast as
-upstream moves. To regenerate this one, dispatch `lql-strategy-matrix` with
+deadline — do not rely on either reading. Retention is 2 days for every
+artifact this workflow produces (raised from 1 on 2026-08-10): short enough to
+force re-measurement rather than accumulate captures that go stale as fast as
+upstream moves, long enough to survive the multi-hour gaps this session's own
+background runs sometimes leave between a run finishing and someone actually
+reading it. To regenerate this one, dispatch `lql-strategy-matrix` with
 `scope: probe`.
 
 ## The known unknown is resolved: piped stdin works
