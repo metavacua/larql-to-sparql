@@ -6,6 +6,9 @@
 //! paths both live here; Metal-specific dispatch in the larql-compute-metal
 //! sibling crate hooks in via the `ComputeBackend` trait.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub mod block;
 pub mod decode;
 pub mod gpu;

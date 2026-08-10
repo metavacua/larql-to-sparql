@@ -2,6 +2,9 @@ use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
 
 use super::{f16_to_f32, f32_to_f16};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Pre-quantize f32 vector to Q8_0 (int8 + per-block f32 scale).
 pub fn quantize_to_q8(x: &[f32]) -> (Vec<i8>, Vec<f32>) {
     let n_blocks = x.len() / LEGACY_BLOCK_ELEMS;

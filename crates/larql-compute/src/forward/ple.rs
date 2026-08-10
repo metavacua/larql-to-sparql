@@ -8,6 +8,9 @@ use super::{apply_norm, dot_proj};
 use larql_models::ModelWeights;
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Precompute per-layer input signals from token embeddings.
 ///
 /// Combines two streams:
@@ -58,7 +61,7 @@ pub fn precompute_per_layer_inputs(
     let norm_offset = arch.norm_weight_offset();
 
     let norm_eps = arch.norm_eps();
-    let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
+    let inv_sqrt2 = core::f32::consts::FRAC_1_SQRT_2;
 
     let mut per_layer_inputs = Vec::with_capacity(num_layers);
     for layer in 0..num_layers {
@@ -146,7 +149,7 @@ pub fn apply_per_layer_embedding(
     let mut gate = dot_proj(h, w_gate);
 
     // Apply gelu_tanh activation to gate
-    let sqrt_2_over_pi = (2.0f32 / std::f32::consts::PI).sqrt();
+    let sqrt_2_over_pi = (2.0f32 / core::f32::consts::PI).sqrt();
     for val in gate.iter_mut() {
         let x = *val;
         let inner = sqrt_2_over_pi * (x + 0.044715 * x * x * x);

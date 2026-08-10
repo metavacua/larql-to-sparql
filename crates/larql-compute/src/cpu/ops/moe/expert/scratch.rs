@@ -1,5 +1,8 @@
 use crate::cpu::ops::q4k_q8k_dot::Q8KActivation;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-call scratch for `run_single_expert_with_scratch` — preallocate once
 /// per gRPC frame and reuse across all K active experts.  Keeps allocation
 /// off the hot path: at Gemma 4 26B-A4B sizes the un-pooled version was

@@ -1,5 +1,8 @@
 use larql_models::quant::ggml::{Q4_K_BLOCK_BYTES, Q4_K_BLOCK_ELEMS};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 use super::q4k_asm::use_asm_kernel;
 

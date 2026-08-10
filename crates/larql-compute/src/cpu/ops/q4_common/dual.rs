@@ -1,5 +1,8 @@
 use super::f16_to_f32;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Fused two-weight Q4_K matvec sharing one input vector.
 ///
 /// `out_a[N] = W_a[N, K] · x[K]`, `out_b[N] = W_b[N, K] · x[K]`.

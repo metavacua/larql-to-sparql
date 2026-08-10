@@ -29,6 +29,9 @@ use crate::attention::AttentionWeights;
 use ndarray::{Array1, Array2};
 use crate::collections::{HashMap, HashSet};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Mid-forward callbacks. All defaults are no-ops; impls override only the
 /// callbacks they need.
 ///

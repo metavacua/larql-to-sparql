@@ -1,6 +1,9 @@
 use super::dual::q4_dual_dot_32;
 use super::f16_to_f32;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Direct Q4_K matrix-vector product: `out = W · x` where `W` is the raw
 /// Q4_K byte stream (`rows × cols` weights, 144 bytes per 256 elements).
 ///

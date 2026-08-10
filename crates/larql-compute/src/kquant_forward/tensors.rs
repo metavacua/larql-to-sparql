@@ -2,6 +2,9 @@ use larql_models::{DequantScratch, ModelWeights};
 
 use super::dequant::dequantize_matrix;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Insert one Q4_K/Q6_K vindex layer's attention and dense FFN tensors into
 /// the engine-owned `scratch` as dense f32 matrices (`weights` stays immutable;
 /// readers resolve them via `WeightsView::with_scratch`).

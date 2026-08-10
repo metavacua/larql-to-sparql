@@ -20,6 +20,9 @@
 //! instrument for the entire model class the K3 ladder is built on. See
 //! `docs/k3-funnel.md` §4.7.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 mod gate;
 mod router;
 // Public for the `tests/test_moe_route_trace_*.rs` end-to-end exercises:

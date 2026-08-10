@@ -31,6 +31,9 @@ pub mod q4 {
 use crate::backend::{Capability, ComputeBackend, DecodeBackend, MatMul, QuantMatVec};
 use ndarray::{Array2, ArrayView2};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// CPU backend using BLAS (f32) and C kernel (Q4).
 pub struct CpuBackend;
 
@@ -182,7 +185,7 @@ impl ComputeBackend for CpuBackend {
         }
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 

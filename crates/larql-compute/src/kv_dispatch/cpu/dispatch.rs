@@ -23,6 +23,9 @@ use larql_models::ModelWeights;
 // — see `docs/diagnoses/q4k-direct-attention.md` §"CONSOLIDATION HAZARD".
 use crate::attention::decode::q4k_direct_attn_enabled;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 // ─── KvDispatch impl ────────────────────────────────────────────────────────
 
 impl KvDispatch for CpuBackend {

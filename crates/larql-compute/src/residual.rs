@@ -9,6 +9,9 @@
 use larql_models::QkNormScope;
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Default norm epsilon. Most models use 1e-5 or 1e-6.
 ///
 /// Callers with an architecture handle should prefer

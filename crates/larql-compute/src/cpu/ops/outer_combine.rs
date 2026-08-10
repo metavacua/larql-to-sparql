@@ -12,6 +12,9 @@
 //! the math here means a single source of truth: when CPU output
 //! disagrees with Metal output, the bug isn't in the combine step.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Combine the dense and MoE branches into the final residual:
 ///
 ///   h_out[i] = h_post_attn[i] + outer_norm(h1_plus_h2)[i]   if `outer_w` Some

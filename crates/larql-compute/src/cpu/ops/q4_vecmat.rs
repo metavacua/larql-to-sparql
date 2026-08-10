@@ -4,6 +4,9 @@
 
 use super::q4_common::q4_0_vecmat_c;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Q4 vecmat: out = activation @ Q4_matrix.
 pub fn dispatch(
     activation: &[f32],

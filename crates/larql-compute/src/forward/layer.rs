@@ -12,6 +12,9 @@ use crate::residual::rms_norm_for_arch;
 use larql_models::{ModelWeights, WeightsView};
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Public wrapper for run_attention — used by diagnostic/capture tooling.
 pub fn run_attention_public(
     weights: WeightsView,
@@ -73,6 +76,11 @@ pub fn run_ffn(
     // intermediates between CPU and Metal.
     let dump_cfg = super::dump_config::DumpConfig::get();
     let stage_dump_dir = dump_cfg.stage_dir(layer);
+    // std::fs has no core/alloc equivalent; wasm32v1-none has no filesystem
+    // and stage_dump_dir is unconditionally None there, so the whole dump
+    // path is dead code on that target (see attention/block.rs's identical
+    // dump_f32 pattern for the fuller rationale).
+    #[cfg(not(target_arch = "wasm32"))]
     let dump_f32 = |name: &str, arr: &Array2<f32>| {
         if let Some(dir) = stage_dump_dir {
             let slice = arr.as_slice().unwrap_or(&[]);
@@ -80,6 +88,8 @@ pub fn run_ffn(
             let _ = std::fs::write(super::dump_config::cpu_stage_path(dir, name), &bytes);
         }
     };
+    #[cfg(target_arch = "wasm32")]
+    let dump_f32 = |_name: &str, _arr: &Array2<f32>| {};
     dump_f32("h_post_attn", h_post_attn);
 
     let pre_ffn_key = if arch.has_post_norms() {
@@ -174,6 +184,7 @@ pub fn run_layer_with_ffn(
     // bisect any layer's drift into attention (compare h_post_attn) vs
     // FFN+PLE+scalar (compare h_out minus h_post_attn). Gated on the
     // same env var as the end-of-layer dump; no overhead when unset.
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(dir) = crate::forward::dump_config::DumpConfig::get().layer_dir() {
         let slice = h_post_attn.as_slice().unwrap_or(&[]);
         let bytes: Vec<u8> = slice.iter().flat_map(|v| v.to_le_bytes()).collect();

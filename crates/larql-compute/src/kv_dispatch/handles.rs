@@ -9,6 +9,9 @@
 /// Backends ship their own inner type (`CpuKvHandle`, `MetalKvHandle`,
 /// `VulkanKvHandle`) implementing [`KvHandleInner`]. Engines hold
 /// `KvHandle` opaquely and call backend methods to manipulate it.
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub struct KvHandle {
     inner: Box<dyn KvHandleInner>,
 }
@@ -64,7 +67,7 @@ impl KvHandle {
 /// this on whatever GPU-side or host-side allocation they manage
 /// (`MTLBuffer`, `VkBuffer`, `Vec<f32>`, or a wrapper over an engine's
 /// `KvCache` from `larql-kv`).
-pub trait KvHandleInner: Send + Sync + std::any::Any {
+pub trait KvHandleInner: Send + Sync + core::any::Any {
     fn cached_len(&self) -> usize;
     fn kv_dim(&self) -> usize;
     fn backend_name(&self) -> &'static str;
@@ -78,11 +81,11 @@ pub trait KvHandleInner: Send + Sync + std::any::Any {
     /// a factor of `num_layers`, which in the bench read as a large
     /// compression win for engines that were doing no compression at all.
     fn resident_bytes(&self) -> usize {
-        self.cached_len() * self.kv_dim() * KV_TENSORS_PER_LAYER * std::mem::size_of::<f32>()
+        self.cached_len() * self.kv_dim() * KV_TENSORS_PER_LAYER * core::mem::size_of::<f32>()
     }
 
-    fn as_any(&self) -> &dyn std::any::Any;
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    fn as_any(&self) -> &dyn core::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any;
 }
 
 /// K and V — the two tensors cached per position, per layer. Named so
@@ -115,8 +118,8 @@ impl ResidualHandle {
     }
 }
 
-pub trait ResidualHandleInner: Send + Sync + std::any::Any {
+pub trait ResidualHandleInner: Send + Sync + core::any::Any {
     fn shape(&self) -> (usize, usize);
     fn backend_name(&self) -> &'static str;
-    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any(&self) -> &dyn core::any::Any;
 }

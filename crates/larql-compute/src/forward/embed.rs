@@ -4,6 +4,9 @@ use super::embedding_plan::{EmbeddingChunk, EmbeddingPlan};
 use larql_models::{ModelWeights, PrecomputedScaling};
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Embed token IDs with architecture-specific scaling.
 ///
 /// Looks up one row per token in `weights.embed`, multiplies by

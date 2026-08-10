@@ -1,6 +1,9 @@
 //! GEGLU activation: out[i] = silu(gate[i]) × up[i].
 //! Element-wise, pure Rust. 0.017ms for 10240 elements.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// SiLU (Swish) activation.
 #[inline(always)]
 pub fn silu(x: f32) -> f32 {

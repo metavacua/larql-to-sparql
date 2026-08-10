@@ -47,6 +47,9 @@ use crate::residual::{rms_norm_heads_no_weight, rms_norm_qk_for_arch};
 
 use super::tensors::{insert_q4k_attn_tensors, insert_q4k_layer_tensors, remove_layer_tensors};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[cfg(test)]
 mod tests;
 
@@ -141,6 +144,11 @@ pub fn predict_kquant_prefill_with_state(
             && q_dim.is_multiple_of(BLK)
             && index.attn_kquant_layer_data(layer).is_some();
 
+        // std::time::Instant has no core/alloc equivalent (no OS clock on
+        // wasm32v1-none); the timing value never affects the function's
+        // return value, so it's individually gated while the dequant logic
+        // stays unconditional (same shape as expert/q4k.rs's KERNEL_TIMING).
+        #[cfg(not(target_arch = "wasm32"))]
         let t0 = std::time::Instant::now();
         // Dequant only what the q4k-direct paths won't read straight from bytes.
         let inserted = match (use_q4k_attn, use_q4k_ffn) {
@@ -149,7 +157,10 @@ pub fn predict_kquant_prefill_with_state(
             _ => insert_q4k_layer_tensors(&mut scratch, weights, index, layer),
         }
         .unwrap_or_else(|err| panic!("{err}"));
-        timings.dequant_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            timings.dequant_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        }
 
         // Snapshot pre-attention residual for this layer if engine wants it.
         if let Some(s) = state.as_deref_mut() {
@@ -231,10 +242,14 @@ pub fn predict_kquant_decode_step(
     let ple_inputs = precompute_per_layer_inputs(weights, &h, &[token_id]);
 
     for layer in 0..num_layers {
+        #[cfg(not(target_arch = "wasm32"))]
         let t0 = std::time::Instant::now();
         let inserted = insert_q4k_layer_tensors(&mut scratch, weights, index, layer)
             .unwrap_or_else(|err| panic!("{err}"));
-        timings.dequant_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            timings.dequant_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        }
 
         let kv_entry = cache[layer].as_ref();
         let (h_post_attn, new_kv) = match run_attention_block_decode_step_backend(
@@ -889,7 +904,7 @@ fn run_ffn_decode_step_q4k_direct(
     let mut activated = vec![0.0f32; intermediate];
     {
         let gelu = arch.activation().uses_gelu_tanh_gate_up();
-        let sqrt_2_over_pi = (2.0f32 / std::f32::consts::PI).sqrt();
+        let sqrt_2_over_pi = (2.0f32 / core::f32::consts::PI).sqrt();
         let gate_ref = &gate_vec[..];
         let up_ref = &up_vec[..];
         crate::cpu::spin_pool::par_chunks_mut(&mut activated, 256, |ci, a_c| {

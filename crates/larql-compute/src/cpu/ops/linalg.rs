@@ -5,6 +5,9 @@
 
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Cholesky decomposition of a symmetric positive-definite matrix.
 /// Returns the lower-triangular factor L such that A = L L^T.
 ///

@@ -2138,6 +2138,7 @@ name = "larql-boundary"
 version = "0.2.0"
 dependencies = [
  "criterion",
+ "num-traits",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2215,6 +2216,8 @@ version = "0.2.0"
 dependencies = [
  "assert_approx_eq",
  "criterion",
+ "hashbrown 0.15.5",
+ "libm",
  "reqwest",
  "rmp-serde",
  "serde",
@@ -2261,6 +2264,7 @@ version = "0.2.0"
 dependencies = [
  "larql-models",
  "larql-vindex-spec",
+ "num-traits",
  "reqwest",
  "serde",
  "serde_json",
@@ -2364,9 +2368,11 @@ name = "larql-models"
 version = "0.2.0"
 dependencies = [
  "criterion",
+ "hashbrown 0.15.5",
  "larql-vindex-spec",
  "memmap2",
  "ndarray",
+ "num-traits",
  "safetensors",
  "serde",
  "serde_json",

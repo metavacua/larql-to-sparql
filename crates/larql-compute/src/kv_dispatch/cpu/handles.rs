@@ -7,6 +7,9 @@ use ndarray::Array2;
 use crate::attention::SharedKV;
 use crate::kv_dispatch::{KvHandle, KvHandleInner, ResidualHandle, ResidualHandleInner};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 // ─── CpuKvHandle ────────────────────────────────────────────────────────────
 
 /// Single-layer K/V cache held in host memory as growable row-major
@@ -117,11 +120,11 @@ impl KvHandleInner for CpuKvHandle {
         "cpu"
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
         self
     }
 }
@@ -175,7 +178,7 @@ impl ResidualHandleInner for CpuResidualHandle {
         "cpu"
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 }
@@ -251,16 +254,16 @@ impl KvHandleInner for CpuQ4kCacheHandle {
             .filter_map(|o| o.as_ref())
             .map(|(k, v)| {
                 (k.shape()[0] * k.shape()[1] + v.shape()[0] * v.shape()[1])
-                    * std::mem::size_of::<f32>()
+                    * core::mem::size_of::<f32>()
             })
             .sum()
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
         self
     }
 }

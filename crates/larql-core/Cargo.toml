@@ -10,11 +10,6 @@ keywords = ["knowledge-graph", "llm", "interpretability", "graph"]
 categories = ["data-structures", "science"]
 
 [dependencies]
-# HTTP provider — optional so pure graph usage has zero network deps
-reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
-
-# Binary serialization via MessagePack
-rmp-serde = { version = "1", optional = true }
 
 # serde/serde_json/thiserror default to their "std" feature, which doesn't
 # exist on wasm32v1-none (core+alloc only) -- E0463 "can't find crate for
@@ -31,6 +26,17 @@ rmp-serde = { version = "1", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# reqwest/rmp-serde pull in std-only transitive deps (futures-core, etc.)
+# that don't declare #![no_std] themselves, breaking wasm32v1-none even
+# though these deps are optional -- Cargo features aren't target-conditional,
+# so an untargeted `optional = true` dep still gets its full std-enabled
+# graph resolved for wasm32 as soon as its feature is on (default leg).
+# Target-gating the dependency table entry, not just the Cargo feature,
+# keeps "http"/"msgpack" enabled-by-default while the crates themselves are
+# simply absent on wasm32; engine/mod.rs's `mod http_provider` gate excludes
+# the one call site. See Task 7, pattern 12: optional-dep-feature-not-target-gated.
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
+rmp-serde = { version = "1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

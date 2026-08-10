@@ -7,6 +7,9 @@ use super::gqa::gqa_reduced_qk_all_weights;
 use super::{AttentionAllWeights, AttentionWeights, SharedKV};
 use ndarray::{s, Array2};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Run the full attention block. Returns (h_post_attn, attn_projected, optional_weights).
 #[allow(clippy::too_many_arguments)]
 pub fn run_attention_block(
@@ -332,6 +335,11 @@ fn run_attention_block_core(
     // are useful for bisecting partial-RoPE / V-norm interactions.
     let dump_cfg = crate::forward::dump_config::DumpConfig::get();
     let stage_dump = dump_cfg.stage_dir(layer);
+    // std::fs has no core/alloc equivalent -- wasm32v1-none has no
+    // filesystem at all, and stage_dump is unconditionally None there
+    // (DumpConfig routes through options::env_value, which is None on
+    // wasm32), so the whole dump path is dead code on that target.
+    #[cfg(not(target_arch = "wasm32"))]
     let dump_f32 = |name: &str, arr: &Array2<f32>| {
         if let Some(dir) = stage_dump {
             let slice = arr.as_slice().unwrap_or(&[]);
@@ -339,6 +347,8 @@ fn run_attention_block_core(
             let _ = std::fs::write(format!("{dir}/cpu_L0_{name}.f32"), &bytes);
         }
     };
+    #[cfg(target_arch = "wasm32")]
+    let dump_f32 = |_name: &str, _arr: &Array2<f32>| {};
 
     // Input norm
     let h_norm =

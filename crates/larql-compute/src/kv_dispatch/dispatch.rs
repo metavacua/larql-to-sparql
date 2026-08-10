@@ -7,6 +7,9 @@ use ndarray::Array2;
 use super::{CompressionCodec, KvHandle, ResidualHandle};
 use crate::PerLayerDecodeState;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-layer state captured during a decode step — populated by
 /// [`KvDispatch::coarse_decode_step_with_state`] when the engine
 /// needs per-layer intermediates that its state policy depends on.

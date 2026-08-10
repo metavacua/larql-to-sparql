@@ -33,6 +33,9 @@ use crate::cpu::ops::q4_common::{q4k_matmul_into, q6k_matmul_into};
 use crate::cpu::ops::q4k_q8k_dot::{q4k_q8k_matvec_into, q6k_q8k_matvec_into, Q8KActivation};
 use crate::QuantFormat;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Dequantise exactly `padded_elems` (a block-multiple) values from a
 /// packed row-major byte stream.
 pub type DequantPaddedFn = fn(&[u8], usize) -> Result<Vec<f32>, String>;

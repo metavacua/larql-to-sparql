@@ -4,6 +4,9 @@ use super::enums::{
 };
 use super::quant_format::QuantFormat;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// How one expert's gate and up projections combine into the down
 /// projection's input — the compute-side form of
 /// [`larql_models::ExpertGatePolicy`] with the activation folded in, so a

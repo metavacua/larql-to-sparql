@@ -3,6 +3,9 @@
 
 use super::KvDispatch;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Codec hook for [`KvDispatch::compressed_kv_append`]. Backends that
 /// implement native compressed K/V append call back into the codec for
 /// per-row encode/decode where the kernel isn't fully fused.

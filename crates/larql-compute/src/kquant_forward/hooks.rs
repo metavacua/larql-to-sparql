@@ -10,6 +10,9 @@ use crate::forward::{run_layer_with_capture_hooked, LayerHook};
 
 use super::tensors::{insert_q4k_layer_tensors, remove_layer_tensors};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Compute final hidden states on a Q4_K/Q6_K vindex while firing a
 /// [`LayerHook`] at each layer.
 ///

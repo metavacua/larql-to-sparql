@@ -8,6 +8,9 @@ use super::rope::{apply_rope_partial, apply_rope_partial_at_full};
 use super::AttentionWeights;
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// GPU-accelerated attention block. Same as `run_attention_block` but routes
 /// Q/K/V/O projections through the ComputeBackend (Metal, CUDA, or CPU).
 pub fn run_attention_block_gpu(

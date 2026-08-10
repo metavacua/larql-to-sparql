@@ -10,6 +10,9 @@
 //! delegation; no behaviour changes vs. the pre-ADR direct-VectorIndex
 //! call sites.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]

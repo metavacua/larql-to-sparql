@@ -19,6 +19,9 @@ use crate::{
 };
 use larql_models::ModelWeights;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub const DEFAULT_GPU_KV_CACHE_MAX_SEQ: usize = 4096;
 
 /// Occupancy multiple of the window at which KV compaction runs.
@@ -416,7 +419,7 @@ pub fn resolve_ffn_weights<'a>(
 pub fn build_pipeline_layers<'a>(
     weights: &'a ModelWeights,
     index: &'a dyn crate::KvIndex,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     q4_ffn_mmap: &'a [u8],
     q4_ffn_per_matrix: usize,
     ffn_format: QuantFormat,

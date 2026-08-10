@@ -18,6 +18,9 @@
 
 use larql_models::YarnRopeScaling;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Amplitude applied to `cos`/`sin` when no scaling asks for one.
 pub const UNIT_AMPLITUDE: f64 = 1.0;
 
@@ -49,7 +52,7 @@ pub fn attention_amplitude(s: &YarnRopeScaling) -> f64 {
 /// HF's `find_correction_dim` — the dimension index at which the rotary
 /// frequency completes `num_rotations` full turns over `max_position`.
 fn correction_dim(num_rotations: f64, dim: f64, base: f64, max_position: f64) -> f64 {
-    (dim * (max_position / (num_rotations * std::f64::consts::TAU)).ln()) / (2.0 * base.ln())
+    (dim * (max_position / (num_rotations * core::f64::consts::TAU)).ln()) / (2.0 * base.ln())
 }
 
 /// HF's `find_correction_range`, returning `(low, high)` dimension bounds.

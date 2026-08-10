@@ -16,6 +16,9 @@
 //! like Gemma 4 31B (50 sliding-attention layers + 10 global-attention
 //! layers, with different head_dim and num_kv_heads on each class).
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-layer state captured during a fused decode step. Engines
 /// (`markov_residual`, `markov_residual_codec`, `turbo_quant`) read
 /// this to enforce their state policy without re-running the per-

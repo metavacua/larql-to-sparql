@@ -1,6 +1,9 @@
 use super::super::math::rms_norm;
 use super::f32::run_single_expert;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Apply pre_experts_norm once per frame and return the normed residual.
 /// Hoisting this out of `run_single_expert*` saves K-1 redundant rms_norm
 /// passes per layer (the input residual is identical for every expert in

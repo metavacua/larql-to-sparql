@@ -19,6 +19,9 @@
 
 use larql_models::ExpertRoutingPolicy;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One token's expert assignment: `(expert_id, weight)` pairs, `k` of them.
 pub type Routing = Vec<(usize, f32)>;
 
@@ -41,7 +44,7 @@ pub fn select(logits: &[f32], k: usize, policy: ExpertRoutingPolicy) -> Routing 
     // the selection. `k` is 4-ish and `logits` 32-ish, so a full sort beats a
     // heap and ties break by first index, matching torch.topk.
     let mut ranked: Vec<(usize, f32)> = logits.iter().copied().enumerate().collect();
-    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
 
     let denominator_max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let denominator: f32 = match policy {

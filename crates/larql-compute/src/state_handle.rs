@@ -71,6 +71,9 @@
 
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Where a row or slab physically lives.
 ///
 /// Used as a batching hint by engines that want to coalesce work

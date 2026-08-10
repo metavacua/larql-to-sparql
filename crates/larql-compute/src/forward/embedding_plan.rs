@@ -14,6 +14,9 @@
 use larql_models::Modality;
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One chunk of an embedding plan.
 ///
 /// Plans are sequences of chunks that the embed step concatenates

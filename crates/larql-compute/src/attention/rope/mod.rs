@@ -8,6 +8,9 @@
 
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub mod llama3;
 pub mod yarn;
 

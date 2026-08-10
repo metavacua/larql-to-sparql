@@ -6,6 +6,9 @@
 
 pub use larql_models::Llama3RopeScaling;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Compute wavelength-adjusted `inv_freq[i]` for each rotary half-pair
 /// from the standard `1 / base^(2i/d)` baseline:
 ///
@@ -19,7 +22,7 @@ pub fn apply_llama3_inv_freq(scaling: &Llama3RopeScaling, inv_freq: &[f64]) -> V
     inv_freq
         .iter()
         .map(|&inv| {
-            let wavelen = std::f64::consts::TAU / inv;
+            let wavelen = core::f64::consts::TAU / inv;
             if wavelen < high_freq_wavelen {
                 inv
             } else if wavelen > low_freq_wavelen {

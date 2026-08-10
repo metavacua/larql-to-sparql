@@ -112,7 +112,7 @@ impl fmt::Display for ParseBackendKindError {
     }
 }
 
-impl std::error::Error for ParseBackendKindError {}
+impl core::error::Error for ParseBackendKindError {}
 
 impl FromStr for BackendKind {
     type Err = ParseBackendKindError;
@@ -164,7 +164,7 @@ impl fmt::Display for BackendSelectError {
     }
 }
 
-impl std::error::Error for BackendSelectError {}
+impl core::error::Error for BackendSelectError {}
 
 /// Build the backend a caller asked for.
 ///

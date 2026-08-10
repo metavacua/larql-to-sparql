@@ -1,5 +1,8 @@
 use super::common::{ELEMS_PER_BLOCK, SUBBLOCKS_PER_BLOCK, SUBBLOCK_SIZE};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Quantised activation in Q8_K layout, one entry per super-block of `x`.
 ///
 /// `qs` packs all super-blocks contiguously: `qs[sb * 256 .. (sb+1) * 256]`

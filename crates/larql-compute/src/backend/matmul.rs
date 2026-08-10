@@ -7,6 +7,9 @@
 
 use ndarray::{Array2, ArrayView2};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A single matmul operation for batch dispatch.
 pub struct MatMulOp {
     pub a: Array2<f32>,

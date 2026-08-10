@@ -43,6 +43,9 @@ pub use helpers::{dot_proj_gpu, matmul_gpu};
 pub use matmul::{MatMul, MatMulOp};
 pub use quant_matvec::QuantMatVec;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Hardware compute backend — the umbrella trait every caller binds.
 ///
 /// Combines [`MatMul`] + [`QuantMatVec`] + [`DecodeBackend`] plus
@@ -83,7 +86,7 @@ pub trait ComputeBackend: MatMul + QuantMatVec + DecodeBackend + Send + Sync {
     fn register_weight_region(&self, _region: &[u8]) {}
 
     /// Expose the concrete type for safe downcasting.
-    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any(&self) -> &dyn core::any::Any;
 
     /// Upload a Per-Layer Embeddings input table for the next
     /// `decode_token*` / `prefill_*` call.

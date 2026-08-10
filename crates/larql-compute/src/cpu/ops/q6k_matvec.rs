@@ -8,6 +8,9 @@
 use larql_models::quant::ggml::q6_k::q6k_subblock_vals;
 use larql_models::quant::ggml::Q6_K_BLOCK_BYTES as Q6K_BLOCK_SIZE;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Decode f16 bits to f32.
 fn f16_to_f32(bits: u16) -> f32 {
     let sign = ((bits >> 15) & 1) as u32;

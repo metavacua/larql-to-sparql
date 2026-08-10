@@ -7,6 +7,9 @@
 
 use super::q4_common::{q4_0_matvec_c, quantize_to_q8};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Q4 matvec: scores = Q4_matrix @ x.
 /// Pre-quantizes x to Q8 internally.
 pub fn dispatch(q4_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> Vec<f32> {

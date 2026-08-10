@@ -19,6 +19,9 @@ use larql_models::ModelWeights;
 
 use crate::cpu::ops::q4_common::quantize_q4_k;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Q4_K super-block width; projection columns must divide into it.
 const Q4K_BLOCK_ELEMS: usize = 256;
 

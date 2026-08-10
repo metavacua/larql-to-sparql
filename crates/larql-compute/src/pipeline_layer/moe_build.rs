@@ -9,6 +9,9 @@
 
 use super::*;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub fn build_moe_weights<'a>(
     weights: &'a ModelWeights,
     arch: &dyn larql_models::ModelArchitecture,
@@ -115,6 +118,8 @@ pub fn build_moe_weights<'a>(
     let router_bias = resolve_bias(arch.moe_router_bias_key(layer));
     let experts_gate_up_bias = resolve_bias(arch.packed_gate_up_bias_key(layer));
     let experts_down_bias = resolve_bias(arch.packed_down_bias_key(layer));
+    // eprintln! has no core/alloc equivalent (needs a real stderr stream).
+    #[cfg(not(target_arch = "wasm32"))]
     if layer == 0
         && arch.moe_router_bias_key(0).is_some()
         && router_bias.is_empty()

@@ -6,6 +6,9 @@
 use super::{AttentionAllWeights, AttentionWeights};
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// GQA with causal masking (no weight capture).
 /// q: (seq, num_q * head_dim), k: (seq, num_kv * head_dim), v: same as k
 #[allow(clippy::too_many_arguments)]

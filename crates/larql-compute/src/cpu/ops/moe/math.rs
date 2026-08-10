@@ -8,6 +8,9 @@
 //! that kernel-binding parity is a statement about the production kernel
 //! rather than about two similar-looking loops agreeing.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Dequantize a BF16 byte slice to f32.
 #[inline]
 pub(super) fn bf16_to_f32(bytes: &[u8]) -> Vec<f32> {
@@ -145,7 +148,7 @@ pub fn softmax(v: &mut [f32]) {
 pub(super) fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
     let k = k.min(v.len());
     let mut indexed: Vec<(usize, f32)> = v.iter().copied().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
     indexed.truncate(k);
     let indices: Vec<usize> = indexed.iter().map(|(i, _)| *i).collect();
     let values: Vec<f32> = indexed.iter().map(|(_, v)| *v).collect();

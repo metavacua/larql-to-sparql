@@ -1,5 +1,8 @@
 use super::f16_to_f32;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Dequantise a Q4_K byte stream to `n_elements` f32 values.
 ///
 /// 256 elements per 144-byte super-block (GGUF / Ollama-canonical layout).

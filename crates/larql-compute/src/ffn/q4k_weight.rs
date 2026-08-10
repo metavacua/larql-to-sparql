@@ -28,6 +28,9 @@ use crate::quantize_x_to_q8k;
 use super::silu_gate_up;
 use super::FfnBackend;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Q4_K super-blocks span this many weights; every matrix dimension fed
 /// to [`quantize_q4_k`] must divide into them row by row.
 const Q4K_BLOCK_ELEMS: usize = 256;

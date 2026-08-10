@@ -12,6 +12,9 @@ use crate::attention::SharedKV;
 use larql_models::ModelWeights;
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Return type for [`forward_raw_logits`]. `h_pre_norm` is the residual
 /// at the last transformer block's output (pre-final-norm), `h_final`
 /// is after final-norm, and `logits` are the raw logits at the final
@@ -188,7 +191,8 @@ fn forward_layer_range(
     let ple_inputs = precompute_per_layer_inputs(&weights, &h, &ple_token_ids);
     let ffn = crate::ffn::ViewFfn { view: weights };
 
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: crate::collections::HashMap<usize, SharedKV> =
+        crate::collections::HashMap::default();
 
     for layer in layer_range {
         let shared_kv = weights

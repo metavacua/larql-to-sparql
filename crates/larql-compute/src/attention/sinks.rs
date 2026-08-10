@@ -9,6 +9,9 @@
 
 use crate::collections::HashMap;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Resolve a layer's per-head attention sinks, if the architecture has them.
 ///
 /// Returns `None` when the architecture declares no sink key (every

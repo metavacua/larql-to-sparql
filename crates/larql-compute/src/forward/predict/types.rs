@@ -3,6 +3,9 @@
 use crate::attention::AttentionWeights;
 use crate::ffn::FfnBackend;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-head attention pattern for the last token at one layer.
 pub struct LayerAttentionCapture {
     pub layer: usize,

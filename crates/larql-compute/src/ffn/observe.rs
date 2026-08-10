@@ -28,6 +28,9 @@
 
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Reason for the trait-default [`super::FfnBackend::forward_observed`]:
 /// the backend ran, but it does not implement activation observation.
 pub const REASON_UNOBSERVED_BACKEND: &str =
