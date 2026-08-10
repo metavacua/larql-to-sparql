@@ -13,16 +13,25 @@ categories = ["data-structures"]
 larql-vindex-spec = { path = "../larql-vindex-spec" }
 ndarray = "0.16"
 
-# Model weight loading
-safetensors = "0.7"
-memmap2 = "0.9"
-
 # See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
-# std-feature) rationale.
+# std-feature) rationale. safetensors/memmap2 moved into this same
+# target-gated table below: both are inherently native (mmap-based file
+# loading, no filesystem on wasm32v1-none at all), AND -- the reason this
+# matters for pattern 1 specifically -- safetensors transitively pulls in
+# serde with its *default* (std-enabled) features. Because that pull
+# wasn't target-gated, Cargo's feature unification re-enabled std for the
+# whole wasm32 build regardless of larql-models' own direct serde
+# override below: confirmed via a real CI round showing serde_core's
+# 5829-error cascade again, identical to the pre-pattern-1 baseline, even
+# with the direct serde split already in place. Generalizes patterns 1
+# and 3: an un-gated dependency that itself needs full std can silently
+# defeat pattern 1's fix for everything else in the graph.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+safetensors = "0.7"
+memmap2 = "0.9"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
