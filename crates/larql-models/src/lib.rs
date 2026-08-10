@@ -12,22 +12,22 @@
 #[macro_use]
 extern crate alloc;
 
-// connectors/, detect/, encoders/, loading/, speech/ are excluded
-// wholesale on wasm32: all five are fundamentally file/mmap-loading
-// pipelines (std::fs, std::path, memmap2/safetensors throughout --
-// confirmed via CI, not guessed), with no cross-reference from any
-// portable module (grepped ModelError/connectors::*/encoders::*
-// usage across architectures/, config/, multimodal/, validation/,
-// vectors/, tensor_keys/, defaults/ before excluding -- none found).
-// Unlike weights.rs (kept, field-gated internally instead) these
-// modules have no otherwise-portable surface worth carving out.
+// connectors/, encoders/, loading/, speech/ are excluded wholesale on
+// wasm32: all four are fundamentally file/mmap-loading pipelines
+// (std::fs, std::path, memmap2/safetensors throughout -- confirmed via
+// CI), with no cross-reference from any portable module -- confirmed by
+// grep, EXCEPT this exact check first wrongly included detect/ in the
+// same bucket (its ModelError type and detect_from_json* functions are
+// pure logic, used from quant/ggml/*.rs, which the first pass of this
+// grep didn't cover). detect/ is therefore NOT wholesale-excluded --
+// see its own module for the surgical field/function-level split
+// instead, same shape as weights.rs's Mmap field.
 pub mod architectures;
 mod collections;
 pub mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod connectors;
 pub mod defaults;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod detect;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod encoders;
@@ -51,11 +51,13 @@ pub use config::{
     YarnRopeScaling, LAYER_TYPE_FULL_ATTENTION, LAYER_TYPE_SLIDING_ATTENTION, ROPE_TYPE_DEFAULT,
     ROPE_TYPE_LINEAR, ROPE_TYPE_LLAMA3, ROPE_TYPE_YARN,
 };
+// detect_from_json/detect_from_json_validated/ModelError are pure logic
+// (dispatch on an already-parsed JSON value) -- portable. Only
+// detect_architecture/detect_architecture_validated take &std::path::Path
+// and read config.json from disk, so only those two are native-only.
 #[cfg(not(target_arch = "wasm32"))]
-pub use detect::{
-    detect_architecture, detect_architecture_validated, detect_from_json,
-    detect_from_json_validated, ModelError,
-};
+pub use detect::{detect_architecture, detect_architecture_validated};
+pub use detect::{detect_from_json, detect_from_json_validated, ModelError};
 pub use multimodal::{
     Connector as MmConnector, ModalEncoder, ModalInput, Modality, MultiModalProtocol,
     PlaceholderProtocol, PrecomputedScaling, TokenBudget,

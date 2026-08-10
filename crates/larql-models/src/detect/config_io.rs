@@ -9,8 +9,10 @@
 
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::ModelError;
 
 /// HF-convention config file name read from a model directory.
@@ -68,6 +70,7 @@ pub(super) const REQUIRED_CONFIG_FIELDS: &[&[&str]] = &[
 ];
 
 /// Resolve the conventional `<model_dir>/config.json` path.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn config_path(model_dir: &Path) -> PathBuf {
     model_dir.join(CONFIG_FILE_NAME)
 }
@@ -78,6 +81,7 @@ pub(super) fn config_path(model_dir: &Path) -> PathBuf {
 /// rather than the prior behavior of synthesising an empty `{}` and
 /// letting magic-number defaults pretend the model was successfully
 /// described.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn read_config_json(config_path: &Path) -> Result<serde_json::Value, ModelError> {
     if !config_path.exists() {
         return Err(ModelError::ConfigMissing(config_path.to_path_buf()));
@@ -91,6 +95,7 @@ pub(super) fn read_config_json(config_path: &Path) -> Result<serde_json::Value, 
 /// `text_config` (multimodal) and nested `language_config` (speech)
 /// layouts are all accepted; a field counts as present when *any* of its
 /// aliases (e.g. `hidden_size` or `n_embd`) resolves under any layout.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn require_config_fields(
     config: &serde_json::Value,
     config_path: &Path,

@@ -11,6 +11,14 @@
 
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
+// std::path::Path has no core/alloc equivalent at all (paths are
+// fundamentally OS-specific) -- unlike patterns 1-7, there is no wasm32
+// substitute to reach for. Every item that needs it (the config_io
+// submodule, detect_architecture/detect_architecture_validated, and the
+// PathBuf/io::Error-carrying ModelError variants) is individually gated
+// below rather than excluding this whole file, since ModelError and
+// detect_from_json*/registry are pure logic used from quant/ggml/*.rs.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use crate::architectures::bitnet::BitnetArch;
@@ -38,10 +46,9 @@ mod config_io;
 mod parser;
 pub mod registry;
 
-use config_io::{
-    config_path, read_config_json, require_config_fields, CONFIG_FILE_NAME,
-    CONFIG_KEY_LANGUAGE_CONFIG, CONFIG_KEY_TEXT_CONFIG,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use config_io::{config_path, read_config_json, require_config_fields, CONFIG_FILE_NAME};
+use config_io::{CONFIG_KEY_LANGUAGE_CONFIG, CONFIG_KEY_TEXT_CONFIG};
 use parser::parse_model_config;
 
 pub use registry::{
@@ -49,8 +56,19 @@ pub use registry::{
 };
 
 /// Error from model detection/config parsing.
+///
+/// The `std::path::PathBuf`/`std::io::Error`-carrying variants below are
+/// wasm32-excluded individually rather than the whole enum: PathBuf has
+/// no core/alloc equivalent at all (paths are fundamentally OS-specific,
+/// unlike patterns 1-7 where *some* wasm32 substitute existed), but
+/// `ConfigValidation`/`Parse`/etc. are plain String/Vec payloads used
+/// from portable code (`validate_detected_architecture` below) and must
+/// stay available. Confirmed via grep that every gated variant is only
+/// ever constructed in already wasm32-excluded modules (config_io.rs,
+/// loading/, speech/) or #[cfg(test)] code.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON parse error: {0}")]
@@ -61,18 +79,22 @@ pub enum ModelError {
     UnsupportedDtype(String),
     #[error("missing tensor: {0}")]
     MissingTensor(String),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("not a directory: {0}")]
     NotADirectory(std::path::PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("no safetensors files in {0}")]
     NoSafetensors(std::path::PathBuf),
     #[error("config validation failed: {0:?}")]
     ConfigValidation(Vec<ConfigValidationError>),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error(
         "{CONFIG_FILE_NAME} not found at {0:?} — \
          architecture cannot be inferred from safetensors alone; \
          copy {CONFIG_FILE_NAME} from the source model into this directory"
     )]
     ConfigMissing(std::path::PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error(
         "{CONFIG_FILE_NAME} at {path:?} is missing required field(s): {missing:?} \
          (checked under top level and `{CONFIG_KEY_TEXT_CONFIG}`)"
@@ -91,6 +113,7 @@ pub enum ModelError {
 /// architecture-class default. This prevents the silent fallback-to-defaults
 /// path from inventing a wrong topology and then panicking deep inside the
 /// extract pipeline (issue #22).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn detect_architecture(model_dir: &Path) -> Result<Box<dyn ModelArchitecture>, ModelError> {
     let config_path = config_path(model_dir);
     let config_json = read_config_json(&config_path)?;
@@ -99,6 +122,7 @@ pub fn detect_architecture(model_dir: &Path) -> Result<Box<dyn ModelArchitecture
 }
 
 /// Read `config.json` from a model directory, detect the architecture, and validate it.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn detect_architecture_validated(
     model_dir: &Path,
 ) -> Result<Box<dyn ModelArchitecture>, ModelError> {
