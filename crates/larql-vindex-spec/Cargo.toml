@@ -9,10 +9,17 @@ description = "Public contract for the vindex on-disk format: Rust types, JSON S
 keywords = ["vindex", "spec", "schema", "manifest"]
 categories = ["data-structures", "encoding"]
 
-[dependencies]
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 
 [features]
 default = []
