@@ -14,12 +14,23 @@ larql-core = { path = "../larql-core" }
 larql-inference = { path = "../larql-inference" }
 larql-models = { path = "../larql-models" }
 larql-vindex = { path = "../larql-vindex" }
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. reqwest (networking) and rustyline (terminal
+# line-editing) are inherently native, pattern 9, no wasm32 entry.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ndarray = "0.16"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 rustyline = "15"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ndarray = { version = "0.16", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 
 [features]
 default = []
