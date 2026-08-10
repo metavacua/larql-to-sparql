@@ -97,8 +97,14 @@ pub fn cpu_moe_forward(
 
     // Debug: print routing per layer if MOE_DEBUG=1
     // core::sync::atomic is the same module std re-exports -- portable
-    // regardless of target, no cfg needed.
+    // regardless of target, no cfg needed. eprintln! itself has no
+    // core equivalent at all (needs an actual stderr/OS stream), so
+    // this whole block is native-only -- moe_debug_enabled() will
+    // return false unconditionally on wasm32 once options.rs is fixed
+    // (no std::env there), making debug_logits always None anyway.
+    #[cfg(not(target_arch = "wasm32"))]
     static DEBUG_LAYER: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(logits) = debug_logits.as_ref() {
         let layer_n = DEBUG_LAYER.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % 30;
         let h_rms = (h.iter().map(|v| v * v).sum::<f32>() / h.len() as f32).sqrt();
@@ -441,6 +447,7 @@ pub fn cpu_moe_forward(
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     if options::moe_debug_enabled() {
         let pre_rms =
             (expert_out.iter().map(|v| v * v).sum::<f32>() / expert_out.len() as f32).sqrt();

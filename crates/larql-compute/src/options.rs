@@ -54,6 +54,9 @@
 //! `metal::flags::DecodeFlags`) — repeated `getenv` per layer per token
 //! costs measurable syscalls.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Enable timing around the full CPU MoE forward pass.
 pub const ENV_MOE_FWD_TIMING: &str = "LARQL_MOE_FWD_TIMING";
 /// Enable timing around one CPU MoE expert.
@@ -174,6 +177,14 @@ pub const ENV_Q4K_ASM: &str = "LARQL_Q4K_ASM";
 /// Spin-barrier thread pool for the decode hot path (vs rayon's sleeping pool).
 pub const ENV_SPIN_POOL: &str = "LARQL_SPIN_POOL";
 
+// wasm32v1-none has neither std::env (nothing to read) nor
+// thread_local! (no threads, so no per-thread test-override map either
+// -- moot anyway since #[cfg(test)] code never compiles under `cargo
+// build`). env_override/env_effective are THE choke point every env
+// helper below reads through, so fixing these two propagates "always
+// unset" to everything downstream without needing to touch each
+// individual helper.
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     /// Per-thread override for env-var reads ([`env_override`]). Tests inject
     /// values here to toggle a flag WITHOUT `std::env::set_var`, which is
@@ -189,12 +200,24 @@ thread_local! {
 
 /// The current thread's test override for `name`, if any. The outer `Option`
 /// tells overridden-vs-not; the inner is the (possibly-unset) raw value.
+#[cfg(target_arch = "wasm32")]
+fn env_override(_name: &str) -> Option<Option<String>> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn env_override(name: &str) -> Option<Option<String>> {
     ENV_OVERRIDES.with(|o| o.borrow().get(name).cloned())
 }
 
 /// Effective raw value for `name`: the thread-local override if present, else
 /// the process env. The single choke point every env helper reads through.
+#[cfg(target_arch = "wasm32")]
+fn env_effective(_name: &str) -> Option<String> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn env_effective(name: &str) -> Option<String> {
     match env_override(name) {
         Some(v) => v,
@@ -222,7 +245,19 @@ fn fast_path_override(name: &'static str) -> Option<bool> {
 /// unset (`None`) — test-only escape hatch ([`ENV_OVERRIDES`]). Lets tests
 /// toggle any flag without process-global env mutation (which segfaults under
 /// parallel `getenv`). Clear with [`clear_fast_path_overrides`] on teardown.
+///
+/// No-op on wasm32: there is no ENV_OVERRIDES map to write into there
+/// (env_override always returns None), and its only callers are
+/// #[cfg(test)] code, which doesn't compile under `cargo build` anyway
+/// -- kept as a real function rather than gated away entirely since
+/// it's `pub` (part of the crate's public API surface, compiled
+/// regardless of in-scope callers).
 #[doc(hidden)]
+#[cfg(target_arch = "wasm32")]
+pub fn set_env_override(_name: &'static str, _value: Option<&str>) {}
+
+#[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn set_env_override(name: &'static str, value: Option<&str>) {
     ENV_OVERRIDES.with(|o| {
         o.borrow_mut().insert(name, value.map(str::to_string));
@@ -238,6 +273,11 @@ pub fn set_fast_path_override(name: &'static str, on: bool) {
 
 /// Clear all thread-local env overrides (test-only).
 #[doc(hidden)]
+#[cfg(target_arch = "wasm32")]
+pub fn clear_fast_path_overrides() {}
+
+#[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn clear_fast_path_overrides() {
     ENV_OVERRIDES.with(|o| o.borrow_mut().clear());
 }
@@ -289,13 +329,28 @@ pub struct DecodeOptions {
     pub spin_pool: bool,
 }
 
+// Raw (override-bypassing) "is this env var set to an opt-out value"
+// check, used only by DecodeOptions::from_env below -- deliberately
+// does NOT route through env_effective/env_override, since the cached
+// DecodeOptions must reflect the RAW process env with the per-thread
+// test override applied later, per-call, via fast_path_override (see
+// that function's doc comment). wasm32 has no std::env at all, so
+// nothing is ever opted out there -- every stage stays at its
+// default-on value, the same outcome an unset env var produces
+// natively.
+#[cfg(target_arch = "wasm32")]
+fn raw_env_is_opt_out(_name: &str) -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn raw_env_is_opt_out(name: &str) -> bool {
+    is_opt_out_value(std::env::var(name).ok().as_deref())
+}
+
 impl DecodeOptions {
     fn from_env() -> Self {
-        // RAW process env (bypass the per-thread override): this is the
-        // process-wide cached production value, and a test's thread-local
-        // override must not be baked into it (the accessors apply the override
-        // per-call instead, via `fast_path_override`).
-        let on = |name: &str| !is_opt_out_value(std::env::var(name).ok().as_deref());
+        let on = |name: &str| !raw_env_is_opt_out(name);
         Self {
             q4k_direct_attn: on(ENV_Q4K_DIRECT_ATTN),
             q4k_attn_int8: on(ENV_Q4K_ATTN_INT8),
@@ -309,6 +364,17 @@ impl DecodeOptions {
 
 /// Process-wide decode fast-path flags, built from env on first use and cached.
 /// The single registry the per-stage `*_enabled()` accessors read.
+///
+/// wasm32 skips the OnceLock cache entirely and just constructs fresh:
+/// std::sync::OnceLock has no core/alloc equivalent (needs real
+/// synchronization), and since `from_env()` never actually touches
+/// std::env there, recomputing costs nothing worth caching.
+#[cfg(target_arch = "wasm32")]
+pub fn decode_options() -> DecodeOptions {
+    DecodeOptions::from_env()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn decode_options() -> &'static DecodeOptions {
     static OPTS: std::sync::OnceLock<DecodeOptions> = std::sync::OnceLock::new();
     OPTS.get_or_init(DecodeOptions::from_env)
@@ -383,6 +449,12 @@ pub fn decode_options_summary() -> String {
 // applies uniformly (no `std::env::set_var` in tests → no `setenv`/`getenv`
 // SIGSEGV race). In production the override map is empty, so each is exactly
 // the prior `std::env::var*` read.
+#[cfg(target_arch = "wasm32")]
+pub fn env_flag(_name: &str) -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn env_flag(name: &str) -> bool {
     match env_override(name) {
         Some(v) => v.is_some(),
@@ -424,6 +496,15 @@ pub fn env_not_zero_or_default(name: &str, default: bool) -> bool {
 /// alias: the canonical name wins; the alias still works but logs a
 /// one-time warning (unprefixed names can collide with a rented host's
 /// ambient env — dec-readiness review §3e).
+///
+/// std::sync::Once has no core/alloc equivalent (needs real
+/// synchronization) and eprintln! has no core equivalent at all (needs
+/// an actual stderr/OS stream) -- native-only. Its three callers below
+/// always return `false` on wasm32 without it: env_flag is
+/// unconditionally false there (no std::env), so this function's
+/// result would always be false regardless of the Once/eprintln
+/// machinery -- the wasm32 callers skip straight to that same answer.
+#[cfg(not(target_arch = "wasm32"))]
 fn env_flag_with_loud_legacy(
     canonical: &'static str,
     legacy: &'static str,
@@ -450,6 +531,12 @@ pub(crate) fn moe_debug_enabled() -> bool {
 
 /// MoE bypass (the DEC-0 ceiling arm's flag): `LARQL_SKIP_MOE`, with the
 /// grid path's historical `SKIP_MOE` as a loud deprecated alias.
+#[cfg(target_arch = "wasm32")]
+pub fn skip_moe_enabled() -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn skip_moe_enabled() -> bool {
     static WARNED: std::sync::Once = std::sync::Once::new();
     env_flag_with_loud_legacy(ENV_SKIP_MOE, ENV_SKIP_MOE_LEGACY, &WARNED)
@@ -457,6 +544,12 @@ pub fn skip_moe_enabled() -> bool {
 
 /// Metal decode-call debug summary: `LARQL_DECODE_DEBUG`, with unprefixed
 /// `DECODE_DEBUG` as a loud deprecated alias.
+#[cfg(target_arch = "wasm32")]
+pub fn decode_debug_enabled() -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn decode_debug_enabled() -> bool {
     static WARNED: std::sync::Once = std::sync::Once::new();
     env_flag_with_loud_legacy(ENV_DECODE_DEBUG, ENV_DECODE_DEBUG_LEGACY, &WARNED)
@@ -464,6 +557,12 @@ pub fn decode_debug_enabled() -> bool {
 
 /// Debug-only outer-norm bypass: `LARQL_SKIP_OUTER_NORM`, with unprefixed
 /// `SKIP_OUTER_NORM` as a loud deprecated alias.
+#[cfg(target_arch = "wasm32")]
+pub fn skip_outer_norm_enabled() -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn skip_outer_norm_enabled() -> bool {
     static WARNED: std::sync::Once = std::sync::Once::new();
     env_flag_with_loud_legacy(ENV_SKIP_OUTER_NORM, ENV_SKIP_OUTER_NORM_LEGACY, &WARNED)
