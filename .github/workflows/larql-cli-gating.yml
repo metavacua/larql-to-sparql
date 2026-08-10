@@ -1,8 +1,6 @@
 name: larql-cli-gating
 
 on:
-  push:
-    branches: [gating/larql-cli-wasm-and-safe]
   pull_request:
     branches: [main]
   workflow_dispatch: {}
