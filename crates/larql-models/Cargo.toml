@@ -53,6 +53,14 @@ ndarray = { version = "0.16", default-features = false }
 # needs-no-std-hasher) rationale -- same fix, this crate's own HashMap/
 # HashSet usage (weights.rs) needs it too.
 hashbrown = { version = "0.15", default-features = false, features = ["serde"] }
+# core's f32/f64 have no transcendental math (.sqrt()/.powf()/etc.) --
+# see crates/larql-core/Cargo.toml for the pattern-6 rationale. num-traits
+# is already transitively present via ndarray, but not as a *direct*
+# dependency; its Float trait (re-exported from src/prelude.rs) covers
+# every method found missing so far (sqrt/powf/powi/round/trunc/ln/exp)
+# in one place, real-implemented via its own "libm" feature rather than
+# std's -- confirmed via docs.rs that Float is libm-backed in no_std.
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 
 [features]
 default = []

@@ -30,9 +30,6 @@ tokenizers = "0.21"
 safetensors = "0.7"
 memmap2 = "0.9"
 ndarray = "0.16"
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
 minijinja = "2"
 libc = "0.2"
 rayon = "1.10"
@@ -43,6 +40,22 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Default scratch directory for `larql recipe build` when --scratch-dir
 # is omitted — not test-only, the CLI needs this at runtime.
 tempfile = "3"
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. Note: this crate is a [[bin]] target whose
+# main.rs itself implicitly requires std (no #![no_std]), so this alone
+# will not get larql-cli itself compiling on wasm32v1-none -- it only
+# clears the dependency-level std wall so the *next* boundary (the bin's
+# own use of std) becomes visible instead of being masked by it.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 
 [features]
 default = ["gpu"]

@@ -24,9 +24,6 @@ larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-core = { path = "../larql-core" }
 larql-vindex = { path = "../larql-vindex" }
 larql-execution = { path = "../larql-execution" }
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
 zip = { version = "2", default-features = false }
 rand = "0.8"
 rand_distr = "0.4"
@@ -76,6 +73,18 @@ wasmtime = { version = "36.0.7", default-features = false, features = ["cranelif
 wasmtime-wasi = "36.0.7"
 anyhow = "1"
 
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }

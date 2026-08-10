@@ -6,6 +6,9 @@
 //! defaults; required topology fields (see [`super::config_io`]) are
 //! validated by the caller before this runs.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use crate::config::{ModelConfig, RopeScaling};
 
 use super::config_io::{

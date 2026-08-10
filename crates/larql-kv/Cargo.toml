@@ -16,13 +16,23 @@ larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-vindex = { path = "../larql-vindex" }
 larql-boundary = { path = "../larql-boundary" }
 
-serde = { workspace = true }
-serde_json = { workspace = true }
 sha2 = "0.10"
-thiserror = { workspace = true }
 
 ndarray = "0.16"
 zip = { version = "2", default-features = false }
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. Orthogonal to the target_os tables below:
+# wasm32v1-none's target_os is "none", so this never overlaps with them.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }

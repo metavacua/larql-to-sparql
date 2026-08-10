@@ -15,13 +15,10 @@ larql-models = { path = "../larql-models" }
 larql-compute = { path = "../larql-compute" }
 larql-vindex-spec = { path = "../larql-vindex-spec" }
 larql-execution = { path = "../larql-execution" }
-serde = { workspace = true }
 # Apple-only sibling backend.  Made `optional = true` so the
 # (target-gated) cfg path on non-macOS doesn't need to fake it out;
 # enabling the `gpu` feature pulls it in.
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
 
 # Matrix types (all compute via larql-compute)
 ndarray = "0.16"
@@ -58,6 +55,18 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 # OS-level mmap hints (madvise)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
 
 [features]
 default = []
