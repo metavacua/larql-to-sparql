@@ -1016,9 +1016,16 @@ jobs:
           python3 scripts/lql_matrix/tensor_presence.py \
             "artifacts/results-*/manifest-*/listing.json" presence.json
           cat presence.json
+      - name: Dtype parity (CLI vs LQL extraction)
+        run: |
+          python3 scripts/lql_matrix/dtype_parity.py \
+            "artifacts/results-*/descriptor-*.json" dtype-parity.json
+          cat dtype-parity.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: inventory
           retention-days: 2
-          path: presence.json
+          path: |
+            presence.json
+            dtype-parity.json
