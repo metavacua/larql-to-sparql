@@ -1,3 +1,17 @@
+// See crates/larql-core/src/lib.rs for the pattern-2 (own-crate-missing-
+// no_std) rationale. Unlike larql-core, this crate is filesystem/mmap-
+// heavy throughout (loading/, detect/, connectors/, encoders/, speech/,
+// weights/ all touch std::fs/std::path/memmap2) -- rather than guess
+// which whole modules need excluding without a compiler in the loop
+// (cross-module references, e.g. weights::ModelWeights used from
+// otherwise-portable modules, are easy to get wrong by inspection alone),
+// this round applies only the confirmed-safe crate-level attribute and
+// lets the next real CI round show exactly what's needed next.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
+
 pub mod architectures;
 pub mod config;
 pub mod connectors;
