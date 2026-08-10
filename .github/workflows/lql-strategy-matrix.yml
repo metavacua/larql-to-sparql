@@ -434,7 +434,14 @@ jobs:
             # must arrive as TWO arguments (`lql` and `SHOW MODELS;`), and an
             # unquoted split would make it three and mask the real behaviour.
             eval "set -- $rest"
-            timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
+            # Chat is a long-running, non-self-terminating command that reads
+            # from stdin. Provide EOF (empty input) so it recognizes end of
+            # input and exits gracefully rather than timing out indefinitely.
+            if [ "$id" = "chat" ]; then
+              echo | timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
+            else
+              timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
+            fi
             echo "$id exit=$? argc=$# argv=[$rest]" >> probe/cmd.index
           done
           cat probe/cmd.index
