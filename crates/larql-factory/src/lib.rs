@@ -29,6 +29,7 @@ mod card;
 mod constants;
 mod estimate;
 mod hex;
+mod prelude;
 mod recipe;
 #[cfg(test)]
 mod test_support;

@@ -13,6 +13,9 @@
 //! was the sole subtle failure mode called out in the spec's build
 //! inventory, §14).
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 

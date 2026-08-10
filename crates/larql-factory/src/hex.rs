@@ -2,7 +2,13 @@
 //! for the handful of digest-formatting call sites this crate needs
 //! (`build_id` today; shard `sha256` in the MANIFEST stage later).
 
-use std::fmt::Write;
+// core::fmt::Write is the same trait std::fmt::Write re-exports --
+// portable regardless of target, no cfg needed (unlike the String type
+// itself, which does need the alloc-gated prelude import below).
+use core::fmt::Write;
+
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 /// Lowercase-hex-encode `bytes`.
 pub fn encode(bytes: impl AsRef<[u8]>) -> String {
