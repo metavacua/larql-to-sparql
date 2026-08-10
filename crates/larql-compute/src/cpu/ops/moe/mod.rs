@@ -11,6 +11,9 @@
 //! Expert weights are stored as packed BF16: [num_experts, out_dim, in_dim].
 //! We dequantize only the selected top-k expert slices on demand.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 mod cache;
 mod expert;
 mod forward;
@@ -46,6 +49,16 @@ use crate::{
 /// Trade-off: the env var is process-bound — flip it before the first
 /// MoE forward call, not at runtime. There is no production caller
 /// that toggles this mid-run; the var is a kernel-debug A/B switch.
+// wasm32v1-none has no std::env at all, so the flag can never be set
+// there -- `false` (the same value as the unset-env-var case natively)
+// is the honestly-correct answer, not a stub. Same shape as
+// cpu/ops/moe/latent_mask.rs's active()/record_stats()/dump_stats().
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn q4k_direct_disabled() -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn q4k_direct_disabled() -> bool {
     use std::sync::OnceLock;
     static CACHE: OnceLock<bool> = OnceLock::new();

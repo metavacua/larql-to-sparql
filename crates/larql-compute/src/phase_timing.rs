@@ -15,18 +15,44 @@
 //! Thread-local by design: the phases of interest run on the
 //! orchestration thread, wrapping whole parallel regions; worker
 //! threads never record.
+//!
+//! wasm32v1-none has neither `std::env` (nothing to read `ENV_VAR`
+//! from) nor `std::time::Instant` (no OS clock) nor `thread_local!` (no
+//! threads) -- this is unconditionally disabled there, same shape as
+//! `cpu/ops/moe/latent_mask.rs`'s env-gated probes. Every call site
+//! (all in larql-compute/larql-inference/larql-cli) passes the `start()`
+//! return value straight through to `finish()` without inspecting it,
+//! so [`PhaseMarker`] can be a real `Instant` natively and a
+//! zero-sized unit on wasm32 with no caller changes.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Instant;
+use core::sync::atomic::{AtomicU8, Ordering};
 
 /// Environment variable that switches recording on.
 pub const ENV_VAR: &str = "LARQL_PHASE_TIMING";
 
+/// Opaque token passed from [`start`] to [`finish`]. A real `Instant`
+/// natively; a zero-sized unit on wasm32, where this is always disabled.
+#[cfg(not(target_arch = "wasm32"))]
+pub type PhaseMarker = std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+pub type PhaseMarker = ();
+
 /// 0 = unknown, 1 = disabled, 2 = enabled.
 static STATE: AtomicU8 = AtomicU8::new(0);
 
+#[cfg(target_arch = "wasm32")]
+fn enabled() -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn enabled() -> bool {
     match STATE.load(Ordering::Relaxed) {
         2 => true,
@@ -39,6 +65,7 @@ fn enabled() -> bool {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static ACCUMULATOR: RefCell<BTreeMap<&'static str, f64>> = const { RefCell::new(BTreeMap::new()) };
 }
@@ -46,13 +73,21 @@ thread_local! {
 /// Start a phase clock. `None` when timing is disabled — [`finish`]
 /// with `None` is free.
 #[inline]
-pub fn start() -> Option<Instant> {
-    enabled().then(Instant::now)
+#[cfg(not(target_arch = "wasm32"))]
+pub fn start() -> Option<PhaseMarker> {
+    enabled().then(std::time::Instant::now)
+}
+
+#[inline]
+#[cfg(target_arch = "wasm32")]
+pub fn start() -> Option<PhaseMarker> {
+    None
 }
 
 /// Close a phase opened by [`start`], accumulating under `phase`.
 #[inline]
-pub fn finish(started: Option<Instant>, phase: &'static str) {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn finish(started: Option<PhaseMarker>, phase: &'static str) {
     if let Some(instant) = started {
         let seconds = instant.elapsed().as_secs_f64();
         ACCUMULATOR.with(|acc| {
@@ -61,8 +96,13 @@ pub fn finish(started: Option<Instant>, phase: &'static str) {
     }
 }
 
+#[inline]
+#[cfg(target_arch = "wasm32")]
+pub fn finish(_started: Option<PhaseMarker>, _phase: &'static str) {}
+
 /// Take the current thread's accumulated phases, clearing them.
 /// Empty when timing is disabled or nothing recorded.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn snapshot_and_reset() -> Vec<(&'static str, f64)> {
     ACCUMULATOR.with(|acc| {
         let mut map = acc.borrow_mut();
@@ -70,6 +110,11 @@ pub fn snapshot_and_reset() -> Vec<(&'static str, f64)> {
         map.clear();
         out
     })
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn snapshot_and_reset() -> Vec<(&'static str, f64)> {
+    Vec::new()
 }
 
 #[cfg(test)]

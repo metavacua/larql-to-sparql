@@ -15,6 +15,9 @@
 //! All three are tokenizer-free — they return raw token IDs and probs.
 //! Decode IDs to strings on the caller side if needed.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 use super::predict::raw::hidden_to_raw_logits;
 use super::softmax;
 use larql_models::ModelWeights;
@@ -93,8 +96,10 @@ fn topk_from_probs(probs: &[f32], k: usize) -> Vec<(u32, f32)> {
         .collect()
 }
 
-fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
+// core::cmp::Ordering is the same type std re-exports -- portable
+// regardless of target, no cfg needed.
+fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> core::cmp::Ordering {
+    use core::cmp::Ordering;
     match (a.1.is_nan(), b.1.is_nan()) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,

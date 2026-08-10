@@ -36,6 +36,18 @@
 //! | `LARQL_LLAMA3_ROPE_SCALING` | `factor,low,high,old_ctx` | Force HF llama3 scaling params. |
 //! | `LARQL_NORM_EPS_OVERRIDE` | `f64` | Override `arch.norm_eps()`. |
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+// wasm32v1-none has no std::env at all, so none of the five diagnostic
+// overrides this module resolves can ever be set there. Each cached
+// resolver below gets a wasm32 twin that calls the same pure parser
+// with `None` -- the identical value the native OnceLock would compute
+// when its env var happens to be unset -- rather than a hand-maintained
+// duplicate of "what the default is." Since it's a plain function call
+// on a constant input, no caching (OnceLock or otherwise) is needed at
+// all on wasm32, unlike cpu/ops/moe/latent_mask.rs's env-gated probes.
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
 /// Diagnostic override for the sliding-window attention bisection.
@@ -78,6 +90,12 @@ fn parse_force_global_spec(raw: Option<&str>) -> ForceGlobalSpec {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn force_global_spec() -> &'static ForceGlobalSpec {
+    &ForceGlobalSpec::None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn force_global_spec() -> &'static ForceGlobalSpec {
     static CELL: OnceLock<ForceGlobalSpec> = OnceLock::new();
     CELL.get_or_init(|| {
@@ -152,6 +170,12 @@ fn parse_rope_position_divisor(raw: Option<&str>) -> f64 {
         .unwrap_or(1.0)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn rope_position_divisor() -> f64 {
+    parse_rope_position_divisor(None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn rope_position_divisor() -> f64 {
     static CELL: OnceLock<f64> = OnceLock::new();
     *CELL.get_or_init(|| {
@@ -163,6 +187,12 @@ fn rope_position_divisor() -> f64 {
 /// applied only on global (non-sliding) layers. Gemma 3's HF config sets a
 /// linear factor on full-attention layers only via the structured per-layer-
 /// type `rope_scaling` form.
+#[cfg(target_arch = "wasm32")]
+fn rope_position_divisor_global_only() -> f64 {
+    parse_rope_position_divisor(None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn rope_position_divisor_global_only() -> f64 {
     static CELL: OnceLock<f64> = OnceLock::new();
     *CELL.get_or_init(|| {
@@ -211,6 +241,12 @@ fn parse_llama3_rope_scaling(raw: Option<&str>) -> Option<larql_models::Llama3Ro
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn llama3_rope_scaling_override() -> Option<larql_models::Llama3RopeScaling> {
+    parse_llama3_rope_scaling(None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn llama3_rope_scaling_override() -> Option<larql_models::Llama3RopeScaling> {
     static CELL: OnceLock<Option<larql_models::Llama3RopeScaling>> = OnceLock::new();
     *CELL.get_or_init(|| {
@@ -264,6 +300,12 @@ fn parse_norm_eps_override(raw: Option<&str>) -> Option<f32> {
         .filter(|v| v.is_finite() && *v > 0.0)
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn norm_eps_override() -> Option<f32> {
+    parse_norm_eps_override(None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn norm_eps_override() -> Option<f32> {
     static CELL: OnceLock<Option<f32>> = OnceLock::new();
     *CELL.get_or_init(|| {
