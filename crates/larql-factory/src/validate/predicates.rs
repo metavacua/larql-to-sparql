@@ -3,6 +3,9 @@
 //! check flow so that flow reads as a list of rules, not a tangle of
 //! inline string munging.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use crate::constants::{GIT_COMMIT_SHA_HEX_LEN, SEMVER_COMPONENT_COUNT};
 
 /// True if `s` is a full lowercase-or-uppercase hex commit SHA of the

@@ -3,7 +3,11 @@
 //! other modules (git SHA length, semver arity) live in
 //! [`crate::constants`] instead; this file is validate-only.
 
-use std::ops::RangeInclusive;
+// core::ops::RangeInclusive is the same type std::ops::RangeInclusive
+// re-exports -- portable regardless of target, no cfg needed, same
+// shape as the core::cmp::Ordering / core::fmt::Write swaps elsewhere
+// in this campaign.
+use core::ops::RangeInclusive;
 
 /// The only extractor tool this factory knows how to invoke.
 pub const SUPPORTED_EXTRACTOR_TOOL: &str = "larql";

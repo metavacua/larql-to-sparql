@@ -13,10 +13,14 @@
 #![deny(missing_docs)]
 // See crates/larql-core/src/lib.rs for the pattern-2 rationale. Like
 // larql-models, this crate's real modules (build/ spawns subprocesses;
-// estimate/ makes HTTP calls) are heavily native -- applying only the
-// confirmed-safe crate-level attribute here and letting the next real
-// CI round show which modules need pattern-3 whole-module exclusion,
-// rather than guessing.
+// estimate/ makes HTTP calls) are heavily native. build/runner.rs +
+// build/stages/ are wholesale wasm32-excluded (std::process::Command,
+// no core/alloc equivalent -- confirmed via grep no portable code
+// depends on them); build/record.rs is pure data and stays available.
+// estimate/http.rs and the two reqwest-calling fns in estimate/mod.rs
+// are excluded the same way; estimate's other submodules (bytes/cost/
+// dims/executor/preset_weights) are pure computation and stay
+// available, same shape as larql-models' detect/ surgical split.
 #![cfg_attr(target_arch = "wasm32", no_std)]
 #[cfg(target_arch = "wasm32")]
 #[macro_use]
@@ -35,22 +39,25 @@ mod recipe;
 mod test_support;
 mod validate;
 
-pub use build::{
-    run as run_build, BuildRecord, BuildStatus, CommandOutput, CommandRunner, OutputRecord, Stage,
-    SubprocessRunner,
-};
+#[cfg(not(target_arch = "wasm32"))]
+pub use build::{run as run_build, CommandOutput, CommandRunner, SubprocessRunner};
+pub use build::{BuildRecord, BuildStatus, OutputRecord, Stage};
 pub use build_id::build_id;
 pub use capabilities::{
     manifest as capabilities_manifest, ArchitectureCapability, CapabilityManifest,
 };
+// card::render needs serde_yaml transitively (via body::render_recipe),
+// native-only -- see card/body/mod.rs. Recipe::from_yaml below is the
+// same shape.
+#[cfg(not(target_arch = "wasm32"))]
+pub use card::render as render_card;
 pub use card::{
-    render as render_card, revision_tag, CardInputs, LogitMatchResult, ReconstructionResult,
-    SliceSummary, VerificationReport,
+    revision_tag, CardInputs, LogitMatchResult, ReconstructionResult, SliceSummary,
+    VerificationReport,
 };
-pub use estimate::{
-    estimate as estimate_size, ExecutorClass, HttpError as EstimateError, ModelDims,
-    OutputEstimate, SizeEstimate,
-};
+#[cfg(not(target_arch = "wasm32"))]
+pub use estimate::{estimate as estimate_size, HttpError as EstimateError};
+pub use estimate::{ExecutorClass, ModelDims, OutputEstimate, SizeEstimate};
 pub use recipe::{
     Budget, BudgetRequires, Extractor, HubPublish, LogitMatch, Metadata, MirrorPublish, OutputSpec,
     Publish, Recipe, Reconstruction, Source, Spec, Verify, API_VERSION, KIND,

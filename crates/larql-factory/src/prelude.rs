@@ -8,4 +8,7 @@
 //! Empty on native: std's own prelude already provides all of these.
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use alloc::string::String;
+pub(crate) use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};

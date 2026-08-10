@@ -1,5 +1,8 @@
 //! `spec.budget` — executor selection and resource/cost ceilings.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use serde::{Deserialize, Serialize};
 
 /// Executor selection and resource/cost ceilings. Not part of `build_id`.

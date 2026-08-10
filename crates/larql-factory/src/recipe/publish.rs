@@ -1,5 +1,8 @@
 //! `spec.publish` — Hub and R2 publication targets.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use serde::{Deserialize, Serialize};
 
 /// Publication targets. Not part of `build_id`.

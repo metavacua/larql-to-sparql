@@ -1,6 +1,9 @@
 //! §9's `USE "hf://..."` snippet — points at the vindex's own Hub
 //! repo (resolved via [`crate::card::naming`]), not the base model's.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use crate::card::naming::{hub_repo_name, slice_suffix};
 use crate::{Metadata, Publish};
 

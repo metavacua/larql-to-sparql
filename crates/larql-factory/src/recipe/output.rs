@@ -1,5 +1,8 @@
 //! `spec.outputs` — the presets to slice and their shard caps.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use serde::{Deserialize, Serialize};
 
 /// One output artifact: a preset slice (or `"full"`, the unsliced

@@ -2,6 +2,9 @@
 //! `v{vindex_schema_version}-{extractor}{extractor_version}-{build_id[:8]}`
 //! e.g. `v1-larql0.14.2-3f9a2c71`. `main` moves; tags don't.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use larql_vindex_spec::VindexManifest;
 
 use crate::Recipe;

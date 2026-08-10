@@ -2,6 +2,9 @@
 //! describes: "does this larql release understand `model_type` X, and
 //! if so what does it support."
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use larql_models::detect::AttentionKind;
 use larql_vindex_spec::QuantFormat;
 use serde::Serialize;

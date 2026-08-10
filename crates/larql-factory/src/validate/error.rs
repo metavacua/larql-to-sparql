@@ -1,6 +1,9 @@
 //! [`RecipeError`] — every structural problem [`crate::validate::validate`]
 //! can report.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 /// One structural problem found in a recipe. A recipe may have several;
 /// [`crate::validate::validate`] collects all of them rather than
 /// failing on the first, so a PR check can post one comment listing

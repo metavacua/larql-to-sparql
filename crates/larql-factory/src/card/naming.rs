@@ -3,6 +3,9 @@
 //! outside `body/` because the eventual PUBLISH stage (§7) needs the
 //! same resolution, not just the card.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use crate::HubPublish;
 
 const MODEL_SLUG_PLACEHOLDER: &str = "{model_slug}";

@@ -20,19 +20,32 @@
 //! than a confident-but-unvalidated numeric check.
 
 mod record;
+// runner.rs (std::process::Command, no core/alloc equivalent) and
+// stages/ (subprocess orchestration built on runner::CommandRunner)
+// are native-only throughout -- confirmed via grep that nothing outside
+// build/ references either, so unlike estimate/'s partial split, the
+// whole pair excludes cleanly. record.rs is pure data (Class A alloc
+// fix only) and stays available on wasm32.
+#[cfg(not(target_arch = "wasm32"))]
 mod runner;
+#[cfg(not(target_arch = "wasm32"))]
 mod stages;
 #[cfg(test)]
 mod tests;
 
 pub use record::{BuildRecord, BuildStatus, OutputRecord, Stage};
+#[cfg(not(target_arch = "wasm32"))]
 pub use runner::{CommandOutput, CommandRunner, SubprocessRunner};
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::Recipe;
 
+#[cfg(not(target_arch = "wasm32"))]
 const HF_CACHE_SUBDIR: &str = "hf-cache";
+#[cfg(not(target_arch = "wasm32"))]
 const FULL_OUTPUT_SUBDIR: &str = "full.vindex";
 
 /// Run every stage for `recipe`, using `scratch_dir` as the build's
@@ -40,6 +53,7 @@ const FULL_OUTPUT_SUBDIR: &str = "full.vindex";
 /// `larql` subcommand. Always returns a [`BuildRecord`] — a stage
 /// failure is encoded in [`BuildRecord::status`], not a Rust `Err`, so
 /// a caller always has a JSON-printable result either way.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run(runner: &dyn CommandRunner, recipe: &Recipe, scratch_dir: &Path) -> BuildRecord {
     let build_id = crate::build_id(recipe);
     let mut output_records: Vec<OutputRecord> = recipe

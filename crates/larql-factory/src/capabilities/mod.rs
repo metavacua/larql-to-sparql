@@ -19,6 +19,9 @@ mod types;
 
 pub use types::{ArchitectureCapability, CapabilityManifest};
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use larql_models::detect::ARCHITECTURE_REGISTRY;
 
 /// Build the capability manifest for the running `larql` binary.

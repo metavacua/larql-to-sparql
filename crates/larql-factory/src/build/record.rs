@@ -5,6 +5,9 @@
 //! to do either, the same way `dec0-loopback.sh` wraps `dec-bench`'s
 //! own JSON output today.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use serde::Serialize;
 
 /// Which stage a build stopped at, if it didn't reach RELEASE.

@@ -1,5 +1,8 @@
 //! §9's "what this is" section: model dimensions plus the slice table.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use larql_vindex_spec::VindexManifest;
 
 use crate::SliceSummary;

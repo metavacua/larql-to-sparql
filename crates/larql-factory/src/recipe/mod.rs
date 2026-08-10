@@ -24,6 +24,9 @@ pub use publish::{HubPublish, MirrorPublish, Publish};
 pub use source::Source;
 pub use verify::{LogitMatch, Reconstruction, Verify};
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use serde::{Deserialize, Serialize};
 
 /// `apiVersion` this crate understands. A recipe declaring anything else
@@ -84,6 +87,12 @@ pub struct Spec {
 
 impl Recipe {
     /// Parse a recipe from YAML source.
+    // serde_yaml has no no_std/alloc mode at all (see Cargo.toml's
+    // pattern-1 comment) -- native-only, same as build/'s
+    // std::process::Command. Recipe itself (derives Serialize/
+    // Deserialize) stays portable; only this parsing entry point needs
+    // the dependency.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_yaml(src: &str) -> Result<Self, serde_yaml::Error> {
         serde_yaml::from_str(src)
     }

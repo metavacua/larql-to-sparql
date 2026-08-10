@@ -1,5 +1,8 @@
 //! §9's verification-report summary section.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use crate::{VerificationReport, Verify};
 
 /// Render the verification summary — pass/fail plus the measured

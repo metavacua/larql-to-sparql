@@ -28,6 +28,9 @@ pub use constants::{
 };
 pub use error::RecipeError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use predicates::{is_full_hex_sha, is_kebab_case, looks_like_released_tag};
 
 use crate::recipe::{Budget, Extractor, HubPublish, Metadata, OutputSpec, Recipe, Source, Verify};

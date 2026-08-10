@@ -5,6 +5,9 @@
 //! card; expect it to grow once `larql build` exists and can validate
 //! these fields against real output.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use larql_vindex_spec::VindexManifest;
 use serde::{Deserialize, Serialize};
 

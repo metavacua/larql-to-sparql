@@ -1,6 +1,9 @@
 //! §9's card frontmatter — generated from the manifest, never
 //! hand-written.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use larql_vindex_spec::VindexManifest;
 
 use crate::Recipe;

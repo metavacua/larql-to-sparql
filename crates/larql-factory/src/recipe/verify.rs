@@ -1,5 +1,8 @@
 //! `spec.verify` — reconstruction and logit-match thresholds (§8.1).
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use serde::{Deserialize, Serialize};
 
 /// Verification thresholds. Not part of `build_id` — tightening a

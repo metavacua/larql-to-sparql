@@ -1,5 +1,8 @@
 //! `spec.source` — the pinned upstream model.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 use serde::{Deserialize, Serialize};
 
 /// Pinned upstream model. Part of `build_id`.
