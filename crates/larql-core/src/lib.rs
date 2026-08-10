@@ -1,6 +1,18 @@
+// wasm32v1-none is core+alloc only (E0463 "can't find crate for `std`" on
+// the implicit prelude import otherwise). Native builds are unaffected.
+// See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
+// Task 7, pattern 2: own-crate-missing-no_std.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
 pub mod algo;
 pub mod core;
 pub mod engine;
+// std::fs-based; no filesystem exists on wasm32v1-none. Pattern 3:
+// native-only-io-module. Whole module excluded rather than patched --
+// there is no alloc/core equivalent for file I/O to fall back to.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod io;
 
 // Re-export the essential types at crate root.
@@ -14,9 +26,13 @@ pub use engine::chain::{chain_tokens, ChainResult};
 pub use engine::provider::{ModelProvider, PredictionResult, TokenPrediction};
 pub use engine::templates::TemplateRegistry;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::checkpoint::CheckpointLog;
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::format::Format;
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::json::{load_json, save_json};
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::{from_bytes, load, load_with_format, save, save_with_format, to_bytes};
 
 pub use algo::components::{are_connected, connected_components};
@@ -30,5 +46,7 @@ pub use algo::pagerank::{pagerank, PageRankResult};
 pub use algo::shortest_path::{astar, shortest_path, shortest_path_with_weight, PathResult};
 pub use algo::traversal::{bfs as bfs_traversal, dfs, TraversalResult};
 pub use algo::walk::{walk_all_paths, WalkResult};
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::csv::{load_csv, save_csv};
+#[cfg(not(target_arch = "wasm32"))]
 pub use io::packed::{from_packed_bytes, load_packed, save_packed, to_packed_bytes};
