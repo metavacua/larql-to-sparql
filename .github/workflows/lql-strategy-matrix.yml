@@ -420,7 +420,7 @@ jobs:
             "dev|dev"
             "repl|repl"
             "lql|lql \"SHOW MODELS;\""
-            "query|query $TMP/graph.json --entity France"
+            "query|query --graph $TMP/graph.json France"
             "describe|describe $TMP/graph.json France"
             "stats|stats $TMP/graph.json"
             "validate|validate $TMP/graph.json"
