@@ -1,6 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 //! Kernel identity and maturity (spec §10).
 //!
 //! Deliberately outside the traversal's vocabulary. Traversal answers "are the
@@ -10,6 +7,9 @@ use crate::alloc_prelude::*;
 //! from operand availability is what stops the second question leaking into
 //! the first — and a traversal that could name a kernel would be a traversal
 //! that had already chosen one.
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// How mature the execution path for an operand is (§10's ladder).
 ///

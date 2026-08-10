@@ -1,11 +1,11 @@
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 //! VectorIndex mutation and persistence methods.
 //!
 //! Adds INSERT/DELETE/UPDATE support and the ability to save a
 //! modified vindex back to disk. NDJSON heap loaders live in the
 //! sibling `loaders` module.
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 pub mod loaders;
 #[cfg(test)]

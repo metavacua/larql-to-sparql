@@ -1,6 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 //! Binary down_meta format — compact storage for per-feature output metadata.
 //!
 //! Replaces down_meta.jsonl (~160 MB) with a binary format (~30 MB for top_k=10).
@@ -17,6 +14,9 @@ use crate::alloc_prelude::*;
 //! bound every allocation and offset by the actual file size, so a
 //! corrupt header produces a parse error rather than a multi-GB
 //! allocation or a panic.
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 mod read;
 

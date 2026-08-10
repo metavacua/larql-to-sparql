@@ -1,7 +1,7 @@
+//! `QuantizedFfnAccess` — Q4_0 / Q4_K / Q6_K FFN row access.
+
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
-
-//! `QuantizedFfnAccess` — Q4_0 / Q4_K / Q6_K FFN row access.
 
 /// Q4_0/Q4_K/Q6_K FFN storage access.
 pub trait QuantizedFfnAccess: Send + Sync {

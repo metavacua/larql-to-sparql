@@ -1,11 +1,11 @@
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 //! DESCRIBE types — DescribeEdge and LabelSource.
 //!
 //! These represent the output of a DESCRIBE operation on an entity.
 //! The actual DESCRIBE logic lives in the executor (larql-lql), but these
 //! types are vindex-level so they can be shared across consumers.
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Source of a relation label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

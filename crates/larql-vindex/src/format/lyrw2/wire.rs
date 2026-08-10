@@ -1,12 +1,12 @@
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 //! Little-endian field access over fixed-width descriptor slices.
 //!
 //! Every descriptor in LYRW v2 is a fixed-size record read from a known
 //! offset, so the whole wire layer needs exactly two readers and two writers.
 //! Keeping them here means no descriptor module hand-rolls a `try_into`, which
 //! is where off-by-two field offsets come from.
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Read a `u16` at `at` within `bytes`, or `None` if the record is short.
 pub fn read_u16(bytes: &[u8], at: usize) -> Option<u16> {

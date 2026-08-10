@@ -1,6 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 //! What an execution is given.
 //!
 //! # Gemma forced this
@@ -33,6 +30,9 @@ use crate::alloc_prelude::*;
 //!
 //! So the block computes both vectors, as it already does, and hands them
 //! over. Models where the two coincide use [`MoeInputs::shared`].
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// The vectors one MoE execution reads.
 #[derive(Debug, Clone, Copy, PartialEq)]

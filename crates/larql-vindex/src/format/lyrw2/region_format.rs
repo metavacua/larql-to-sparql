@@ -1,12 +1,12 @@
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 //! Region encodings and packings (spec §6.4).
 //!
 //! Like roles, unrecognised tags are preserved rather than rejected — a reader
 //! that only walks gate regions must not fail because a `down` region uses a
 //! codec it cannot decode. Refusal happens when a kernel is asked to execute
 //! the region (spec §10/§11), which is where the honest diagnosis lives.
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Numeric encoding of a region's payload bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

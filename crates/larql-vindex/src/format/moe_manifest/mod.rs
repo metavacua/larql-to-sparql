@@ -1,6 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 //! The MoE programme manifest (format spec §8).
 //!
 //! The physical index stores tensor regions; this manifest gives them meaning;
@@ -12,6 +9,9 @@ use crate::alloc_prelude::*;
 //! Per-layer, deliberately (§8.1). A global `first_k_dense_replace` would have
 //! covered Kimi-Linear's leading dense layer and then failed on Inkling-Small,
 //! whose dense MLP sits mid-stack at index 2.
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 pub mod bank_ref;
 pub mod layer;

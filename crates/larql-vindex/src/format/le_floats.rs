@@ -1,6 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 //! Little-endian f32 ⇄ byte codecs shared by the on-disk formats
 //! (`config::dtype`, `patch::format`, `quant::convert`).
 //!
@@ -11,6 +8,9 @@ use crate::alloc_prelude::*;
 //! every supported target is little-endian today, so this matches the
 //! historical native-endian writers bit-for-bit while making the
 //! formats portable.
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// On-disk width of one f32 value.
 const F32_BYTES: usize = std::mem::size_of::<f32>();
