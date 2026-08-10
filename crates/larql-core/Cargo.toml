@@ -36,6 +36,14 @@ thiserror = { workspace = true }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
+# std::collections::HashMap/HashSet have no core/alloc equivalent (need a
+# hasher; alloc provides no default one). hashbrown is no_std-capable, but
+# its own default hasher (foldhash) has the identical OS-randomness
+# requirement (confirmed via its Cargo.toml) -- default-features = false
+# avoids pulling that in; src/collections.rs supplies a fixed-seed FNV-1a
+# hasher instead. See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
+# Task 7, pattern 4: std-collection-needs-no-std-hasher.
+hashbrown = { version = "0.15", default-features = false }
 
 [features]
 default = ["http", "msgpack"]

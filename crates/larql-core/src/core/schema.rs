@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
-// HashMap has no core/alloc equivalent (needs a hasher); see
-// algo/shortest_path.rs for the pattern-4 rationale.
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashMap;
+use crate::collections::{HashMap, HashSet};
 
 /// Metadata for a relation type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,8 +73,8 @@ impl Schema {
     /// using the loaded type rules. Returns None if no rule matches.
     pub fn infer_type(
         &self,
-        outgoing: &std::collections::HashSet<String>,
-        incoming: &std::collections::HashSet<String>,
+        outgoing: &HashSet<String>,
+        incoming: &HashSet<String>,
     ) -> Option<String> {
         for rule in &self.type_rules {
             let out_match =

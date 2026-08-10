@@ -1,10 +1,9 @@
 use ::core::cell::RefCell;
 #[cfg(target_arch = "wasm32")]
 use alloc::collections::VecDeque;
-// HashMap/HashSet have no core/alloc equivalent (need a hasher); see
-// algo/shortest_path.rs for the pattern-4 rationale.
 #[cfg(not(target_arch = "wasm32"))]
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+use crate::collections::{HashMap, HashSet};
 
 use super::edge::{CompactEdge, Edge, Triple};
 use super::enums::{MergeStrategy, SourceType};
@@ -645,8 +644,8 @@ impl Default for Graph {
     }
 }
 
-impl std::fmt::Debug for Graph {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl ::core::fmt::Debug for Graph {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         write!(
             f,
             "Graph(edges={}, nodes={})",
@@ -668,6 +667,12 @@ pub struct DescribeResult {
 pub enum GraphError {
     #[error("deserialization failed: {0}")]
     Deserialize(String),
+    // std::io::Error has no core/alloc equivalent (it's fundamentally an
+    // OS error type). Only ever constructed by io/packed.rs via
+    // `map_err(GraphError::Io)` -- that whole module is already excluded
+    // on wasm32 (lib.rs), so this variant can be too. Confirmed via grep
+    // that nothing outside io/ references GraphError::Io.
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

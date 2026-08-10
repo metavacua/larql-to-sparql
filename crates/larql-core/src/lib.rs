@@ -7,6 +7,7 @@
 extern crate alloc;
 
 pub mod algo;
+mod collections;
 pub mod core;
 pub mod engine;
 // std::fs-based; no filesystem exists on wasm32v1-none. Pattern 3:

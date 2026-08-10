@@ -1,8 +1,5 @@
 use ::core::sync::atomic::{AtomicUsize, Ordering};
-// HashMap has no core/alloc equivalent (needs a hasher); see
-// algo/shortest_path.rs for the pattern-4 rationale.
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashMap;
+use crate::collections::HashMap;
 
 use super::provider::*;
 

@@ -2,10 +2,9 @@
 
 #[cfg(target_arch = "wasm32")]
 use alloc::collections::VecDeque;
-// HashMap/HashSet have no core/alloc equivalent (need a hasher); see
-// algo/shortest_path.rs for the pattern-4 rationale.
 #[cfg(not(target_arch = "wasm32"))]
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+use crate::collections::{HashMap, HashSet};
 
 use crate::core::edge::Edge;
 use crate::core::graph::Graph;
