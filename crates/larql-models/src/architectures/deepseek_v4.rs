@@ -19,6 +19,8 @@
 //! Currently scoped to **browse-tier extraction** — gate vectors + embeddings
 //! + down_meta. Inference (HCA forward pass) is out of scope for this impl.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::{ModelArchitecture, ModelConfig};
 
 pub struct DeepSeekV4Arch {

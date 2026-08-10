@@ -15,6 +15,8 @@
 //! 2. `sliding_window_pattern` field (every Nth layer is full)
 //! 3. Default pattern of 6 (every 6th layer is full)
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::{Activation, ExpertFormat, ModelArchitecture, ModelConfig};
 use crate::tensor_keys::qk_norm;
 

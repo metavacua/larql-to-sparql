@@ -8,6 +8,8 @@
 //! Used by the LARQL FP4 vindex format (exp 26) as both the
 //! per-sub-block scale format and the per-block scale format.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 /// Convert one E4M3 byte to f32.
 ///
 /// Uses a 256-entry precomputed lookup table for speed; the table is

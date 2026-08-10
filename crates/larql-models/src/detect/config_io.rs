@@ -7,6 +7,8 @@
 //! shape: [2560] to: [2048]`). Failing here keeps the error message
 //! attached to the actual cause.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::path::{Path, PathBuf};
 
 use super::ModelError;

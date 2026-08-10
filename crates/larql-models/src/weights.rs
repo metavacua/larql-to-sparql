@@ -1,5 +1,7 @@
 //! Model weight tensors — the loaded representation of a model's parameters.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::ModelArchitecture;
 use memmap2::Mmap;
 use ndarray::ArcArray2;

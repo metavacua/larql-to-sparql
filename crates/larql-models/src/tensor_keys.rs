@@ -12,6 +12,8 @@
 //! `c_attn`-style Conv1D layouts) build their own keys and should not
 //! reach for these.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 /// Standard HuggingFace QK-norm names.
 ///
 /// Declared by Gemma 2/3/4, Qwen3, and OLMoE — five architectures, one

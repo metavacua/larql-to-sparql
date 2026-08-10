@@ -1,5 +1,7 @@
 //! Validation for parsed model architecture configs.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::{ModelArchitecture, ModelConfig};
 
 pub const FIELD_NUM_LAYERS: &str = "num_layers";
@@ -64,8 +66,8 @@ impl ConfigValidationError {
     }
 }
 
-impl std::fmt::Display for ConfigValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ConfigValidationError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}: {}", self.field, self.message)
     }
 }

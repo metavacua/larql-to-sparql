@@ -4,6 +4,8 @@
 //! Granite Vision variants additionally declare a multi-modal protocol
 //! for SigLIP2 + MLP GELU connector + AnyRes tiling (Phase 2).
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::{ModelArchitecture, ModelConfig};
 use crate::multimodal::{MultiModalProtocol, PlaceholderProtocol, PrecomputedScaling, TokenBudget};
 

@@ -28,6 +28,8 @@
 //! OLMoE also sets `attention_bias: false` and `num_key_value_heads ==
 //! num_attention_heads` (MHA, not GQA), so no bias keys are emitted.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::{ModelArchitecture, ModelConfig, QkNormScope};
 use crate::tensor_keys::{moe_experts, qk_norm};
 

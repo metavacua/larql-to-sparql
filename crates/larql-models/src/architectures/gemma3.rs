@@ -10,6 +10,8 @@
 //! Note: HuggingFace saves Gemma norm weights with the +1 offset already baked in,
 //! so norm_weight_offset is 0.0 (the saved weight IS the final multiplier).
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::{Activation, ModelArchitecture, ModelConfig};
 use crate::multimodal::{MultiModalProtocol, PlaceholderProtocol, PrecomputedScaling, TokenBudget};
 use crate::tensor_keys::qk_norm;

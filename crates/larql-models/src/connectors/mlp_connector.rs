@@ -13,6 +13,8 @@
 //! multi_modal_projector.linear_2.bias     (text_hidden,)
 //! ```
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
 

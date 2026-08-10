@@ -17,6 +17,8 @@
 //! caller); `embed`/`lm_head` are placeholders that must never be
 //! sampled from, exactly as with the backbone's missing text head.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use ndarray::Array2;
 
 use crate::detect::detect_from_json;

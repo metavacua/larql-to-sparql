@@ -9,6 +9,8 @@
 //!   the family-routing dispatch that maps `model_type` → concrete
 //!   [`ModelArchitecture`].
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::path::Path;
 
 use crate::architectures::bitnet::BitnetArch;

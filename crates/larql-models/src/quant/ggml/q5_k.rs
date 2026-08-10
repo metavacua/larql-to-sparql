@@ -7,6 +7,8 @@
 //!   [ 16.. 48]  qh      — 1 high bit per element (packed, 32 bytes = 256 bits)
 //!   [ 48..176]  qs      — 4 low bits per element (packed, 128 bytes = 256 nibbles)
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use super::check_block_input;
 use super::q4_k::unpack_q4k_scales;
 use crate::detect::ModelError;

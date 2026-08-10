@@ -7,6 +7,8 @@
 //! - No local RoPE base (single rope_theta for all layers)
 //! - query_pre_attn_scalar may differ from head_dim
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::{Activation, ModelArchitecture, ModelConfig};
 use crate::tensor_keys::qk_norm;
 

@@ -1,5 +1,7 @@
 //! GGUF file parsing — GgufFile::open/open_single, shard filename parsing, sibling discovery.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 use std::io::{BufReader, Seek};
 use std::path::Path;

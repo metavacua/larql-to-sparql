@@ -4,6 +4,8 @@
 //! reads this struct. Keeping the two apart is what lets a config fact be read
 //! once in a trait default instead of per architecture.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use super::RopeScaling;
 
 /// Model dimensions and architecture parameters, parsed from config.json.

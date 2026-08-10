@@ -1,6 +1,8 @@
 //! Tensor orientation helpers — orient_in_place, orient_ffn_tensors,
 //! orient_attention_tensors, split_fused_qkv, orient_embedding.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 
 pub(super) fn orient_embedding(

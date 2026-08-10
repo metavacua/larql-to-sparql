@@ -14,6 +14,8 @@
 //! — lower nibble holds the even-indexed element. This matches the
 //! LARQL format spec §5.1.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 /// FP4 E2M1 value lookup. Index 0..15 maps the 4-bit encoding to f32.
 /// Must remain byte-identical to `mxfp4::MXFP4_TABLE`.
 pub const FP4_E2M1_TABLE: [f32; 16] = [

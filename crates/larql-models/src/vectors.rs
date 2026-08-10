@@ -4,6 +4,8 @@
 //! and loading. Defined here so multiple crates can use them
 //! without depending on each other.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 /// Component name constants — strings, not enums.
 pub const COMPONENT_FFN_DOWN: &str = "ffn_down";
 pub const COMPONENT_FFN_GATE: &str = "ffn_gate";

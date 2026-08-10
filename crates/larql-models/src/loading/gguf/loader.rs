@@ -1,5 +1,7 @@
 //! GGUF tensor loading, config building, and entry points.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
 

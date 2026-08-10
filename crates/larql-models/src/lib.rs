@@ -20,6 +20,7 @@ pub mod detect;
 pub mod encoders;
 pub mod loading;
 pub mod multimodal;
+mod prelude;
 pub mod quant;
 pub mod speech;
 pub(crate) mod tensor_keys;

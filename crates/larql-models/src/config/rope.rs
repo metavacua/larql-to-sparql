@@ -4,6 +4,8 @@
 //! Selector strings live in [`super::rope_types`]; the math lives in
 //! `larql-compute::attention::rope`.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 /// RoPE scaling configuration (YaRN, linear, dynamic, llama3, default).
 ///
 /// `scaling_type` matches HF's `rope_type` field:

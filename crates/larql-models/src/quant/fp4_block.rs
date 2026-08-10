@@ -16,6 +16,8 @@
 //!
 //! Format reference: `docs/specs/fp4-format-spec.md`.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use super::fp4;
 use super::fp8;
 

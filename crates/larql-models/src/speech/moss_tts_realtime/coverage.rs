@@ -13,6 +13,8 @@
 //! which catches a truncated checkpoint the same way `unexplained` catches
 //! an unmodelled one.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 
 use crate::architectures::moss_tts_realtime::BACKBONE_KEY_PREFIX;

@@ -2,6 +2,8 @@
 //! K-quant; typical for the down projection in Ollama-shaped Q4_K_M
 //! mixes. NEON row dot + scaled-add with scalar fallbacks.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::ModelError;
 
 use super::check_block_input;

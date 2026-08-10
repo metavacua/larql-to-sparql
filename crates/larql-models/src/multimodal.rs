@@ -10,6 +10,8 @@
 //! `multimodal()` that returns `None`, and the text path is structurally
 //! unchanged.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use ndarray::Array2;
 
 // ─── Modality tag ────────────────────────────────────────────────────────

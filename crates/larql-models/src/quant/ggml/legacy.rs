@@ -5,6 +5,8 @@
 //! `dequantize_q4_1` and `dequantize_q8_0` stay `pub(super)` because
 //! they're only reached through `super::dequantize` dispatch.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::ModelError;
 
 use super::check_block_input;

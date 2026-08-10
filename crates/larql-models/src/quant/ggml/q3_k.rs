@@ -6,6 +6,8 @@
 //!   [ 96..108]  scales  — 12 bytes → 16 six-bit signed scale values (centred at 32)
 //!   [108..110]  d       — f16 global scale
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use super::check_block_input;
 use crate::detect::ModelError;
 use crate::quant::half::f16_to_f32;

@@ -11,6 +11,8 @@
 //! matches the trait defaults (`embed_tokens.weight`, `mlp.up_proj.weight`,
 //! `mlp.down_proj.weight`, …), so this arch only overrides behavior flags.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::{Activation, FfnType, ModelArchitecture, ModelConfig, NormType};
 use crate::tensor_keys::attn_bias;
 

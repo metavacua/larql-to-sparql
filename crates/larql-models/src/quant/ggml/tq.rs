@@ -25,6 +25,8 @@
 //! See <https://github.com/ggerganov/llama.cpp/blob/master/ggml/src/ggml-quants.c>
 //! for the reference implementation we mirror.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::ModelError;
 
 use super::{

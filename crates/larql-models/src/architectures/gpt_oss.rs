@@ -19,6 +19,8 @@
 //!   returned the keys, so extraction dropped them), and uses GQA
 //! - YaRN RoPE scaling
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::{
     ExpertFormat, ExpertGatePolicy, ExpertRoutingPolicy, ModelArchitecture, ModelConfig,
 };

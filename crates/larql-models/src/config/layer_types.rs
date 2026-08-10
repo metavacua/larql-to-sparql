@@ -19,6 +19,8 @@
 //!
 //! [§4.7.8]: ../../../../docs/k3-funnel.md
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 /// A layer attending only to the last `sliding_window` positions.
 pub const LAYER_TYPE_SLIDING_ATTENTION: &str = "sliding_attention";
 

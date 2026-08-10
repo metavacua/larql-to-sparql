@@ -6,6 +6,8 @@
 //! [`super::coverage`] derives per-layer member names from the arch so
 //! there is exactly one speller for each tensor family.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::config::ModelArchitecture;
 use crate::detect::ModelError;
 

@@ -18,6 +18,8 @@
 //! Phase 1b scope: config + struct definitions + loader. The forward
 //! pass and the multi_modal_projector connector are Phase 1b.2 and 1c.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
 

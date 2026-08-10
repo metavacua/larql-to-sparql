@@ -5,6 +5,8 @@
 //! per expert; this module recognises that layout and expands it into the
 //! per-expert Mixtral-style keys the rest of the loader expects.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 
 use ndarray::Array2;

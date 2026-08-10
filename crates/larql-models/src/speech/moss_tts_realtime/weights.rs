@@ -4,6 +4,8 @@
 //! from the checkpoint's on-disk dtype at load, matching the vision
 //! tower's convention ([`crate::encoders::vision_tower`]).
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use ndarray::Array2;
 
 use super::config::MossTtsRealtimeConfig;

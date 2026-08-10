@@ -4,6 +4,8 @@
 //! that file with nothing to do with tensor formats — it answers "where is
 //! the model", not "how is it encoded".
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::path::PathBuf;
 
 use crate::detect::ModelError;

@@ -5,6 +5,8 @@
 //! that consume them). This module covers Q4_0 and Q8_0, which the
 //! vindex write path uses for the lm_head and gate vector slices.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 // ── Quantizers (f32 → packed bytes) ──
 
 /// Quantize f32 values to Q4_0 format.

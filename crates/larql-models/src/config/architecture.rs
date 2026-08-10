@@ -14,6 +14,8 @@
 //! default is safe only when the answer genuinely is "this family does not
 //! have one"; where `config.json` states the answer, read it here.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::validation::ConfigValidationResult;
 
 use super::{

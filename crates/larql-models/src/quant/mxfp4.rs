@@ -7,6 +7,8 @@
 //!   blocks: [experts, out_features, groups, 16] as U8 (each byte = 2 × 4-bit values)
 //!   scales: [experts, out_features, groups] as U8 (e8m0 exponent)
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::detect::ModelError;
 
 /// MXFP4 lookup table: maps 4-bit value to float.

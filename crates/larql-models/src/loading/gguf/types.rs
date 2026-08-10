@@ -1,5 +1,7 @@
 //! GGUF data types — GgufValue, GgufTensorInfo, ShardInfo, GgufFile struct definitions.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 
 // ═══════════════════════════════════════════════════════════════

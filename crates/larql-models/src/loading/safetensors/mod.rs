@@ -3,6 +3,8 @@
 //! Handles dtype conversion (f16, bf16 → f32), HuggingFace cache resolution,
 //! and architecture detection.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
