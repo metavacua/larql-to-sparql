@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 use ndarray::Array2;
 
 use crate::attention::SharedKV;
@@ -122,6 +125,22 @@ where
             out_h.copy_from_slice(weighted_v.as_slice().expect("1-D dot output is contiguous"));
         };
 
+        // wasm32v1-none has no OS threads at all (no spin pool, no rayon),
+        // so heads run sequentially with one reused scratch buffer instead
+        // of the per-worker thread_local the spin path needs -- safe plain
+        // slicing suffices since only one execution context ever touches
+        // `out_slice` at a time. Numerically identical either way (see
+        // `head_body`'s own comment above).
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut scores = Vec::<f32>::new();
+            for h in 0..num_q {
+                let start = h * head_dim;
+                let end = (start + head_dim).min(out_slice.len());
+                head_body(h, &mut out_slice[start..end], &mut scores);
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         if crate::cpu::spin_pool::enabled() {
             // Each head owns a disjoint `head_dim`-wide output slice; spin
             // workers keep a thread-local scratch (same reuse as for_each_init).

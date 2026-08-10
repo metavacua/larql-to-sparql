@@ -27,12 +27,32 @@
 //! `LARQL_SPIN_POOL=0` forces the rayon path. Either way the arithmetic is
 //! identical — only *which threads run which chunks* differs.
 
+// The whole persistent-thread-pool machinery below (Shared, SpinPool,
+// trampoline, worker_loop, run_chunks, the two impl blocks,
+// performance_cores, global) is native-only: wasm32v1-none has no OS
+// threads at all, so there is nothing to pool. par_chunks_mut/
+// par_chunks_mut2 (the actual call sites everything else in this crate
+// uses) get a wasm32-only sequential fallback further down instead --
+// same call signature, no caller changes needed, and this file's own
+// doc comments already establish sequential vs. parallel execution is
+// numerically identical ("only which thread runs which chunk
+// differs"). enabled() becomes an unconditional `false` on wasm32
+// (there is no pool to route through). Two call sites elsewhere in
+// this crate (attention/decode/gqa_step.rs, cpu/ops/moe/forward.rs)
+// bypass this wrapper and call global()/enabled() directly; those need
+// their own explicit wasm32 branch, fixed separately.
+#[cfg(not(target_arch = "wasm32"))]
 use std::cell::Cell;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     /// True while this thread is executing a dispatched chunk body. Guards
     /// against reentrant `for_each_chunk` (a body that itself dispatches): the
@@ -63,14 +83,18 @@ thread_local! {
 ///
 /// Net: spin = the win during active decode; park = actually-zero CPU when the
 /// decode loop is idle — which is what makes on-by-default safe.
+#[cfg(not(target_arch = "wasm32"))]
 const SPIN_HOT: u32 = 256_000;
+#[cfg(not(target_arch = "wasm32"))]
 const YIELD_UNTIL: u32 = SPIN_HOT + 64;
+#[cfg(not(target_arch = "wasm32"))]
 const PARK_BACKSTOP: Duration = Duration::from_secs(1);
 
 /// Cross-thread dispatch state. The `epoch` release store wakes workers; the
 /// `slot_seq` seqlock + `task_gen` stamp make the task fields safe to read,
 /// because epoch-wakeup alone does not prove the slot still belongs to the
 /// observed dispatch (see `slot_seq`).
+#[cfg(not(target_arch = "wasm32"))]
 struct Shared {
     /// Bumped once per `for_each_chunk`; workers wake when it changes.
     epoch: AtomicU64,
@@ -114,6 +138,7 @@ struct Shared {
 
 /// A persistent spin-barrier pool. Owns `n-1` worker threads; the thread that
 /// calls [`for_each_chunk`] is the n-th participant.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct SpinPool {
     shared: Arc<Shared>,
     workers: Vec<thread::JoinHandle<()>>,
@@ -131,6 +156,7 @@ pub struct SpinPool {
 /// `data` must point to the live `F` published for the current epoch (the
 /// dispatcher keeps it on its stack until the completion barrier passes), and
 /// `F: Sync` (multiple threads call it concurrently).
+#[cfg(not(target_arch = "wasm32"))]
 fn trampoline<F: Fn(usize) + Sync>(data: *const (), chunk: usize) {
     // SAFETY: see fn docs — `data` is `&F` published under the epoch fence and
     // outlives every call within the dispatch.
@@ -138,6 +164,7 @@ fn trampoline<F: Fn(usize) + Sync>(data: *const (), chunk: usize) {
     f(chunk);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn worker_loop(shared: Arc<Shared>, worker_id: usize, n_participants: usize) {
     let mut seen_epoch = 0u64;
     loop {
@@ -199,6 +226,7 @@ fn worker_loop(shared: Arc<Shared>, worker_id: usize, n_participants: usize) {
 /// Chunk cost is uniform for every current caller (equal row counts per chunk),
 /// so the load-balancing advantage strided ownership would have under uneven
 /// chunk cost does not apply; llama.cpp's pool partitions rows the same way.
+#[cfg(not(target_arch = "wasm32"))]
 fn run_chunks(shared: &Shared, participant_id: usize, n_participants: usize, expected_gen: u64) {
     // Seqlock-consistent snapshot of the task slot, refused unless it still
     // belongs to `expected_gen`. Guards the empty-block straggler: a
@@ -261,6 +289,7 @@ fn run_chunks(shared: &Shared, participant_id: usize, n_participants: usize, exp
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SpinPool {
     /// Build a pool with `n_threads` total participants (spawns `n_threads-1`
     /// persistent workers; the dispatcher is the n-th). `n_threads <= 1` makes
@@ -416,6 +445,7 @@ impl SpinPool {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for SpinPool {
     fn drop(&mut self) {
         self.shared.shutdown.store(true, Ordering::Relaxed);
@@ -467,7 +497,10 @@ fn performance_cores() -> Option<usize> {
     sysctl_usize(c"hw.perflevel0.logicalcpu")
 }
 
-#[cfg(not(target_os = "macos"))]
+// Only called from the now-native-only global() below; gated the same
+// way to avoid an unused-function warning on wasm32 rather than
+// leaving it as accidentally-portable dead code.
+#[cfg(all(not(target_os = "macos"), not(target_arch = "wasm32")))]
 fn performance_cores() -> Option<usize> {
     None
 }
@@ -510,6 +543,7 @@ fn performance_cores() -> Option<usize> {
 /// E-cores were contributing ~nothing even before they became stragglers.
 ///
 /// See `docs/diagnoses/memory-bandwidth-roofline.md`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn global() -> &'static SpinPool {
     static POOL: OnceLock<SpinPool> = OnceLock::new();
     POOL.get_or_init(|| {
@@ -526,6 +560,16 @@ pub fn global() -> &'static SpinPool {
 /// safe on shared/contended machines — set `LARQL_SPIN_POOL=0` to force the
 /// rayon path (e.g. for an A/B or a heavily oversubscribed host). Either path
 /// is numerically identical; only *which threads run which chunks* differs.
+///
+/// Unconditionally `false` on wasm32: there is no pool to route through
+/// (no OS threads at all), so every caller takes the sequential path in
+/// [`par_chunks_mut`]/[`par_chunks_mut2`] below.
+#[cfg(target_arch = "wasm32")]
+pub fn enabled() -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn enabled() -> bool {
     crate::options::spin_pool_enabled()
 }
@@ -536,6 +580,31 @@ pub fn enabled() -> bool {
 /// `body(chunk_idx, chunk)` receives each disjoint `chunk`-sized (last shorter)
 /// slice of `out` and its index — identical semantics either way, so the
 /// arithmetic is unchanged; only *which thread runs which chunk* differs.
+///
+/// wasm32v1-none has no OS threads at all, so there is neither a spin
+/// pool nor rayon to route through there -- this runs every chunk
+/// sequentially on the calling "thread" instead, via the same safe
+/// `slice::chunks_mut` the doc-comment example above describes. The
+/// native raw-pointer/unsafe split-borrow trick exists specifically to
+/// let *multiple threads* mutably alias disjoint parts of one slice at
+/// once (something the borrow checker can't verify statically); with
+/// no concurrency at all, a single safe mutable-borrow loop produces
+/// the identical chunk/index assignment with no unsafe needed.
+#[cfg(target_arch = "wasm32")]
+pub fn par_chunks_mut<T, F>(out: &mut [T], chunk: usize, body: F)
+where
+    T: Send,
+    F: Fn(usize, &mut [T]) + Sync + Send,
+{
+    if chunk == 0 || out.is_empty() {
+        return;
+    }
+    for (ci, c) in out.chunks_mut(chunk).enumerate() {
+        body(ci, c);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn par_chunks_mut<T, F>(out: &mut [T], chunk: usize, body: F)
 where
     T: Send,
@@ -578,6 +647,25 @@ where
 /// at the same row index (e.g. the fused gate/up dual matvec). `a` and `b` must
 /// have the same length; `body(chunk_idx, a_chunk, b_chunk)` gets the matching
 /// disjoint slices.
+///
+/// See [`par_chunks_mut`]'s doc comment for the wasm32 sequential-fallback
+/// rationale -- identical shape here, `.zip()`-ed over both slices.
+#[cfg(target_arch = "wasm32")]
+pub fn par_chunks_mut2<T, F>(a: &mut [T], b: &mut [T], chunk: usize, body: F)
+where
+    T: Send,
+    F: Fn(usize, &mut [T], &mut [T]) + Sync + Send,
+{
+    debug_assert_eq!(a.len(), b.len(), "par_chunks_mut2 needs equal-length a/b");
+    if chunk == 0 || a.is_empty() {
+        return;
+    }
+    for (ci, (ca, cb)) in a.chunks_mut(chunk).zip(b.chunks_mut(chunk)).enumerate() {
+        body(ci, ca, cb);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn par_chunks_mut2<T, F>(a: &mut [T], b: &mut [T], chunk: usize, body: F)
 where
     T: Send,
