@@ -1,0 +1,218 @@
+# Runs `cargo clippy --fix --target wasm32v1-none` on a GitHub-hosted
+# runner instead of the local dev machine, then immediately verifies the
+# result against the REAL native oracle before anything is ever applied
+# locally.
+#
+# Why this exists: earlier in the gating/larql-cli-wasm-and-safe campaign,
+# a local `cargo clippy --fix --target wasm32v1-none` run silently deleted
+# or narrowed several imports/bindings that were "unused" only from
+# wasm32v1-none's perspective, but load-bearing on native. The damage sat
+# undetected for an extended stretch because only the wasm32 leg was
+# checked afterward -- see this branch's plan doc (Global Constraints) and
+# `.superpowers/sdd/2026-08-10-larql-cli-wasm-and-safe-gating/progress.md`
+# for the full writeup. Decision made in response: keep using `--fix` (it's
+# faster than hand-applying every suggestion), but its output is incomplete
+# -- not "probably fine" -- until an immediate native verification confirms
+# it. This workflow makes that immediate-verification contract structural
+# (a `needs:` edge) instead of relying on the operator remembering to do it
+# in a follow-up round.
+#
+# This workflow NEVER commits or pushes anything. `fix` only produces a
+# downloadable patch (and a log of whatever `--fix` couldn't resolve on its
+# own); `verify-native` is the actual gate on whether that patch is safe.
+# A green `verify-native` means: download the patch from this run's
+# artifacts, read it, and only then `git apply` + commit locally. A red
+# `verify-native` means the patch stays an artifact -- inspect it for
+# context, but the affected items need hand-fixing (the correct default is
+# `#[cfg(not(target_arch = "wasm32"))]`, never deletion, unless justified
+# in place with specific evidence -- see phase_timing.rs's `enabled()`
+# wasm32 stub removal for what that justification looks like).
+#
+# Usage:
+#   gh workflow run wasm32-clippy-fix.yml --ref gating/larql-cli-wasm-and-safe \
+#     -f crate=larql-lql -f features=default
+#   # wait for both jobs, then:
+#   gh run download <run-id> -n wasm32-clippy-fix-larql-lql-default
+#
+# `inputs.crate`/`inputs.features` are workflow_dispatch inputs (untrusted
+# in principle, since anyone with workflow_dispatch access supplies them)
+# -- every `run:` step below reads them via `env:`-mapped shell variables
+# ($CRATE/$FEATURES, always double-quoted) rather than interpolating
+# `${{ inputs.* }}` directly into a shell script, which would let a
+# crafted input string inject arbitrary shell commands into the runner.
+
+name: wasm32-clippy-fix
+
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: 'Crate to run cargo clippy --fix against (wasm32v1-none target)'
+        required: true
+        type: string
+      features:
+        description: 'Feature set to fix against'
+        required: true
+        type: choice
+        options:
+          - default
+          - no-default-features
+        default: default
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.crate }}-${{ inputs.features }}
+  cancel-in-progress: true
+
+jobs:
+  fix:
+    name: fix / ${{ inputs.crate }} / ${{ inputs.features }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CRATE: ${{ inputs.crate }}
+      FEATURES: ${{ inputs.features }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: clippy
+
+      # No OpenBLAS install: every BLAS dependency in this workspace is
+      # gated behind cfg(target_os = "linux"/"macos"/"windows"), and
+      # wasm32v1-none's target_os is "none" (same reasoning as the main
+      # gating workflow's wasm32v1-none-ubuntu job).
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32-fix-${{ inputs.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32-fix-${{ inputs.crate }}-
+
+      # Never fails the job -- whatever --fix manages (fully, partially,
+      # or not at all) still produces a diff worth capturing below. A
+      # fresh checkout is always clean, so --allow-dirty is deliberately
+      # NOT passed: if this step ever complains the tree is dirty, that's
+      # a real anomaly worth seeing, not something to suppress.
+      - name: cargo clippy --fix --target wasm32v1-none
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$FEATURES" = "no-default-features" ]; then
+            cargo clippy --fix --target wasm32v1-none -p "$CRATE" --no-default-features -- -D warnings
+          else
+            cargo clippy --fix --target wasm32v1-none -p "$CRATE" -- -D warnings
+          fi
+
+      - name: Capture the diff, whatever --fix produced (or didn't)
+        run: git diff -- crates/ > wasm32-clippy-fix.patch
+
+      # Informational only: whatever's left after --fix is exactly the
+      # set of findings that need a human/agent judgment call (gate vs.
+      # genuinely-dead-with-evidence), not something this job decides.
+      - name: Re-check for remaining, non-auto-fixable findings
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$FEATURES" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p "$CRATE" --no-default-features -- -D warnings 2>&1 | tee wasm32-clippy-remaining.log
+          else
+            cargo clippy --target wasm32v1-none -p "$CRATE" -- -D warnings 2>&1 | tee wasm32-clippy-remaining.log
+          fi
+
+      - name: Upload the proposed patch + remaining-findings log
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm32-clippy-fix-${{ inputs.crate }}-${{ inputs.features }}
+          path: |
+            wasm32-clippy-fix.patch
+            wasm32-clippy-remaining.log
+          retention-days: 14
+          if-no-files-found: error
+
+  # The actual gate. Applies fix's proposed patch on a fresh checkout and
+  # runs the same native oracle used everywhere else in this campaign
+  # (cargo check --all-targets, clippy --no-deps -D warnings, cargo test)
+  # -- no wasm32 target anywhere in this job. Green here is what makes the
+  # patch safe to download and apply for real; red here means the patch
+  # stays an artifact, not a commit.
+  verify-native:
+    name: verify-native / ${{ inputs.crate }} / ${{ inputs.features }}
+    needs: fix
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CRATE: ${{ inputs.crate }}
+      FEATURES: ${{ inputs.features }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm32-clippy-fix-${{ inputs.crate }}-${{ inputs.features }}
+
+      - name: Nothing to verify if --fix produced no changes
+        shell: bash
+        run: |
+          if [ ! -s wasm32-clippy-fix.patch ]; then
+            echo "::notice::--fix produced an empty patch for $CRATE ($FEATURES) -- nothing to verify. Check wasm32-clippy-remaining.log in the fix job's artifact for what's still unresolved."
+            exit 0
+          fi
+          echo "HAS_PATCH=1" >> "$GITHUB_ENV"
+
+      - name: Apply the proposed patch
+        if: env.HAS_PATCH == '1'
+        run: |
+          git apply --check wasm32-clippy-fix.patch
+          git apply wasm32-clippy-fix.patch
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.HAS_PATCH == '1'
+        with:
+          components: clippy, rustfmt
+
+      - name: Install OpenBLAS (Linux)
+        if: env.HAS_PATCH == '1'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Cache cargo registry + build artefacts
+        if: env.HAS_PATCH == '1'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-native-verify-${{ inputs.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-native-verify-${{ inputs.crate }}-
+
+      - name: Format check
+        if: env.HAS_PATCH == '1'
+        run: cargo fmt -p "$CRATE" -- --check
+
+      - name: Check all targets (native)
+        if: env.HAS_PATCH == '1'
+        run: cargo check -p "$CRATE" --all-targets
+
+      # --no-deps keeps lints scoped to the crate itself, matching the
+      # per-crate native workflows' own clippy step (e.g. larql-kv.yml) --
+      # otherwise pre-existing debt in a transitive dependency would
+      # surface here even though it's unrelated to this patch.
+      - name: Clippy (native, --no-deps)
+        if: env.HAS_PATCH == '1'
+        run: cargo clippy -p "$CRATE" --all-targets --no-deps -- -D warnings
+
+      - name: Tests (native)
+        if: env.HAS_PATCH == '1'
+        run: cargo test -p "$CRATE"
