@@ -48,15 +48,14 @@ pub use cost::{
 // `SemanticPromotionEngine`/`RecordingSink` (see enforce.rs/executor.rs
 // doc comments) even though this whole directory was surveyed as
 // blanket PORTABLE. Split their re-exports accordingly.
-pub use enforce::WalkTokens;
 #[cfg(not(target_arch = "wasm32"))]
 pub use enforce::EnforceWalkExecutor;
-pub use executor::{
-    AuthoritySnapshot, ModelWalkExecutor, PhysicalEffect, WalkAction, WalkExecutionError,
-    WalkTrace,
-};
+pub use enforce::WalkTokens;
 #[cfg(not(target_arch = "wasm32"))]
 pub use executor::ObserveWalkExecutor;
+pub use executor::{
+    AuthoritySnapshot, ModelWalkExecutor, PhysicalEffect, WalkAction, WalkExecutionError, WalkTrace,
+};
 pub use graph::{render_boundary, ModelEdge, ModelGraph, ModelNode, Relation};
 pub use plan::{ExpertPrefetchHint, ModelWalkPlan, WalkPlanId, WalkStep};
 pub use planner::{WalkPlanError, WalkPlanner, WalkStrategy};

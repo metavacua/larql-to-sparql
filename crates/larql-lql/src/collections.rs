@@ -10,7 +10,14 @@
 //! downstream crate eventually hitting "type is private" once its code
 //! needs to resolve a trait bound through it (e.g. `.get()`).
 
+// Unused on native for this crate specifically: every HashMap/HashSet
+// site in larql-lql lives inside relations.rs/executor/ (both already
+// wholesale-gated `#[cfg(not(target_arch = "wasm32"))]` at their `mod`
+// declaration), which reach for `std::collections::` directly rather
+// than this alias -- kept here anyway for parity with every other
+// gated crate and for any future portable code that needs it.
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
 pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 // BTreeMap/BTreeSet need no hasher (Ord-keyed) -- alloc's own types,

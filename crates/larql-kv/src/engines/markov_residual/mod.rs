@@ -34,9 +34,9 @@ pub use compute::kv_memory_bytes_for_seq;
 pub use compute::recompute_kv;
 #[cfg(not(target_arch = "wasm32"))]
 pub use engine::MarkovResidualEngine;
-pub use prefill::RsPrefillResult;
 #[cfg(not(target_arch = "wasm32"))]
 pub use prefill::rs_prefill;
+pub use prefill::RsPrefillResult;
 #[cfg(not(target_arch = "wasm32"))]
 pub use step::rs_decode_step;
 pub use store::RsStore;

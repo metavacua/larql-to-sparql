@@ -15,9 +15,9 @@ use larql_compute::ComputeBackend;
 use larql_vindex::VectorIndex;
 use ndarray::{s, Array2};
 
-use larql_inference::attention::SharedKV;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::run_attention_block_decode_step_backend;
+use larql_inference::attention::SharedKV;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::BackendFfn;
 #[cfg(not(target_arch = "wasm32"))]

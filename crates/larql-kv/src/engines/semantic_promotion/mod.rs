@@ -117,9 +117,9 @@ pub use error::PromotionError;
 // `RecordingSink` holds `Mutex<Vec<SemanticPhaseEvent>>`; the rest of
 // events.rs (SessionId, SemanticPhaseEvent, the SemanticPhaseSink trait
 // definition) is pure data / method signatures and stays portable.
-pub use events::{SemanticPhase, SemanticPhaseEvent, SemanticPhaseSink, SessionId};
 #[cfg(not(target_arch = "wasm32"))]
 pub use events::RecordingSink;
+pub use events::{SemanticPhase, SemanticPhaseEvent, SemanticPhaseSink, SessionId};
 pub use exclusion::{
     apply_exclusion, restore_exclusion, ExclusionJournal, JournalledLayer, LayerAttention,
 };

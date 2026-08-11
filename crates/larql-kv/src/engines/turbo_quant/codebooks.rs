@@ -24,12 +24,17 @@
 // call. Both arms return byte-identical values -- `Cow<'static,
 // Codebook>` lets both share one return type and one set of call
 // sites in `engine.rs`.
+#[cfg(target_arch = "wasm32")]
+use alloc::borrow::Cow;
 #[cfg(not(target_arch = "wasm32"))]
 use std::borrow::Cow;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::LazyLock;
+// `wht_coordinate_sigma` below calls `f32::sqrt`, which needs
+// `num_traits::Float` in scope under `#![no_std]` (core's f32 has no
+// sqrt/exp/tanh/etc without a libm backend).
 #[cfg(target_arch = "wasm32")]
-use alloc::borrow::Cow;
+use crate::alloc_prelude::*;
 
 use super::lloyd_max::Codebook;
 

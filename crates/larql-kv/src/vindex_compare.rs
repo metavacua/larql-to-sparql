@@ -25,8 +25,6 @@ use serde::Serialize;
 // (metrics_from_logits/aggregate/argmax/etc.) has no dependency on any
 // of this and stays portable.
 #[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::SharedKV;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::{embed_tokens_pub, hidden_to_raw_logits, run_layer_with_ffn};
@@ -36,6 +34,8 @@ use larql_inference::model::ModelWeights;
 use larql_inference::vindex::WalkFfn;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
