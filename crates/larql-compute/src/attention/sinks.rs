@@ -63,7 +63,15 @@ mod tests {
             .collect()
     }
 
-    fn lookup(v: &HashMap<String, Vec<f32>>) -> impl Fn(&str) -> Option<&[f32]> + '_ {
+    // `resolve<'a>`'s `lookup` parameter is `impl FnOnce(&str) -> Option<&'a
+    // [f32]>` for one fixed, named `'a` -- not a per-call higher-ranked
+    // bound. `+ '_` alone (tried first) only bounds the returned trait
+    // object's own capture lifetime; `Fn(&str) -> Option<&[f32]>`'s elided
+    // inner lifetime is still independently (higher-ranked-)quantified over
+    // the `&str` parameter, so the previous attempt didn't actually tie the
+    // return value to `v`. Naming `'a` explicitly on both `v` and the
+    // return type fixes it to match `resolve`'s real signature.
+    fn lookup<'a>(v: &'a HashMap<String, Vec<f32>>) -> impl Fn(&str) -> Option<&'a [f32]> + 'a {
         move |k| v.get(k).map(|x| x.as_slice())
     }
 
