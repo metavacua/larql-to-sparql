@@ -1,5 +1,8 @@
 //! [`DecodeStageSummary`] — per-step timing averages for a completed run.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-step averages for a completed engine run. Returned from
 /// [`KvEngine::stage_summary`] when profiling was enabled at engine
 /// construction.

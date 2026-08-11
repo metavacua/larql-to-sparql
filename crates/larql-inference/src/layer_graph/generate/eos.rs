@@ -152,6 +152,7 @@ impl EosConfig {
     /// so the hot path stays at one decode per token. Use it from the
     /// generate loop instead of `is_eos` whenever the surface form
     /// passed in came from a `skip_special_tokens=true` decoder.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn is_eos_with_tokenizer(
         &self,
         id: u32,

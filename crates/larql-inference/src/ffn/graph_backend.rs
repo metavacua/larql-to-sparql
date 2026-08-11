@@ -71,6 +71,7 @@ impl GateIndex {
 
         for (idx, &layer) in layers.iter().enumerate() {
             callbacks.on_layer_start(layer, total);
+            #[cfg(not(target_arch = "wasm32"))]
             let start = std::time::Instant::now();
 
             let gate_key = weights.arch.ffn_gate_key(layer);
@@ -115,6 +116,7 @@ impl GateIndex {
             index.insert(layer, layer_index);
 
             let _ = idx; // used for progress via callbacks
+            #[cfg(not(target_arch = "wasm32"))]
             callbacks.on_layer_done(layer, start.elapsed().as_secs_f64() * 1000.0);
         }
 
