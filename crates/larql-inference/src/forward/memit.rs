@@ -22,6 +22,15 @@
 //! `~/chris-source/chris-experiments/compilation/15_v11_model/RESULTS.md §20`.
 
 use ndarray::Array2;
+// Array1/ModelWeights/capture_ffn_activation_matrix/estimate_ffn_covariance
+// are only used inside the native-gated run_memit* / memit_solve_layer
+// functions below (Array2 above stays portable: MemitResult::delta_w).
+#[cfg(not(target_arch = "wasm32"))]
+use super::trace::{capture_ffn_activation_matrix, estimate_ffn_covariance};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array1;
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;

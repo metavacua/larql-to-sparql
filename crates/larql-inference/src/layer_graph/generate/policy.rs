@@ -1,10 +1,19 @@
 //! Tokenizer-level generation policy shared by generation frontends.
 
+// HashSet/ComputeBackend/EosConfig are only used inside the native-gated
+// functions below (build_special_suppress_set_with_policy,
+// pick_next_filtered_with_policy) and the #[cfg(test)] module.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_models::ModelWeights;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::eos::EosConfig;
 #[cfg(not(target_arch = "wasm32"))]
 use super::lm_head::{lm_head_topk_with_policy, LmHeadPolicy};
 

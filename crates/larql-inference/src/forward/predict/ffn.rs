@@ -1,7 +1,22 @@
 //! FFN-backend forward passes (custom backend, router, strategy).
 
+// Every function in this file is native-only, so every import below is too.
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::embed::embed_tokens;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::layer::{run_attention, run_layer_with_capture, run_layer_with_ffn};
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::ple::precompute_per_layer_inputs;
 #[cfg(not(target_arch = "wasm32"))]
 use super::dense::logits_to_predictions;
+#[cfg(not(target_arch = "wasm32"))]
+use super::types::{LayerAttentionCapture, LayerMode, PredictResult, PredictResultWithAttention};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::{FfnBackend, LayerFfnRouter};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::collections::HashMap;

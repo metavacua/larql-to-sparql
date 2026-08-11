@@ -20,6 +20,9 @@ use crate::alloc_prelude::*;
 
 use ndarray::Array2;
 
+// Only used by build_streaming/save/load below, all native-gated.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::InferenceError;
 use crate::ffn::sigmoid;
 use crate::model::ModelWeights;
 

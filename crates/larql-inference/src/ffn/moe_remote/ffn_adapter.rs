@@ -11,9 +11,17 @@
 //! closed #146; see the larql-kv "MoE-aware KV engines (C1)" roadmap item.
 
 // FfnBackend's only uses are the two `impl FfnBackend for {RemoteMoeFfn,
-// MoeFfn}` blocks below, both native-only.
+// MoeFfn}` blocks below, both native-only. ModelWeights/Array2/WeightFfn
+// are used only inside those same native-gated structs/impls (the
+// #[cfg(test)] module below has its own local `use ndarray::Array2;`).
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::WeightFfn;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
 
 // `RemoteMoeBackend` (backend.rs) is tokio+rayon+tonic gRPC/HTTP transport,
 // native-only -- see mod.rs. `RemoteMoeFfn` below wraps it concretely, so

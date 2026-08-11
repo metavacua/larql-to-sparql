@@ -2,7 +2,14 @@
 
 // No alloc_prelude import: both functions in this file
 // (finalize_logits, softmax_prob) are native-only -- nothing in the
-// portable subset needs Vec/String/Box/ToOwned.
+// portable subset needs Vec/String/Box/ToOwned. Array2/ModelWeights/
+// ComputeBackend below are needed only by finalize_logits, same reason.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
 
 /// Shared logits computation: final norm + vindex KNN + softmax.
 #[cfg(not(target_arch = "wasm32"))]

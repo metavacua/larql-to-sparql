@@ -1,5 +1,26 @@
 //! Dense (full-weight) forward passes and logit projection utilities.
 
+// Every function in this file is native-only (see each fn's own
+// #[cfg(not(target_arch = "wasm32"))]), so every import below is too.
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::apply_norm;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::embed::embed_tokens;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::layer::run_layer_with_ffn;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
+use super::types::{PredictResult, PredictResultWithResiduals};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::WeightFfn;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
 #[cfg(not(target_arch = "wasm32"))]
 use crate::collections::HashMap;
 
