@@ -3,12 +3,12 @@
 // BTreeMap needs alloc (not core) on wasm32 -- unlike HashMap/HashSet
 // (pattern 4), it needs no custom hasher, so a plain cfg'd import
 // suffices instead of a wrapper type in collections.rs.
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::BTreeMap;
-#[cfg(target_arch = "wasm32")]
-use alloc::collections::BTreeMap;
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::BTreeMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::BTreeMap;
 
 use larql_vindex_spec::{ExtractLevel, StorageDtype};
 use serde::{Deserialize, Serialize};

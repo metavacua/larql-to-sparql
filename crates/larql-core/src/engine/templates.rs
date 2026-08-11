@@ -1,7 +1,7 @@
+use crate::collections::HashMap;
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
 use serde::{Deserialize, Serialize};
-use crate::collections::HashMap;
 
 /// A prompt template for probing a specific relation.
 #[derive(Debug, Clone, Serialize, Deserialize)]

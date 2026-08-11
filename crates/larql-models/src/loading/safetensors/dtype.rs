@@ -4,9 +4,9 @@
 //! *bit patterns*: given a `TensorView` in some storage dtype, produce
 //! f32. No key conventions, no shard layout, no architecture.
 
+use crate::detect::ModelError;
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::detect::ModelError;
 
 pub(crate) fn tensor_to_f32(
     view: &safetensors::tensor::TensorView<'_>,

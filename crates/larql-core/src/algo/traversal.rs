@@ -1,12 +1,12 @@
 //! BFS and DFS traversal with depth tracking and visit order.
 
+use crate::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use alloc::collections::VecDeque;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::VecDeque;
-use crate::collections::{HashMap, HashSet};
 
 use crate::core::edge::Edge;
 use crate::core::graph::Graph;

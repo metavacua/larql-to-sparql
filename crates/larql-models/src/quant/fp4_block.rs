@@ -16,10 +16,10 @@
 //!
 //! Format reference: `docs/specs/fp4-format-spec.md`.
 
-#[cfg(target_arch = "wasm32")]
-use crate::prelude::*;
 use super::fp4;
 use super::fp8;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 /// Block geometry (v1 of the LARQL FP4 format).
 pub const BLOCK_ELEMENTS: usize = 256;

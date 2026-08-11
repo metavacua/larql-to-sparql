@@ -53,10 +53,10 @@ use std::collections::VecDeque;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{OnceLock, RwLock};
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]
 use alloc::{sync::Arc, vec::Vec};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::options;

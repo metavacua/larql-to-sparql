@@ -1,8 +1,8 @@
+use crate::collections::HashMap;
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use serde::{Deserialize, Serialize};
 use ::core::hash::{Hash, Hasher};
-use crate::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 use super::enums::SourceType;
 

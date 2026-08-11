@@ -26,8 +26,8 @@
 //! wrappers passing [`NoopHook`], so call-sites that don't care pay no cost.
 
 use crate::attention::AttentionWeights;
-use ndarray::{Array1, Array2};
 use crate::collections::{HashMap, HashSet};
+use ndarray::{Array1, Array2};
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;

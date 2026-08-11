@@ -103,18 +103,18 @@ pub use error::VindexError;
 // Index — the portable POD/trait surface lives in `index::types`;
 // `VectorIndex` itself (and the ffn_row traits, which reference storage)
 // are native-only, gated where they're declared.
-pub use index::types::{
-    FeatureMeta, Fp4FfnAccess, GateLookup, IndexLoadCallbacks, NativeFfnAccess, OverrideSlot,
-    PatchOverrides, QuantizedFfnAccess, SilentLoadCallbacks, StorageBucket, WalkHit, WalkTrace,
-};
-#[cfg(not(target_arch = "wasm32"))]
-pub use index::types::{FfnRowAccess, GateIndex};
 #[cfg(not(target_arch = "wasm32"))]
 pub use index::core::VectorIndex;
 #[cfg(not(target_arch = "wasm32"))]
 pub use index::residency::{LayerState, ResidencyManager};
 #[cfg(not(target_arch = "wasm32"))]
 pub use index::router::{RouteResult, RouterIndex};
+pub use index::types::{
+    FeatureMeta, Fp4FfnAccess, GateLookup, IndexLoadCallbacks, NativeFfnAccess, OverrideSlot,
+    PatchOverrides, QuantizedFfnAccess, SilentLoadCallbacks, StorageBucket, WalkHit, WalkTrace,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use index::types::{FfnRowAccess, GateIndex};
 // FFN component indices for `ffn_row_*` / `kquant_ffn_layer*` calls —
 // compile-time pinned equal to `larql_compute`'s in `kv_index_impl.rs`.
 #[cfg(not(target_arch = "wasm32"))]
@@ -158,9 +158,9 @@ pub use format::weights::{
 };
 
 // Patch
-pub use patch::core::{PatchOp, VindexPatch};
 #[cfg(not(target_arch = "wasm32"))]
 pub use patch::core::PatchedVindex;
+pub use patch::core::{PatchOp, VindexPatch};
 pub use patch::knn_store::{KnnEntry, KnnStore};
 pub use patch::refine::{refine_gates, RefineInput, RefineResult, RefinedGate};
 
@@ -181,11 +181,11 @@ pub use walker::weight_walker::{
 };
 
 // Storage engine — `engine` (preferred); `storage` still available as alias.
+#[cfg(not(target_arch = "wasm32"))]
+pub use engine::StorageEngine;
 pub use engine::{
     memit_solve, CompactStatus, Epoch, MemitCycle, MemitFact, MemitSolveResult, MemitStore,
 };
-#[cfg(not(target_arch = "wasm32"))]
-pub use engine::StorageEngine;
 
 // Vindexfile
 #[cfg(not(target_arch = "wasm32"))]

@@ -1,5 +1,6 @@
 //! Shortest path algorithms — Dijkstra and A*.
 
+use crate::collections::HashMap;
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
 use ::core::cmp::Ordering;
@@ -7,7 +8,6 @@ use ::core::cmp::Ordering;
 use alloc::collections::BinaryHeap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::BinaryHeap;
-use crate::collections::HashMap;
 
 use crate::core::edge::Edge;
 use crate::core::graph::Graph;

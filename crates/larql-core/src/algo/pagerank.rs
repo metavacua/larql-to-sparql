@@ -1,8 +1,8 @@
 //! PageRank — iterative importance ranking for graph entities.
 
+use crate::collections::HashMap;
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::collections::HashMap;
 
 use crate::core::graph::Graph;
 

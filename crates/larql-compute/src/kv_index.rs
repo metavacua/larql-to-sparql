@@ -13,10 +13,10 @@
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]
 use alloc::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 
 /// Number of FFN components per layer (gate / up / down).
 ///

@@ -1,3 +1,4 @@
+use crate::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
 use ::core::cell::RefCell;
@@ -5,7 +6,6 @@ use ::core::cell::RefCell;
 use alloc::collections::VecDeque;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::VecDeque;
-use crate::collections::{HashMap, HashSet};
 
 use super::edge::{CompactEdge, Edge, Triple};
 use super::enums::{MergeStrategy, SourceType};

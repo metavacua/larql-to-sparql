@@ -1,10 +1,10 @@
 //! Predicate-based edge filtering.
 
-#[cfg(target_arch = "wasm32")]
-use crate::prelude::*;
 use crate::core::edge::Edge;
 use crate::core::enums::SourceType;
 use crate::core::graph::Graph;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 /// Comparison operator for metadata predicates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

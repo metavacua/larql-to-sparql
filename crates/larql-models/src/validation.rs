@@ -1,8 +1,8 @@
 //! Validation for parsed model architecture configs.
 
+use crate::config::{ModelArchitecture, ModelConfig};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::config::{ModelArchitecture, ModelConfig};
 
 pub const FIELD_NUM_LAYERS: &str = "num_layers";
 pub const FIELD_HIDDEN_SIZE: &str = "hidden_size";

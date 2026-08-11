@@ -5,9 +5,9 @@
 //! - Qwen3: QK norms (no bias), optional MoE FFN
 //! - Qwen3 MoE: router at `mlp.gate.weight`, per-expert `mlp.experts.{E}.{gate,up,down}_proj.weight`
 
+use crate::config::{ModelArchitecture, ModelConfig};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::config::{ModelArchitecture, ModelConfig};
 use crate::tensor_keys::{attn_bias, moe_experts, qk_norm};
 
 pub struct QwenArch {

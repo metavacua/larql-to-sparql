@@ -19,11 +19,11 @@
 //!   returned the keys, so extraction dropped them), and uses GQA
 //! - YaRN RoPE scaling
 
-#[cfg(target_arch = "wasm32")]
-use crate::prelude::*;
 use crate::config::{
     ExpertFormat, ExpertGatePolicy, ExpertRoutingPolicy, ModelArchitecture, ModelConfig,
 };
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::tensor_keys::{attn_bias, mxfp4_dequantised};
 
 /// Multiplier on the sigmoid argument in the expert GLU. Not a config field —

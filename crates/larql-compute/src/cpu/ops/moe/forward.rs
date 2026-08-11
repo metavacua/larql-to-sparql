@@ -7,10 +7,10 @@
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::borrow::Cow;
 #[cfg(target_arch = "wasm32")]
 use alloc::borrow::Cow;
+#[cfg(not(target_arch = "wasm32"))]
+use std::borrow::Cow;
 
 use crate::MoeLayerWeights;
 

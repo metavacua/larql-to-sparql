@@ -15,9 +15,9 @@
 //! See the TTS funnel (`docs/tts-funnel.md`) for why this model is the
 //! forcing function for non-text generation.
 
+use crate::config::{ModelArchitecture, ModelConfig};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::config::{ModelArchitecture, ModelConfig};
 use crate::tensor_keys::qk_norm;
 
 /// `model_type` declared by the checkpoint's `config.json`.

@@ -56,9 +56,11 @@ pub use io::{
     checkpoint::CheckpointLog,
     csv::{load_csv, save_csv},
     format::Format,
+    from_bytes,
     json::{load_json, save_json},
+    load, load_with_format,
     packed::{from_packed_bytes, load_packed, save_packed, to_packed_bytes},
-    from_bytes, load, load_with_format, save, save_with_format, to_bytes,
+    save, save_with_format, to_bytes,
 };
 
 pub use algo::components::{are_connected, connected_components};

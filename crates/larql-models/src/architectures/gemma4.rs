@@ -15,9 +15,9 @@
 //! 2. `sliding_window_pattern` field (every Nth layer is full)
 //! 3. Default pattern of 6 (every 6th layer is full)
 
+use crate::config::{Activation, ExpertFormat, ModelArchitecture, ModelConfig};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::config::{Activation, ExpertFormat, ModelArchitecture, ModelConfig};
 use crate::tensor_keys::qk_norm;
 
 /// Layer type string used in Gemma 4 `layer_types` config field.

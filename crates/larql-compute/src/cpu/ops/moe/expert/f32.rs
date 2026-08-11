@@ -1,10 +1,10 @@
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::borrow::Cow;
 #[cfg(target_arch = "wasm32")]
 use alloc::borrow::Cow;
+#[cfg(not(target_arch = "wasm32"))]
+use std::borrow::Cow;
 
 use super::super::cache::{try_cached_dequant, ExpertF32};
 use super::super::math::{matmul_vec, matmul_vec_into};

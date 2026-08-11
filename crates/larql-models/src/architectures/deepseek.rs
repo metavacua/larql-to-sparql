@@ -6,9 +6,9 @@
 //! - YaRN RoPE scaling for extended context
 //! - Tensor key pattern: experts under mlp.experts.{id}, shared under mlp.shared_experts
 
+use crate::config::{ModelArchitecture, ModelConfig};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::config::{ModelArchitecture, ModelConfig};
 use crate::tensor_keys::moe_experts;
 
 pub struct DeepSeekArch {

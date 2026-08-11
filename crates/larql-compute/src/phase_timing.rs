@@ -28,11 +28,11 @@
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
 
+use core::sync::atomic::{AtomicU8, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
-use core::sync::atomic::{AtomicU8, Ordering};
 
 /// Environment variable that switches recording on.
 pub const ENV_VAR: &str = "LARQL_PHASE_TIMING";

@@ -21,10 +21,10 @@
 //! dispatch, the shared `check_block_input` validator, and the test
 //! mod.
 
-#[cfg(target_arch = "wasm32")]
-use crate::prelude::*;
 use super::half::{decode_bf16, decode_f16};
 use crate::detect::ModelError;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 pub mod legacy;
 pub mod q3_k;

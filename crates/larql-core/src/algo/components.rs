@@ -3,14 +3,14 @@
 //! Basic component counting is on `Graph::stats()`. This module provides
 //! richer analysis: enumerate components, find largest, check connectivity.
 
+use crate::collections::HashSet;
+use crate::core::graph::Graph;
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use alloc::collections::VecDeque;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::VecDeque;
-use crate::collections::HashSet;
-use crate::core::graph::Graph;
 
 /// Enumerate all connected components as sets of node names.
 /// Treats the graph as undirected (follows both adjacency and reverse edges).

@@ -1,8 +1,8 @@
 //! Model weight tensors — the loaded representation of a model's parameters.
 
+use crate::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::collections::{HashMap, HashSet};
 use crate::ModelArchitecture;
 // Mmap is inherently native (no filesystem/mmap on wasm32v1-none). Its
 // one field (ModelWeights::packed_mmaps) and every site that touches it

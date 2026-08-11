@@ -10,9 +10,9 @@
 //! Versions: v11, v11a, v12, … all share this architecture. Weights
 //! live at `<tiny-model>/model/<version>/artifacts/`.
 
+use crate::config::{ModelArchitecture, ModelConfig};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::config::{ModelArchitecture, ModelConfig};
 
 pub struct TinyModelArch {
     config: ModelConfig,

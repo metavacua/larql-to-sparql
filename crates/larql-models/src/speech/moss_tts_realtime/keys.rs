@@ -6,10 +6,10 @@
 //! [`super::coverage`] derives per-layer member names from the arch so
 //! there is exactly one speller for each tensor family.
 
-#[cfg(target_arch = "wasm32")]
-use crate::prelude::*;
 use crate::config::ModelArchitecture;
 use crate::detect::ModelError;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 /// Top-level embedding tables (`embed_tokens.{i}.weight`): index 0 is the
 /// text table, `1..=rvq` are the per-codebook tables.

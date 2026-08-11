@@ -1,10 +1,10 @@
+use crate::collections::HashSet;
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use alloc::collections::VecDeque;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::VecDeque;
-use crate::collections::HashSet;
 
 use crate::core::edge::Edge;
 use crate::core::enums::SourceType;

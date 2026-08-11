@@ -16,12 +16,12 @@
 //! the storage + dot-product kernel, not the ranking.
 
 use crate::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::RwLock;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]
 use alloc::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::RwLock;
 
 use ndarray::Array1;
 

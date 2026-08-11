@@ -1,7 +1,7 @@
+use crate::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
 use serde::{Deserialize, Serialize};
-use crate::collections::{HashMap, HashSet};
 
 /// Metadata for a relation type.
 #[derive(Debug, Clone, Serialize, Deserialize)]

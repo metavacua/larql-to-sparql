@@ -6,9 +6,9 @@
 //! - Router and experts under `block_sparse_moe` prefix
 //! - Attention is identical to Llama
 
+use crate::config::{ModelArchitecture, ModelConfig};
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
-use crate::config::{ModelArchitecture, ModelConfig};
 
 pub struct MixtralArch {
     config: ModelConfig,
