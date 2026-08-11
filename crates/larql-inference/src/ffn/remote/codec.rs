@@ -15,9 +15,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::collections::HashMap;
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
+use crate::collections::HashMap;
 
 /// f32 content-type constant.
 pub const BINARY_CT: &str = "application/x-larql-ffn";

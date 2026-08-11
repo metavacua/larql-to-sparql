@@ -9,10 +9,10 @@ use larql_models::ModelWeights;
 use larql_vindex::VectorIndex;
 
 use super::eos::EosConfig;
-#[cfg(not(target_arch = "wasm32"))]
-use super::lm_head::{lm_head_topk_with_policy, LmHeadPolicy};
 #[cfg(target_arch = "wasm32")]
 use super::lm_head::LmHeadPolicy;
+#[cfg(not(target_arch = "wasm32"))]
+use super::lm_head::{lm_head_topk_with_policy, LmHeadPolicy};
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;

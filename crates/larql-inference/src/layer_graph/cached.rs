@@ -1,11 +1,11 @@
 use ndarray::Array2;
 
 use super::{DenseLayerGraph, LayerGraph, LayerOutput, PerLayerGraph};
-use crate::ffn::FfnBackend;
-use crate::model::ModelWeights;
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
 use crate::collections::HashMap;
+use crate::ffn::FfnBackend;
+use crate::model::ModelWeights;
 
 // ── Cached: precomputed layer output for fixed-routing regimes ──
 

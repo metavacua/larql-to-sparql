@@ -62,12 +62,14 @@ pub use moe_remote::{
 // `RemoteMoeFfn` wraps the tokio/tonic `RemoteMoeBackend` transport).
 #[cfg(not(target_arch = "wasm32"))]
 pub use moe_remote::{MoeFfn, RemoteMoeFfn};
-#[cfg(not(target_arch = "wasm32"))]
-pub use remote::{LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference};
 pub use remote::{
     decode_q8k_batch_response_entries, decode_single_response, encode_binary_request,
-    encode_binary_request_as, encode_q8k_batch_request, RemoteLatencyStats, WireFormat,
-    BINARY_CT, F16_CT, I8_CT, Q8K_BATCH_CT,
+    encode_binary_request_as, encode_q8k_batch_request, RemoteLatencyStats, WireFormat, BINARY_CT,
+    F16_CT, I8_CT, Q8K_BATCH_CT,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote::{
+    LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference,
 };
 pub use sparse::SparseFfn;
 pub use sparse_compute::{

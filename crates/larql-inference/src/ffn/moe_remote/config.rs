@@ -6,10 +6,10 @@ use super::error::RemoteMoeError;
 use crate::alloc_prelude::*;
 use crate::collections::{BTreeMap, HashSet};
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]
 use alloc::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 
 // ── Shard configuration ───────────────────────────────────────────────────────
 
@@ -61,10 +61,7 @@ impl ShardConfig {
     /// Build a shard config that owns an explicit set of `(layer, expert_id)`
     /// pairs.  `start`/`end` are derived from the set's min/max for
     /// diagnostic compatibility; ownership checks use the set itself.
-    pub fn with_units(
-        url: impl Into<String>,
-        units: HashSet<(usize, usize)>,
-    ) -> Self {
+    pub fn with_units(url: impl Into<String>, units: HashSet<(usize, usize)>) -> Self {
         let url = url.into().trim_end_matches('/').to_string();
         let (start, end) = if units.is_empty() {
             (0, 0)

@@ -246,9 +246,9 @@ pub use kv_dispatch::{
     CompressionCodec, EngineBackend, KvDispatch, KvHandle, KvHandleInner, PerLayerDecodeState,
     ResidualHandle, ResidualHandleInner,
 };
-pub use kv_engine::{DecodeStageSummary, EngineInfo};
 #[cfg(not(target_arch = "wasm32"))]
 pub use kv_engine::KvEngine;
+pub use kv_engine::{DecodeStageSummary, EngineInfo};
 // Crate-root forward re-exports — kept for any name with external use OR
 // in-crate examples/tests/benches that already import from the root. The
 // curated `research` module (below) re-sources these from subpaths so it

@@ -12,11 +12,11 @@ use ndarray::Array2;
 
 use super::weight::dense_ffn_forward;
 use super::{gelu_tanh, sigmoid, FfnActivations, SparseActivations};
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 use crate::collections::HashMap;
 use crate::forward::add_bias;
 use crate::model::ModelWeights;
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
 
 /// Compute FFN output for a pre-selected set of features.
 ///
