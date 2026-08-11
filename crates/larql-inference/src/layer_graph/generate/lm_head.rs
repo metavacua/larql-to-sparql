@@ -241,7 +241,7 @@ pub(super) fn backend_lm_head_topk(
         }
     }
 
-    heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
     heap.into_iter().map(|(s, i)| (i, s)).collect()
 }
 

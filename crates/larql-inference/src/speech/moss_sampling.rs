@@ -19,7 +19,12 @@
 //! below). Sampled *tokens* are not comparable across engines (RNG
 //! streams differ); the transform is what parity means here.
 
+// `StdRng` needs an OS entropy source -- no wasm32v1-none equivalent.
+// Only `sample_multinomial` (native-only, below) and the #[cfg(test)]
+// module need these; every other function here is pure logits math.
+#[cfg(not(target_arch = "wasm32"))]
 use rand::rngs::StdRng;
+#[cfg(not(target_arch = "wasm32"))]
 use rand::Rng;
 
 #[cfg(target_arch = "wasm32")]
@@ -124,6 +129,7 @@ pub fn apply_repetition_penalty(logits: &mut [f32], history: &[u32], penalty: f3
 }
 
 /// Draw from the (filtered) logits' softmax.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn sample_multinomial(logits: &[f32], rng: &mut StdRng) -> usize {
     let probs = softmax(logits);
     let draw: f32 = rng.gen();

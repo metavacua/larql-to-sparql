@@ -124,7 +124,12 @@ pub mod vindex;
 pub use larql_models;
 pub use larql_vindex;
 pub use ndarray;
+// Both native-only dependencies (no wasm32 entry in this crate's
+// Cargo.toml target tables), matching the tokenizer/vindex modules
+// above.
+#[cfg(not(target_arch = "wasm32"))]
 pub use safetensors;
+#[cfg(not(target_arch = "wasm32"))]
 pub use tokenizers;
 
 // Backend re-exports — only the names with external consumers via
