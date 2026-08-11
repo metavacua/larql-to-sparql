@@ -15,7 +15,12 @@ use crate::core::graph::Graph;
 /// Enumerate all connected components as sets of node names.
 /// Treats the graph as undirected (follows both adjacency and reverse edges).
 pub fn connected_components(graph: &Graph) -> Vec<Vec<String>> {
-    let mut visited = HashSet::default();
+    // Explicit `HashSet<String>` (not bare `::default()`) because
+    // `crate::collections::HashSet` is a fixed-hasher single-param type
+    // alias on wasm32 (no ambiguity) but re-exports std's real 2-param
+    // generic type on native, where the hasher parameter needs a type
+    // position to resolve its default (E0283 otherwise).
+    let mut visited: HashSet<String> = HashSet::default();
     let mut components = Vec::new();
 
     let all_nodes = graph.list_entities();
@@ -60,7 +65,7 @@ pub fn connected_components(graph: &Graph) -> Vec<Vec<String>> {
 
 /// Check if two nodes are in the same connected component.
 pub fn are_connected(graph: &Graph, a: &str, b: &str) -> bool {
-    let mut visited = HashSet::default();
+    let mut visited: HashSet<String> = HashSet::default();
     let mut queue = VecDeque::new();
     queue.push_back(a.to_string());
     visited.insert(a.to_string());
