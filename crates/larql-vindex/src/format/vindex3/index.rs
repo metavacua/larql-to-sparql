@@ -9,7 +9,7 @@
 //! and the loader would sniff fields to decide which half it is looking at,
 //! which is exactly the heuristic dispatch §12.1 forbids.
 
-use std::collections::BTreeMap;
+use crate::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

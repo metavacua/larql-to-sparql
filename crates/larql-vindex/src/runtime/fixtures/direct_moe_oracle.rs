@@ -71,7 +71,7 @@ fn select(scores: &[f32]) -> Vec<(u32, f32)> {
     let mut ranked: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
     ranked.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .unwrap_or(core::cmp::Ordering::Equal)
             .then(a.0.cmp(&b.0))
     });
     ranked.truncate(TOP_K);

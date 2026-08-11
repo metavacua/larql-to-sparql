@@ -19,7 +19,7 @@
 //! an iterative guessing game. Resolution collects every failure whose
 //! diagnosis does not depend on interpreting another.
 
-use std::collections::BTreeMap;
+use crate::collections::BTreeMap;
 
 use super::component::{SelectedComponent, SelectedTensor};
 use super::coordinate::BankCoordinate;

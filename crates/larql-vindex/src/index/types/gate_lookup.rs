@@ -61,7 +61,7 @@ pub trait GateLookup: Send + Sync {
 
     fn gate_knn_batch(&self, layer: usize, x: &Array2<f32>, top_k: usize) -> Vec<usize> {
         let seq_len = x.shape()[0];
-        let mut all = std::collections::BTreeSet::new();
+        let mut all = crate::collections::BTreeSet::new();
         for s in 0..seq_len {
             let row = x.row(s).to_owned();
             for (feat, _) in self.gate_knn(layer, &row, top_k) {

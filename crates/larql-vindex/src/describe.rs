@@ -22,8 +22,8 @@ pub enum LabelSource {
     KnnStore,
 }
 
-impl std::fmt::Display for LabelSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for LabelSource {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Probe => write!(f, "probe"),
             Self::Cluster => write!(f, "cluster"),

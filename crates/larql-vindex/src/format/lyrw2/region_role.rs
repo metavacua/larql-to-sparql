@@ -32,13 +32,13 @@ pub enum RegionRole {
 }
 
 impl PartialOrd for RegionRole {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for RegionRole {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.as_u16().cmp(&other.as_u16())
     }
 }

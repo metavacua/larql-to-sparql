@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 use crate::config::ExtractLevel;
@@ -7,8 +8,14 @@ use crate::alloc_prelude::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VindexError {
+    // PathBuf/io::Error have no core/alloc equivalent (no filesystem on
+    // wasm32v1-none); confirmed via grep that no portable production
+    // code constructs these three variants -- only this file's own
+    // tests and format/generation_tests.rs (both #[cfg(test)]) do.
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("not a directory: {0}")]
     NotADirectory(PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("no safetensors files in {0}")]
     NoSafetensors(PathBuf),
     #[error("missing tensor: {0}")]
@@ -40,6 +47,7 @@ pub enum VindexError {
         required: &'static str,
     },
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("model error: {0}")]

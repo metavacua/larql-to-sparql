@@ -67,7 +67,7 @@
 //! This module measures the reference case. Declaring envelopes belongs to
 //! kernel binding and is deliberately not modelled here yet.
 
-use std::ops::Range;
+use core::ops::Range;
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;

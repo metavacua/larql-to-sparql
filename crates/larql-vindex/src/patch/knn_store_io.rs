@@ -15,7 +15,7 @@
 //! Keys are quantised to f16 — KNN cosine retrieval doesn't need f32
 //! precision. Reconstruction goes through `KnnStore::from_entries`.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
@@ -26,8 +26,8 @@ use crate::alloc_prelude::*;
 
 const MAGIC: &[u8; 4] = b"LKNN";
 const VERSION: u32 = 1;
-const U32_BYTES: usize = std::mem::size_of::<u32>();
-const F16_BYTES: usize = std::mem::size_of::<u16>();
+const U32_BYTES: usize = core::mem::size_of::<u32>();
+const F16_BYTES: usize = core::mem::size_of::<u16>();
 
 /// Cap a `Vec::with_capacity` request from an untrusted header count by
 /// the number of items the remaining input bytes could possibly encode.
@@ -117,7 +117,7 @@ impl KnnStore {
         let dim = read_u32(&mut cursor)? as usize;
         let num_layers = read_u32(&mut cursor)? as usize;
 
-        let mut entries = HashMap::new();
+        let mut entries = HashMap::default();
         for _ in 0..num_layers {
             let layer = read_u32(&mut cursor)? as usize;
             let num_entries = read_u32(&mut cursor)? as usize;

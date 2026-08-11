@@ -67,13 +67,13 @@ impl LayerWeightFormat {
 
 const MAGIC: u32 = u32::from_le_bytes(*b"LYRW");
 const FORMAT_VERSION: u32 = 1;
-const U32_FIELD_BYTES: usize = std::mem::size_of::<u32>();
-const U64_FIELD_BYTES: usize = std::mem::size_of::<u64>();
+const U32_FIELD_BYTES: usize = core::mem::size_of::<u32>();
+const U64_FIELD_BYTES: usize = core::mem::size_of::<u64>();
 const HEADER_FIELDS: usize = 6;
 const OFFSET_FIELDS_PER_ENTRY: usize = 4;
 const HEADER_BYTES: usize = HEADER_FIELDS * U32_FIELD_BYTES;
 const OFFSET_ENTRY_BYTES: usize = OFFSET_FIELDS_PER_ENTRY * U64_FIELD_BYTES;
-const BF16_BYTES: usize = std::mem::size_of::<u16>();
+const BF16_BYTES: usize = core::mem::size_of::<u16>();
 
 /// One quantized entry: gate+up bytes and down bytes, both in the same format.
 ///
@@ -84,8 +84,8 @@ pub struct LayerEntry {
     pub down: Vec<u8>,    // Q6_K [hidden, inter_padded]  (same format as gate_up)
 }
 
-impl std::fmt::Debug for LayerEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for LayerEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("LayerEntry")
             .field("gate_up_bytes", &self.gate_up.len())
             .field("down_bytes", &self.down.len())

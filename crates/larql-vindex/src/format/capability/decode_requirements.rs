@@ -87,7 +87,7 @@ impl Requirement {
     /// Candidates in declaration order.
     pub fn candidates(&self) -> &[ComponentRequirement] {
         match self {
-            Self::One(r) => std::slice::from_ref(r),
+            Self::One(r) => core::slice::from_ref(r),
             Self::AnyOf(rs) => rs,
         }
     }

@@ -8,11 +8,14 @@
 //!                  pairs + the `memit_solve` entry point that produces
 //!                  them (wraps `larql_compute::ridge_decomposition_solve`).
 
+// Wraps PatchedVindex (native-only) directly throughout.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod core;
 pub mod epoch;
 pub mod memit_store;
 pub mod status;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use core::StorageEngine;
 pub use epoch::Epoch;
 pub use memit_store::{memit_solve, MemitCycle, MemitFact, MemitSolveResult, MemitStore};

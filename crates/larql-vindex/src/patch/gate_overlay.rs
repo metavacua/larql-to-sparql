@@ -15,8 +15,13 @@
 //! cosine. Match the statistic to the operation — the shared piece is
 //! the storage + dot-product kernel, not the ranking.
 
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use crate::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::RwLock;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use alloc::sync::Arc;
 
 use ndarray::Array1;
 
@@ -46,6 +51,12 @@ pub(crate) struct GateOverlay {
     rows: HashMap<(usize, usize), Vec<f32>>,
     /// Lazy per-layer flattened snapshots. `Arc` lets scoring read a
     /// snapshot without holding the lock across the matvec.
+    ///
+    /// `RwLock` has no core/alloc equivalent (no OS sync on
+    /// wasm32v1-none) -- there, `layer_cache` always rebuilds fresh
+    /// instead (no caching), matching the already-established
+    /// load-bearing-cache-becomes-unconditional-miss shape.
+    #[cfg(not(target_arch = "wasm32"))]
     cache: RwLock<HashMap<usize, Arc<LayerRowCache>>>,
 }
 
@@ -53,7 +64,8 @@ impl Clone for GateOverlay {
     fn clone(&self) -> Self {
         Self {
             rows: self.rows.clone(),
-            cache: RwLock::new(HashMap::new()),
+            #[cfg(not(target_arch = "wasm32"))]
+            cache: RwLock::new(HashMap::default()),
         }
     }
 }
@@ -97,6 +109,7 @@ impl GateOverlay {
     /// Remove every row and snapshot.
     pub(crate) fn clear(&mut self) {
         self.rows.clear();
+        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(mut c) = self.cache.write() {
             c.clear();
         }
@@ -159,11 +172,24 @@ impl GateOverlay {
     /// Build (or reuse) the layer snapshot. `None` when the layer has
     /// no rows or the rows are unsliceable (zero-width / mixed-width).
     fn layer_cache(&self, layer: usize) -> Option<Arc<LayerRowCache>> {
+        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(c) = self.cache.read() {
             if let Some(cache) = c.get(&layer) {
                 return Some(Arc::clone(cache));
             }
         }
+        let cache = Arc::new(self.build_layer_cache(layer)?);
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Ok(mut c) = self.cache.write() {
+            c.insert(layer, Arc::clone(&cache));
+        }
+        Some(cache)
+    }
+
+    /// Pure computation half of `layer_cache` — no lock interaction.
+    /// `None` for the same zero-width/mixed-width/empty reasons as
+    /// `layer_cache`.
+    fn build_layer_cache(&self, layer: usize) -> Option<LayerRowCache> {
         let mut slot_ids: Vec<usize> = Vec::new();
         let mut d = 0usize;
         for (&(l, s), row) in &self.rows {
@@ -187,18 +213,16 @@ impl GateOverlay {
         for &slot in &slot_ids {
             matrix.extend_from_slice(&self.rows[&(layer, slot)]);
         }
-        let cache = Arc::new(LayerRowCache {
+        Some(LayerRowCache {
             slot_ids,
             matrix,
             d,
-        });
-        if let Ok(mut c) = self.cache.write() {
-            c.insert(layer, Arc::clone(&cache));
-        }
-        Some(cache)
+        })
     }
 
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
     fn invalidate_layer(&mut self, layer: usize) {
+        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(mut c) = self.cache.write() {
             c.remove(&layer);
         }

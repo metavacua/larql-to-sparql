@@ -18,7 +18,7 @@
 //! insert, and ranking by raw cosine descending (`gate_knn` ranks by
 //! `|score|` merged with base hits — different statistic, same kernel).
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 
 use ndarray::Array1;
 use serde::{Deserialize, Serialize};
@@ -148,7 +148,7 @@ impl KnnStore {
         // ties broken by insertion order for determinism.
         indexed.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(core::cmp::Ordering::Equal)
                 .then(a.0.cmp(&b.0))
         });
         indexed.truncate(k.min(entries.len()));

@@ -18,8 +18,8 @@ pub enum StorageDtype {
     F16,
 }
 
-impl std::fmt::Display for StorageDtype {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for StorageDtype {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::F32 => write!(f, "f32"),
             Self::F16 => write!(f, "f16"),

@@ -33,6 +33,7 @@ pub mod write_kquant;
 
 #[cfg(test)]
 mod tests;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod write_layers;
 
 pub(crate) use capabilities::ensure_extract_level_supported;

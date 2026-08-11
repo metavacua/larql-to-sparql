@@ -24,7 +24,7 @@
 //! — after the segment files are resident — turns a naming error into a
 //! partially-initialised load.
 
-use std::collections::BTreeMap;
+use crate::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

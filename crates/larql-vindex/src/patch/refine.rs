@@ -86,8 +86,8 @@ pub fn refine_gates(inputs: &[RefineInput], decoy_residuals: &[Array1<f32>]) -> 
     // Group facts by layer so each fact's suppression set is built from
     // peers at the same layer. The decoys apply to every layer because
     // the caller is responsible for capturing them at the right depth.
-    let mut by_layer: std::collections::BTreeMap<usize, Vec<usize>> =
-        std::collections::BTreeMap::new();
+    let mut by_layer: crate::collections::BTreeMap<usize, Vec<usize>> =
+        crate::collections::BTreeMap::new();
     for (i, fact) in inputs.iter().enumerate() {
         by_layer.entry(fact.layer).or_default().push(i);
     }
@@ -297,7 +297,7 @@ mod tests {
         }];
         let decoy = vec(&[0.0, 1.0]);
         let cos_before = cos(&inputs[0].gate, &decoy);
-        let r = refine_gates(&inputs, std::slice::from_ref(&decoy));
+        let r = refine_gates(&inputs, core::slice::from_ref(&decoy));
         let cos_after = cos(&r.gates[0].gate, &decoy);
         assert!(
             cos_after.abs() < 1e-5,

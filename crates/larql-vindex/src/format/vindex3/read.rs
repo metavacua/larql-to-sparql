@@ -12,7 +12,7 @@
 //! `open` resolves generation, index, manifest and then **every declared
 //! profile** (§9.1) before reading a segment byte.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::index::Vindex3Index;
@@ -251,7 +251,7 @@ mod tests {
         use crate::format::vindex3::{RegionSetVariants, StoredVariant};
         RegionSetVariants {
             baseline: baseline.to_string(),
-            variants: std::collections::BTreeMap::from([(
+            variants: crate::collections::BTreeMap::from([(
                 present.to_string(),
                 StoredVariant::new("routed/layer_000", Fidelity::SourceEquivalent),
             )]),

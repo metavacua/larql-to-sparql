@@ -2,7 +2,9 @@
 //! Model loading (safetensors/GGUF) is in larql-models.
 
 pub mod capability;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod checksums;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod describes;
 // std::fs::{File::create,rename}/Path::exists throughout (write_binary/
 // has_binary), plus read::{read_binary,mmap_binary} are tokenizers/
@@ -10,6 +12,7 @@ pub mod describes;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod down_meta;
 pub mod filenames;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod fp4_codec;
 pub mod generation;
 #[cfg(test)]

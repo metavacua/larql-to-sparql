@@ -11,7 +11,14 @@
 //! needs to resolve a trait bound through it (e.g. `.get()`).
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use std::collections::{HashMap, HashSet};
+pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+
+// BTreeMap/BTreeSet need no hasher (Ord-keyed) -- alloc's own types,
+// identical to std's (std::collections::BTreeMap literally re-exports
+// alloc's), just needs `extern crate alloc;` in scope, which the
+// wasm32 crate root already declares.
+#[cfg(target_arch = "wasm32")]
+pub use alloc::collections::{BTreeMap, BTreeSet};
 
 #[cfg(target_arch = "wasm32")]
 pub type HashMap<K, V> = hashbrown::HashMap<K, V, ::core::hash::BuildHasherDefault<FnvHasher>>;

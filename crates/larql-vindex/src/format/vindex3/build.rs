@@ -38,7 +38,7 @@
 //! streaming assembler that also converted formats would hide the silent
 //! conversion one level below where c8 already forbids it.
 
-use std::collections::BTreeMap;
+use crate::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::import::{manifest_layer, routed_storage_key, write_segment_file, MoeLayerSource};

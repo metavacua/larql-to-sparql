@@ -1,6 +1,6 @@
 //! Checksum utilities for vindex file integrity verification.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 
@@ -30,7 +30,7 @@ pub fn sha256_file(path: &Path) -> Result<String, VindexError> {
 /// Compute checksums for all binary files in a vindex directory.
 /// Returns a map of filename → SHA256 hex string.
 pub fn compute_checksums(dir: &Path) -> Result<HashMap<String, String>, VindexError> {
-    let mut checksums = HashMap::new();
+    let mut checksums = HashMap::default();
 
     let files = [
         GATE_VECTORS_BIN,
@@ -107,7 +107,7 @@ pub fn verify_checksums(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use crate::collections::HashMap;
     use tempfile::TempDir;
 
     #[test]
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn verify_checksums_missing_file_is_false() {
         let dir = TempDir::new().unwrap();
-        let mut stored = HashMap::new();
+        let mut stored = HashMap::default();
         stored.insert(GATE_VECTORS_BIN.to_string(), "fakehash".to_string());
         let results = verify_checksums(dir.path(), &stored).unwrap();
         let r = results.iter().find(|(n, _)| n == GATE_VECTORS_BIN).unwrap();
@@ -271,7 +271,7 @@ mod tests {
         names.sort();
         // Forward, reverse, and rotated insertion orders.
         for rotation in 0..names.len() {
-            let mut shuffled = HashMap::new();
+            let mut shuffled = HashMap::default();
             for i in 0..names.len() {
                 let name = names[(i + rotation) % names.len()];
                 shuffled.insert(name.clone(), stored[name].clone());

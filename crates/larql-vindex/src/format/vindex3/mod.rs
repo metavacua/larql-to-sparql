@@ -36,10 +36,13 @@
 //! the silent conversion §9.1 forbids, buried one layer below where anyone
 //! would look for it. Regions are placed exactly as their producer wrote them.
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod build;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod import;
 pub mod index;
 pub mod profile;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod read;
 /// Conformance fixture A, public so integration tests and future gate arms can
 /// build a real container without duplicating its frozen dimensions.
@@ -53,14 +56,22 @@ pub mod read;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod test_support;
 pub mod variants;
+// impl block is entirely `impl Vindex3Container` (native-only, see `read`).
+#[cfg(not(target_arch = "wasm32"))]
 pub mod verify;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod write;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use build::ContainerBuilder;
+#[cfg(not(target_arch = "wasm32"))]
 pub use import::{import_one_layer, write_segment_file, MoeLayerSource};
 pub use index::{Vindex3Index, PROFILE_EXACT};
 pub use profile::{Profile, ProfileSelectionError, ResolvedProfile};
+#[cfg(not(target_arch = "wasm32"))]
 pub use read::Vindex3Container;
 pub use variants::{RegionSetVariants, StoredVariant, VariantCatalogue, VariantDefect};
+#[cfg(not(target_arch = "wasm32"))]
 pub use verify::ContainerDefect;
+#[cfg(not(target_arch = "wasm32"))]
 pub use write::{segment_path, write_container, ContainerSpec, SegmentSource, MOE_MANIFEST_JSON};

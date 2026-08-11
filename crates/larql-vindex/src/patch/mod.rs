@@ -12,6 +12,7 @@
 pub mod format;
 pub(crate) mod gate_overlay;
 pub mod knn_store;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod knn_store_io;
 // `PatchedVindex` wraps `VectorIndex` (now native-only) directly.
 #[cfg(not(target_arch = "wasm32"))]

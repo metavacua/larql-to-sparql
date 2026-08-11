@@ -17,6 +17,7 @@
 //! Runtime application of patches lives in `super::overlay`
 //! (`PatchedVindex`).
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -139,6 +140,7 @@ impl PatchOp {
 // Patch file I/O
 // ═══════════════════════════════════════════════════════════════
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VindexPatch {
     /// Write patch to a .vlp file.
     pub fn save(&self, path: &Path) -> Result<(), VindexError> {
@@ -155,7 +157,9 @@ impl VindexPatch {
             serde_json::from_str(&text).map_err(|e| VindexError::Parse(e.to_string()))?;
         Ok(patch)
     }
+}
 
+impl VindexPatch {
     /// Number of operations in this patch.
     pub fn len(&self) -> usize {
         self.operations.len()
@@ -198,7 +202,7 @@ pub fn encode_gate_vector(vec: &[f32]) -> String {
 /// Decode a base64 string back to f32 vector.
 pub fn decode_gate_vector(b64: &str) -> Result<Vec<f32>, VindexError> {
     let bytes = base64_decode(b64)?;
-    if bytes.len() % std::mem::size_of::<f32>() != 0 {
+    if bytes.len() % core::mem::size_of::<f32>() != 0 {
         return Err(VindexError::Parse(
             "gate vector bytes not aligned to f32".into(),
         ));

@@ -28,7 +28,7 @@
 //! property a routed read pattern depends on, and interleaving roles across
 //! experts instead would scatter every selected expert across the whole file.
 
-use std::ops::Range;
+use core::ops::Range;
 
 use crate::format::capability::binding::RepresentationIdentity;
 use crate::format::capability::component::ComponentContract;

@@ -13,7 +13,7 @@
 use crate::alloc_prelude::*;
 
 /// On-disk width of one f32 value.
-const F32_BYTES: usize = std::mem::size_of::<f32>();
+const F32_BYTES: usize = core::mem::size_of::<f32>();
 
 /// Decode a little-endian f32 byte stream. Works on unaligned input.
 /// Trailing bytes beyond the last complete 4-byte word are ignored —

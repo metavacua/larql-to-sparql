@@ -16,9 +16,7 @@
 //! the previous (string-keyed) loaders expected — switching loaders to
 //! typed deserialisation is a no-op on existing on-disk manifests.
 
-use serde::{Deserialize, Serialize};
-
-use super::write_kquant::QuantBlockFormat;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
@@ -31,6 +29,77 @@ pub struct Q4kManifestEntry {
     pub format: QuantBlockFormat,
     pub offset: u64,
     pub length: u64,
+}
+
+/// Per-block quantisation format tag carried by Q4_K pipeline manifests.
+///
+/// Serialises / deserialises as the literal on-disk tag string
+/// (`"Q4_K"`, `"Q6_K"`, …) to match llama.cpp / Ollama conventions. The
+/// `Other` variant accepts tags that future binaries can decode but
+/// this one can't — readers see the format string and route through
+/// [`crate::quant::registry`]; if the registry returns `None` the
+/// caller surfaces a clear "unknown format" error rather than the
+/// previous serde panic on an unknown variant.
+///
+/// Adding a new format the registry can decode (e.g., Q5_K) is a
+/// single entry in `QUANT_FORMATS` — no edit to this enum is required.
+/// Add an explicit variant here only when the writer pipeline also
+/// supports emitting the format (the writer dispatches typed because
+/// emitting a new format is a deliberate act that needs an encode
+/// function + user-config option).
+///
+/// Lives here rather than in `write_kquant` (pure data, no I/O) so it
+/// stays portable — `write_kquant` is native-only (safetensors-adjacent
+/// writer pipeline), but this manifest shape is loaded by portable
+/// readers too. `write_kquant` re-exports it for backward compatibility.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuantBlockFormat {
+    Q4K,
+    Q6K,
+    /// Tag the writer pipeline cannot emit but the reader can identify.
+    /// Carries the on-disk string so dispatch can consult the registry.
+    Other(String),
+}
+
+impl QuantBlockFormat {
+    /// On-disk tag string. Routes through [`crate::quant::registry::lookup`].
+    pub fn tag(&self) -> &str {
+        match self {
+            Self::Q4K => "Q4_K",
+            Self::Q6K => "Q6_K",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+
+    /// Construct from a tag string, succeeding only when the format is
+    /// known to [`crate::quant::registry`]. Use at vindex-load seams to
+    /// reject unknown formats once, instead of letting the dispatch
+    /// kernels report `None` per-row.
+    pub fn from_registry_tag(tag: &str) -> Option<Self> {
+        crate::quant::registry::lookup(tag)?;
+        Some(match tag {
+            "Q4_K" => Self::Q4K,
+            "Q6_K" => Self::Q6K,
+            other => Self::Other(other.to_string()),
+        })
+    }
+}
+
+impl Serialize for QuantBlockFormat {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.tag())
+    }
+}
+
+impl<'de> Deserialize<'de> for QuantBlockFormat {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.as_str() {
+            "Q4_K" => Self::Q4K,
+            "Q6_K" => Self::Q6K,
+            _ => Self::Other(s),
+        })
+    }
 }
 
 impl Q4kManifestEntry {

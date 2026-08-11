@@ -45,6 +45,7 @@ pub mod segment;
 #[cfg(test)]
 mod test_fixtures;
 pub mod wire;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod write;
 #[cfg(test)]
 mod write_tests;

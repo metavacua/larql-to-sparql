@@ -22,7 +22,7 @@
 //! it, and being shown the second is how a load-time check teaches people to
 //! bypass it.
 
-use std::collections::BTreeMap;
+use crate::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

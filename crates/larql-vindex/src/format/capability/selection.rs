@@ -13,7 +13,7 @@
 //! read (§9.1), so an absent *variant* never reaches traversal; an absent
 //! *role* does, and that is what traversal reports on.
 
-use std::collections::BTreeMap;
+use crate::collections::BTreeMap;
 
 use crate::format::lyrw2::region_format::{Packing, RegionFormat};
 use crate::format::lyrw2::region_role::RegionRole;

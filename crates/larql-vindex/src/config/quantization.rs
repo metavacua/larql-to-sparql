@@ -32,8 +32,8 @@ pub enum QuantFormat {
     Q4K,
 }
 
-impl std::fmt::Display for QuantFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for QuantFormat {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::None => write!(f, "none"),
             Self::Q4K => write!(f, "q4k"),
@@ -61,8 +61,8 @@ pub enum Precision {
     F32,
 }
 
-impl std::fmt::Display for Precision {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Precision {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Fp4 => write!(f, "fp4"),
             Self::Fp8 => write!(f, "fp8"),

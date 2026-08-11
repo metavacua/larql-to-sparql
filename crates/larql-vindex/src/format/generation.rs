@@ -32,6 +32,7 @@
 //! versions this binary supports, before any weight byte is read — a loader
 //! that guesses produces a served model with wrong weights, not an error.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use crate::format::filenames::INDEX_JSON;
@@ -53,8 +54,8 @@ impl IndexSchemaVersion {
     }
 }
 
-impl std::fmt::Display for IndexSchemaVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for IndexSchemaVersion {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -88,7 +89,7 @@ impl ContainerGeneration {
     }
 
     /// Every schema this generation can read. Many-to-one, not a bijection.
-    pub const fn supported_schema_versions(self) -> std::ops::RangeInclusive<u32> {
+    pub const fn supported_schema_versions(self) -> core::ops::RangeInclusive<u32> {
         match self {
             Self::V2 => V2_MIN_SCHEMA..=V2_CURRENT_SCHEMA,
             Self::V3 => V3_MIN_SCHEMA..=V3_CURRENT_SCHEMA,
@@ -183,6 +184,7 @@ pub fn supported_schema_summary() -> String {
 /// keys the VINDEX2 config struct does not model, and full deserialisation
 /// would fail on shape before it could report the far more useful "wrong
 /// generation".
+#[cfg(not(target_arch = "wasm32"))]
 pub fn detect_generation(dir: &Path) -> Result<ContainerGeneration, VindexError> {
     let path = dir.join(INDEX_JSON);
     let text = std::fs::read_to_string(&path)?;

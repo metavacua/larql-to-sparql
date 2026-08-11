@@ -64,8 +64,8 @@ pub enum ContainerDefect {
     },
 }
 
-impl std::fmt::Display for ContainerDefect {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ContainerDefect {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Storage { layer, key, why } => {
                 write!(f, "layer {layer}: storage '{key}' unusable: {why}")

@@ -107,6 +107,7 @@ pub use index::types::{FfnRowAccess, GateIndex};
 pub use index::core::VectorIndex;
 #[cfg(not(target_arch = "wasm32"))]
 pub use index::residency::{LayerState, ResidencyManager};
+#[cfg(not(target_arch = "wasm32"))]
 pub use index::router::{RouteResult, RouterIndex};
 // FFN component indices for `ffn_row_*` / `kquant_ffn_layer*` calls —
 // compile-time pinned equal to `larql_compute`'s in `kv_index_impl.rs`.
@@ -175,8 +176,9 @@ pub use walker::weight_walker::{
 // Storage engine — `engine` (preferred); `storage` still available as alias.
 pub use engine::{
     memit_solve, CompactStatus, Epoch, MemitCycle, MemitFact, MemitSolveResult, MemitStore,
-    StorageEngine,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use engine::StorageEngine;
 
 // Vindexfile
 #[cfg(not(target_arch = "wasm32"))]
