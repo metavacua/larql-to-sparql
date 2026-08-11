@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use super::geometry::{BitConvention, K3Geometry, MXFP4_PAYLOAD_BITS};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Measured attainable bandwidth, not spec sheet (`project_memory_bandwidth_roofline`).
 pub const BW_GPU_GB_S: f64 = 367.0;
 pub const BW_CPU_GB_S: f64 = 127.0;

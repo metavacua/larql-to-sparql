@@ -28,7 +28,8 @@
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
 
-use core::sync::atomic::{AtomicU8, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
+use core::sync::atomic::AtomicU8;
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]
@@ -44,13 +45,13 @@ pub type PhaseMarker = std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 pub type PhaseMarker = ();
 
-/// 0 = unknown, 1 = disabled, 2 = enabled.
+/// 0 = unknown, 1 = disabled, 2 = enabled. Native-only: wasm32's `start()`
+/// below hardcodes `None` directly rather than consulting `enabled()`, so
+/// neither this nor a wasm32 stub of `enabled()` itself has any caller
+/// on that target -- CI-confirmed (workflow run 31489222310) both were
+/// dead code there, not merely unreachable-but-present for symmetry.
+#[cfg(not(target_arch = "wasm32"))]
 static STATE: AtomicU8 = AtomicU8::new(0);
-
-#[cfg(target_arch = "wasm32")]
-fn enabled() -> bool {
-    false
-}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn enabled() -> bool {

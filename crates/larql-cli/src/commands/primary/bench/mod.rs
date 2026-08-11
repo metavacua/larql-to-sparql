@@ -34,27 +34,44 @@
 //!   ollama     — Ollama side-by-side comparison.
 //!   output     — table printer.
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod args;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod helpers;
 pub mod row;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod run;
 
 pub(super) mod engine;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) mod engine_runtime;
 pub(super) mod grid_lan;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) mod grid_lan_runtime;
 pub(super) mod local;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) mod local_moe_runtime;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) mod local_runtime;
 pub(super) mod notes;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) mod ollama;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) mod output;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) mod remote_ffn;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) mod remote_ffn_runtime;
 pub(super) mod remote_moe;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) mod remote_moe_runtime;
 
 // Public surface kept identical to the pre-split bench_cmd: callers only
-// see `BenchArgs` and `run`.
+// see `BenchArgs` and `run`. Native-only on wasm32 (no Metal, no real
+// vindex files, no network on that target) -- upstream `commands/primary/
+// mod.rs` and `main.rs`'s `Commands::Bench` dispatch need corresponding
+// cfg gating (out of this group's scope, flagged in the report).
+#[cfg(not(target_arch = "wasm32"))]
 pub use args::BenchArgs;
+#[cfg(not(target_arch = "wasm32"))]
 pub use run::run;

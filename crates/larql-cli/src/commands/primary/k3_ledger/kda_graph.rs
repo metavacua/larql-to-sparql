@@ -49,6 +49,9 @@
 
 use serde::Serialize;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// K3 KDA geometry (`linear_attn_config`), used to derive expected shapes.
 pub const HEAD_DIM: u64 = 128;
 pub const NUM_HEADS: u64 = 96;

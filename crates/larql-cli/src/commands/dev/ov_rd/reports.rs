@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use super::types::{HeadId, PqConfig};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct FinishedHeadStats {
     pub(super) count: u64,

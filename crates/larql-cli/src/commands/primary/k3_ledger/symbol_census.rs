@@ -23,6 +23,9 @@
 
 use serde::Serialize;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// fp4 code width: the alphabet is 16 nibbles (15 distinct values).
 pub const FP4_CODES: usize = 16;
 /// Payload bits a fixed-width exact code spends — `serving_format`'s floor.
@@ -175,7 +178,7 @@ pub fn miller_madow_bias(k: usize, n: u64) -> f64 {
     if n == 0 {
         return 0.0;
     }
-    (k.saturating_sub(1)) as f64 / (2.0 * n as f64 * std::f64::consts::LN_2)
+    (k.saturating_sub(1)) as f64 / (2.0 * n as f64 * core::f64::consts::LN_2)
 }
 
 /// Does an observed global-minus-local entropy gap look like estimator bias

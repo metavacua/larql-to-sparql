@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct PromptRecord {
     pub(super) id: Option<String>,

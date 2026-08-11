@@ -47,8 +47,14 @@ mod parser;
 pub mod registry;
 
 #[cfg(not(target_arch = "wasm32"))]
-use config_io::{config_path, read_config_json, require_config_fields, CONFIG_FILE_NAME};
-use config_io::{CONFIG_KEY_LANGUAGE_CONFIG, CONFIG_KEY_TEXT_CONFIG};
+use config_io::{
+    config_path, read_config_json, require_config_fields, CONFIG_FILE_NAME, CONFIG_KEY_TEXT_CONFIG,
+};
+// CONFIG_KEY_LANGUAGE_CONFIG (unlike its TEXT_CONFIG sibling) is also
+// read from portable code below (detect_from_json's MOSS-TTS-Realtime
+// arm), so it stays ungated -- CONFIG_KEY_TEXT_CONFIG's only use is the
+// ConfigFieldsMissing error message, already native-gated in config_io.rs.
+use config_io::CONFIG_KEY_LANGUAGE_CONFIG;
 use parser::parse_model_config;
 
 pub use registry::{

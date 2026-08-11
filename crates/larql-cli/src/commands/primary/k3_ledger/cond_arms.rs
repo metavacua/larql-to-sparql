@@ -55,6 +55,9 @@ use super::cond_census::{
 };
 use super::rng::SplitMix64;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Fraction of coordinates used to choose parents; the rest are scored.
 pub const DEFAULT_FIT_FRACTION: f64 = 0.5;
 /// Seed for the marginal-preserving nulls.
@@ -177,7 +180,7 @@ fn choose_parent(streams: &[ExpertStream], target: usize, fit: usize) -> Option<
             let cost = pair_cost(&streams[target].nibbles[..fit], &s.nibbles[..fit]);
             (i, cost)
         })
-        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(i, _)| i)
 }
 

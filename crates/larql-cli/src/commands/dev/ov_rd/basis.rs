@@ -1,15 +1,42 @@
-use std::collections::HashMap;
-
-use larql_inference::attention::run_attention_block_with_pre_o;
-use larql_inference::forward::ple::precompute_per_layer_inputs;
-use larql_inference::forward::{embed_tokens_pub, run_layer_with_ffn};
-use larql_inference::{encode_prompt, WeightFfn};
 use larql_vindex::VectorIndex;
 use ndarray::s;
 
+// `run_attention_block_with_pre_o`/`precompute_per_layer_inputs`/
+// `embed_tokens_pub`/`run_layer_with_ffn` are all portable in
+// `larql_inference` (unconditional re-exports there), but every call
+// site in this file lives inside `fit_z_pca_bases`, which is native-only
+// (below) -- gated alongside it so they don't go unused on wasm32 under
+// `-D warnings`.
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::run_attention_block_with_pre_o;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::{embed_tokens_pub, run_layer_with_ffn};
+// `encode_prompt`/`WeightFfn` are themselves native-gated at their
+// `larql_inference` definitions (tokenizer-driven / native FFN backend
+// wiring) -- this import must match.
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::{encode_prompt, WeightFfn};
+
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
+#[cfg(not(target_arch = "wasm32"))]
 use super::stats::StaticHeadMeans;
-use super::types::{HeadId, PromptRecord};
+use super::types::HeadId;
+#[cfg(not(target_arch = "wasm32"))]
+use super::types::PromptRecord;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+use crate::collections::HashMap;
+
+// `vec!`/`format!` aren't in `alloc_prelude` and this crate's `extern
+// crate alloc;` (main.rs) isn't `#[macro_use]` -- import explicitly
+// (flagged in the round-1 report as a crate-root gap out of this
+// group's scope; matches the fix already applied in
+// `commands/primary/slice_cmd.rs` / `shannon_trace/compare.rs`).
+#[cfg(target_arch = "wasm32")]
+use alloc::{format, vec};
 
 #[derive(Debug)]
 pub(super) struct WoRoundtripBasis {
@@ -133,13 +160,13 @@ pub(super) fn build_roundtrip_bases(
     index: &VectorIndex,
     heads: &[HeadId],
     sigma_rel_cutoff: f64,
-) -> Result<HashMap<HeadId, WoRoundtripBasis>, Box<dyn std::error::Error>> {
-    let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
+) -> Result<HashMap<HeadId, WoRoundtripBasis>, Box<dyn core::error::Error>> {
+    let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::default();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
     }
 
-    let mut bases = HashMap::new();
+    let mut bases: HashMap<HeadId, WoRoundtripBasis> = HashMap::default();
     for (layer, layer_heads) in heads_by_layer {
         let inserted = insert_q4k_layer_tensors(weights, index, layer)?;
         let w_o = weights
@@ -160,6 +187,10 @@ pub(super) fn build_roundtrip_bases(
     Ok(bases)
 }
 
+// `ZPcaAccumulator` is a private helper used only by `fit_z_pca_bases`
+// (below, native-only) -- gated alongside it to avoid `dead_code` on
+// wasm32.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 struct ZPcaAccumulator {
     count: u64,
@@ -167,6 +198,7 @@ struct ZPcaAccumulator {
     sum_outer: Vec<Vec<f64>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ZPcaAccumulator {
     fn new(dim: usize) -> Self {
         Self {
@@ -209,7 +241,7 @@ impl ZPcaAccumulator {
         }
         let (eigenvalues, eigenvectors) = jacobi_symmetric_eigen(&covariance, 100, 1e-8);
         let mut pairs: Vec<(f64, Vec<f64>)> = eigenvalues.into_iter().zip(eigenvectors).collect();
-        pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
         ZPcaBasis {
             vectors: pairs
                 .into_iter()
@@ -220,6 +252,10 @@ impl ZPcaAccumulator {
     }
 }
 
+// Exclusion (category b): prompt encoding is driven by a live
+// `&tokenizers::Tokenizer`, which has no wasm32 dependency table entry
+// at all in this crate -- no wasm32-side equivalent exists.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn fit_z_pca_bases(
     weights: &mut larql_inference::ModelWeights,
     index: &VectorIndex,
@@ -316,7 +352,7 @@ pub(super) fn fit_z_pca_bases(
 fn build_wo_roundtrip_basis(
     w_o_head: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>,
     sigma_rel_cutoff: f64,
-) -> Result<WoRoundtripBasis, Box<dyn std::error::Error>> {
+) -> Result<WoRoundtripBasis, Box<dyn core::error::Error>> {
     let hidden = w_o_head.nrows();
     let head_dim = w_o_head.ncols();
     let mut gram = vec![vec![0.0f64; head_dim]; head_dim];
@@ -336,7 +372,7 @@ fn build_wo_roundtrip_basis(
 
     let (eigenvalues, eigenvectors) = jacobi_symmetric_eigen(&gram, 100, 1e-10);
     let mut pairs: Vec<(f64, Vec<f64>)> = eigenvalues.into_iter().zip(eigenvectors).collect();
-    pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
 
     let sigma_max = pairs
         .first()

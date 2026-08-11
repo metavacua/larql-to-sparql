@@ -1,12 +1,10 @@
 //! Logits computation — final norm + vindex KNN + softmax.
 
-use ndarray::Array2;
 
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
+// No alloc_prelude import: both functions in this file
+// (finalize_logits, softmax_prob) are native-only -- nothing in the
+// portable subset needs Vec/String/Box/ToOwned.
 
 /// Shared logits computation: final norm + vindex KNN + softmax.
 #[cfg(not(target_arch = "wasm32"))]
@@ -67,6 +65,10 @@ pub fn finalize_logits(
 }
 
 /// Softmax probability of a single score within a set of hits.
+/// Native-only: its only caller, `generate::gpu::sampling_step`, lives in
+/// the native-only `gpu` module (pure f32/f64 arithmetic, but currently
+/// uncalled from anywhere portable).
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn softmax_prob(
     score: f32,
     hits: &[(u32, f32)],

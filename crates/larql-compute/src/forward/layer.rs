@@ -12,8 +12,10 @@ use crate::residual::rms_norm_for_arch;
 use larql_models::{ModelWeights, WeightsView};
 use ndarray::Array2;
 
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
+// No alloc_prelude import: this file's only `Vec` uses (the two stage-dump
+// closures' `bytes: Vec<u8>` collect) are both inside
+// `#[cfg(not(target_arch = "wasm32"))]` blocks -- nothing in the portable
+// subset needs Vec/String/Box/ToOwned.
 
 /// Public wrapper for run_attention — used by diagnostic/capture tooling.
 pub fn run_attention_public(
@@ -75,7 +77,7 @@ pub fn run_ffn(
     // `LARQL_METAL_DUMP_LAYERS` convention. Lets us diff per-stage
     // intermediates between CPU and Metal.
     let dump_cfg = super::dump_config::DumpConfig::get();
-    let stage_dump_dir = dump_cfg.stage_dir(layer);
+    let _stage_dump_dir = dump_cfg.stage_dir(layer);
     // std::fs has no core/alloc equivalent; wasm32v1-none has no filesystem
     // and stage_dump_dir is unconditionally None there, so the whole dump
     // path is dead code on that target (see attention/block.rs's identical

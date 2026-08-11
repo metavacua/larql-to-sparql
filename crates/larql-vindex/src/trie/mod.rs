@@ -15,6 +15,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use serde::Deserialize;
 
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +23,9 @@ use crate::alloc_prelude::*;
 
 // ── Serialised probe format ───────────────────────────────────────────────────
 
+// Native-only: its sole consumer, CascadeTrie::load below, is
+// std::fs-based.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Deserialize)]
 struct ProbeFile {
     layer: usize,

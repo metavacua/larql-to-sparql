@@ -4,6 +4,9 @@
 //! N detail tiles from a resolution-aware grid. Each tile is resized
 //! to `tile_size x tile_size` and handed to the encoder independently.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Configuration for AnyRes tiling, derived from the model's
 /// `MultiModalProtocol::valid_tile_counts()` and the encoder's
 /// expected input size.

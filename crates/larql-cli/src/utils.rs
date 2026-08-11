@@ -1,5 +1,8 @@
 //! Shared CLI utilities.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Simple base64 encoder for Basic auth (avoids adding a base64 crate).
 #[allow(dead_code)]
 pub fn base64_encode(input: &str) -> String {

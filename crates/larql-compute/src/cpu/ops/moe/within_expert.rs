@@ -170,7 +170,9 @@ pub fn prune_act(act: &mut [f32], inter: usize) {
 }
 
 /// Keep the `k` largest-magnitude features, zero the rest. `1 <= k < act.len()`
-/// guaranteed by [`WithinExpertRouting::keep_k`].
+/// guaranteed by [`WithinExpertRouting::keep_k`]. Native-only: its sole
+/// caller, `prune_act` above, is already gated.
+#[cfg(not(target_arch = "wasm32"))]
 fn prune_top_k(act: &mut [f32], k: usize) {
     let inter = act.len();
     // Partition indices so the first `k` are the largest by |act| (the set, not
@@ -189,6 +191,8 @@ fn prune_top_k(act: &mut [f32], k: usize) {
 }
 
 /// Keep `~k` features on a fixed stride (content-blind), zero the rest.
+/// Native-only: its sole caller, `prune_act` above, is already gated.
+#[cfg(not(target_arch = "wasm32"))]
 fn prune_strided(act: &mut [f32], k: usize) {
     let inter = act.len();
     let stride = (inter / k).max(1);

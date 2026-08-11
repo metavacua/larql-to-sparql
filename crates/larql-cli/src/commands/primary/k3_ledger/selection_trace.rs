@@ -10,7 +10,11 @@
 //! steps). Sessions are the unit the adaptive-cache estimators condition on, so
 //! the type keeps them separable rather than pooling at construction.
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::super::dec_bench::capture_format::{CapturePool, ROUTING_SENTINEL_EXPERT};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Marks an unused slot in a fixed-width selection record: a stratum that
 /// carried no selection, or a slot freed by zero-weight stripping upstream.
@@ -136,6 +140,7 @@ impl SelectionTrace {
     /// The alphabet is **inferred** as `max observed id + 1`; an expert never
     /// selected anywhere in the pool is invisible here, so a pool that does not
     /// exercise the whole bank reports a bank smaller than the model's.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_routing_pool(pool: &CapturePool) -> Result<Self, String> {
         let width = pool
             .routing_top_k()
@@ -234,7 +239,7 @@ impl SelectionTrace {
         let mut n = 0;
         for t in 0..steps.min(self.steps) {
             for &id in self.selections(session, t, stratum) {
-                if !std::mem::replace(&mut seen[id as usize], true) {
+                if !core::mem::replace(&mut seen[id as usize], true) {
                     n += 1;
                 }
             }

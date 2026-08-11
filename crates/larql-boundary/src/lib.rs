@@ -97,8 +97,10 @@
 // next real CI round show which modules need pattern-3 whole-module
 // exclusion, rather than guessing.
 #![cfg_attr(target_arch = "wasm32", no_std)]
+// No #[macro_use]: prelude.rs re-exports String/Vec/Float explicitly
+// via `pub(crate) use`, nothing here relies on alloc's macros being
+// injected into scope -- clippy confirmed the attribute has zero effect.
 #[cfg(target_arch = "wasm32")]
-#[macro_use]
 extern crate alloc;
 
 pub mod codec;

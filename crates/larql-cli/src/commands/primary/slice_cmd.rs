@@ -23,12 +23,32 @@
 //! dense-remote topology these presets were cut to serve.
 
 use larql_vindex::format::filenames::*;
-use std::collections::BTreeSet;
+
+use crate::collections::BTreeSet;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Args;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::commands::primary::cache;
+
+// `Part`/`preset_parts`/`effective_level`/`part_name`/`human_size`/
+// `is_backup` below are the portable domain model (no native markers);
+// `SliceArgs`/`SliceOutcome`/`slice_vindex`/`run` are native-gated
+// (PathBuf fields, clap::Args, std::fs I/O). See the round-1 gating
+// survey for `commands/primary` for the full split rationale.
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+// `format!` isn't in `alloc_prelude` (only value types are) and this
+// crate's `extern crate alloc;` (main.rs) isn't `#[macro_use]`, unlike
+// every other already-gated crate in this workspace -- import the macro
+// explicitly here rather than depend on that (see report: flagged as a
+// crate-root gap out of this group's scope).
+#[cfg(target_arch = "wasm32")]
+use alloc::format;
 
 // ─── Parts catalogue ─────────────────────────────────────────────────────
 //
@@ -170,6 +190,7 @@ pub fn preset_parts(preset: &str) -> Result<BTreeSet<Part>, String> {
 
 // ─── CLI ─────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Args)]
 pub struct SliceArgs {
     /// Source vindex: directory, `hf://owner/name`, `owner/name`, or cache shorthand.
@@ -214,6 +235,7 @@ pub struct SliceArgs {
 /// Outcome of a slice operation — what got copied, skipped, and how the
 /// destination `index.json` was rewritten. Returned by the testable core
 /// so integration tests can assert behaviour without parsing stdout.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct SliceOutcome {
     pub source: PathBuf,
@@ -233,6 +255,7 @@ pub struct SliceOutcome {
 /// Library-callable slice. Doesn't print or touch the global cache — all
 /// resolution is the caller's responsibility. `run` wraps this with CLI
 /// prints and `cache::resolve_model` lookup.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn slice_vindex(
     src: &Path,
     dst: &Path,
@@ -369,6 +392,7 @@ pub fn slice_vindex(
     Ok(outcome)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Resolve source through the cache shorthand.
     let src = cache::resolve_model(&args.source)?;

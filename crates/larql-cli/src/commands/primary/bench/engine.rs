@@ -10,6 +10,9 @@
 
 use super::row::compute_percentiles;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Greedy argmax over a logits slice. Returns 0 on empty input, which is
 /// safe because the decode loop bails on empty hidden states before
 /// reaching this.
@@ -17,7 +20,7 @@ pub(super) fn argmax_token(logits: &[f32]) -> u32 {
     logits
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(i, _)| i as u32)
         .unwrap_or(0)
 }

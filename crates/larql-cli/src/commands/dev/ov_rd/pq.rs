@@ -1,6 +1,13 @@
-use std::collections::HashMap;
-
 use super::types::PqConfig;
+use crate::collections::HashMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+// `vec!` isn't in `alloc_prelude` and this crate's `extern crate alloc;`
+// (main.rs) isn't `#[macro_use]` -- import explicitly (flagged in the
+// round-1 report as a crate-root gap out of this group's scope).
+#[cfg(target_arch = "wasm32")]
+use alloc::vec;
 
 #[derive(Debug, Clone)]
 pub(super) struct PqCodebook {

@@ -3,6 +3,9 @@
 /// Shared by `eval-program` and `induce-program`. Returns `None` when Metal
 /// is unavailable or not requested; callers fall back to the CPU path.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub(super) type Backend = Box<dyn larql_compute::ComputeBackend + Send + Sync>;
 
 /// Initialize a Metal backend if `use_metal` is true and the `gpu` feature
@@ -27,6 +30,11 @@ pub(super) fn init(use_metal: bool) -> Option<Backend> {
     }
     #[cfg(not(all(feature = "gpu", target_os = "macos")))]
     {
+        // `eprintln!` has no core/alloc equivalent (needs a real
+        // stderr/OS stream) -- native-only. wasm32 always falls through
+        // this branch (there is no macOS target_os there), so the
+        // print is skipped and `None` returned either way.
+        #[cfg(not(target_arch = "wasm32"))]
         eprintln!(
             "Metal backend: not compiled in — rebuild with `--features gpu` on macOS. \
              Falling back to CPU."

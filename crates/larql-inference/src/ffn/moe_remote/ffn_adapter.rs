@@ -10,9 +10,10 @@
 //! the standalone full-recompute `generate_kquant_cpu_remote` path that
 //! closed #146; see the larql-kv "MoE-aware KV engines (C1)" roadmap item.
 
+// FfnBackend's only uses are the two `impl FfnBackend for {RemoteMoeFfn,
+// MoeFfn}` blocks below, both native-only.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ffn::FfnBackend;
-use larql_models::ModelWeights;
-use ndarray::Array2;
 
 // `RemoteMoeBackend` (backend.rs) is tokio+rayon+tonic gRPC/HTTP transport,
 // native-only -- see mod.rs. `RemoteMoeFfn` below wraps it concretely, so
@@ -23,7 +24,6 @@ use ndarray::Array2;
 // half -- see the import comment below.
 #[cfg(not(target_arch = "wasm32"))]
 use super::RemoteMoeBackend;
-use crate::ffn::WeightFfn;
 // `moe_ffn_block_cpu` lives in `vindex`, which is native-only (the whole
 // module is `#[cfg(not(target_arch = "wasm32"))]`-gated in lib.rs) --
 // `MoeFfn` below is the only user, in its `forward_moe_full_layer` impl, so

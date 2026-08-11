@@ -2150,6 +2150,7 @@ version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
+ "hashbrown 0.15.5",
  "image",
  "indicatif 0.17.11",
  "larql-compute",
@@ -2166,6 +2167,7 @@ dependencies = [
  "memmap2",
  "minijinja",
  "ndarray",
+ "num-traits",
  "rayon",
  "reqwest",
  "safetensors",
@@ -2328,6 +2330,7 @@ version = "0.2.0"
 dependencies = [
  "blas-src",
  "criterion",
+ "hashbrown 0.15.5",
  "larql-boundary",
  "larql-compute",
  "larql-compute-metal",
@@ -2335,6 +2338,7 @@ dependencies = [
  "larql-inference",
  "larql-vindex",
  "ndarray",
+ "num-traits",
  "openblas-src",
  "rand 0.8.6",
  "rand_distr",
@@ -2351,6 +2355,7 @@ name = "larql-lql"
 version = "0.2.0"
 dependencies = [
  "criterion",
+ "hashbrown 0.15.5",
  "larql-compute",
  "larql-compute-metal",
  "larql-core",
@@ -2359,6 +2364,7 @@ dependencies = [
  "larql-vindex",
  "mockito",
  "ndarray",
+ "num-traits",
  "reqwest",
  "rustyline",
  "serde",

@@ -16,11 +16,19 @@
 //! both sides of a comparison must use the same fixture, and the tokenizer is
 //! part of the fixture.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Args;
 
 pub mod compare;
+// Unlike `compare`/`dump` (each has a portable core that must stay
+// reachable, see their own module-level docs), `decode_diff` has no
+// portable half at all -- both cfg variants of `run_decode_diff` take
+// `DecodeDiffArgs` (native, see above) directly, so the whole module is
+// gated here rather than joining the compare/dump "package deal".
+#[cfg(not(target_arch = "wasm32"))]
 pub mod decode_diff;
 pub mod dump;
 
@@ -31,6 +39,7 @@ pub mod dump;
 /// below it is a structural difference, not accumulation.
 pub const DEFAULT_DRIFT_COS: f64 = 0.9999;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Args)]
 pub struct LayerDumpArgs {
     /// Model path or HuggingFace model ID.
@@ -54,6 +63,7 @@ pub struct LayerDumpArgs {
     pub out: PathBuf,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Args)]
 pub struct LayerDiffArgs {
     /// First dump directory (conventionally the engine under test).
@@ -79,6 +89,7 @@ pub struct LayerDiffArgs {
 /// external reference over a prefill, which by construction cannot see a
 /// decode defect. See [`decode_diff`] for why that distinction cost a
 /// week once already.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Args)]
 pub struct DecodeDiffArgs {
     /// Vindex directory to load.

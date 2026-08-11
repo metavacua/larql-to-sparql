@@ -6,6 +6,9 @@ use serde::Serialize;
 use super::capture_format::CaptureManifest;
 use super::replay::DecPointSummary;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Serialize)]
 pub struct DecBenchJsonResult {
     /// Unix seconds, as a string (matches ADR-0012 bench JSON).

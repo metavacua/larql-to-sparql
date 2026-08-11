@@ -48,12 +48,15 @@
 //! the only avoidable part. Reporting the compulsory floor keeps a hit-rate
 //! improvement from being quoted against a denominator that was never reachable.
 
-use std::collections::{BTreeSet, HashMap};
-
 use serde::Serialize;
+
+use crate::collections::{BTreeSet, HashMap, HashSet};
 
 use super::rng::SplitMix64;
 use super::selection_trace::SelectionTrace;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// One K3 routed expert, all three branches, MXFP4. The bytes column is a
 /// K3-scaled projection whenever the trace is not itself K3 — label it.
@@ -215,7 +218,7 @@ pub fn stream_from_trace(trace: &SelectionTrace) -> ReferenceStream {
 
 /// For each position, the next position referencing the same slot.
 fn next_use_table(flat: &[u32]) -> Vec<usize> {
-    let mut last: HashMap<u32, usize> = HashMap::new();
+    let mut last: HashMap<u32, usize> = HashMap::default();
     let mut next = vec![usize::MAX; flat.len()];
     for i in (0..flat.len()).rev() {
         if let Some(&j) = last.get(&flat[i]) {
@@ -237,7 +240,7 @@ impl Ordered {
     fn new() -> Self {
         Self {
             set: BTreeSet::new(),
-            keys: HashMap::new(),
+            keys: HashMap::default(),
         }
     }
     fn insert(&mut self, slot: u32, key: (i64, i64)) {
@@ -328,15 +331,14 @@ pub fn simulate(
 /// Loading the set itself is charged as `min(capacity, distinct)` compulsory
 /// misses so it is not credited with bytes it never paid.
 fn static_oracle(stream: &ReferenceStream, capacity: usize) -> (u64, u64) {
-    let mut freq: HashMap<u32, u64> = HashMap::new();
+    let mut freq: HashMap<u32, u64> = HashMap::default();
     for &s in &stream.flat {
         *freq.entry(s).or_default() += 1;
     }
     let mut ranked: Vec<(u32, u64)> = freq.into_iter().collect();
     // Deterministic: frequency descending, then slot id ascending.
     ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    let resident: std::collections::HashSet<u32> =
-        ranked.iter().take(capacity).map(|&(s, _)| s).collect();
+    let resident: HashSet<u32> = ranked.iter().take(capacity).map(|&(s, _)| s).collect();
     let load = resident.len() as u64;
     let misses = stream
         .flat
@@ -360,10 +362,10 @@ fn dynamic(
     };
     let mut ordered = Ordered::new();
     let mut rand_items: Vec<u32> = Vec::new();
-    let mut rand_pos: HashMap<u32, usize> = HashMap::new();
+    let mut rand_pos: HashMap<u32, usize> = HashMap::default();
     let mut rng = SplitMix64(seed);
-    let mut freq: HashMap<u32, i64> = HashMap::new();
-    let mut ever_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut freq: HashMap<u32, i64> = HashMap::default();
+    let mut ever_seen: HashSet<u32> = HashSet::default();
     let (mut misses, mut compulsory) = (0u64, 0u64);
     let mut clock: i64 = 0;
     let mut current_session = usize::MAX;

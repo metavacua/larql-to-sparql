@@ -5,15 +5,36 @@
 //! the reference side must hook the same points — see
 //! `scripts/dump_layers_hf.py`.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+// Only the native `write_plane`/`read_plane` name `Array2` directly;
+// `LayerDumpManifest` and friends (the portable half) never do.
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::LayerDumpArgs;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::commands::primary::shannon_cmd;
+
+// `LayerDumpManifest`/`MANIFEST_NAME`/`ENGINE_LARQL_F32`/`PLANE_DTYPE`/
+// `plane_bytes`/`plane_name` below are the portable geometry model
+// consumed by `compare.rs`'s portable `check_comparable`; `write_plane`/
+// `read_plane`/`read_manifest`/`run_layer_dump` are native-gated
+// (std::fs/std::io). See the round-1 gating survey for `commands/primary`.
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+// `format!` isn't in `alloc_prelude` and this crate's `extern crate
+// alloc;` (main.rs) isn't `#[macro_use]` -- import explicitly (see
+// report: flagged as a crate-root gap out of this group's scope).
+#[cfg(target_arch = "wasm32")]
+use alloc::format;
 
 /// Manifest filename inside a dump directory.
 pub const MANIFEST_NAME: &str = "layer_dump.json";
@@ -56,7 +77,7 @@ pub struct LayerDumpManifest {
 /// definition of the geometry→size rule: `read_plane` validates against it,
 /// so a manifest and the file it describes cannot disagree about it.
 pub fn plane_bytes(seq_len: usize, hidden_size: usize) -> usize {
-    seq_len * hidden_size * std::mem::size_of::<f32>()
+    seq_len * hidden_size * core::mem::size_of::<f32>()
 }
 
 /// Plane filename for capture `idx`. Zero-padded so a directory listing sorts
@@ -66,6 +87,7 @@ pub fn plane_name(idx: usize) -> String {
 }
 
 /// Write one `[seq, hidden]` plane as little-endian f32.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn write_plane(path: &Path, plane: &Array2<f32>) -> std::io::Result<()> {
     let mut out = std::io::BufWriter::new(fs::File::create(path)?);
     for v in plane.iter() {
@@ -75,6 +97,7 @@ pub fn write_plane(path: &Path, plane: &Array2<f32>) -> std::io::Result<()> {
 }
 
 /// Read one plane back, validating its length against the declared geometry.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn read_plane(
     path: &Path,
     seq_len: usize,
@@ -98,6 +121,7 @@ pub fn read_plane(
 }
 
 /// Load a dump directory's manifest.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn read_manifest(dir: &Path) -> Result<LayerDumpManifest, Box<dyn std::error::Error>> {
     let path = dir.join(MANIFEST_NAME);
     let text = fs::read_to_string(&path)
@@ -105,6 +129,7 @@ pub fn read_manifest(dir: &Path) -> Result<LayerDumpManifest, Box<dyn std::error
     Ok(serde_json::from_str(&text)?)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_layer_dump(args: LayerDumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     let text = shannon_cmd::read_text(&args.corpus, args.bytes)?;
     let model = shannon_cmd::load_model(&args.model)?;

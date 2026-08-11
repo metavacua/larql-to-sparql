@@ -1,9 +1,6 @@
 use crate::config::ExtractLevel;
 use crate::error::VindexError;
 
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 pub(super) const SURFACE_F32_WEIGHT_WRITER: &str = "f32 weight writer";
 pub(super) const SURFACE_Q4K_WEIGHT_WRITER: &str = "q4k weight writer";
 pub(crate) const SURFACE_EXTRACT_PIPELINE: &str = "extract pipeline";

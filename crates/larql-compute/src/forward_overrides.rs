@@ -59,7 +59,14 @@ use std::sync::OnceLock;
 #[derive(Debug)]
 enum ForceGlobalSpec {
     None,
+    // `All`/`Layers` are native-only: the wasm32 stub of `force_global_spec`
+    // below hardcodes `&ForceGlobalSpec::None` directly rather than parsing
+    // an env var, so these are never constructed on that target -- CI-confirmed
+    // (workflow run 31489222310). `layer_forced_global`'s match below is
+    // cfg-gated to match: `None` is the only reachable arm on wasm32.
+    #[cfg(not(target_arch = "wasm32"))]
     All,
+    #[cfg(not(target_arch = "wasm32"))]
     Layers(Vec<usize>),
 }
 
@@ -67,7 +74,9 @@ enum ForceGlobalSpec {
 /// `ForceGlobalSpec` variant. Split from [`force_global_spec`] so the
 /// parsing logic is testable without going through the `OnceLock`
 /// (which fires once per process and pins to whatever the env was at
-/// first-call time).
+/// first-call time). Native-only: its sole caller, `force_global_spec`
+/// below, hardcodes a wasm32 stub that never calls this.
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_force_global_spec(raw: Option<&str>) -> ForceGlobalSpec {
     let Some(s) = raw else {
         return ForceGlobalSpec::None;
@@ -105,10 +114,18 @@ fn force_global_spec() -> &'static ForceGlobalSpec {
 
 /// Returns true when `LARQL_FORCE_GLOBAL_LAYERS` requests this layer be
 /// forced onto the global-attention code path.
+///
+/// `layer` is unused on wasm32: `force_global_spec()` there is hard-wired to
+/// `ForceGlobalSpec::None` (env vars don't exist on that target) and the
+/// `All`/`Layers` match arms that read `layer` are native-only. Kept as a
+/// real parameter (not cfg'd out) so the signature matches native callers.
+#[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
 pub fn layer_forced_global(layer: usize) -> bool {
     match force_global_spec() {
         ForceGlobalSpec::None => false,
+        #[cfg(not(target_arch = "wasm32"))]
         ForceGlobalSpec::All => true,
+        #[cfg(not(target_arch = "wasm32"))]
         ForceGlobalSpec::Layers(v) => v.contains(&layer),
     }
 }

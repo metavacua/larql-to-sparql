@@ -50,7 +50,6 @@ use core::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
-use crate::options;
 
 /// Retained fraction of shared-input channels, in `(0, 1]`. Absent or `>= 1`
 /// disables the probe entirely.
@@ -299,8 +298,12 @@ static STATS: std::sync::Mutex<Vec<Vec<u64>>> = std::sync::Mutex::new(Vec::new()
 /// Only the pairwise matrix separates those.
 #[cfg(not(target_arch = "wasm32"))]
 static COSTATS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+// Native-only, same as COSTATS above: the wasm32 stub of record_stats
+// below is a pure no-op that never touches either of these.
+#[cfg(not(target_arch = "wasm32"))]
 static COSTATS_SAMPLES: AtomicU64 = AtomicU64::new(0);
 /// Accumulate the (expensive, O(kept²)) pair matrix on 1 call in N.
+#[cfg(not(target_arch = "wasm32"))]
 const COSTATS_SAMPLE_EVERY: u64 = 64;
 
 /// No-op on wasm32: same reasoning as `active()` above -- there is no

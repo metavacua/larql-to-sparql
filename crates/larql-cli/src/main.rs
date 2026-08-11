@@ -36,9 +36,11 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::large_enum_variant)]
 
+#[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, Subcommand};
 
 #[cfg(target_arch = "wasm32")]
+#[macro_use]
 extern crate alloc;
 
 #[forbid(unsafe_code)]
@@ -53,17 +55,24 @@ mod backend_select;
 mod commands;
 #[forbid(unsafe_code)]
 mod formatting;
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 mod image_input;
 #[forbid(unsafe_code)]
 mod utils;
 
+#[cfg(not(target_arch = "wasm32"))]
 use commands::dev::*;
+#[cfg(not(target_arch = "wasm32"))]
 use commands::diagnostics::*;
+#[cfg(not(target_arch = "wasm32"))]
 use commands::extraction::*;
+#[cfg(not(target_arch = "wasm32"))]
 use commands::primary::*;
+#[cfg(not(target_arch = "wasm32"))]
 use commands::query::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 #[derive(Parser)]
 #[command(
@@ -88,6 +97,7 @@ struct Cli {
 //   * "Research"      — `larql dev <subcmd>`
 // ══════════════════════════════════════════════════════════════════════
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 #[derive(Subcommand)]
 enum Commands {
@@ -258,6 +268,7 @@ enum Commands {
 // continue to work without a breaking change.
 // ══════════════════════════════════════════════════════════════════════
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 #[derive(Subcommand)]
 enum DevCommand {
@@ -341,6 +352,7 @@ enum DevCommand {
 // Minor glue types
 // ══════════════════════════════════════════════════════════════════════
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 #[derive(clap::Args)]
 struct ChatArgs {
@@ -365,6 +377,7 @@ struct ChatArgs {
     verbose: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 impl From<ChatArgs> for run_cmd::RunArgs {
     fn from(c: ChatArgs) -> Self {
@@ -411,6 +424,7 @@ impl From<ChatArgs> for run_cmd::RunArgs {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 #[derive(clap::Args)]
 struct LqlArgs {
@@ -418,6 +432,7 @@ struct LqlArgs {
     statement: String,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 #[derive(clap::Args)]
 struct ServeArgs {
@@ -565,6 +580,7 @@ struct ServeArgs {
 /// Research subcommands previously lived at the top level. Rewrite
 /// `larql <legacy-name> …` → `larql dev <legacy-name> …` before clap
 /// parses so existing scripts keep working.
+#[cfg(not(target_arch = "wasm32"))]
 const LEGACY_DEV_NAMES: &[&str] = &[
     "weight-extract",
     "attention-extract",
@@ -595,6 +611,7 @@ const LEGACY_DEV_NAMES: &[&str] = &[
     "ffn-latency",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
     if args.len() >= 2 && LEGACY_DEV_NAMES.contains(&args[1].as_str()) {
@@ -607,6 +624,7 @@ fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
     args
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 fn main() {
     // Windows defaults the main thread to a 1 MiB stack, which our large
@@ -627,6 +645,10 @@ fn main() {
     std::process::exit(code);
 }
 
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 fn real_main() -> i32 {
     let raw_args: Vec<String> = std::env::args().collect();
@@ -705,6 +727,7 @@ fn real_main() -> i32 {
     0
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
@@ -736,6 +759,7 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd_args = Vec::new();

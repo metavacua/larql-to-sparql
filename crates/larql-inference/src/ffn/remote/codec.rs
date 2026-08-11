@@ -13,7 +13,10 @@
 //! these functions/constants instead of maintaining their own copies.
 //! See the `super` module doc for the full binary frame layout.
 
-use serde::{Deserialize, Serialize};
+// Deserialize's only user is WalkFfnSingleResponse below, native-only.
+#[cfg(not(target_arch = "wasm32"))]
+use serde::Deserialize;
+use serde::Serialize;
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
@@ -84,6 +87,9 @@ pub(super) struct WalkFfnHttpRequest {
     pub full_output: bool,
 }
 
+// Native-only: its only non-test consumer, `remote::http`, is
+// `#[cfg(not(target_arch = "wasm32"))]`-gated and not re-exported.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Deserialize)]
 pub(super) struct WalkFfnSingleResponse {
     #[allow(dead_code)]
@@ -423,7 +429,10 @@ pub(crate) fn decode_binary_single_i8(
     Ok((layer, all_floats))
 }
 
-/// Decode a binary batch i8 response into f32 outputs.
+/// Decode a binary batch i8 response into f32 outputs. Native-only: its
+/// only non-test consumer, `remote::http`, is
+/// `#[cfg(not(target_arch = "wasm32"))]`-gated and not re-exported.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn decode_binary_batch_i8(
     body: &[u8],
     hidden_size: usize,

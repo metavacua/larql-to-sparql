@@ -13,6 +13,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Bytes per weight for MXFP4: 4-bit codeword plus one 8-bit block scale per 32.
 ///
 /// Two conventions travel with any bit-width quoted against this (standing rule

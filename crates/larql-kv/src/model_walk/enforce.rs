@@ -26,10 +26,6 @@ use larql_inference::ffn::FfnBackend;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
 
-use crate::semantic_promotion::{
-    AbortReason, MaterialisationPolicy, OperationLease, OperationOutcome, PromotionError,
-    PromotionRequest, QualificationEvidence, SemanticKvControl,
-};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::semantic_promotion::{RecordingSink, SemanticPromotionEngine};
 #[cfg(not(target_arch = "wasm32"))]

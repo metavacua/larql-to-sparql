@@ -12,8 +12,10 @@
 //! `c_attn`-style Conv1D layouts) build their own keys and should not
 //! reach for these.
 
-#[cfg(target_arch = "wasm32")]
-use crate::prelude::*;
+// No top-level alloc_prelude import: every item in this file lives
+// inside one of the four nested modules below, each of which imports
+// crate::prelude::* itself (glob imports don't cascade into child
+// modules in Rust) -- nothing at this file's own top level needs it.
 /// Standard HuggingFace QK-norm names.
 ///
 /// Declared by Gemma 2/3/4, Qwen3, and OLMoE — five architectures, one

@@ -199,6 +199,8 @@ impl KnnStore {
     /// Construct from a fully-populated entries map. Used by
     /// `super::knn_store_io::load`. Keys are assumed already
     /// normalized (they were normalized on the original `add`).
+    /// Native-only: `knn_store_io` is a native-gated module.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn from_entries(entries: HashMap<usize, Vec<KnnEntry>>) -> Self {
         let mut keys = GateOverlay::default();
         for (&layer, layer_entries) in &entries {

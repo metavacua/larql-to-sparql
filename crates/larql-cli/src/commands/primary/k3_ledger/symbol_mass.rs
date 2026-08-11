@@ -85,6 +85,9 @@ use serde::Serialize;
 
 use super::selection_trace::SelectionTrace;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One symbol's measured share of one stratum's selection events.
 #[derive(Debug, Clone, Serialize)]
 pub struct SymbolMass {

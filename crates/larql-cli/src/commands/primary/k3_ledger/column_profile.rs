@@ -35,6 +35,9 @@
 
 use super::symbol_census::FP4_CODES;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-input-channel symbol histogram pooled over every row of every expert.
 pub struct ColumnProfile {
     per_column: Vec<[u64; FP4_CODES]>,

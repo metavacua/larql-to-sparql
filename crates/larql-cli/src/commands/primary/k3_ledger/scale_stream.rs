@@ -25,6 +25,9 @@ use serde::Serialize;
 use super::symbol_census::FP4_CODES;
 use super::transcode::MXFP4_GROUP;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Scale bytes the checkpoint spends per weight, unconditioned.
 pub const RAW_SCALE_BPW: f64 = 8.0 / MXFP4_GROUP as f64;
 

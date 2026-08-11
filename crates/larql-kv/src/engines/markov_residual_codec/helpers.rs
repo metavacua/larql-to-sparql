@@ -9,8 +9,13 @@
 
 use ndarray::{s, Array2};
 
+// All four helpers here are native-only: their sole caller,
+// `super::dispatch`, is `#[cfg(not(target_arch = "wasm32"))]`-gated in
+// full (markov_residual_codec/mod.rs), same as the markov_residual twin.
+
 /// Initial slab capacity for a buffer that will grow as the engine
 /// decodes new tokens.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn window_capacity(prompt_len: usize, window_size: Option<usize>) -> usize {
     match window_size {
         Some(w) => prompt_len.max(w),
@@ -21,6 +26,7 @@ pub(super) fn window_capacity(prompt_len: usize, window_size: Option<usize>) -> 
 /// Copy `src` (logical rows = `len`) into a freshly-allocated slab of
 /// `cap` rows. The slab is zero-padded past `len` so push_row-style
 /// append-in-place writes have somewhere to land.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn grow_capacity_2d(src: &Array2<f32>, len: usize, cap: usize) -> Array2<f32> {
     debug_assert_eq!(src.shape()[0], len, "src shape disagrees with len");
     debug_assert!(cap >= len, "cap {cap} smaller than len {len}");
@@ -35,6 +41,7 @@ pub(super) fn grow_capacity_2d(src: &Array2<f32>, len: usize, cap: usize) -> Arr
 /// Append a single row at logical position `len`. Doubles the slab's
 /// capacity if `len == cap` so the amortised cost stays O(cols) per
 /// call.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn append_row(buf: &mut Array2<f32>, row: &Array2<f32>, len: usize) {
     let cap = buf.shape()[0];
     if len == cap {

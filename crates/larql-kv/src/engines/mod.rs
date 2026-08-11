@@ -115,8 +115,7 @@ pub mod standard;
 pub mod turbo_quant;
 pub mod windowed_checkpoint;
 
-pub(crate) use layer_ffn::{apply_ple_and_layer_scalar, layer_ffn_or_moe};
-pub(crate) use no_expert_route::refuse_if_moe;
+pub(crate) use layer_ffn::layer_ffn_or_moe;
 
 /// Whether W10 mask cascade is active.
 ///

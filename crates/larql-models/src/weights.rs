@@ -1,6 +1,10 @@
 //! Model weight tensors — the loaded representation of a model's parameters.
 
-use crate::collections::{HashMap, HashSet};
+use crate::collections::HashMap;
+// HashSet's only use (below, the packed-mmap eviction block) is already
+// #[cfg(not(target_arch = "wasm32"))]-gated at the statement level.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::collections::HashSet;
 #[cfg(target_arch = "wasm32")]
 use crate::prelude::*;
 use crate::ModelArchitecture;

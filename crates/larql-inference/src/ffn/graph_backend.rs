@@ -20,7 +20,6 @@ use crate::alloc_prelude::*;
 
 use ndarray::Array2;
 
-use crate::error::InferenceError;
 use crate::ffn::sigmoid;
 use crate::model::ModelWeights;
 

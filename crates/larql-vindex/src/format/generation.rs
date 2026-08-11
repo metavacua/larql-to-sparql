@@ -35,6 +35,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+// INDEX_JSON's only use is detect_generation below, which is std::fs-based
+// and native-only.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::format::filenames::INDEX_JSON;
 use crate::VindexError;
 
@@ -203,6 +206,9 @@ pub fn detect_generation(dir: &Path) -> Result<ContainerGeneration, VindexError>
 }
 
 /// Minimal view over `index.json` — the version field and nothing else.
+/// Native-only: its sole consumer, detect_generation above, is
+/// std::fs-based.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(serde::Deserialize)]
 struct VersionProbe {
     version: Option<u32>,

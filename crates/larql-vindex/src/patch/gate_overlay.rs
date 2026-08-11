@@ -80,6 +80,11 @@ impl GateOverlay {
     /// Remove a row. Invalidates the layer's snapshot even when the
     /// row was absent — callers use removal to mean "this slot must
     /// not score", and a stale snapshot is never worth the risk.
+    ///
+    /// Native-only: its only non-test callers are `overlay.rs` and
+    /// `overlay_apply.rs`, both native-gated (`PatchedVindex` wraps the
+    /// native-only `VectorIndex`).
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remove(&mut self, layer: usize, slot: usize) -> Option<Vec<f32>> {
         self.invalidate_layer(layer);
         self.rows.remove(&(layer, slot))
@@ -95,6 +100,9 @@ impl GateOverlay {
     /// Replace the row for an EXISTING slot; no-op (returning `false`)
     /// when the slot has no row. `set_gate_override` semantics: refine
     /// passes may only touch slots already claimed by a patch.
+    ///
+    /// Native-only: its only non-test caller is `overlay.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn replace_existing(&mut self, layer: usize, slot: usize, row: Vec<f32>) -> bool {
         match self.rows.get_mut(&(layer, slot)) {
             Some(existing) => {
@@ -106,23 +114,33 @@ impl GateOverlay {
         }
     }
 
-    /// Remove every row and snapshot.
+    /// Remove every row and snapshot. Native-only: its only non-test
+    /// caller is `overlay_apply.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn clear(&mut self) {
         self.rows.clear();
-        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(mut c) = self.cache.write() {
             c.clear();
         }
     }
 
+    /// Native-only: its only non-test callers are `overlay.rs` and
+    /// `overlay_gate_trait.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn get(&self, layer: usize, slot: usize) -> Option<&[f32]> {
         self.rows.get(&(layer, slot)).map(|v| v.as_slice())
     }
 
+    /// Native-only: its only non-test callers are `overlay.rs` and
+    /// `overlay_apply.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn contains(&self, layer: usize, slot: usize) -> bool {
         self.rows.contains_key(&(layer, slot))
     }
 
+    /// Native-only: its only non-test callers are `overlay.rs` and
+    /// `overlay_gate_trait.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn has_layer(&self, layer: usize) -> bool {
         self.rows.keys().any(|&(l, _)| l == layer)
     }
@@ -134,6 +152,9 @@ impl GateOverlay {
         self.rows.is_empty()
     }
 
+    /// Native-only: its only non-test callers are `overlay.rs` and
+    /// `overlay_gate_trait.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn iter(&self) -> impl Iterator<Item = (usize, usize, &[f32])> + '_ {
         self.rows.iter().map(|(&(l, s), v)| (l, s, v.as_slice()))
     }

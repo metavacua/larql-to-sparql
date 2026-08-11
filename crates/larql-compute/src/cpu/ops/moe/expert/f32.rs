@@ -6,13 +6,11 @@ use alloc::borrow::Cow;
 #[cfg(not(target_arch = "wasm32"))]
 use std::borrow::Cow;
 
-use super::super::cache::{try_cached_dequant, ExpertF32};
-use super::super::math::{matmul_vec, matmul_vec_into};
+use super::super::cache::try_cached_dequant;
+use super::super::math::matmul_vec;
 use super::q4k::run_single_expert_kq_q8k_into;
 use super::scratch::ExpertScratch;
-use crate::cpu::ops::q4_common::q4k_matvec_into;
 use crate::cpu::ops::q4k_q8k_dot::{quantize_x_to_q8k_into, Q8KActivation};
-use crate::options;
 
 /// Run a single expert's gated FFN given a pre-normed input vector.
 ///

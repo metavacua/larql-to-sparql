@@ -41,6 +41,9 @@
 
 use serde::Serialize;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// How `A_log` maps onto the `[H, K]` decay grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ALogAxis {

@@ -85,6 +85,9 @@ use serde::Serialize;
 use super::rng::SplitMix64;
 use super::selection_trace::SelectionTrace;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Deterministic default so a re-run reproduces the null exactly.
 pub const DEFAULT_NULL_SEED: u64 = 20_260_801;
 

@@ -7,6 +7,13 @@
 //!
 //! Empty on native: std's own prelude already provides all of these.
 
+// `ToOwned` IS re-exported here (unlike this crate's sibling
+// alloc_prelude.rs files): `prompt.rs::render_messages` -- fully
+// portable, no cfg gate -- calls `.as_ref().to_owned()` on `&str`.
+// A prior pass in this campaign removed it based on an incomplete
+// caller check and broke wasm32 compilation (E0599); restored after
+// checking every `.to_owned()` call site in the crate, not just the
+// first one found.
 #[cfg(target_arch = "wasm32")]
 pub(crate) use alloc::{
     borrow::ToOwned,

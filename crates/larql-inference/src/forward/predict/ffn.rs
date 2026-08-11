@@ -1,14 +1,7 @@
 //! FFN-backend forward passes (custom backend, router, strategy).
 
-use super::super::embed::embed_tokens;
-use super::super::layer::{run_attention, run_layer_with_capture, run_layer_with_ffn};
-use super::super::ple::precompute_per_layer_inputs;
 #[cfg(not(target_arch = "wasm32"))]
 use super::dense::logits_to_predictions;
-use super::types::{LayerAttentionCapture, LayerMode, PredictResult, PredictResultWithAttention};
-use crate::attention::SharedKV;
-use crate::ffn::{FfnBackend, LayerFfnRouter};
-use crate::model::ModelWeights;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::collections::HashMap;

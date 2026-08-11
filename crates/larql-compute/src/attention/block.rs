@@ -7,8 +7,6 @@ use super::gqa::gqa_reduced_qk_all_weights;
 use super::{AttentionAllWeights, AttentionWeights, SharedKV};
 use ndarray::{s, Array2};
 
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
 
 /// Run the full attention block. Returns (h_post_attn, attn_projected, optional_weights).
 #[allow(clippy::too_many_arguments)]
@@ -334,7 +332,7 @@ fn run_attention_block_core(
     // capture a specific layer instead — Gemma 4 global layers (5, 11, …)
     // are useful for bisecting partial-RoPE / V-norm interactions.
     let dump_cfg = crate::forward::dump_config::DumpConfig::get();
-    let stage_dump = dump_cfg.stage_dir(layer);
+    let _stage_dump = dump_cfg.stage_dir(layer);
     // std::fs has no core/alloc equivalent -- wasm32v1-none has no
     // filesystem at all, and stage_dump is unconditionally None there
     // (DumpConfig routes through options::env_value, which is None on

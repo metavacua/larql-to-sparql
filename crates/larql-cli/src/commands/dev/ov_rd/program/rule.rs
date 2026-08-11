@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use super::context::PositionContext;
 use super::predicate::Predicate;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 fn default_code_reference() -> CodeReference {
     CodeReference::CurrentCode
 }

@@ -26,6 +26,9 @@ use serde::Serialize;
 use super::frontier::ServingPremises;
 use super::geometry::K3Geometry;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Efficiency of a kernel that loses nothing. No measured kernel reaches it;
 /// the banked Metal band is 0.74-0.86.
 pub const IDEAL_EFFICIENCY: f64 = 1.0;

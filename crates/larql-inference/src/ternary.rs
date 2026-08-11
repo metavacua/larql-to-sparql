@@ -2009,7 +2009,9 @@ pub fn load_bitnet_model(vindex_path: &std::path::Path) -> Result<BitnetModel, B
 }
 
 /// Pluck a 1D norm vector out of `dense.vectors` and validate its
-/// length.
+/// length. Native-only: its sole caller, `load_bitnet_model` above, is
+/// native-gated.
+#[cfg(not(target_arch = "wasm32"))]
 fn take_norm(
     dense: &larql_models::ModelWeights,
     key: &str,

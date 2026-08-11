@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use larql_vindex::VectorIndex;
 use ndarray::s;
 
@@ -8,6 +6,16 @@ use super::pq::{ModeDTable, PqCodebook};
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PqConfig};
+use crate::collections::HashMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+// `format!`/`vec!` aren't in `alloc_prelude` and this crate's `extern
+// crate alloc;` (main.rs) isn't `#[macro_use]` -- import explicitly
+// (flagged in the round-1 report as a crate-root gap out of this
+// group's scope).
+#[cfg(target_arch = "wasm32")]
+use alloc::{format, vec};
 
 pub(super) fn corruption_keep_values(groups: usize) -> Vec<usize> {
     [0usize, 4, 8, 12, 16, 24, 32, 40, groups]
@@ -25,13 +33,13 @@ pub(super) fn materialize_mode_d_tables(
     pca_bases: &HashMap<HeadId, ZPcaBasis>,
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     stratum_conditioned_groups: &[usize],
-) -> Result<HashMap<(HeadId, PqConfig), ModeDTable>, Box<dyn std::error::Error>> {
-    let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
+) -> Result<HashMap<(HeadId, PqConfig), ModeDTable>, Box<dyn core::error::Error>> {
+    let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::default();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
     }
 
-    let mut tables = HashMap::new();
+    let mut tables: HashMap<(HeadId, PqConfig), ModeDTable> = HashMap::default();
     for (layer, layer_heads) in heads_by_layer {
         let inserted = insert_q4k_layer_tensors(weights, index, layer)?;
         let w_o = weights
@@ -78,7 +86,7 @@ pub(super) fn materialize_mode_d_tables(
                     group_tables.push(table);
                 }
                 let mut stratum_group_tables: HashMap<String, HashMap<usize, Vec<Vec<f32>>>> =
-                    HashMap::new();
+                    HashMap::default();
                 for (stratum, groups) in &codebook.stratum_centroids {
                     for &group in stratum_conditioned_groups {
                         let Some(centroids) = groups.get(&group) else {

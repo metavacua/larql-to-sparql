@@ -6,9 +6,11 @@
 // than being declared here and inherited. `diagnostics`/`query` contain
 // no such files (pattern 18 in the gating plan doc).
 pub mod dev;
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 pub mod diagnostics;
 pub mod extraction;
 pub mod primary;
+#[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
 pub mod query;

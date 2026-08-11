@@ -1,14 +1,5 @@
 //! Dense (full-weight) forward passes and logit projection utilities.
 
-use super::super::apply_norm;
-use super::super::embed::embed_tokens;
-use super::super::layer::run_layer_with_ffn;
-use super::super::ple::precompute_per_layer_inputs;
-use super::types::{PredictResult, PredictResultWithResiduals};
-use crate::attention::SharedKV;
-use crate::ffn::WeightFfn;
-use crate::model::ModelWeights;
-use ndarray::Array2;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::collections::HashMap;
@@ -116,6 +107,10 @@ unsafe fn f32_dot_neon(a: &[f32], b: &[f32]) -> f32 {
 /// — a forward pass that produces the occasional NaN (bad quant, runaway
 /// softmax) still surfaces the real maximum instead of whatever NaN
 /// happened to land in the pivot.
+///
+/// Native-only: every caller in this file (`finalize_topk_predictions`
+/// and its sibling below) is native-gated.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> core::cmp::Ordering {
     use core::cmp::Ordering;
     match (a.1.is_nan(), b.1.is_nan()) {

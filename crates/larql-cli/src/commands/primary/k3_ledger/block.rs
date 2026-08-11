@@ -24,6 +24,9 @@ use serde::{Deserialize, Serialize};
 use super::frontier::ServingPremises;
 use super::geometry::K3Geometry;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A drafter proposing `width` positions, of which `mean_accepted` commit.
 ///
 /// **R5.** Costs key on `width`; throughput keys on `mean_accepted`. Constructing

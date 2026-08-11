@@ -6,13 +6,23 @@ use larql_compute::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
 
+// `LmHeadPolicy` and its `from_env`/`env_bool`/const machinery are
+// native-only: `lm_head_topk`/`lm_head_topk_with_policy` below (the only
+// production constructors) are native-gated, and its two struct-field
+// consumers in `generate/policy.rs` (`TokenSelectionPolicy`,
+// `GenerationRuntimeConfig`) are themselves native-only there (their sole
+// production caller is the `grid` module, which is
+// `#[cfg(not(target_arch = "wasm32"))]`-gated in full at `layer_graph/mod.rs`).
+#[cfg(not(target_arch = "wasm32"))]
 const ENV_LM_HEAD_SKIP_Q4K: &str = "LARQL_LM_HEAD_SKIP_Q4K";
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct LmHeadPolicy {
     pub skip_q4k: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LmHeadPolicy {
     pub(crate) fn from_env() -> Self {
         Self {
@@ -26,6 +36,7 @@ impl LmHeadPolicy {
 /// so tests can toggle the flag via the thread-local override instead of
 /// `std::env::set_var`, which races concurrent `getenv` on the decode path →
 /// SIGSEGV.
+#[cfg(not(target_arch = "wasm32"))]
 fn env_bool(name: &str) -> bool {
     larql_compute::options::env_opt_in(name)
 }
@@ -260,6 +271,9 @@ pub(super) fn cpu_lm_head_topk(
 /// constrained decoding — the sparse vindex KNN can't apply an arbitrary
 /// vocabulary mask because masked-out tokens might fall outside the top-K.
 /// Same compute kernel as [`backend_lm_head_topk`], just no truncation.
+/// Native-only: its only non-test caller, `grid::forced_score`, lives in
+/// the native-only `grid` module.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn backend_lm_head_scores(
     weights: &ModelWeights,
     query: &ndarray::Array1<f32>,

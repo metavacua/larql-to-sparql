@@ -5,6 +5,9 @@
 //! JSON shape committed to `bench/baselines/*.json`. They live here together
 //! so that any change to the row layout is one file's review surface.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub(crate) struct BenchRow {
     pub backend: String,
     pub prefill_ms: f64,
@@ -134,7 +137,7 @@ pub(crate) fn compute_percentiles(values: &[f64]) -> (f64, f64, f64) {
         return (0.0, 0.0, 0.0);
     }
     let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
     let mean = sorted.iter().sum::<f64>() / sorted.len() as f64;
     let p50 = percentile(&sorted, 50.0);
     let p99 = percentile(&sorted, 99.0);

@@ -127,6 +127,7 @@ impl RsStore {
     ///
     /// All overflow vectors must be the same row count `c_new` (the
     /// layer-uniform eviction property; see `clip_layer`).
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn append_cold_overflow(
         &mut self,
         overflow: Vec<Array2<f32>>,
@@ -255,6 +256,7 @@ impl RsStore {
         self.hot_len
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn clip_layer(&mut self, layer: usize, cold: &mut Vec<Array2<f32>>) {
         let window = match self.max_window {
             Some(w) => w,
@@ -295,6 +297,7 @@ impl RsStore {
 
     /// Reset the logical row count after a window-clip loop. Call once
     /// after `clip_layer` has been invoked for every layer.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn finalise_hot_len_after_clip(&mut self) {
         if let Some(w) = self.max_window {
             self.hot_len = self.hot_len.min(w);
@@ -311,6 +314,7 @@ impl RsStore {
     /// would be empty. The function does **not** mutate `hot_kv`;
     /// the in-place clip in [`clip_layer`] already removes the top
     /// rows from each layer's hot K/V slot.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn snapshot_evicted_hot_kv(
         original_hot_kv: &[SharedKV],
         keep_from: &[usize],

@@ -16,6 +16,9 @@
 
 use larql_compute::{backend_from_spec, BackendCtor, BackendKind, ComputeBackend};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[cfg(all(feature = "gpu", target_os = "macos"))]
 fn metal_ctor() -> Option<Box<dyn ComputeBackend>> {
     larql_compute_metal::metal_backend().map(|m| Box::new(m) as Box<dyn ComputeBackend>)
@@ -37,14 +40,14 @@ pub fn backend_registry() -> Vec<(BackendKind, BackendCtor)> {
 /// Build the backend for a [`BackendKind`].
 pub fn backend_for_kind(
     kind: BackendKind,
-) -> Result<Box<dyn ComputeBackend>, Box<dyn std::error::Error>> {
+) -> Result<Box<dyn ComputeBackend>, Box<dyn core::error::Error>> {
     Ok(backend_from_spec(kind, &backend_registry())?)
 }
 
 /// Build the backend for a legacy `--metal` bool flag.
 pub fn backend_for_metal_flag(
     metal: bool,
-) -> Result<Box<dyn ComputeBackend>, Box<dyn std::error::Error>> {
+) -> Result<Box<dyn ComputeBackend>, Box<dyn core::error::Error>> {
     backend_for_kind(BackendKind::from_metal_flag(metal))
 }
 

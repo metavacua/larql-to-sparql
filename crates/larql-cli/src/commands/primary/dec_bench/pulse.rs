@@ -8,6 +8,9 @@
 
 use super::replay::DecPointSummary;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Build one pulse line for a sweep point. `step` is the sweep-point index.
 /// Denominators (`dec/weight_bytes_tok[_naive|_union]`, `dec/movement_ratio`,
 /// `dec/experts_union_frac`) come from the summary itself — per-point since

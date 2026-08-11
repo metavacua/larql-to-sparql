@@ -21,9 +21,7 @@
 //! distribution across L8-L12 on v11 TinyStories 115M. See
 //! `~/chris-source/chris-experiments/compilation/15_v11_model/RESULTS.md §20`.
 
-use super::trace::{capture_ffn_activation_matrix, estimate_ffn_covariance};
-use crate::model::ModelWeights;
-use ndarray::{Array1, Array2};
+use ndarray::Array2;
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;

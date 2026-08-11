@@ -9,8 +9,6 @@
 
 use super::*;
 
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
 
 pub fn build_moe_weights<'a>(
     weights: &'a ModelWeights,

@@ -36,9 +36,9 @@
 //! If both hold, the transcode is **exact, verifiable value-by-value against
 //! the banked codec** — a stronger chain of custody than a bounded-KL label.
 
-use std::collections::BTreeMap;
-
 use serde::Serialize;
+
+use crate::collections::BTreeMap;
 
 /// MXFP4 scale group, in weights.
 pub const MXFP4_GROUP: usize = 32;

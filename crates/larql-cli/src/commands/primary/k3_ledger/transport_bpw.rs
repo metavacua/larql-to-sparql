@@ -33,6 +33,9 @@ use super::frontier::ServingPremises;
 use super::geometry::K3Geometry;
 use super::serving_format::{self, Container};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Nibbles per packed byte — how expert bytes become expert weights.
 pub const WEIGHTS_PER_PACKED_BYTE: u64 = 2;
 

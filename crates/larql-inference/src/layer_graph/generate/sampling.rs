@@ -19,16 +19,21 @@
 // (Cargo.toml: `rand = { default-features = false }` under the wasm32
 // target section) -- no OS entropy source to seed a std RNG from anyway.
 // `Sampler` (owns the RNG) and `multinomial` (takes `&mut StdRng`) are
-// gated native-only below; the pure filter functions (`argmax`,
-// `apply_filters`, `keep_top_k`, `keep_top_p`, repetition-penalty
-// helpers) need no RNG and stay portable.
+// gated native-only below. The pure filter functions (`argmax`,
+// `apply_filters`, `keep_top_k`, `keep_top_p`, `token_counts`,
+// `apply_repetition_penalty`) need no RNG themselves, but every actual
+// call site lives inside `impl Sampler`, so they're gated native-only
+// too -- CI-confirmed via a wasm32 clippy dead-code pass, not left
+// "portable but uncalled".
 #[cfg(not(target_arch = "wasm32"))]
 use rand::rngs::StdRng;
 #[cfg(not(target_arch = "wasm32"))]
 use rand::{Rng, SeedableRng};
 
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
+// No alloc_prelude import: `SamplingConfig` (the only portable item in
+// this file) has no Vec/String/Box/ToOwned fields -- every function that
+// touches alloc collections is native-gated below.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::collections::{HashMap, HashSet};
 
 /// Numeric guard: `temperature <= EPS` is treated as greedy (avoids
@@ -248,6 +253,7 @@ impl Sampler {
 
 /// Build a `token_id → count` map. Tiny helper used by both penalty
 /// paths; allocations dominate here only for very long histories.
+#[cfg(not(target_arch = "wasm32"))]
 fn token_counts(generated: &[u32]) -> HashMap<u32, usize> {
     let mut counts: HashMap<u32, usize> = HashMap::default();
     for &id in generated {
@@ -259,6 +265,7 @@ fn token_counts(generated: &[u32]) -> HashMap<u32, usize> {
 /// Apply OpenAI-style repetition penalties to a full-vocab logit slice.
 /// Returns a fresh `Vec<f32>` with the modified logits — leaves the
 /// original intact for callers that want to compare or fall back.
+#[cfg(not(target_arch = "wasm32"))]
 fn apply_repetition_penalty(logits: &[f32], generated: &[u32], cfg: SamplingConfig) -> Vec<f32> {
     let counts = token_counts(generated);
     let freq = cfg.frequency_penalty;
@@ -279,6 +286,7 @@ fn apply_repetition_penalty(logits: &[f32], generated: &[u32], cfg: SamplingConf
 
 // ── Internals ────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn argmax(logits: &[f32]) -> Option<u32> {
     logits
         .iter()
@@ -290,6 +298,7 @@ fn argmax(logits: &[f32]) -> Option<u32> {
 
 /// Apply temperature → top-k → top-p → softmax. Returns a probability
 /// vector the same length as `logits` with filtered entries set to 0.
+#[cfg(not(target_arch = "wasm32"))]
 fn apply_filters(logits: &[f32], cfg: SamplingConfig) -> Vec<f32> {
     let temp = if cfg.temperature > TEMPERATURE_GREEDY_EPS {
         cfg.temperature
@@ -336,6 +345,7 @@ fn apply_filters(logits: &[f32], cfg: SamplingConfig) -> Vec<f32> {
 /// Mask all but the top-k entries to `-inf` in place. Cheap when k is
 /// small relative to vocab — a single `select_nth_unstable`-equivalent
 /// sort would also work but allocates more.
+#[cfg(not(target_arch = "wasm32"))]
 fn keep_top_k(scaled: &mut [f32], k: usize) {
     if k == 0 || k >= scaled.len() {
         return;
@@ -358,6 +368,7 @@ fn keep_top_k(scaled: &mut [f32], k: usize) {
 }
 
 /// Keep the smallest set of indices whose cumulative probability ≥ p.
+#[cfg(not(target_arch = "wasm32"))]
 fn keep_top_p(probs: &mut [f32], p_thr: f32) {
     if !(0.0..1.0).contains(&p_thr) {
         return;

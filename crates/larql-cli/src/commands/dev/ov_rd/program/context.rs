@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Field name constants used in predicate JSON — avoids magic strings.
 pub mod fields {
     pub const STRATUM: &str = "stratum";

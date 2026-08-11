@@ -25,15 +25,13 @@
 use std::sync::Arc;
 
 use crate::semantic_promotion::{
-    AuthorityId, AuthorityState, CapabilityKey, MaterialisationPolicy, OperationId, OperationLease,
-    OperationOutcome, PromotionError, PromotionRequest, RecordId, SemanticKvControl,
+    AuthorityId, AuthorityState, OperationId, PromotionError, RecordId, SemanticKvControl,
     SemanticPhaseEvent,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::semantic_promotion::{RecordingSink, SemanticPromotionEngine};
 
-use super::graph::{render_boundary, ModelEdge, ModelGraph, ModelNode};
-use super::plan::WalkStep;
+use super::graph::{ModelEdge, ModelNode};
 use super::validate::ValidatedWalkPlan;
 
 #[cfg(target_arch = "wasm32")]

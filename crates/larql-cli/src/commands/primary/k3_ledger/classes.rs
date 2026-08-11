@@ -23,6 +23,9 @@ use serde::Serialize;
 
 use super::geometry::K3Geometry;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Measured attainable GPU bandwidth (`project_memory_bandwidth_roofline`).
 pub const BW_GB_S: f64 = 367.0;
 

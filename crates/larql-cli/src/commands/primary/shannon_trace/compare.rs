@@ -5,14 +5,32 @@
 //! than worst: downstream layers inherit an upstream difference, so the deepest
 //! disagreement is usually an echo and the shallowest is the defect.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use ndarray::Array2;
 
-use super::dump::{read_manifest, read_plane, LayerDumpManifest};
+use super::dump::LayerDumpManifest;
+#[cfg(not(target_arch = "wasm32"))]
+use super::dump::{read_manifest, read_plane};
+#[cfg(not(target_arch = "wasm32"))]
 use super::LayerDiffArgs;
 
+// `LayerDelta`/`compare_planes`/`check_comparable`/`first_token_mismatch`/
+// `first_drift` below are the portable Gate-B math core (pure, no native
+// markers); `diff_dumps`/`print_table`/`run_layer_diff` are native-gated
+// (fs-backed dump.rs helpers + println!). See the round-1 gating survey
+// for `commands/primary` for the full split rationale.
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+// `format!` isn't in `alloc_prelude` and this crate's `extern crate
+// alloc;` (main.rs) isn't `#[macro_use]` -- import explicitly (see
+// report: flagged as a crate-root gap out of this group's scope).
+#[cfg(target_arch = "wasm32")]
+use alloc::format;
+
 /// Prefix of the machine-readable line, matching `shannon verify`'s.
+#[cfg(not(target_arch = "wasm32"))]
 const RESULT_PREFIX: &str = "RESULT ";
 
 /// Per-capture agreement between two dumps.
@@ -88,7 +106,7 @@ pub fn compare_planes(a: &Array2<f32>, b: &Array2<f32>) -> LayerDelta {
 pub fn check_comparable(
     a: &LayerDumpManifest,
     b: &LayerDumpManifest,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     if a.token_ids != b.token_ids {
         return Err(format!(
             "dumps ran different token windows ({} vs {} tokens{}) — both sides \
@@ -125,6 +143,7 @@ fn first_token_mismatch(a: &[u32], b: &[u32]) -> Option<usize> {
 }
 
 /// Compare every capture in two dump directories, in capture order.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn diff_dumps(
     dir_a: &Path,
     dir_b: &Path,
@@ -149,6 +168,7 @@ pub fn first_drift(deltas: &[LayerDelta], threshold_cos: f64) -> Option<&LayerDe
     deltas.iter().find(|d| d.cos < threshold_cos)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn print_table(deltas: &[LayerDelta], threshold_cos: f64) {
     println!();
     println!(
@@ -172,6 +192,7 @@ fn print_table(deltas: &[LayerDelta], threshold_cos: f64) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_layer_diff(args: LayerDiffArgs) -> Result<(), Box<dyn std::error::Error>> {
     let (man_a, man_b, deltas) = diff_dumps(&args.a, &args.b)?;
     println!(

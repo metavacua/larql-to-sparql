@@ -37,8 +37,13 @@
 //! routed pools and simply ignore the sidecars).
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Bump when the binary layout changes. `open` rejects other versions.
 /// The routing sidecars are additive — version stays 1.
@@ -159,6 +164,7 @@ impl CapturePool {
     /// layout is rectangular; the pre-truncation count is kept in
     /// [`PromptMeta::steps_captured`].
     #[allow(dead_code)] // Phase C routed-replay consumer pending; tests pin it
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn write(
         dir: &Path,
         model: &str,
@@ -183,6 +189,7 @@ impl CapturePool {
     /// [`Self::write`] plus the optional routed-experts sidecars. With
     /// `routing: None` this is exactly the walk-ffn-only write path.
     #[allow(clippy::too_many_arguments)]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn write_with_routing(
         dir: &Path,
         model: &str,
@@ -270,6 +277,7 @@ impl CapturePool {
     }
 
     /// Open and validate a pool directory.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open(dir: &Path) -> Result<Self, String> {
         let manifest_path = dir.join(MANIFEST_FILE);
         let manifest_json = std::fs::read_to_string(&manifest_path)
@@ -563,6 +571,7 @@ fn validate_routing_capture(
 
 /// Write one `[prompt][step][layer][hidden]` f32-LE plane, truncated to
 /// `steps` per prompt. Shared by `residuals.bin` / `raw.bin` / `normed.bin`.
+#[cfg(not(target_arch = "wasm32"))]
 fn write_plane(path: &Path, per_prompt: &[Vec<Vec<Vec<f32>>>], steps: usize) -> Result<(), String> {
     let f = std::fs::File::create(path)
         .map_err(|e| format!("capture pool: create {}: {e}", path.display()))?;
@@ -582,6 +591,7 @@ fn write_plane(path: &Path, per_prompt: &[Vec<Vec<Vec<f32>>>], steps: usize) -> 
 
 /// Write `routing.bin`: fixed `top_k` records; zero-weight pairs stripped
 /// (compacted out) and the record sentinel-padded to length.
+#[cfg(not(target_arch = "wasm32"))]
 fn write_routing_file(path: &Path, rc: &RoutingCapture, steps: usize) -> Result<(), String> {
     let f = std::fs::File::create(path)
         .map_err(|e| format!("capture pool: create {}: {e}", path.display()))?;

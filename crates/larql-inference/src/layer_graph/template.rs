@@ -1,9 +1,11 @@
-use ndarray::Array2;
 
-use super::{LayerGraph, LayerOutput};
-use crate::collections::{HashMap, HashSet};
+// LayerGraph/FfnBackend's only uses (TemplateUniverse::build and the
+// GuidedWalkLayerGraph impl below) are both native-gated.
+#[cfg(not(target_arch = "wasm32"))]
+use super::LayerGraph;
+use crate::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::ffn::FfnBackend;
-use crate::model::ModelWeights;
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;

@@ -22,9 +22,10 @@
 // `ResidualCapture` (super::capture) is native-only -- residual_diff/mod.rs
 // gates the whole `capture` module out on wasm32 (env-var-driven dump
 // hooks, real fs). `compare_captures` is the only item here that touches
-// it, so only that function (and this import) needs gating; everything
-// else (LayerStat/ParityThreshold/ParityReport/layer_stat) is pure
-// arithmetic over `&[f32]` and stays portable.
+// it, so only that function (and this import) needs gating for that
+// reason; LayerStat/ParityThreshold/ParityReport are pure arithmetic and
+// stay portable (part of the public API). `layer_stat` itself is
+// additionally native-gated below: its only caller is `compare_captures`.
 #[cfg(not(target_arch = "wasm32"))]
 use super::capture::ResidualCapture;
 
@@ -171,6 +172,7 @@ pub fn compare_captures(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn layer_stat(layer: usize, a: &[f32], b: &[f32]) -> LayerStat {
     debug_assert_eq!(a.len(), b.len());
     let mut dot = 0.0f64;

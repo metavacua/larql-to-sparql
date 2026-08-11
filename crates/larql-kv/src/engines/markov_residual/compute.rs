@@ -18,7 +18,7 @@
 use larql_compute::{dot_proj_gpu, ComputeBackend, QuantFormat};
 #[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
-use ndarray::{s, Array2, ArrayBase, ArrayView1, Data, Ix2};
+use ndarray::{s, Array2, Data};
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]
@@ -614,6 +614,9 @@ pub fn kv_memory_bytes_for_seq(weights: larql_inference::WeightsView, seq_len: u
         .sum()
 }
 
+// Native-only: its callers (prefill.rs::rs_prefill, walk.rs) are both
+// native-gated -- rs_prefill directly, walk.rs as a whole module.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
     let last = h.shape()[0] - 1;
     h.slice(s![last..=last, ..]).to_owned()

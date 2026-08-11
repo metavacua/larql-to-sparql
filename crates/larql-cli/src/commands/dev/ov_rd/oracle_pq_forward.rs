@@ -1,12 +1,18 @@
-use std::collections::HashMap;
-
 use larql_inference::attention::{
     run_attention_block_with_pre_o_and_all_attention_weights,
     run_attention_block_with_pre_o_and_reduced_qk_attention_weights, SharedKV,
 };
+// `WeightFfn`/`hidden_to_raw_logits` via the crate-root `larql_inference::*`
+// path are bundled into a wholesale-native re-export block upstream (a
+// previously-gated sibling crate's over-broad grouping -- see round-1
+// report), even though both underlying items are themselves portable.
+// Importing via their unconditional `forward`/`ffn` submodule paths
+// instead sidesteps that gate without needing to touch larql-inference.
+use larql_inference::ffn::WeightFfn;
 use larql_inference::forward::ple::precompute_per_layer_inputs;
-use larql_inference::forward::{embed_tokens_pub, run_ffn, run_layer_with_ffn};
-use larql_inference::{hidden_to_raw_logits, WeightFfn};
+use larql_inference::forward::{
+    embed_tokens_pub, hidden_to_raw_logits, run_ffn, run_layer_with_ffn,
+};
 use larql_vindex::VectorIndex;
 use ndarray::{s, Array2};
 
@@ -16,6 +22,16 @@ use super::pq::{ModeDTable, PqCodebook};
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::HeadId;
+use crate::collections::HashMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+// `format!`/`vec!` aren't in `alloc_prelude` and this crate's `extern
+// crate alloc;` (main.rs) isn't `#[macro_use]` -- import explicitly
+// (flagged in the round-1 report as a crate-root gap out of this
+// group's scope).
+#[cfg(target_arch = "wasm32")]
+use alloc::{format, vec};
 
 pub(super) fn forward_q4k_oracle_pq_head(
     weights: &mut larql_inference::ModelWeights,
@@ -27,7 +43,7 @@ pub(super) fn forward_q4k_oracle_pq_head(
     means: &StaticHeadMeans,
     codebook: &PqCodebook,
     stratum: &str,
-) -> Result<(Array2<f32>, RoundtripPatchMetrics, Vec<Vec<usize>>), Box<dyn std::error::Error>> {
+) -> Result<(Array2<f32>, RoundtripPatchMetrics, Vec<Vec<usize>>), Box<dyn core::error::Error>> {
     let mut metrics = None;
     let mut oracle_codes = Vec::new();
 
@@ -105,7 +121,7 @@ pub(super) fn forward_q4k_oracle_pq_mode_d_head(
     codebook: &PqCodebook,
     mode_d_table: &ModeDTable,
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     let hidden_size = weights.hidden_size;
     larql_inference::vindex::predict_kquant_hidden_with_mapped_head_residual_delta(
         weights,
@@ -148,7 +164,7 @@ pub(super) fn forward_q4k_predicted_address_mode_d_head(
     mode_d_table: &ModeDTable,
     predicted_codes_by_position: &[Vec<usize>],
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     let mut replacement_delta = Vec::with_capacity(token_ids.len() * weights.hidden_size);
     for pos in 0..token_ids.len() {
         let codes = predicted_codes_by_position
@@ -175,10 +191,10 @@ pub(super) fn capture_layer_input_hidden(
     token_ids: &[u32],
     index: &VectorIndex,
     target_layer: usize,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
 
     for layer in 0..target_layer {
         let inserted = insert_q4k_layer_tensors(weights, index, layer)?;
@@ -220,7 +236,7 @@ pub(super) fn capture_prev_ffn_feature_keys(
     index: &VectorIndex,
     target_layer: usize,
     feature_top_k: usize,
-) -> Result<Vec<Vec<usize>>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Vec<usize>>, Box<dyn core::error::Error>> {
     let mut prev_features_by_pos = vec![Vec::<usize>::new(); token_ids.len()];
     if target_layer == 0 || feature_top_k == 0 {
         return Ok(prev_features_by_pos);
@@ -228,7 +244,7 @@ pub(super) fn capture_prev_ffn_feature_keys(
 
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
 
     for layer in 0..target_layer {
         let inserted = insert_q4k_layer_tensors(weights, index, layer)?;
@@ -277,10 +293,10 @@ pub(super) fn capture_ffn_first_feature_keys(
     index: &VectorIndex,
     target_layer: usize,
     feature_top_k: usize,
-) -> Result<Vec<Vec<usize>>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Vec<usize>>, Box<dyn core::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
 
     for layer in 0..=target_layer {
         let inserted = insert_q4k_layer_tensors(weights, index, layer)?;
@@ -335,10 +351,10 @@ pub(super) fn capture_attention_relation_rows(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Vec<f32>>, Box<dyn core::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
 
     for layer in 0..=head.layer {
         let inserted = insert_q4k_layer_tensors(weights, index, layer)?;
@@ -403,10 +419,10 @@ pub(super) fn capture_reduced_qk_attention_rows(
     index: &VectorIndex,
     head: HeadId,
     qk_rank: usize,
-) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Vec<f32>>, Box<dyn core::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
 
     for layer in 0..=head.layer {
         let inserted = insert_q4k_layer_tensors(weights, index, layer)?;

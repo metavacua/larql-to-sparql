@@ -48,6 +48,9 @@ use super::symbol_census::{
     miller_madow_bias, SymbolCounts, FIXED_PAYLOAD_BITS, FP4_CODES, NEG_ZERO_CODE, POS_ZERO_CODE,
 };
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One bit per weight naming "same symbol as the parent" or "escape".
 pub const MATCH_FLAG_BITS: f64 = 1.0;
 

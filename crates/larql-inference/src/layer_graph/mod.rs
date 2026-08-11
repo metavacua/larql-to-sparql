@@ -24,7 +24,9 @@ pub mod grid;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hybrid;
 // Splits internally: finalize_logits (&VectorIndex/&Tokenizer) is
-// native; softmax_prob (pure f32/f64 arithmetic) stays portable.
+// native; softmax_prob is pure f32/f64 arithmetic but its only caller
+// (generate::gpu::sampling_step) lives in the native-only gpu module,
+// so it's gated native-only too (CI-confirmed, not left portable-but-dead).
 pub mod logits;
 pub mod pipeline_layer;
 // Splits internally: honest/split submodules + the VectorIndex-taking

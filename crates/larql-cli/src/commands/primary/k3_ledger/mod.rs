@@ -41,6 +41,7 @@
 //! was arithmetic over correct measurements, so the arithmetic carries unit
 //! tests and the network does not.
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod args;
 pub mod block;
 pub mod budget;
@@ -48,7 +49,9 @@ pub mod classes;
 pub mod column_profile;
 pub mod cond_arms;
 pub mod cond_census;
+#[cfg(not(target_arch = "wasm32"))]
 mod cond_report;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod fetch;
 pub mod freqmass;
 #[cfg(test)]
@@ -57,6 +60,7 @@ pub mod frontier;
 pub mod geometry;
 pub mod kda_a_log;
 pub mod kda_graph;
+#[cfg(not(target_arch = "wasm32"))]
 mod report;
 pub mod rng;
 pub mod scale_stream;
@@ -69,8 +73,10 @@ pub mod touch;
 pub mod transcode;
 pub mod transport_bpw;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use args::K3LedgerArgs;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run(args: K3LedgerArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Decided by counting the source alphabet, not by reading the checkpoint —
     // so it must not pay for geometry it never consults.

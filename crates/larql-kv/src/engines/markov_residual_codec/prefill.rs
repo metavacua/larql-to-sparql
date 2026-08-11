@@ -27,7 +27,6 @@ use ndarray::Array2;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::engines::markov_residual::recompute_kv;
 use crate::engines::markov_residual_codec::codec::ColdResidualCodec;
-use crate::engines::markov_residual_codec::helpers::last_row;
 use crate::engines::markov_residual_codec::store::{EncodedColdLayer, RsStoreCodec};
 
 pub struct RsPrefillResultCodec {

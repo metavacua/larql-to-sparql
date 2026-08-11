@@ -6,6 +6,9 @@
 //! the engine really holds — so they are kept together and tested
 //! together, separately from the numeric summarisation in `engine.rs`.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Render the dispatch-shape prefix for an engine row, e.g.
 /// `"[per-layer→host] "`. Empty when the engine does not report a shape
 /// (no prefill, or an engine with only one).

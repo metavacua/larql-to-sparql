@@ -18,7 +18,6 @@
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) use alloc::{
-    borrow::ToOwned,
     string::{String, ToString},
     vec::Vec,
 };

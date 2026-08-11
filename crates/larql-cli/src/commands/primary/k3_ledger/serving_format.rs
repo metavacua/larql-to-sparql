@@ -66,6 +66,9 @@ use serde::Serialize;
 
 use super::transcode::{GROUPS_PER_SUPERBLOCK, MXFP4_GROUP};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// fp4 (e2m1) magnitudes. Mirrors `larql_models::quant::mxfp4::MXFP4_TABLE`.
 pub const FP4_MAGNITUDES: [f64; 8] = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0];
 

@@ -100,6 +100,10 @@ pub fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<
 /// `out` must have length exactly `out_rows`; existing contents are
 /// overwritten.  Panics in debug builds on size mismatch (matches
 /// `matmul_vec`'s assertion semantics).
+///
+/// Native-only: its only callers are `expert/f32.rs::run_single_expert_into`,
+/// itself `#[cfg(not(target_arch = "wasm32"))]`-gated.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn matmul_vec_into(
     out: &mut [f32],
     x: &[f32],

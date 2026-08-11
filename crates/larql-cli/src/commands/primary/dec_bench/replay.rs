@@ -12,11 +12,23 @@ use larql_inference::ffn::moe_remote::{
     MultiLayerTask, MultiLayerTaskQ8K, MULTI_LAYER_BATCH_CONTENT_TYPE,
     MULTI_LAYER_BATCH_Q8K_CONTENT_TYPE,
 };
-use larql_inference::ffn::remote::{WireFormat, WALK_FFN_PATH, WALK_FFN_Q8K_PATH};
-use larql_inference::{encode_binary_request_as, encode_q8k_batch_request};
+use larql_inference::ffn::remote::WireFormat;
+use larql_inference::ffn::{encode_binary_request_as, encode_q8k_batch_request};
 
 use super::super::bench::row::compute_percentiles;
 use super::capture_format::CapturePool;
+
+// `WALK_FFN_PATH` / `WALK_FFN_Q8K_PATH` live only in larql-inference's
+// native-only `ffn::remote::http` module (no portable path exists at
+// all -- unlike the crate-root-vs-`ffn::` rerouting above, this is a
+// genuine absence upstream). Inlined here as the same literal bytes
+// (category-(a) reimplementation, verified against
+// `ffn/remote/http.rs`'s `pub const` definitions).
+const WALK_FFN_PATH: &str = "/v1/walk-ffn";
+const WALK_FFN_Q8K_PATH: &str = "/v1/walk-ffn-q8k";
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 // ── Sweep plan ────────────────────────────────────────────────────────────────
 
@@ -73,9 +85,9 @@ impl WireArm {
     /// `None` for Q8K, which is its own endpoint rather than a negotiated CT.
     pub fn accept(self) -> Option<&'static str> {
         match self {
-            WireArm::F32 => Some(larql_inference::BINARY_CT),
-            WireArm::F16 => Some(larql_inference::F16_CT),
-            WireArm::I8 => Some(larql_inference::I8_CT),
+            WireArm::F32 => Some(larql_inference::ffn::BINARY_CT),
+            WireArm::F16 => Some(larql_inference::ffn::F16_CT),
+            WireArm::I8 => Some(larql_inference::ffn::I8_CT),
             WireArm::Q8k => None,
         }
     }
@@ -315,7 +327,12 @@ impl Endpoint {
         }
     }
 
-    /// Request path — the production constants, not re-declared strings.
+    /// Request path. `WalkFfn`/`WalkFfnQ8k` use this file's local
+    /// `WALK_FFN_PATH`/`WALK_FFN_Q8K_PATH` (byte-identical inlines of the
+    /// production constants -- see the top-of-file note; the originals
+    /// live only in larql-inference's native-only `http` module, with no
+    /// portable path for a wasm32 build to import). The multi-layer arms
+    /// still import the real production constants directly.
     pub fn path(self) -> &'static str {
         match self {
             Self::WalkFfn => WALK_FFN_PATH,
@@ -331,7 +348,7 @@ impl Endpoint {
     pub fn request_content_type(self, wire: WireSpec) -> &'static str {
         match self {
             Self::WalkFfn => wire.request_format().content_type(),
-            Self::WalkFfnQ8k => larql_inference::Q8K_BATCH_CT,
+            Self::WalkFfnQ8k => larql_inference::ffn::Q8K_BATCH_CT,
             Self::ExpertsMultiLayer => MULTI_LAYER_BATCH_CONTENT_TYPE,
             Self::ExpertsMultiLayerQ8k => MULTI_LAYER_BATCH_Q8K_CONTENT_TYPE,
         }
@@ -672,10 +689,10 @@ pub fn build_frame(
 /// verbatim so the run record never hides what the server sent).
 pub fn wire_label_for_content_type(ct: &str) -> String {
     match ct {
-        larql_inference::BINARY_CT => "f32".into(),
-        larql_inference::F16_CT => "f16".into(),
-        larql_inference::I8_CT => "i8".into(),
-        larql_inference::Q8K_BATCH_CT => "q8k".into(),
+        larql_inference::ffn::BINARY_CT => "f32".into(),
+        larql_inference::ffn::F16_CT => "f16".into(),
+        larql_inference::ffn::I8_CT => "i8".into(),
+        larql_inference::ffn::Q8K_BATCH_CT => "q8k".into(),
         MULTI_LAYER_BATCH_CONTENT_TYPE => "experts-ml".into(),
         MULTI_LAYER_BATCH_Q8K_CONTENT_TYPE => "experts-ml-q8k".into(),
         other => other.to_string(),
@@ -1101,7 +1118,7 @@ pub fn routed_weight_bytes_per_token(
     let mut naive_experts = 0usize;
     let mut union_experts = 0usize;
     for cell in expert_sets {
-        let mut union: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+        let mut union: crate::collections::BTreeSet<u32> = crate::collections::BTreeSet::new();
         for row in cell {
             naive_experts += row.len();
             union.extend(row.iter().copied());

@@ -5,8 +5,8 @@ use crate::attention::SharedKV;
 use super::dispatch::attn_int8_enabled;
 use super::gqa_step::gqa_attention_decode_step;
 
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
+// No alloc_prelude import: this file never uses Vec/String/Box/ToOwned --
+// all of its buffers are ndarray Array2/slices, not alloc collections.
 
 /// Int8 decode-step projection: `[1, num_rows] = qw × x_q8k`. The activation
 /// is pre-quantised ONCE by the caller (Q/K/V share `h_norm`'s Q8_K form).
