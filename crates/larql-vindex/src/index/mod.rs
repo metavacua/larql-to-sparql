@@ -10,22 +10,28 @@
 //! - `gate`, `walk`, `accessors`, `attn`, `lm_head`, `fp4_storage` —
 //!   pending split into compute/ and storage/ in a follow-up pass
 
+// `compute`/`core`/`mutate` all couple directly and pervasively into
+// `storage`'s mmap-backed types (confirmed via grep -- VindexStorage,
+// GateStore, MmapStorage referenced throughout, not incidentally; this
+// module's own doc above says as much: "compute/ ... read-only over
+// storage"). The whole VectorIndex/KNN query engine is therefore
+// native-only for now, same as storage itself. `types` stays portable
+// (POD structs; its one native piece, DownMetaMmap, is gated locally).
+#[cfg(not(target_arch = "wasm32"))]
 pub mod compute;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod core;
 #[cfg(test)]
 mod ffn_dispatch_tests;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mutate;
-// "mmap loaders, residency management. These modules touch raw bytes"
-// (this module's own doc, above) -- no filesystem/mmap on wasm32v1-none.
-// compute/core/mutate/types reference storage's mmap-backed types
-// extensively; gating storage wholesale will surface those as real
-// errors in the next CI round, to be gated individually rather than
-// guessed at now.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod storage;
 pub mod types;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use compute::router::RouterIndex;
+#[cfg(not(target_arch = "wasm32"))]
 pub use core::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use storage::residency::{LayerState, ResidencyManager};
@@ -34,7 +40,9 @@ pub use storage::residency::{LayerState, ResidencyManager};
 // migrated incrementally; external callers can reach the modules by
 // either name. Drop these once `crate::index::{hnsw,attn,lm_head,…}`
 // users are all updated.
+#[cfg(not(target_arch = "wasm32"))]
 pub use compute::hnsw;
+#[cfg(not(target_arch = "wasm32"))]
 pub use compute::router;
 #[cfg(not(target_arch = "wasm32"))]
 pub use storage::attn;

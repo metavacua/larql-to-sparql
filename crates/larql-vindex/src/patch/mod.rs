@@ -13,13 +13,18 @@ pub mod format;
 pub(crate) mod gate_overlay;
 pub mod knn_store;
 pub mod knn_store_io;
+// `PatchedVindex` wraps `VectorIndex` (now native-only) directly.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod overlay;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod overlay_apply;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod overlay_gate_trait;
 pub mod refine;
 
 pub use format::*;
 pub use knn_store::{KnnEntry, KnnStore};
+#[cfg(not(target_arch = "wasm32"))]
 pub use overlay::*;
 pub use refine::{refine_gates, RefineInput, RefineResult, RefinedGate};
 
@@ -28,5 +33,6 @@ pub use refine::{refine_gates, RefineInput, RefineResult, RefinedGate};
 /// keep them working by re-exporting both new modules through `core`.
 pub mod core {
     pub use super::format::*;
+    #[cfg(not(target_arch = "wasm32"))]
     pub use super::overlay::*;
 }

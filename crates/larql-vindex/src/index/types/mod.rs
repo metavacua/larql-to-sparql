@@ -22,6 +22,8 @@ use larql_models::TopKEntry;
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
 
+// References crate::index::storage::ffn_store::FFN_DOWN (native-only).
+#[cfg(not(target_arch = "wasm32"))]
 mod ffn_row;
 mod fp4_ffn;
 mod gate_lookup;
@@ -29,6 +31,7 @@ mod native_ffn;
 mod patch_overrides;
 mod quantized_ffn;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn_row::{FfnRowAccess, GateIndex};
 pub use fp4_ffn::Fp4FfnAccess;
 pub use gate_lookup::GateLookup;
@@ -153,6 +156,8 @@ pub struct GateQ4Slice {
 }
 
 /// Mmap'd down_meta.bin — reads individual feature records on demand.
+/// memmap2/tokenizers-backed; no portable equivalent.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct DownMetaMmap {
     pub(crate) mmap: std::sync::Arc<memmap2::Mmap>,
@@ -162,6 +167,7 @@ pub struct DownMetaMmap {
     pub(crate) tokenizer: std::sync::Arc<tokenizers::Tokenizer>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl DownMetaMmap {
     fn record_size(&self) -> usize {
         8 + self.top_k_count * 8

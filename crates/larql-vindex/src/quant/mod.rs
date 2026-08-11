@@ -14,6 +14,8 @@
 //! loaded `VectorIndex`) live elsewhere — see
 //! `crate::index::fp4_storage` and `crate::format::fp4_storage`.
 
+// std::fs read/write throughout, plus depends directly on `scan` (native).
+#[cfg(not(target_arch = "wasm32"))]
 pub mod convert;
 // memmap2-backed.
 #[cfg(not(target_arch = "wasm32"))]
@@ -25,6 +27,7 @@ pub mod scan;
 
 pub use registry::{lookup, QuantFormatInfo, QUANT_FORMATS};
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use convert::{
     vindex_to_fp4, Fp4ConvertConfig, Fp4ConvertReport, Policy, ProjectionAction, ProjectionOutcome,
 };

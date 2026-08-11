@@ -21,6 +21,8 @@ mod capabilities;
 pub mod load;
 pub mod manifest;
 pub mod mla_absorb;
+// Depends directly on write_f32::WeightSource (native-only).
+#[cfg(not(target_arch = "wasm32"))]
 mod ple_sidecar;
 // safetensors-backed writer.
 #[cfg(not(target_arch = "wasm32"))]
@@ -35,15 +37,18 @@ pub mod write_layers;
 
 pub(crate) use capabilities::ensure_extract_level_supported;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use load::{
     arch_from_vindex_config, find_tokenizer_path, load_model_weights, load_model_weights_kquant,
     load_model_weights_kquant_shard, load_model_weights_with_opts, LoadWeightsOptions,
 };
 pub use manifest::Q4kManifestEntry;
+#[cfg(not(target_arch = "wasm32"))]
 pub use write_f32::{
     write_model_weights, write_model_weights_with_opts, StreamingWeights, WeightSource,
     WriteWeightsOptions,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use write_kquant::{
     write_model_weights_kquant, write_model_weights_kquant_with_opts, DownProjFormat,
     KquantWriteOptions, QuantBlockFormat,

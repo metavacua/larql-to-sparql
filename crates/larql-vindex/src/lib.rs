@@ -54,6 +54,8 @@ pub mod error;
 pub mod extract;
 pub mod format;
 pub mod index;
+// `KvIndex` impl for `VectorIndex`, now native-only.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod kv_index_impl;
 pub mod patch;
 pub mod quant;
@@ -69,10 +71,14 @@ pub use engine as storage;
 // `madvise` hints -- an OS mmap operation, no wasm32v1-none equivalent.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mmap_util;
+// Build-pipeline tooling: depends on PatchedVindex (native), HF resolution,
+// and std::fs path checks throughout.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod vindexfile;
 
 // ── Re-export dependencies ──
 pub use ndarray;
+#[cfg(not(target_arch = "wasm32"))]
 pub use tokenizers;
 
 // ── Re-export essentials at crate root ──
@@ -88,22 +94,30 @@ pub use config::types::{
 // Error
 pub use error::VindexError;
 
-// Index
-pub use index::core::{
-    FeatureMeta, FfnRowAccess, Fp4FfnAccess, GateIndex, GateLookup, IndexLoadCallbacks,
-    NativeFfnAccess, OverrideSlot, PatchOverrides, QuantizedFfnAccess, SilentLoadCallbacks,
-    StorageBucket, VectorIndex, WalkHit, WalkTrace,
+// Index — the portable POD/trait surface lives in `index::types`;
+// `VectorIndex` itself (and the ffn_row traits, which reference storage)
+// are native-only, gated where they're declared.
+pub use index::types::{
+    FeatureMeta, Fp4FfnAccess, GateLookup, IndexLoadCallbacks, NativeFfnAccess, OverrideSlot,
+    PatchOverrides, QuantizedFfnAccess, SilentLoadCallbacks, StorageBucket, WalkHit, WalkTrace,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use index::types::{FfnRowAccess, GateIndex};
+#[cfg(not(target_arch = "wasm32"))]
+pub use index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 pub use index::residency::{LayerState, ResidencyManager};
 pub use index::router::{RouteResult, RouterIndex};
 // FFN component indices for `ffn_row_*` / `kquant_ffn_layer*` calls —
 // compile-time pinned equal to `larql_compute`'s in `kv_index_impl.rs`.
+#[cfg(not(target_arch = "wasm32"))]
 pub use index::storage::ffn_store::{FFN_COMPONENTS_PER_LAYER, FFN_DOWN, FFN_GATE, FFN_UP};
 
 // Describe
 pub use describe::{DescribeEdge, LabelSource};
 
 // Extract
+#[cfg(not(target_arch = "wasm32"))]
 pub use extract::{
     build_vindex, build_vindex_dense_only, build_vindex_from_vectors, build_vindex_streaming,
     snapshot_hf_metadata, IndexBuildCallbacks, SilentBuildCallbacks, SNAPSHOT_FILES,
@@ -111,11 +125,14 @@ pub use extract::{
 
 // Format
 pub use format::checksums;
+#[cfg(not(target_arch = "wasm32"))]
 pub use format::down_meta;
+#[cfg(not(target_arch = "wasm32"))]
 pub use format::load::{
     load_feature_labels, load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer,
 };
 // Model loading: use larql_models::{load_model_dir, resolve_model_path, load_gguf} directly
+#[cfg(not(target_arch = "wasm32"))]
 pub use format::huggingface::{
     dataset_repo_exists, download_hf_weights, ensure_collection, fetch_collection_items,
     is_hf_path, publish_vindex, publish_vindex_with_opts, repo_exists,
@@ -123,6 +140,7 @@ pub use format::huggingface::{
     set_repo_visibility, CollectionItem, DownloadProgress, PublishCallbacks, PublishOptions,
     SilentPublishCallbacks,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use format::weights::{
     arch_from_vindex_config, load_model_weights, load_model_weights_kquant,
     load_model_weights_kquant_shard, load_model_weights_with_opts, write_model_weights,
@@ -132,7 +150,9 @@ pub use format::weights::{
 };
 
 // Patch
-pub use patch::core::{PatchOp, PatchedVindex, VindexPatch};
+pub use patch::core::{PatchOp, VindexPatch};
+#[cfg(not(target_arch = "wasm32"))]
+pub use patch::core::PatchedVindex;
 pub use patch::knn_store::{KnnEntry, KnnStore};
 pub use patch::refine::{refine_gates, RefineInput, RefineResult, RefinedGate};
 
@@ -141,10 +161,13 @@ pub use trie::CascadeTrie;
 
 // Walker — build-time graph extraction (FFN + attention) and vector dump.
 // Full module surface is reachable via `larql_vindex::walker::*`.
+#[cfg(not(target_arch = "wasm32"))]
 pub use walker::attention_walker::{AttentionLayerResult, AttentionWalker};
+#[cfg(not(target_arch = "wasm32"))]
 pub use walker::vector_extractor::{
     ExtractCallbacks, ExtractConfig, ExtractSummary, VectorExtractor,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use walker::weight_walker::{
     walk_model, LayerResult, LayerStats, WalkCallbacks, WalkConfig, WeightWalker,
 };
@@ -156,6 +179,7 @@ pub use engine::{
 };
 
 // Vindexfile
+#[cfg(not(target_arch = "wasm32"))]
 pub use vindexfile::{
     build_from_vindexfile, parse_vindexfile, Vindexfile, VindexfileDirective, VindexfileStage,
 };

@@ -4,6 +4,10 @@
 pub mod capability;
 pub mod checksums;
 pub mod describes;
+// std::fs::{File::create,rename}/Path::exists throughout (write_binary/
+// has_binary), plus read::{read_binary,mmap_binary} are tokenizers/
+// memmap2-backed -- no portable equivalent for either half.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod down_meta;
 pub mod filenames;
 pub mod fp4_codec;
