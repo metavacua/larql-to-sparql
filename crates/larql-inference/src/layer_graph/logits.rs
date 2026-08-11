@@ -5,7 +5,11 @@ use ndarray::Array2;
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Shared logits computation: final norm + vindex KNN + softmax.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn finalize_logits(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,

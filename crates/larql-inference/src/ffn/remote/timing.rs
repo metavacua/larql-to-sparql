@@ -52,6 +52,9 @@
 //! flag is per-request opt-in and degrades to `None`, never to a
 //! corrupt decode.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Request header a client sends to opt into the response timing trailer.
 pub const TIMING_HEADER: &str = "x-larql-timing";
 

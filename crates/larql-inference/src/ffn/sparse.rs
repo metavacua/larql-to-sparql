@@ -6,7 +6,10 @@ use super::sparse_compute::{
     select_top_k_features, sparse_ffn_forward, sparse_ffn_forward_observed,
 };
 use super::{FfnActivations, FfnBackend};
+use crate::collections::BTreeSet;
 use crate::model::ModelWeights;
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Sparse FFN: compute all gate activations, select top-K, then
 /// compute gate/up/down for those K features only.
@@ -23,7 +26,7 @@ impl<'a> SparseFfn<'a> {
     /// gather/compute runs once.
     fn select_features(&self, layer: usize, x: &Array2<f32>) -> Vec<usize> {
         let seq_len = x.shape()[0];
-        let mut all_features = std::collections::BTreeSet::new();
+        let mut all_features = BTreeSet::new();
         for s in 0..seq_len {
             let x_row = x.row(s);
             let feats = select_top_k_features(self.weights, layer, &x_row, self.top_k);

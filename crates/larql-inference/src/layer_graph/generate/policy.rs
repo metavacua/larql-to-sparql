@@ -1,13 +1,21 @@
 //! Tokenizer-level generation policy shared by generation frontends.
 
-use std::collections::HashSet;
+use crate::collections::HashSet;
 
 use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
 
 use super::eos::EosConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use super::lm_head::{lm_head_topk_with_policy, LmHeadPolicy};
+#[cfg(target_arch = "wasm32")]
+use super::lm_head::LmHeadPolicy;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 const SUPPRESSED_TOKEN_CANDIDATE_TOPK: usize = 256;
 const DEBUG_SUPPRESS_PROBE_IDS: &[u32] = &[5, 31, 4, 168, 184];
@@ -39,8 +47,8 @@ impl Default for TokenSelectionPolicy {
 impl TokenSelectionPolicy {
     pub(crate) fn from_env() -> Self {
         Self {
-            debug_token_ids: std::env::var(ENV_DEBUG_TOKEN_IDS).is_ok(),
-            debug_topk: std::env::var(ENV_DEBUG_TOPK).is_ok(),
+            debug_token_ids: larql_compute::options::env_flag(ENV_DEBUG_TOKEN_IDS),
+            debug_topk: larql_compute::options::env_flag(ENV_DEBUG_TOPK),
             suppress_candidate_topk: SUPPRESSED_TOKEN_CANDIDATE_TOPK,
             lm_head: LmHeadPolicy::from_env(),
         }
@@ -58,9 +66,9 @@ pub(crate) struct GenerationRuntimeConfig {
 impl GenerationRuntimeConfig {
     pub(crate) fn from_env() -> Self {
         Self {
-            compare_cpu: std::env::var(ENV_METAL_COMPARE_CPU).is_ok(),
-            profile_decode: std::env::var(ENV_PROFILE_DECODE).is_ok(),
-            profile_split: std::env::var(ENV_PROFILE_SPLIT).is_ok(),
+            compare_cpu: larql_compute::options::env_flag(ENV_METAL_COMPARE_CPU),
+            profile_decode: larql_compute::options::env_flag(ENV_PROFILE_DECODE),
+            profile_split: larql_compute::options::env_flag(ENV_PROFILE_SPLIT),
             lm_head: LmHeadPolicy::from_env(),
         }
     }
@@ -71,6 +79,7 @@ impl GenerationRuntimeConfig {
 /// Built from the tokenizer's `added_tokens` table (everything marked
 /// `special: true`) minus any IDs in the EOS set. Vocab-resident structural
 /// markers like `<unusedN>` and `[multimodal]` are also suppressed.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn build_special_suppress_set_with_policy(
     tokenizer: &tokenizers::Tokenizer,
     eos: &EosConfig,
@@ -145,6 +154,7 @@ fn is_structural_marker(tok: &str) -> bool {
 }
 
 /// Pick the top-1 vocabulary id from logits, skipping any id in `suppress`.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn pick_next_filtered_with_policy(
     index: &VectorIndex,
     weights: &ModelWeights,

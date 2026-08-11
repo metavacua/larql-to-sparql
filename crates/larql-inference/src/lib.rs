@@ -62,6 +62,9 @@ mod alloc_prelude;
 mod collections;
 pub use collections::{FnvHasher, HashMap, HashSet};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub mod async_compute_backend;
 pub mod attention;
 // Loads a model, tokenizes entities, runs forward passes, writes NDJSON --

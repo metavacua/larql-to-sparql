@@ -36,6 +36,8 @@ use larql_models::ModelWeights;
 use ndarray::Array2;
 
 use super::moe_remote::RemoteMoeError;
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Why a backend could not produce an expert contribution.
 ///

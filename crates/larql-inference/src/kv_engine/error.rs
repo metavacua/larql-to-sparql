@@ -3,6 +3,9 @@
 
 use thiserror::Error;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Typed failure mode for engine `prefill` / `decode_step` calls.
 ///
 /// Replaces the historical `Option<T>` return semantics that collapsed

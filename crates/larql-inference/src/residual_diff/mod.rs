@@ -63,6 +63,11 @@ mod stages;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use capture::ResidualCapture;
-pub use compare::{compare_captures, LayerStat, ParityReport, ParityThreshold};
+// `compare_captures` takes `&ResidualCapture` (native-only, see `capture`
+// above), so it can't be re-exported unconditionally; the rest of
+// `compare` is pure `&[f32]` arithmetic and stays portable.
+pub use compare::{LayerStat, ParityReport, ParityThreshold};
+#[cfg(not(target_arch = "wasm32"))]
+pub use compare::compare_captures;
 #[cfg(not(target_arch = "wasm32"))]
 pub use stages::{compare_stages, StageCapture, StagePair, StageReport};

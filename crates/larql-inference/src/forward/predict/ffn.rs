@@ -3,13 +3,18 @@
 use super::super::embed::embed_tokens;
 use super::super::layer::{run_attention, run_layer_with_capture, run_layer_with_ffn};
 use super::super::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
 use super::dense::logits_to_predictions;
 use super::types::{LayerAttentionCapture, LayerMode, PredictResult, PredictResultWithAttention};
 use crate::attention::SharedKV;
 use crate::ffn::{FfnBackend, LayerFfnRouter};
 use crate::model::ModelWeights;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::collections::HashMap;
+
 /// Run a full forward pass with a custom FFN backend for all layers.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_ffn(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -21,7 +26,7 @@ pub fn predict_with_ffn(
     let mut h = embed_tokens(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
 
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
 
     for layer in 0..num_layers {
         let shared_kv = weights
@@ -62,6 +67,7 @@ pub fn predict_with_ffn(
 /// residuals `on_stop` inspects via the FFN trace) are computed **identically**
 /// whether or not the tail runs — the early-exit token is byte-identical to the
 /// full forward's (proven in `examples/fr_early_exit_parity.rs`).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_ffn_early_exit(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -75,7 +81,7 @@ pub fn predict_with_ffn_early_exit(
     let mut h = embed_tokens(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
 
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
 
     for layer in 0..num_layers {
         let shared_kv = weights
@@ -116,6 +122,7 @@ pub fn predict_with_ffn_early_exit(
 
 /// Run a full forward pass with a custom FFN backend, capturing attention weights
 /// and per-layer residuals for logit lens.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_ffn_attention(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -161,6 +168,7 @@ pub fn predict_with_ffn_attention(
 }
 
 /// Run a full forward pass with per-layer FFN backend selection.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_router(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -192,6 +200,7 @@ pub fn predict_with_router(
 }
 
 /// Run a forward pass with per-layer strategy: full compute or scalar gain bypass.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_strategy(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,

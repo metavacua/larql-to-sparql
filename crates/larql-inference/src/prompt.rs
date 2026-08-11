@@ -36,6 +36,9 @@
 //! aligned with the [`TurnRenderer`](crate::layer_graph::TurnRenderer) impls
 //! when adjusting either side.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Chat-template format for instruction-tuned models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatTemplate {

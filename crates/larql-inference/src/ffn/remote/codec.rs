@@ -14,7 +14,10 @@
 //! See the `super` module doc for the full binary frame layout.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+use crate::collections::HashMap;
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// f32 content-type constant.
 pub const BINARY_CT: &str = "application/x-larql-ffn";
@@ -106,8 +109,8 @@ pub struct RemoteLatencyStats {
     pub samples: usize,
 }
 
-impl std::fmt::Display for RemoteLatencyStats {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for RemoteLatencyStats {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "layers={} hidden={} samples={}\n  total    {:7.2} ms\n  server   {:7.2} ms  (FFN compute)\n  overhead {:7.2} ms  (HTTP + TCP + framing)",
@@ -259,7 +262,7 @@ pub fn decode_binary_batch(body: &[u8]) -> Result<HashMap<usize, Vec<f32>>, Stri
     // Single-layer response — accept it as a batch of 1.
     if marker != BATCH_MARKER {
         let (layer, floats) = decode_binary_single(body)?;
-        let mut m = HashMap::new();
+        let mut m = HashMap::default();
         m.insert(layer, floats);
         return Ok(m);
     }
@@ -268,7 +271,7 @@ pub fn decode_binary_batch(body: &[u8]) -> Result<HashMap<usize, Vec<f32>>, Stri
     validate_batch_result_count(body, num_results, "binary batch")?;
     // bytes 8-11: latency f32 (skip)
     let mut offset = 12usize;
-    let mut out = HashMap::with_capacity(num_results);
+    let mut out = HashMap::with_capacity_and_hasher(num_results, Default::default());
 
     for _ in 0..num_results {
         checked_end(offset, 12, body.len(), "binary batch result header")?;
@@ -327,14 +330,14 @@ pub fn decode_binary_batch_f16(body: &[u8]) -> Result<HashMap<usize, Vec<f32>>, 
     let marker = u32::from_le_bytes(body[0..4].try_into().unwrap());
     if marker != BATCH_MARKER {
         let (layer, floats) = decode_binary_single_f16(body)?;
-        let mut m = HashMap::new();
+        let mut m = HashMap::default();
         m.insert(layer, floats);
         return Ok(m);
     }
     let num_results = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
     validate_batch_result_count(body, num_results, "f16 batch")?;
     let mut offset = 12usize;
-    let mut out = HashMap::with_capacity(num_results);
+    let mut out = HashMap::with_capacity_and_hasher(num_results, Default::default());
     for _ in 0..num_results {
         checked_end(offset, 12, body.len(), "f16 batch result header")?;
         let layer = read_u32(body, offset, "f16 batch layer")? as usize;
@@ -431,14 +434,14 @@ pub(crate) fn decode_binary_batch_i8(
     let marker = u32::from_le_bytes(body[0..4].try_into().unwrap());
     if marker != BATCH_MARKER {
         let (layer, floats) = decode_binary_single_i8(body, hidden_size)?;
-        let mut m = HashMap::new();
+        let mut m = HashMap::default();
         m.insert(layer, floats);
         return Ok(m);
     }
     let num_results = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
     validate_batch_result_count(body, num_results, "i8 batch")?;
     let mut offset = 12usize;
-    let mut out = HashMap::with_capacity(num_results);
+    let mut out = HashMap::with_capacity_and_hasher(num_results, Default::default());
     for _ in 0..num_results {
         checked_end(offset, 12, body.len(), "i8 batch result header")?;
         let layer = read_u32(body, offset, "i8 batch layer")? as usize;

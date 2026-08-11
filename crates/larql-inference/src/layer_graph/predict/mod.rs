@@ -14,18 +14,29 @@
 //! - [`honest`] — `predict_honest`, the production GPU+CPU hybrid that
 //!   `larql bench` and the streaming-demo runner use.
 
+// honest/split: predict_honest/predict_split_pass/predict_split_cached all
+// take &tokenizers::Tokenizer + &VectorIndex directly -- native-only.
+#[cfg(not(target_arch = "wasm32"))]
 mod honest;
+#[cfg(not(target_arch = "wasm32"))]
 mod split;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use honest::predict_honest;
+#[cfg(not(target_arch = "wasm32"))]
 pub use split::{predict_split_cached, predict_split_pass};
 
 use super::LayerGraph;
 use crate::model::ModelWeights;
 
-// Re-export moved functions for backward compatibility.
+// Re-export moved functions for backward compatibility. All native --
+// generate/finalize_logits/prefill_with_kv all require &VectorIndex or
+// &tokenizers::Tokenizer directly.
+#[cfg(not(target_arch = "wasm32"))]
 pub use super::generate::{generate, GenerateResult};
+#[cfg(not(target_arch = "wasm32"))]
 pub use super::logits::finalize_logits;
+#[cfg(not(target_arch = "wasm32"))]
 pub use super::prefill::prefill_with_kv;
 
 /// Run a full forward pass using vindex logits (KNN against lm_head mmap).

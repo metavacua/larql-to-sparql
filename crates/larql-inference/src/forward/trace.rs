@@ -7,9 +7,13 @@ use super::layer::{
 };
 use super::ple::{apply_per_layer_embedding, precompute_per_layer_inputs};
 use super::{LayerAttentionCapture, TraceResult};
+use crate::collections::HashMap;
 use crate::ffn::{FfnBackend, WeightFfn};
 use crate::model::ModelWeights;
 use ndarray::Array2;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Per-layer residuals captured for speculation error analysis.
 pub struct SpecCapture {
@@ -77,9 +81,9 @@ pub fn trace_forward_attn_only_with_head_zero(
     weights: &ModelWeights,
     token_ids: &[u32],
     capture_layers: &[usize],
-    head_zero_map: &std::collections::HashMap<usize, Vec<usize>>,
-) -> std::collections::HashMap<usize, Array2<f32>> {
-    let mut captures = std::collections::HashMap::new();
+    head_zero_map: &HashMap<usize, Vec<usize>>,
+) -> HashMap<usize, Array2<f32>> {
+    let mut captures = HashMap::default();
     if capture_layers.is_empty() {
         return captures;
     }
@@ -124,8 +128,8 @@ pub fn trace_forward_attn_only_capture_pre_o(
     weights: &ModelWeights,
     token_ids: &[u32],
     capture_layers: &[usize],
-) -> std::collections::HashMap<usize, Array2<f32>> {
-    let mut captures = std::collections::HashMap::new();
+) -> HashMap<usize, Array2<f32>> {
+    let mut captures = HashMap::default();
     if capture_layers.is_empty() {
         return captures;
     }

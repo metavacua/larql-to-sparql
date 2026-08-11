@@ -33,7 +33,17 @@
 //! [`generate_with_sampling`]: super::gpu::generate_with_sampling
 //! [`generate_streaming`]: super::gpu::generate_streaming
 
+// `tokenizers::Tokenizer` is a native-only dependency: Cargo.toml puts
+// `tokenizers = "0.21"` under the `[target.'cfg(not(target_arch =
+// "wasm32"))'.dependencies]` section, so the crate isn't even available
+// on wasm32. `ChatSession` (which owns a `Tokenizer`) is gated
+// native-only below; `TurnRenderer` and its Gemma/ChatML/Llama-3
+// implementations don't touch `Tokenizer` and stay portable.
+#[cfg(not(target_arch = "wasm32"))]
 use tokenizers::Tokenizer;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Context window default. Real models report this in their config; the
 /// caller can override with [`ChatSession::with_max_context`].
@@ -111,6 +121,9 @@ impl TurnRenderer for Llama3Renderer {
 /// Multi-turn chat session — owns the running token buffer and per-turn
 /// lengths so eviction can drop *whole oldest turns* when the buffer
 /// exceeds `max_context`.
+///
+/// Native-only: owns a `Tokenizer` (see the `tokenizers` import note above).
+#[cfg(not(target_arch = "wasm32"))]
 pub struct ChatSession {
     tokenizer: Tokenizer,
     renderer: Box<dyn TurnRenderer>,
@@ -122,6 +135,7 @@ pub struct ChatSession {
     pending_assistant_turn: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ChatSession {
     pub fn new(tokenizer: Tokenizer, renderer: Box<dyn TurnRenderer>) -> Self {
         Self {
@@ -265,7 +279,10 @@ impl ChatSession {
     }
 }
 
+// Every test here exercises ChatSession/Tokenizer, so the whole module
+// is gated alongside them.
 #[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use super::*;
 

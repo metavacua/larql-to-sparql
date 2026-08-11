@@ -12,8 +12,11 @@ use ndarray::Array2;
 
 use super::weight::dense_ffn_forward;
 use super::{gelu_tanh, sigmoid, FfnActivations, SparseActivations};
+use crate::collections::HashMap;
 use crate::forward::add_bias;
 use crate::model::ModelWeights;
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Compute FFN output for a pre-selected set of features.
 ///
@@ -154,8 +157,8 @@ fn sparse_ffn_forward_impl(
     let down_view = ndarray::ArrayView2::from_shape((hidden, k), &down_sub).unwrap();
 
     // Override lookup (only built when overrides are present)
-    let override_map: std::collections::HashMap<usize, &[f32]> = if overrides.is_empty() {
-        std::collections::HashMap::new()
+    let override_map: HashMap<usize, &[f32]> = if overrides.is_empty() {
+        HashMap::default()
     } else {
         overrides.iter().copied().collect()
     };
@@ -299,7 +302,7 @@ fn sparse_ffn_forward_full_impl(
     let down_view = ndarray::ArrayView2::from_shape((hidden, k), &down_sub).unwrap();
 
     // Per-feature override lookup. Built once.
-    let override_map: std::collections::HashMap<usize, &FeatureSlotOverride<'_>> =
+    let override_map: HashMap<usize, &FeatureSlotOverride<'_>> =
         overrides.iter().map(|o| (o.feature, o)).collect();
 
     let mut obs = observe.then(|| SparseActivations::new(seq_len, intermediate));

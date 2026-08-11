@@ -8,6 +8,9 @@
 
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// K/V rows lifted out of a layer's cache, retained so they can be put
 /// back exactly. Positions are not renumbered by the excision, so
 /// splicing them back at the same offset restores the original cache.
@@ -176,7 +179,7 @@ pub trait PerLayerKvAccess {
     fn excise_kv_rows(
         &mut self,
         layer: usize,
-        rows: std::ops::Range<usize>,
+        rows: core::ops::Range<usize>,
     ) -> Option<ExcisedKvRows>;
 
     /// Put previously excised rows back at physical offset `at`,

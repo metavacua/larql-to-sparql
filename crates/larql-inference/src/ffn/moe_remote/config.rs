@@ -1,6 +1,15 @@
-use std::time::Duration;
+use core::time::Duration;
 
 use super::error::RemoteMoeError;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+use crate::collections::{BTreeMap, HashSet};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use alloc::sync::Arc;
 
 // ── Shard configuration ───────────────────────────────────────────────────────
 
@@ -34,7 +43,7 @@ pub struct ShardConfig {
     /// owned by this shard.  When `Some`, takes precedence over the
     /// `start..=end` range.  See `crate::ffn::moe_remote::UnitManifest`
     /// for the JSON shape that produces this set.
-    pub unit_set: Option<std::sync::Arc<std::collections::HashSet<(usize, usize)>>>,
+    pub unit_set: Option<Arc<HashSet<(usize, usize)>>>,
 }
 
 impl ShardConfig {
@@ -54,7 +63,7 @@ impl ShardConfig {
     /// diagnostic compatibility; ownership checks use the set itself.
     pub fn with_units(
         url: impl Into<String>,
-        units: std::collections::HashSet<(usize, usize)>,
+        units: HashSet<(usize, usize)>,
     ) -> Self {
         let url = url.into().trim_end_matches('/').to_string();
         let (start, end) = if units.is_empty() {
@@ -69,7 +78,7 @@ impl ShardConfig {
             end,
             url,
             timeout: Duration::from_secs(30),
-            unit_set: Some(std::sync::Arc::new(units)),
+            unit_set: Some(Arc::new(units)),
         }
     }
 
@@ -122,15 +131,13 @@ pub struct UnitShard {
     pub url: String,
     /// Per-layer list of inclusive `[start, end]` expert-id ranges.  Layers
     /// absent from the map are not owned by this shard.
-    pub layer_experts: std::collections::BTreeMap<String, Vec<[usize; 2]>>,
+    pub layer_experts: BTreeMap<String, Vec<[usize; 2]>>,
 }
 
 impl UnitShard {
     /// Expand the per-layer ranges into a flat `(layer, expert_id)` set.
-    pub fn into_unit_set(
-        self,
-    ) -> Result<std::collections::HashSet<(usize, usize)>, RemoteMoeError> {
-        let mut units = std::collections::HashSet::new();
+    pub fn into_unit_set(self) -> Result<HashSet<(usize, usize)>, RemoteMoeError> {
+        let mut units = HashSet::default();
         for (layer_str, ranges) in self.layer_experts {
             let layer: usize = layer_str.parse().map_err(|_| {
                 RemoteMoeError::Client(format!(

@@ -23,10 +23,13 @@ pub mod generate;
 pub mod grid;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hybrid;
-#[cfg(not(target_arch = "wasm32"))]
+// Splits internally: finalize_logits (&VectorIndex/&Tokenizer) is
+// native; softmax_prob (pure f32/f64 arithmetic) stays portable.
 pub mod logits;
 pub mod pipeline_layer;
-#[cfg(not(target_arch = "wasm32"))]
+// Splits internally: honest/split submodules + the VectorIndex-taking
+// predict_with_graph* fns are native; trace_with_graph (pure &dyn
+// LayerGraph, no VectorIndex/Tokenizer) stays portable.
 pub mod predict;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod prefill;
@@ -41,9 +44,14 @@ pub use generate::{
     try_generate_constrained_streaming_sampled, try_generate_streaming, try_generate_with_sampling,
 };
 pub use generate::{
-    ChatMLRenderer, ChatSession, Detokenizer, EosConfig, GemmaRenderer, GenerateError,
-    GenerateResult, Llama3Renderer, Sampler, SamplingConfig, StageTimings, TurnRenderer,
+    ChatMLRenderer, EosConfig, GemmaRenderer, GenerateError, GenerateResult, Llama3Renderer,
+    SamplingConfig, StageTimings, TurnRenderer,
 };
+// `ChatSession`/`Detokenizer` wrap `tokenizers::Tokenizer` and `Sampler`
+// needs `rand`'s `std_rng` feature -- all native-only, see
+// `generate/chat_session.rs`, `generate/detok.rs`, `generate/sampling.rs`.
+#[cfg(not(target_arch = "wasm32"))]
+pub use generate::{ChatSession, Detokenizer, Sampler};
 
 use ndarray::Array2;
 
@@ -53,7 +61,6 @@ use crate::model::ModelWeights;
 // Re-export everything publicly
 pub use cached::*;
 pub use dense::*;
-#[cfg(not(target_arch = "wasm32"))]
 pub use predict::*;
 pub use template::*;
 pub use walk::*;

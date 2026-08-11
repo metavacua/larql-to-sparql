@@ -2,11 +2,14 @@
 //! per-layer routing policy, plus its parse-time and validation-time
 //! error types.
 
-use std::ops::Range;
+use core::ops::Range;
 
 use super::backend_kind::{classify_backend_parse_error, FfnBackendKind};
 use super::routing::RoutingPredicate;
 use super::validated::ValidatedFfnLayerPolicy;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Walk the spec string and split on top-level commas (outside any
 /// braces). Commas inside `{...}` are part of the braced spec
@@ -90,8 +93,8 @@ pub enum PolicyParseError {
     OverlappingLayers { layer: usize },
 }
 
-impl std::fmt::Display for PolicyParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for PolicyParseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             PolicyParseError::EmptySpec => write!(f, "empty FFN policy spec"),
             PolicyParseError::MalformedBraces { spec } => {
@@ -135,7 +138,7 @@ impl std::fmt::Display for PolicyParseError {
     }
 }
 
-impl std::error::Error for PolicyParseError {}
+impl core::error::Error for PolicyParseError {}
 
 /// Validation errors against a known layer count. Separate from
 /// [`PolicyParseError`] because they need `num_layers` to evaluate.
@@ -148,8 +151,8 @@ pub enum PolicyValidationError {
     LayerOutOfRange { layer: usize, num_layers: usize },
 }
 
-impl std::fmt::Display for PolicyValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for PolicyValidationError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             PolicyValidationError::LayerUnbound { layer } => {
                 write!(
@@ -167,7 +170,7 @@ impl std::fmt::Display for PolicyValidationError {
     }
 }
 
-impl std::error::Error for PolicyValidationError {}
+impl core::error::Error for PolicyValidationError {}
 
 impl FfnLayerPolicy {
     /// Parse a policy spec. Accepts two forms:

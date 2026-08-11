@@ -23,6 +23,9 @@
 //!     u32  hidden
 //!     f32[hidden]  h2         (raw weighted sum; caller applies post-experts norm)
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub const MULTI_LAYER_BATCH_CONTENT_TYPE: &str = "application/x-larql-experts-multi-layer";
 
 /// HTTP path served by the multi-layer batch endpoint.
@@ -265,7 +268,7 @@ fn read_i8_slice(bytes: &[u8], pos: &mut usize, n: usize) -> Option<Vec<i8>> {
     // so reinterpreting the byte slab is sound on every target — one bulk
     // memcpy instead of a per-element loop.
     let src: &[i8] =
-        unsafe { std::slice::from_raw_parts(bytes[*pos..end].as_ptr().cast::<i8>(), n) };
+        unsafe { core::slice::from_raw_parts(bytes[*pos..end].as_ptr().cast::<i8>(), n) };
     let v = src.to_vec();
     *pos = end;
     Some(v)
@@ -303,7 +306,7 @@ fn push_f32_slice(buf: &mut Vec<u8>, vals: &[f32]) {
     #[cfg(target_endian = "little")]
     {
         let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(vals.as_ptr().cast::<u8>(), std::mem::size_of_val(vals))
+            core::slice::from_raw_parts(vals.as_ptr().cast::<u8>(), core::mem::size_of_val(vals))
         };
         buf.extend_from_slice(bytes);
     }
@@ -318,7 +321,7 @@ fn push_u32_slice(buf: &mut Vec<u8>, vals: &[u32]) {
     #[cfg(target_endian = "little")]
     {
         let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(vals.as_ptr().cast::<u8>(), std::mem::size_of_val(vals))
+            core::slice::from_raw_parts(vals.as_ptr().cast::<u8>(), core::mem::size_of_val(vals))
         };
         buf.extend_from_slice(bytes);
     }
@@ -333,7 +336,7 @@ fn push_i16_slice(buf: &mut Vec<u8>, vals: &[i16]) {
     #[cfg(target_endian = "little")]
     {
         let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(vals.as_ptr().cast::<u8>(), std::mem::size_of_val(vals))
+            core::slice::from_raw_parts(vals.as_ptr().cast::<u8>(), core::mem::size_of_val(vals))
         };
         buf.extend_from_slice(bytes);
     }
@@ -347,7 +350,7 @@ fn push_i16_slice(buf: &mut Vec<u8>, vals: &[i16]) {
 /// reinterpreting `&[i8]` as `&[u8]` is sound on every target.
 fn push_i8_slice(buf: &mut Vec<u8>, vals: &[i8]) {
     let bytes: &[u8] =
-        unsafe { std::slice::from_raw_parts(vals.as_ptr().cast::<u8>(), vals.len()) };
+        unsafe { core::slice::from_raw_parts(vals.as_ptr().cast::<u8>(), vals.len()) };
     buf.extend_from_slice(bytes);
 }
 

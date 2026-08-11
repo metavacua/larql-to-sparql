@@ -54,12 +54,18 @@ impl<'a> LayerGraph for WalkLayerGraph<'a> {
 /// For layers where attention and FFN are interleaved (each FFN feeds next attention),
 /// this runs a hybrid: per-layer attention + per-layer Q4 FFN via the compute backend,
 /// but with the Q4 overhead amortized by reusing the GPU command queue.
+// Native-only: `larql_vindex::GateIndex` is itself gated
+// `#[cfg(not(target_arch = "wasm32"))]` in larql-vindex's own lib.rs
+// (crates/larql-vindex/src/lib.rs), so the trait doesn't exist to name
+// on wasm32 at all -- no core/alloc equivalent.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct PipelinedLayerGraph<'a> {
     pub index: &'a dyn larql_vindex::GateIndex,
     pub backend: &'a dyn ComputeBackend,
-    pub layer_range: std::ops::Range<usize>,
+    pub layer_range: core::ops::Range<usize>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> LayerGraph for PipelinedLayerGraph<'a> {
     fn forward_layer(
         &self,

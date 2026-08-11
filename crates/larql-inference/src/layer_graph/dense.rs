@@ -4,6 +4,8 @@ use super::{LayerGraph, LayerOutput};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Dense baseline: standard matmul attention + pluggable FFN backend.
 /// This is today's working path — nothing changes, just wrapped in the trait.

@@ -23,12 +23,18 @@ pub use raw::{
     RawForward,
 };
 
+// Every name in both blocks below takes `&tokenizers::Tokenizer` (or exists
+// solely to serve a function that does) and is gated at its definition in
+// dense.rs/ffn.rs (native-only, per Cargo.toml's wasm32 dependency
+// section) -- so both re-export blocks are wholesale-gated the same way.
+#[cfg(not(target_arch = "wasm32"))]
 pub use dense::{
     logit_lens_top1, logits_to_predictions_pub, logits_to_predictions_q4_lm_head, predict,
     predict_from_hidden, predict_from_hidden_with_ffn, predict_with_ffn_trace,
     predict_with_temperature, q4_lm_head_argmax,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn::{
     predict_with_ffn, predict_with_ffn_attention, predict_with_ffn_early_exit, predict_with_router,
     predict_with_strategy,

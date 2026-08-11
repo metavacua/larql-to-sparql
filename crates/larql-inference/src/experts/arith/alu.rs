@@ -7,8 +7,11 @@
 //! operand sizes here are tens of digits, schoolbook is exact and instant
 //! relative to a decode step, and it keeps the crate dependency-free.
 
-use std::cmp::Ordering;
-use std::fmt;
+use core::cmp::Ordering;
+use core::fmt;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Operator set the ALU evaluates. `Mul` binds tighter than `Add`/`Sub`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

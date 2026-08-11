@@ -3,6 +3,9 @@
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 const ENV_LM_HEAD_SKIP_Q4K: &str = "LARQL_LM_HEAD_SKIP_Q4K";
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -42,6 +45,7 @@ fn env_bool(name: &str) -> bool {
 /// a one-shot matvec per generated token — negligible compared to the
 /// per-layer attention + FFN. It lets every model generate tokens through
 /// the Metal pipeline regardless of how its vindex was packaged.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn lm_head_topk(
     index: &larql_vindex::VectorIndex,
     weights: &ModelWeights,
@@ -59,6 +63,7 @@ pub fn lm_head_topk(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn lm_head_topk_with_policy(
     index: &larql_vindex::VectorIndex,
     weights: &ModelWeights,
@@ -291,6 +296,7 @@ pub(crate) fn backend_lm_head_scores(
 /// Returns `(id, raw_post_mask_score)` so callers that record per-token
 /// probability still get the masked logit for the picked id (even
 /// though the multinomial draw used the softmaxed distribution).
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn pick_next_token_masked_sampled<M>(
     weights: &ModelWeights,
     h_1d: &ndarray::Array1<f32>,

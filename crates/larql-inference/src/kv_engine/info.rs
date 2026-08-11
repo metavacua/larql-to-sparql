@@ -1,5 +1,8 @@
 //! [`EngineInfo`] — the diagnostics an engine reports about itself.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Runtime diagnostics reported by each engine.
 #[derive(Debug, Clone)]
 pub struct EngineInfo {

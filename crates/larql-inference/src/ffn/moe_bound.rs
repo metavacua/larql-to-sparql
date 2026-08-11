@@ -41,6 +41,8 @@ use larql_compute::cpu::ops::moe::{moe_expert_input, moe_post_expert_output, moe
 use larql_compute::MoeLayerWeights;
 
 use super::moe_backend::{MoeBackendError, MoeExpertBackend};
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Which representation these operands claim to come from.
 const VARIANT: &str = "vindex-mapped";

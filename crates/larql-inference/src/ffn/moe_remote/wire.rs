@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 // ── Binary wire format ────────────────────────────────────────────────────────
 //
 // Content-Type: application/x-larql-expert

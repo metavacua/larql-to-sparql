@@ -52,6 +52,11 @@ mod backend;
 mod config;
 mod error;
 mod ffn_adapter;
+// Mutex/OnceLock (no core/alloc equivalent) + eprintln! (std::io) +
+// env-var-gated via `runtime` (already native-only above) -- the whole
+// module is inherently native-only. Its only consumers (shard/*, backend,
+// layer_graph/grid/remote_moe.rs) are themselves already native-only-gated.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod metrics;
 pub mod multi_layer_wire;
 mod router;
@@ -74,7 +79,13 @@ pub use backend::RemoteMoeBackend;
 pub use config::parse_unit_manifest;
 pub use config::{ShardConfig, UnitManifest, UnitShard};
 pub use error::RemoteMoeError;
-pub use ffn_adapter::{MoeFfn, RecordedRefusal, RefusalPolicy, RemoteMoeFfn};
+pub use ffn_adapter::{RecordedRefusal, RefusalPolicy};
+// `MoeFfn`'s `FfnBackend` impl calls `moe_ffn_block_cpu` (vindex,
+// native-only) -- see ffn_adapter.rs for the full rationale.
+#[cfg(not(target_arch = "wasm32"))]
+pub use ffn_adapter::MoeFfn;
+#[cfg(not(target_arch = "wasm32"))]
+pub use ffn_adapter::RemoteMoeFfn;
 pub use multi_layer_wire::{
     decode_multi_layer_request, decode_multi_layer_request_q8k, decode_multi_layer_response,
     encode_multi_layer_request, encode_multi_layer_request_q8k, encode_multi_layer_response,

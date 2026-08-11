@@ -15,6 +15,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 use tokenizers::Tokenizer;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Read-only residual capture, last prompt token, at one or more layers.
 /// In production this is a free read off the prompt forward pass; harnesses
 /// may populate it with `crate::forward::capture_residuals` (whose

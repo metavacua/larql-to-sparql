@@ -10,12 +10,16 @@ use crate::ffn::WeightFfn;
 use crate::model::ModelWeights;
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::collections::HashMap;
+
 /// Row-parallel matvec: `out[v] = sum_h x[0, h] * lm_head[v, h]`.
 /// `lm_head` is `[vocab, hidden]` row-major; `x` is `[1, hidden]`.
 /// Each row's dot product runs independently; rayon fans out across
 /// performance cores and the inner dot dispatches to a NEON kernel on
 /// aarch64. Bypasses ndarray's BLAS fall-back, which collapses to
 /// scalar on `lm_head.t()` (transposed view = non-standard layout).
+#[cfg(not(target_arch = "wasm32"))]
 fn parallel_lm_head_logits(
     x: &ndarray::ArrayView2<'_, f32>,
     lm_head: &larql_models::WeightArray,
@@ -46,6 +50,7 @@ fn parallel_lm_head_logits(
 /// Silicon always has it), scalar elsewhere. Handles arbitrary
 /// length; processes 16 elements per NEON iteration with 4-wide FMA
 /// accumulators, scalar tail.
+#[cfg(not(target_arch = "wasm32"))]
 #[inline]
 fn f32_dot(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len());
@@ -111,8 +116,8 @@ unsafe fn f32_dot_neon(a: &[f32], b: &[f32]) -> f32 {
 /// — a forward pass that produces the occasional NaN (bad quant, runaway
 /// softmax) still surfaces the real maximum instead of whatever NaN
 /// happened to land in the pivot.
-pub(super) fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
+pub(super) fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> core::cmp::Ordering {
+    use core::cmp::Ordering;
     match (a.1.is_nan(), b.1.is_nan()) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater, // NaN sorts after real in descending order
@@ -122,6 +127,7 @@ pub(super) fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> std::cmp:
 }
 
 /// Project the final hidden state to logits and return top-k predictions.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn logits_to_predictions_pub(
     weights: &ModelWeights,
     h: &Array2<f32>,
@@ -141,6 +147,7 @@ pub fn logits_to_predictions_pub(
 /// Gemma 3 / Llama tied-embedding models always get a Q4_K view via
 /// `synthesize_lm_head_kquant` at vindex load. Untied models need a
 /// separate `lm_head_q4.bin` (extract with the quantised writer).
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub fn logits_to_predictions_q4_lm_head(
     weights: &ModelWeights,
@@ -209,6 +216,7 @@ pub fn logits_to_predictions_q4_lm_head(
 /// `exp` pass + the ~3 MB of probability/index temporaries it allocates
 /// (sampled at ~4.6% of decode wall time on the 26B). The max itself runs
 /// rayon-parallel with a deterministic lowest-index tie-break.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn q4_lm_head_argmax(
     weights: &ModelWeights,
     h: &Array2<f32>,
@@ -276,6 +284,7 @@ pub fn q4_lm_head_argmax(
 /// Shared softmax + top-k decode used by both the f32 and Q4 lm_head
 /// paths. Pulled out so the two flavours diverge only in how they
 /// compute the raw logits.
+#[cfg(not(target_arch = "wasm32"))]
 fn finalize_topk_predictions(
     logits: Vec<f32>,
     tokenizer: &tokenizers::Tokenizer,
@@ -312,6 +321,7 @@ fn finalize_topk_predictions(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn logits_to_predictions(
     weights: &ModelWeights,
     h: &Array2<f32>,
@@ -386,6 +396,7 @@ pub(crate) fn logits_to_predictions(
 }
 
 /// Run a full forward pass and return the top-k next token predictions.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -395,6 +406,7 @@ pub fn predict(
     predict_with_temperature(weights, tokenizer, token_ids, top_k, 1.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_temperature(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -406,7 +418,7 @@ pub fn predict_with_temperature(
     let num_layers = weights.num_layers;
     let mut h = embed_tokens(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
     for layer in 0..num_layers {
         let shared_kv = weights
             .arch
@@ -434,6 +446,7 @@ pub fn predict_with_temperature(
 }
 
 /// Project a single residual vector through final norm + lm_head to get top-1 prediction.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn logit_lens_top1(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -450,6 +463,7 @@ pub fn logit_lens_top1(
 }
 
 /// Resume a forward pass from a pre-computed hidden state.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_from_hidden(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -462,6 +476,7 @@ pub fn predict_from_hidden(
 }
 
 /// Resume a forward pass from a pre-computed hidden state with a custom FFN backend.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_from_hidden_with_ffn(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -499,6 +514,7 @@ pub fn predict_from_hidden_with_ffn(
 }
 
 /// Forward pass with residual capture — predictions + per-layer residuals.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_ffn_trace(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,

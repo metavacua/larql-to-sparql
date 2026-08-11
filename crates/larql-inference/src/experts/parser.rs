@@ -19,6 +19,9 @@
 
 use serde_json::{Map, Value};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A structured op-call extracted from model output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpCall {

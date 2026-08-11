@@ -19,7 +19,17 @@
 //! noise observed across our four test vindexes — Gemma 3 4B, Gemma 4
 //! 31B dense, Llama 2 7B, Mistral 7B v0.1.
 
+// `ResidualCapture` (super::capture) is native-only -- residual_diff/mod.rs
+// gates the whole `capture` module out on wasm32 (env-var-driven dump
+// hooks, real fs). `compare_captures` is the only item here that touches
+// it, so only that function (and this import) needs gating; everything
+// else (LayerStat/ParityThreshold/ParityReport/layer_stat) is pure
+// arithmetic over `&[f32]` and stays portable.
+#[cfg(not(target_arch = "wasm32"))]
 use super::capture::ResidualCapture;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Per-layer comparison output. `cos` close to 1.0 means matching
 /// direction; `max_abs` close to 0.0 means matching pointwise. Both
@@ -121,6 +131,7 @@ impl ParityReport {
 /// Compare two captures layer-by-layer. Each `a.layers[l]` and
 /// `b.layers[l]` must have the same length — the comparison surfaces
 /// any shape mismatch in the report's first-bad slot.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn compare_captures(
     a: &ResidualCapture,
     b: &ResidualCapture,

@@ -33,7 +33,7 @@
 //!
 //! Content-Type: `application/x-larql-ffn-q8k-batch`
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 
 use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
 
@@ -41,6 +41,10 @@ use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
 pub const Q8K_BATCH_CT: &str = "application/x-larql-ffn-q8k-batch";
 
 use crate::ffn::Q4K_Q8K_SUPERBLOCK_ELEMS as ELEMS_PER_BLOCK;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 const SUBBLOCKS_PER_BLOCK: usize = 8;
 
 // ── Encode (client → server) ──────────────────────────────────────────────────

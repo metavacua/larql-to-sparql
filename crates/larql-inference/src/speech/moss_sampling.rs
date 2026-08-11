@@ -22,6 +22,9 @@
 use rand::rngs::StdRng;
 use rand::Rng;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Sampling parameters. Defaults are the reference's shipped values.
 #[derive(Debug, Clone, Copy)]
 pub struct MossSampling {

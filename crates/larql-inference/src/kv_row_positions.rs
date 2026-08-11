@@ -27,6 +27,9 @@
 //! (sliding layers dropping pre-hole rows, global layers keeping them)
 //! wait on it.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Logical positions of one layer's resident rows, ascending.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LayerRowPositions {
@@ -131,7 +134,7 @@ impl LayerRowPositions {
 
     /// Remove the rows in physical range `rows`, returning their
     /// positions so a splice can restore them.
-    pub fn excise(&mut self, rows: std::ops::Range<usize>) -> Result<Vec<u64>, PositionError> {
+    pub fn excise(&mut self, rows: core::ops::Range<usize>) -> Result<Vec<u64>, PositionError> {
         if rows.start > rows.end || rows.end > self.positions.len() {
             return Err(PositionError::OutOfRange);
         }
@@ -182,7 +185,7 @@ impl LayerRowPositions {
     }
 
     /// Positions elapsed but not resident. Empty on a contiguous cache.
-    pub fn holes(&self) -> Vec<std::ops::Range<u64>> {
+    pub fn holes(&self) -> Vec<core::ops::Range<u64>> {
         self.positions
             .windows(2)
             .filter(|pair| pair[1] > pair[0] + 1)
@@ -395,7 +398,7 @@ mod tests {
         assert_eq!(p.excise(0..9).unwrap_err(), PositionError::OutOfRange);
         // Inverted range, built field-wise: a literal `3..1` is a
         // compile-time lint.
-        let inverted = std::ops::Range { start: 3, end: 1 };
+        let inverted = core::ops::Range { start: 3, end: 1 };
         assert_eq!(p.excise(inverted).unwrap_err(), PositionError::OutOfRange);
     }
 

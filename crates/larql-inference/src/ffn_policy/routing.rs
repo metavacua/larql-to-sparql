@@ -1,7 +1,10 @@
 //! [`RoutingPredicate`] — where in the per-layer routing space a
 //! [`crate::ffn_policy::FfnLayerPolicy`] binding applies.
 
-use std::ops::Range;
+use core::ops::Range;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Where in the per-layer routing space a binding applies.
 ///

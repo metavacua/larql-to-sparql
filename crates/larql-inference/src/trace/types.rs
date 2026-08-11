@@ -4,6 +4,9 @@ use crate::attention::AttentionWeights;
 use crate::model::ModelWeights;
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A single waypoint in the residual stream.
 #[derive(Clone)]
 pub struct TraceNode {

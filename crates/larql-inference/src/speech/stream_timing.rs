@@ -14,6 +14,9 @@
 //! arrives; the module exists so the metric definitions live in one
 //! place and are unit-tested rather than embedded in a CLI.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Seconds of audio per generated frame — 12.5 Hz. A protocol constant
 /// of the MOSS-TTS-Realtime checkpoint family (frame = 1920 samples at
 /// 24 kHz), spelled here with that provenance; callers pass it to

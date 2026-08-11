@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Sum of per-stage decode times across every successful step.
 ///
 /// Dividing each field by `GenerateResult::decode_ms.len()` gives the
@@ -77,8 +80,8 @@ impl GenerateError {
     }
 }
 
-impl std::fmt::Display for GenerateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for GenerateError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             GenerateError::UnsupportedBackend { reason } => write!(f, "{reason}"),
             GenerateError::MissingWeights { reason } => write!(f, "{reason}"),
@@ -102,7 +105,7 @@ impl std::fmt::Display for GenerateError {
     }
 }
 
-impl std::error::Error for GenerateError {}
+impl core::error::Error for GenerateError {}
 
 impl From<String> for GenerateError {
     fn from(reason: String) -> Self {
@@ -290,8 +293,8 @@ mod tests {
 
     #[test]
     fn generate_error_is_std_error() {
-        // Compile-time assertion: GenerateError implements std::error::Error.
-        fn assert_error<E: std::error::Error>() {}
+        // Compile-time assertion: GenerateError implements core::error::Error.
+        fn assert_error<E: core::error::Error>() {}
         assert_error::<GenerateError>();
     }
 

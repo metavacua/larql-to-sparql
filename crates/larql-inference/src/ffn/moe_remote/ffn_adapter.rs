@@ -14,9 +14,26 @@ use larql_compute::ffn::FfnBackend;
 use larql_models::ModelWeights;
 use ndarray::Array2;
 
+// `RemoteMoeBackend` (backend.rs) is tokio+rayon+tonic gRPC/HTTP transport,
+// native-only -- see mod.rs. `RemoteMoeFfn` below wraps it concretely, so
+// that struct/impl/const are gated the same way. The generalised `MoeFfn`
+// (trait-object based via `MoeExpertBackend`) is *also* native-only despite
+// being expert-route-agnostic: its `forward_moe_full_layer` impl calls
+// `moe_ffn_block_cpu` (vindex, native-only) directly for the dense `h1`
+// half -- see the import comment below.
+#[cfg(not(target_arch = "wasm32"))]
 use super::RemoteMoeBackend;
 use crate::ffn::WeightFfn;
+// `moe_ffn_block_cpu` lives in `vindex`, which is native-only (the whole
+// module is `#[cfg(not(target_arch = "wasm32"))]`-gated in lib.rs) --
+// `MoeFfn` below is the only user, in its `forward_moe_full_layer` impl, so
+// that struct/impl (and `RefusalRecorder`, its sole helper) are gated the
+// same way, alongside this import.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::vindex::moe_ffn_block_cpu;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// `FfnBackend` for CPU remote-MoE decode through a `KvEngine`.
 ///
@@ -34,11 +51,13 @@ use crate::vindex::moe_ffn_block_cpu;
 /// `ple_input = None`), so callers must route Per-Layer-Embedding
 /// architectures (Gemma 4 E-series) through the full-recompute path
 /// instead. Non-PLE MoE models (Gemma 4 26B-A4B, 31B-MoE) are unaffected.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct RemoteMoeFfn<'a> {
     pub weights: &'a ModelWeights,
     pub remote: &'a RemoteMoeBackend,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> FfnBackend for RemoteMoeFfn<'a> {
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
         self.general().forward(layer, x)
@@ -65,6 +84,7 @@ impl<'a> FfnBackend for RemoteMoeFfn<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> RemoteMoeFfn<'a> {
     /// This adapter as the general one. Kept as a delegation rather than a type
     /// alias so the `{ weights, remote }` literal its callers use still
@@ -80,6 +100,7 @@ impl<'a> RemoteMoeFfn<'a> {
 
 /// The name `RemoteMoeFfn` reports. Unchanged from before the generalisation:
 /// it appears in engine diagnostics and is matched on in at least one test.
+#[cfg(not(target_arch = "wasm32"))]
 const REMOTE_MOE_FFN_NAME: &str = "remote-moe";
 
 /// `FfnBackend` for CPU MoE decode through a `KvEngine`, over **any** expert
@@ -99,6 +120,7 @@ const REMOTE_MOE_FFN_NAME: &str = "remote-moe";
 /// PLE is **not** applied here (`moe_ffn_block_cpu` is called with
 /// `ple_input = None`), so Per-Layer-Embedding architectures must go through
 /// the full-recompute path instead.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct MoeFfn<'a> {
     pub weights: &'a ModelWeights,
     pub moe: &'a dyn crate::ffn::MoeExpertBackend,
@@ -110,7 +132,7 @@ pub struct MoeFfn<'a> {
     /// channel — `forward_moe_full_layer` returns `Option<Array2<f32>>`, and
     /// widening it would reach every engine. The refusal is therefore caught on
     /// the way *in*, before `moe_ffn_block_cpu` handles it.
-    refusal: std::cell::RefCell<Option<RecordedRefusal>>,
+    refusal: core::cell::RefCell<Option<RecordedRefusal>>,
 }
 
 /// What a refusing expert route means to the caller.
@@ -145,13 +167,13 @@ pub struct RecordedRefusal {
     pub message: String,
 }
 
-impl std::fmt::Display for RecordedRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for RecordedRefusal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "layer {}: {} ({})", self.layer, self.message, self.kind)
     }
 }
 
-impl std::error::Error for RecordedRefusal {}
+impl core::error::Error for RecordedRefusal {}
 
 impl larql_execution::ExecutionRefusal for RecordedRefusal {
     fn kind(&self) -> larql_execution::RefusalKind {
@@ -160,11 +182,16 @@ impl larql_execution::ExecutionRefusal for RecordedRefusal {
 }
 
 /// Wraps the route so a refusal is recorded before the block loop swallows it.
+///
+/// Only used by [`MoeFfn::forward_moe_full_layer`], which is native-only
+/// (calls `moe_ffn_block_cpu`) -- gated the same way.
+#[cfg(not(target_arch = "wasm32"))]
 struct RefusalRecorder<'a> {
     inner: &'a dyn crate::ffn::MoeExpertBackend,
-    sink: &'a std::cell::RefCell<Option<RecordedRefusal>>,
+    sink: &'a core::cell::RefCell<Option<RecordedRefusal>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl crate::ffn::MoeExpertBackend for RefusalRecorder<'_> {
     fn forward_moe_seq(
         &self,
@@ -208,6 +235,7 @@ impl crate::ffn::MoeExpertBackend for RefusalRecorder<'_> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> MoeFfn<'a> {
     /// Best-effort: a refusing route contributes zeros and the dense half is
     /// returned. Historical behaviour, unchanged.
@@ -219,7 +247,7 @@ impl<'a> MoeFfn<'a> {
             weights,
             moe,
             policy: RefusalPolicy::BestEffort,
-            refusal: std::cell::RefCell::new(None),
+            refusal: core::cell::RefCell::new(None),
         }
     }
 
@@ -234,7 +262,7 @@ impl<'a> MoeFfn<'a> {
             weights,
             moe,
             policy: RefusalPolicy::Strict,
-            refusal: std::cell::RefCell::new(None),
+            refusal: core::cell::RefCell::new(None),
         }
     }
 
@@ -255,6 +283,7 @@ impl<'a> MoeFfn<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FfnBackend for MoeFfn<'_> {
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
         WeightFfn {
