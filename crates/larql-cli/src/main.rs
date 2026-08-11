@@ -38,6 +38,14 @@
 
 use clap::{Parser, Subcommand};
 
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
+#[forbid(unsafe_code)]
+mod alloc_prelude;
+#[forbid(unsafe_code)]
+mod collections;
+
 #[forbid(unsafe_code)]
 mod anyres_tiler;
 #[forbid(unsafe_code)]
