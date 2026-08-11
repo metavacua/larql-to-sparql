@@ -60,10 +60,13 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Default scratch directory for `larql recipe build` when --scratch-dir
 # is omitted — not test-only, the CLI needs this at runtime.
 tempfile = "3"
-# clap's default "color" feature pulls in anstream -> is_terminal_polyfill,
-# which needs std::io::IsTerminal (pattern 12: an un-targeted feature, not
-# an un-targeted dependency edge — the wasm32 leg below opts out of it).
-clap = { version = "4", features = ["derive", "env", "color"] }
+# clap has zero no_std support at any feature combination -- clap_builder's
+# mandatory (non-optional, no-feature-gate) dependency on clap_lex uses
+# `std::ffi::OsStr` unconditionally and clap_lex itself declares no
+# features at all (confirmed via cargo metadata). Not a tunable-feature
+# case like the "color"/is_terminal_polyfill wall this replaced -- pattern
+# 9, no wasm32 entry at all.
+clap = { version = "4", features = ["derive", "env"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
@@ -71,11 +74,6 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 base64 = { version = "0.22", default-features = false }
 ndarray = { version = "0.16", default-features = false }
-# No "color": pulls in anstream -> is_terminal_polyfill (std::io::IsTerminal,
-# no wasm32v1-none equivalent). "std" still on: clap itself needs it, and
-# main.rs already implicitly requires std as a [[bin]] target (see comment
-# above on the pattern-1 dependency-level wall this only partially clears).
-clap = { version = "4", default-features = false, features = ["derive", "env", "std", "help", "usage", "error-context", "suggestions"] }
 
 [features]
 default = ["gpu"]
