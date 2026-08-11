@@ -115,7 +115,11 @@ pub mod standard;
 pub mod turbo_quant;
 pub mod windowed_checkpoint;
 
-pub(crate) use layer_ffn::layer_ffn_or_moe;
+pub(crate) use layer_ffn::{apply_ple_and_layer_scalar, layer_ffn_or_moe};
+// refuse_if_moe's own definition is native-only (see no_expert_route.rs);
+// this re-export must match.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use no_expert_route::refuse_if_moe;
 
 /// Whether W10 mask cascade is active.
 ///

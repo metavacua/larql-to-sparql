@@ -28,12 +28,15 @@ use larql_inference::model::ModelWeights;
 
 // AbortReason/MaterialisationPolicy/OperationLease/OperationOutcome/
 // PromotionError/PromotionRequest/QualificationEvidence are only used
-// inside the native-gated EnforceWalkExecutor impl below (SemanticKvControl
-// is genuinely unused in this file, unlike its sibling executor.rs).
+// inside the native-gated EnforceWalkExecutor impl below. SemanticKvControl
+// IS needed here too (self.engine.begin_operation()/.plan_promotion()/etc
+// below are its trait methods) -- an earlier pass wrongly called it unused
+// because its name is never written as text, same gotcha as executor.rs.
 #[cfg(not(target_arch = "wasm32"))]
 use crate::semantic_promotion::{
     AbortReason, MaterialisationPolicy, OperationLease, OperationOutcome, PromotionError,
-    PromotionRequest, QualificationEvidence, RecordingSink, SemanticPromotionEngine,
+    PromotionRequest, QualificationEvidence, RecordingSink, SemanticKvControl,
+    SemanticPromotionEngine,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::KvEngine;
