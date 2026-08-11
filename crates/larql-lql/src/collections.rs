@@ -24,8 +24,6 @@ pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 // identical to std's (std::collections::BTreeMap literally re-exports
 // alloc's), just needs `extern crate alloc;` in scope, which the
 // wasm32 crate root already declares.
-#[cfg(target_arch = "wasm32")]
-pub use alloc::collections::{BTreeMap, BTreeSet};
 
 #[cfg(target_arch = "wasm32")]
 pub type HashMap<K, V> = hashbrown::HashMap<K, V, ::core::hash::BuildHasherDefault<FnvHasher>>;

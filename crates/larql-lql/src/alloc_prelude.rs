@@ -18,12 +18,3 @@ pub(crate) use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-
-/// `core`'s f32/f64 have no `sqrt`/`exp`/`tanh`/`round`/etc. -- those need a
-/// libm implementation, which `std` links against the platform's. Same fix
-/// as `larql-core`/`larql-models`/`larql-compute`/`larql-factory`/
-/// `larql-vindex`'s own `prelude.rs`/`alloc_prelude.rs`: the `num-traits`
-/// crate's `Float` trait, backed by its own `"libm"` feature (confirmed
-/// via docs.rs to be a real no_std implementation).
-#[cfg(target_arch = "wasm32")]
-pub(crate) use num_traits::Float;

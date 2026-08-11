@@ -4,9 +4,6 @@ use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Keyword;
 
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 impl Parser {
     /// Parse a statement starting with BEGIN (BEGIN PATCH "file.vlp").
     pub(crate) fn parse_begin(&mut self) -> Result<Statement, ParseError> {

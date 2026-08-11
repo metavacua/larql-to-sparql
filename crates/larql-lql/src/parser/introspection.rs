@@ -4,9 +4,6 @@ use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
 
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
-
 impl Parser {
     pub(crate) fn parse_show(&mut self) -> Result<Statement, ParseError> {
         self.expect_keyword(Keyword::Show)?;
