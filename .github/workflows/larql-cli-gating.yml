@@ -125,23 +125,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-wasm32v1-none-
 
-      - name: cargo build --target wasm32v1-none
-        shell: bash
-        run: |
-          if [ "${{ matrix.features }}" = "no-default-features" ]; then
-            cargo build --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features
-          else
-            cargo build --target wasm32v1-none -p ${{ matrix.crate }}
-          fi
-
-      # No --all-targets: that would pull in #[cfg(test)] modules, which
-      # this whole campaign has deliberately never gated for wasm32
-      # (they're not compiled by a plain `cargo build` either -- same
-      # scope boundary, just enforced for lint as well as build now).
-      # This is the first time any of this crate's wasm32-cfg'd code has
-      # ever been linted by anything: native clippy runs on the disabled
-      # per-crate workflows never see it (cfg'd out entirely), and the
-      # build step above only checks for compile errors, not lint warnings.
+      # clippy runs before build: clippy-driver fully type-checks before
+      # it can lint (a strict superset of what `cargo build` alone
+      # checks), so running it first surfaces both compile errors and
+      # lint failures in one step instead of waiting on a separate build
+      # pass first. No --all-targets: that would pull in #[cfg(test)]
+      # modules, which this whole campaign has deliberately never gated
+      # for wasm32 (they're not compiled by a plain `cargo build`
+      # either -- same scope boundary, just enforced for lint as well as
+      # build now). This is the first time any of this crate's
+      # wasm32-cfg'd code has ever been linted by anything: native
+      # clippy runs on the disabled per-crate workflows never see it
+      # (cfg'd out entirely).
       - name: cargo clippy --target wasm32v1-none
         shell: bash
         run: |
@@ -149,6 +144,15 @@ jobs:
             cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features -- -D warnings
           else
             cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} -- -D warnings
+          fi
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features
+          else
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }}
           fi
 
   # Same 12 crates, windows + macos -- gated on the ubuntu wave above
@@ -200,15 +204,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-wasm32v1-none-
 
-      - name: cargo build --target wasm32v1-none
-        shell: bash
-        run: |
-          if [ "${{ matrix.features }}" = "no-default-features" ]; then
-            cargo build --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features
-          else
-            cargo build --target wasm32v1-none -p ${{ matrix.crate }}
-          fi
-
       - name: cargo clippy --target wasm32v1-none
         shell: bash
         run: |
@@ -216,6 +211,15 @@ jobs:
             cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features -- -D warnings
           else
             cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} -- -D warnings
+          fi
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features
+          else
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }}
           fi
 
   # larql-compute-metal: macOS-only, no ubuntu/windows leg exists for
@@ -249,15 +253,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-wasm32v1-none-
 
-      - name: cargo build --target wasm32v1-none
-        shell: bash
-        run: |
-          if [ "${{ matrix.features }}" = "no-default-features" ]; then
-            cargo build --target wasm32v1-none -p larql-compute-metal --no-default-features
-          else
-            cargo build --target wasm32v1-none -p larql-compute-metal
-          fi
-
       - name: cargo clippy --target wasm32v1-none
         shell: bash
         run: |
@@ -265,6 +260,15 @@ jobs:
             cargo clippy --target wasm32v1-none -p larql-compute-metal --no-default-features -- -D warnings
           else
             cargo clippy --target wasm32v1-none -p larql-compute-metal -- -D warnings
+          fi
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p larql-compute-metal --no-default-features
+          else
+            cargo build --target wasm32v1-none -p larql-compute-metal
           fi
 
   # larql-cli (the root) on ubuntu -- gated on every dependency's
@@ -298,15 +302,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-wasm32v1-none-
 
-      - name: cargo build --target wasm32v1-none
-        shell: bash
-        run: |
-          if [ "${{ matrix.features }}" = "no-default-features" ]; then
-            cargo build --target wasm32v1-none -p larql-cli --no-default-features
-          else
-            cargo build --target wasm32v1-none -p larql-cli
-          fi
-
       - name: cargo clippy --target wasm32v1-none
         shell: bash
         run: |
@@ -314,6 +309,15 @@ jobs:
             cargo clippy --target wasm32v1-none -p larql-cli --no-default-features -- -D warnings
           else
             cargo clippy --target wasm32v1-none -p larql-cli -- -D warnings
+          fi
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p larql-cli --no-default-features
+          else
+            cargo build --target wasm32v1-none -p larql-cli
           fi
 
   # larql-cli on windows + macos -- gated on its own ubuntu leg above.
@@ -351,15 +355,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-wasm32v1-none-
 
-      - name: cargo build --target wasm32v1-none
-        shell: bash
-        run: |
-          if [ "${{ matrix.features }}" = "no-default-features" ]; then
-            cargo build --target wasm32v1-none -p larql-cli --no-default-features
-          else
-            cargo build --target wasm32v1-none -p larql-cli
-          fi
-
       - name: cargo clippy --target wasm32v1-none
         shell: bash
         run: |
@@ -367,6 +362,15 @@ jobs:
             cargo clippy --target wasm32v1-none -p larql-cli --no-default-features -- -D warnings
           else
             cargo clippy --target wasm32v1-none -p larql-cli -- -D warnings
+          fi
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p larql-cli --no-default-features
+          else
+            cargo build --target wasm32v1-none -p larql-cli
           fi
 
   forbid-unsafe:
