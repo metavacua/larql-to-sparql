@@ -115,6 +115,9 @@ use larql_compute::cpu::ops::ternary_matvec::{
 };
 use ndarray::{Array1, Array2, ArrayView2};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One BitLinear-FFN block.  Holds three ternary weight tensors
 /// (gate, up, down) and the two RMSnorm scales (input, post-attn).
 ///
@@ -607,6 +610,10 @@ pub struct TernaryPrediction {
 ///
 /// Compare to the dense f16 path's ~5 GB resident — that's the
 /// architectural goal closed by this commit.
+///
+/// Native-only: takes `&larql_vindex::tokenizers::Tokenizer` (see the
+/// `tokenizers` native-only note in `layer_graph/generate/detok.rs`).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_bitnet(
     model: &BitnetModel,
     tokenizer: &larql_vindex::tokenizers::Tokenizer,
@@ -1284,6 +1291,9 @@ pub fn decode_step(model: &BitnetModel, cache: &mut BitnetKvCache, new_token: u3
 /// Backwards-compat shim around [`generate_sampled`] with
 /// [`SamplingConfig::greedy`] — byte-for-byte identical output to
 /// callers built before sampling existed.
+///
+/// Native-only: takes `&larql_vindex::tokenizers::Tokenizer`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn generate(
     model: &BitnetModel,
     tokenizer: &larql_vindex::tokenizers::Tokenizer,
@@ -1310,6 +1320,10 @@ pub fn generate(
 /// (stop strings, multiple EOS ids) belongs in
 /// [`generate_streaming_bitnet`] which threads the full
 /// [`EosConfig`].
+///
+/// Native-only: uses `generate::Sampler`, which is itself native-only
+/// (holds a `StdRng` — no OS entropy source on wasm32v1-none).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn generate_sampled(
     model: &BitnetModel,
     prompt_token_ids: &[u32],
@@ -1807,8 +1821,8 @@ pub enum BitnetLoadError {
     Shape(String),
 }
 
-impl std::fmt::Display for BitnetLoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for BitnetLoadError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             BitnetLoadError::Vindex(e) => write!(f, "vindex: {e}"),
             BitnetLoadError::Model(e) => write!(f, "model: {e}"),
@@ -1821,6 +1835,9 @@ impl std::fmt::Display for BitnetLoadError {
     }
 }
 
+// `std::error::Error` has no core/alloc equivalent -- same split as
+// `InferenceError` in `error.rs`.
+#[cfg(not(target_arch = "wasm32"))]
 impl std::error::Error for BitnetLoadError {}
 
 impl From<larql_vindex::VindexError> for BitnetLoadError {
@@ -1858,6 +1875,11 @@ impl From<larql_models::ModelError> for BitnetLoadError {
 /// `BitnetLoadError::NotBitnet` when index.json lacks
 /// `bitnet_layout`.  Other variants surface tensor-shape /
 /// I/O failures from the underlying loaders.
+///
+/// Native-only: takes `&std::path::Path` and calls
+/// `load_vindex_config`/`LoadWeightsOptions`/`load_model_weights_with_opts`,
+/// all filesystem-only (no core/alloc equivalent).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_bitnet_model(vindex_path: &std::path::Path) -> Result<BitnetModel, BitnetLoadError> {
     let config = larql_vindex::load_vindex_config(vindex_path)?;
     let layout = config.bitnet_layout.clone().ok_or_else(|| {
@@ -2030,6 +2052,10 @@ fn take_norm(
 /// from the prefill (empty prompt, etc.) yield `0` with no callback
 /// invocations \u2014 the route handler gets to decide whether to surface
 /// that as 200 OK with an empty stream or a 4xx.
+///
+/// Native-only: takes `&larql_vindex::tokenizers::Tokenizer` and uses
+/// `generate::Sampler` + `generate::Detokenizer`, both native-only.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn generate_streaming_bitnet<F>(
     model: &BitnetModel,
     tokenizer: &larql_vindex::tokenizers::Tokenizer,
@@ -2331,6 +2357,9 @@ mod streaming_tests {
 /// layer's residual additions (post FFN-residual), matching the
 /// semantic position used by the dense path's
 /// `WalkFfn::take_residuals`.
+///
+/// Native-only: takes `&larql_vindex::tokenizers::Tokenizer`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_bitnet_with_residuals(
     model: &BitnetModel,
     tokenizer: &larql_vindex::tokenizers::Tokenizer,
@@ -2361,6 +2390,11 @@ pub fn predict_bitnet_with_residuals(
 /// Future work: a true sparse FFN walk on BitNet would require
 /// per-feature ternary access in `BitLinearWeight` to amortise
 /// the down-projection over selected features only.
+///
+/// Native-only: takes `&larql_vindex::tokenizers::Tokenizer`, returns
+/// `crate::forward::InferPatchedResult`, and calls
+/// `crate::forward::apply_knn_override` — all native-only.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn infer_bitnet_walk(
     model: &BitnetModel,
     tokenizer: &larql_vindex::tokenizers::Tokenizer,
@@ -2395,6 +2429,11 @@ pub fn infer_bitnet_walk(
 /// probability.  Pulled out of `predict_bitnet` so
 /// `predict_bitnet_with_residuals` can share the post-processing
 /// without duplicating the loop.
+///
+/// Native-only: takes `&larql_vindex::tokenizers::Tokenizer` directly
+/// (despite the name suggesting pure math) to resolve token ids to
+/// surface strings.
+#[cfg(not(target_arch = "wasm32"))]
 fn softmax_topk(
     logits: &[f32],
     tokenizer: &larql_vindex::tokenizers::Tokenizer,
