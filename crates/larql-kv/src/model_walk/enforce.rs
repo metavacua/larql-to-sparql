@@ -26,8 +26,15 @@ use larql_inference::ffn::FfnBackend;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
 
+// AbortReason/MaterialisationPolicy/OperationLease/OperationOutcome/
+// PromotionError/PromotionRequest/QualificationEvidence are only used
+// inside the native-gated EnforceWalkExecutor impl below (SemanticKvControl
+// is genuinely unused in this file, unlike its sibling executor.rs).
 #[cfg(not(target_arch = "wasm32"))]
-use crate::semantic_promotion::{RecordingSink, SemanticPromotionEngine};
+use crate::semantic_promotion::{
+    AbortReason, MaterialisationPolicy, OperationLease, OperationOutcome, PromotionError,
+    PromotionRequest, QualificationEvidence, RecordingSink, SemanticPromotionEngine,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::KvEngine;
 

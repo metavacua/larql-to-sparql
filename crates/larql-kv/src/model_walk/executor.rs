@@ -25,13 +25,27 @@
 use std::sync::Arc;
 
 use crate::semantic_promotion::{
-    AuthorityId, AuthorityState, OperationId, PromotionError, RecordId, SemanticKvControl,
-    SemanticPhaseEvent,
+    AuthorityId, AuthorityState, OperationId, PromotionError, RecordId, SemanticPhaseEvent,
 };
+// CapabilityKey/MaterialisationPolicy/OperationLease/OperationOutcome/
+// PromotionRequest are only used inside the native-gated
+// ObserveWalkExecutor struct/impl below. SemanticKvControl provides
+// `.finish_operation()`/`.begin_operation()`/etc trait methods called
+// there too -- needed for method resolution even though its name is
+// never written elsewhere in this file.
 #[cfg(not(target_arch = "wasm32"))]
-use crate::semantic_promotion::{RecordingSink, SemanticPromotionEngine};
+use crate::semantic_promotion::{
+    CapabilityKey, MaterialisationPolicy, OperationLease, OperationOutcome, PromotionRequest,
+    RecordingSink, SemanticKvControl, SemanticPromotionEngine,
+};
 
 use super::graph::{ModelEdge, ModelNode};
+// render_boundary/ModelGraph are only used inside the native-gated impl
+// below; WalkStep likewise -- both narrowed by the same --fix pass.
+#[cfg(not(target_arch = "wasm32"))]
+use super::graph::{render_boundary, ModelGraph};
+#[cfg(not(target_arch = "wasm32"))]
+use super::plan::WalkStep;
 use super::validate::ValidatedWalkPlan;
 
 #[cfg(target_arch = "wasm32")]

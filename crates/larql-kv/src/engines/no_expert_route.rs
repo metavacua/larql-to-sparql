@@ -59,6 +59,12 @@ impl ExecutionRefusal for NoExpertDispatchPath {
 /// Called before any forward work, so the refusal costs nothing and mutates
 /// nothing — which is also what makes it trivially retryable through a
 /// different engine.
+///
+/// Native-only: its only caller, `apollo::engine::ApolloEngine::prefill`,
+/// lives in `apollo/engine.rs`, whose `pub mod engine;` declaration in
+/// `apollo/mod.rs` is `#[cfg(not(target_arch = "wasm32"))]`-gated in full
+/// (`impl RetrievalEngine for ApolloEngine` doesn't exist on wasm32).
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn refuse_if_moe(
     engine: &'static str,
     because: &'static str,

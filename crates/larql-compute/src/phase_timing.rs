@@ -29,7 +29,7 @@
 use crate::alloc_prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
-use core::sync::atomic::AtomicU8;
+use core::sync::atomic::{AtomicU8, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]

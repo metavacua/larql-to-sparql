@@ -11,6 +11,15 @@ use super::super::math::matmul_vec;
 use super::q4k::run_single_expert_kq_q8k_into;
 use super::scratch::ExpertScratch;
 use crate::cpu::ops::q4k_q8k_dot::{quantize_x_to_q8k_into, Q8KActivation};
+// The following are only consumed by run_single_expert_into below, itself native-only.
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::cache::ExpertF32;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::math::matmul_vec_into;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::cpu::ops::q4_common::q4k_matvec_into;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::options;
 
 /// Run a single expert's gated FFN given a pre-normed input vector.
 ///

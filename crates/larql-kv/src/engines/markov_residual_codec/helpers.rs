@@ -58,6 +58,11 @@ pub(super) fn append_row(buf: &mut Array2<f32>, row: &Array2<f32>, len: usize) {
 
 /// The final row of a `[rows, hidden]` block, as its own `[1, hidden]` array
 /// — what a prefill or decode step reports as "the" hidden state.
+///
+/// Native-only: both callers (`step/mod.rs`, whole-module-gated, and
+/// `prefill.rs::rs_prefill_codec`, function-gated) are native-only —
+/// matches `markov_residual/compute.rs::last_row`'s identical pattern.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
     let last = h.shape()[0] - 1;
     h.slice(s![last..=last, ..]).to_owned()

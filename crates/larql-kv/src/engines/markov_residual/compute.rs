@@ -7,18 +7,24 @@
 // DISCREPANCY vs the round-1 survey (which classified this file
 // WHOLESALE_NATIVE and gated `pub mod compute;` at mod.rs): the mod.rs
 // re-export split explicitly wants `kv_memory_bytes_for_seq` portable,
-// and it (plus `last_row`) has zero native markers — pure arithmetic
-// over `WeightsView`/`Array2`. Doing the real per-item split here
-// instead of gating the whole file: `recompute_kv` and every private
-// helper feeding it (VectorIndex param, `std::env`/`thread_local!`,
-// and `eprintln!` in the diag path, which also has no core/alloc
-// equivalent) are native; `kv_memory_bytes_for_seq`/`last_row` stay
-// portable, matching mod.rs's own re-export split.
+// which has zero native markers — pure arithmetic over `WeightsView`.
+// Doing the real per-item split here instead of gating the whole file:
+// `recompute_kv` and every private helper feeding it (VectorIndex
+// param, `std::env`/`thread_local!`, and `eprintln!` in the diag path,
+// which also has no core/alloc equivalent) are native.
+// `last_row` is pure arithmetic too, but unlike `kv_memory_bytes_for_seq`
+// both its callers (prefill.rs::rs_prefill, walk.rs) are native-gated, so
+// it is dead code on wasm32 and gated accordingly below (Algorithm A
+// dead-code classification, not a native marker on `last_row` itself).
 #[cfg(not(target_arch = "wasm32"))]
 use larql_compute::{dot_proj_gpu, ComputeBackend, QuantFormat};
 #[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
-use ndarray::{s, Array2, Data};
+// s!/ArrayBase/ArrayView1/Ix2 are only used inside native-gated
+// functions (recompute_kv and its helpers, plus last_row); Array2/Data
+// likewise have no remaining portable use now that last_row is native-only.
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{s, Array2, ArrayBase, ArrayView1, Data, Ix2};
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]

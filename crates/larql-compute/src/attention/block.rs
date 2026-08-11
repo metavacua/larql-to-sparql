@@ -331,11 +331,14 @@ fn run_attention_block_core(
     // capture a specific layer instead — Gemma 4 global layers (5, 11, …)
     // are useful for bisecting partial-RoPE / V-norm interactions.
     let dump_cfg = crate::forward::dump_config::DumpConfig::get();
-    let _stage_dump = dump_cfg.stage_dir(layer);
     // std::fs has no core/alloc equivalent -- wasm32v1-none has no
     // filesystem at all, and stage_dump is unconditionally None there
     // (DumpConfig routes through options::env_value, which is None on
-    // wasm32), so the whole dump path is dead code on that target.
+    // wasm32), so the whole dump path is dead code on that target --
+    // hence the wasm32-only allow rather than renaming to `_stage_dump`
+    // (which broke the native closure below referencing it by name).
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
+    let stage_dump = dump_cfg.stage_dir(layer);
     #[cfg(not(target_arch = "wasm32"))]
     let dump_f32 = |name: &str, arr: &Array2<f32>| {
         if let Some(dir) = stage_dump {

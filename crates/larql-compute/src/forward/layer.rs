@@ -77,11 +77,14 @@ pub fn run_ffn(
     // `LARQL_METAL_DUMP_LAYERS` convention. Lets us diff per-stage
     // intermediates between CPU and Metal.
     let dump_cfg = super::dump_config::DumpConfig::get();
-    let _stage_dump_dir = dump_cfg.stage_dir(layer);
     // std::fs has no core/alloc equivalent; wasm32v1-none has no filesystem
     // and stage_dump_dir is unconditionally None there, so the whole dump
     // path is dead code on that target (see attention/block.rs's identical
-    // dump_f32 pattern for the fuller rationale).
+    // dump_f32 pattern for the fuller rationale) -- hence the wasm32-only
+    // allow rather than renaming to `_stage_dump_dir` (which broke the
+    // native closure below referencing it by name).
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
+    let stage_dump_dir = dump_cfg.stage_dir(layer);
     #[cfg(not(target_arch = "wasm32"))]
     let dump_f32 = |name: &str, arr: &Array2<f32>| {
         if let Some(dir) = stage_dump_dir {

@@ -6,10 +6,12 @@
 
 // DISCREPANCY vs the round-1 survey (WHOLESALE_NATIVE by transitive
 // dependency on `recompute_kv`): same split as the markov_residual
-// twin's prefill.rs -- `RsPrefillResultCodec` (pure data) and
-// `roundtrip` (pure codec math, no recompute_kv/VectorIndex touch) stay
-// portable; only `rs_prefill_codec` and its native-only imports are
-// gated.
+// twin's prefill.rs -- `RsPrefillResultCodec` (pure data) stays
+// portable; `rs_prefill_codec` and its native-only imports are gated.
+// `roundtrip` is pure codec math (no recompute_kv/VectorIndex touch)
+// but its only call site is inside the now-gated `rs_prefill_codec`,
+// so it's gated too (CI-confirmed via wasm32 clippy dead-code, not
+// left "portable but uncalled").
 #[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ComputeBackend;
 #[cfg(not(target_arch = "wasm32"))]
@@ -26,8 +28,18 @@ use ndarray::Array2;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::engines::markov_residual::recompute_kv;
+// ColdResidualCodec/EncodedColdLayer's only uses (rs_prefill_codec,
+// roundtrip) are both native-gated; RsStoreCodec stays portable -- it's
+// the field type of the still-portable RsPrefillResultCodec below.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::engines::markov_residual_codec::codec::ColdResidualCodec;
-use crate::engines::markov_residual_codec::store::{EncodedColdLayer, RsStoreCodec};
+// last_row's own consumer here (rs_prefill_codec) is native-gated; see
+// helpers.rs::last_row for the full native-only rationale.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::engines::markov_residual_codec::helpers::last_row;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::engines::markov_residual_codec::store::EncodedColdLayer;
+use crate::engines::markov_residual_codec::store::RsStoreCodec;
 
 pub struct RsPrefillResultCodec {
     pub hidden: Array2<f32>,
@@ -126,6 +138,7 @@ pub fn rs_prefill_codec(
 /// Apply the codec roundtrip to a block. Used during prefill cold setup so
 /// that the cold K/V we precompute is consistent with what `decode` would
 /// later produce.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn roundtrip(block: &Array2<f32>, codec: ColdResidualCodec) -> Array2<f32> {
     if block.shape()[0] == 0 {
         return block.clone();

@@ -87,7 +87,13 @@ pub fn cpu_moe_forward(
         let retained = m.mask_in_place(&mut expert_input);
         (m, retained)
     });
-    let _debug_logits = if options::moe_debug_enabled() {
+    // Only read by the native-only debug block below -- wasm32 leaves
+    // this unconditionally None (see that block's comment), so the
+    // binding itself needs the wasm32-only allow rather than an
+    // underscore rename (which broke the native `if let` referencing
+    // it by name below).
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
+    let debug_logits = if options::moe_debug_enabled() {
         let mut logits = matmul_vec(&router_in, moe.router_proj, num_experts, hidden);
         softmax(&mut logits);
         Some(logits)

@@ -49,6 +49,11 @@ use crate::alloc_prelude::*;
 use core::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
+// Used by active()/record_stats()/dump_stats() (all native-only) and by
+// this file's #[cfg(test)] module, which only ever compiles alongside
+// native code in this project's CI.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::options;
 
 /// Retained fraction of shared-input channels, in `(0, 1]`. Absent or `>= 1`
 /// disables the probe entirely.

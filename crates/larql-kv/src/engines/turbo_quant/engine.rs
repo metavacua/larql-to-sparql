@@ -22,20 +22,21 @@
 //! 4-bit / ≈ 0.980 at 3-bit on isotropic unit vectors (Gaussian
 //! simulation, 2026-07-30).
 
-// Portable: `TurboQuant` (stateless codec), `CompressedLayer::{compress,
-// append_row, truncate_rows, memory_bytes}`, `detect_head_dim`,
-// `resolve_block_dim`, `compress_matrix`, `last_row` -- no
-// VectorIndex/Instant/spin_pool touch. Native: `TurboQuantEngine` (`impl
-// KvEngine`, upstream-gated) and `CompressedLayer::decompress` /
-// `decompress_matrix` (routes through
-// `larql_compute::cpu::spin_pool::par_chunks_mut`, a rayon-class
-// thread pool that is itself not(wasm32)-gated in larql-compute).
+// `TurboQuant` (stateless codec struct) is portable. Everything else
+// here -- `CompressedLayer` and all its methods, `detect_head_dim`,
+// `resolve_block_dim`, `compress_matrix`, `last_row`, `TurboQuantEngine`
+// (`impl KvEngine`, upstream-gated) -- is native-only: despite not
+// touching VectorIndex/Instant/spin_pool themselves, their only callers
+// are the four `impl TurboQuantEngine` blocks below, all
+// `#[cfg(not(target_arch = "wasm32"))]`-gated (CI-confirmed via wasm32
+// clippy dead-code, not left "portable but uncalled").
 #[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ComputeBackend;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::{cpu_engine_backend, EngineBackend};
 #[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::{s, Array2};
 
 use super::{codebooks, lloyd_max, packing, rotation};
@@ -43,6 +44,7 @@ use super::{codebooks, lloyd_max, packing, rotation};
 use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{EngineInfo, KvEngine};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::SharedKV;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::{
@@ -179,6 +181,7 @@ impl TurboQuant {
 
 // ─── Compressed K/V layer ────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) struct CompressedLayer {
     pub compressed_k: Vec<u8>,
     pub compressed_v: Vec<u8>,
@@ -188,6 +191,7 @@ pub(super) struct CompressedLayer {
     pub head_dim: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl CompressedLayer {
     pub(super) fn compress(kv: &SharedKV, tq: &TurboQuant) -> Self {
         let (k, v) = kv;
@@ -274,6 +278,7 @@ impl CompressedLayer {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn detect_head_dim(kv_dim: usize) -> usize {
     for &hd in &[256usize, 128, 64, 32] {
         if kv_dim.is_multiple_of(hd) {
@@ -287,6 +292,7 @@ pub(super) fn detect_head_dim(kv_dim: usize) -> usize {
 /// power-of-two block dim, so a kv_dim with no supported head split (e.g.
 /// 80) must surface as a typed error at prefill entry instead of the WHT
 /// assert firing mid-prefill.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn resolve_block_dim(kv_dim: usize) -> Result<usize, EngineError> {
     let head_dim = detect_head_dim(kv_dim);
     if head_dim.is_power_of_two() {
@@ -301,6 +307,7 @@ pub(super) fn resolve_block_dim(kv_dim: usize) -> Result<usize, EngineError> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn compress_matrix(m: &Array2<f32>, tq: &TurboQuant, head_dim: usize) -> Vec<u8> {
     let rows = m.shape()[0];
     let cols = m.shape()[1];
@@ -362,6 +369,7 @@ pub(super) fn decompress_matrix(
     Array2::from_shape_vec((num_vecs, kv_dim), data).expect("shape mismatch")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
     let last = h.shape()[0] - 1;
     h.slice(s![last..=last, ..]).to_owned()

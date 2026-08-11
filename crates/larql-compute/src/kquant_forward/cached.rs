@@ -119,7 +119,11 @@ pub fn predict_kquant_prefill_with_state(
 ) -> (Array2<f32>, CpuKvCache, CachedTimings) {
     let num_layers = weights.num_layers;
     let mut cache: CpuKvCache = vec![None; num_layers];
-    let timings = CachedTimings::default();
+    // Only mutated inside the native-only dequant-timing blocks below --
+    // wasm32-only allow rather than dropping `mut` (which broke the native
+    // `timings.dequant_ms +=` writes).
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+    let mut timings = CachedTimings::default();
     // Forward-local dequant scratch — per-forward derived state; `weights`
     // stays immutable. Readers resolve via with_scratch (scratch ∪ canonical).
     let mut scratch = larql_models::DequantScratch::default();
@@ -234,7 +238,8 @@ pub fn predict_kquant_decode_step(
     if cache.len() != num_layers {
         return None;
     }
-    let timings = CachedTimings::default();
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+    let mut timings = CachedTimings::default();
     let mut scratch = larql_models::DequantScratch::default();
 
     // 1-row embed + 1-row PLE for the new token.
