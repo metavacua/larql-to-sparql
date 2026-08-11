@@ -63,7 +63,7 @@ mod tests {
             .collect()
     }
 
-    fn lookup(v: &HashMap<String, Vec<f32>>) -> impl Fn(&str) -> Option<&[f32]> {
+    fn lookup(v: &HashMap<String, Vec<f32>>) -> impl Fn(&str) -> Option<&[f32]> + '_ {
         move |k| v.get(k).map(|x| x.as_slice())
     }
 
