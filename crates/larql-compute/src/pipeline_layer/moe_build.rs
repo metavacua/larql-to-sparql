@@ -9,7 +9,6 @@
 
 use super::*;
 
-
 pub fn build_moe_weights<'a>(
     weights: &'a ModelWeights,
     arch: &dyn larql_models::ModelArchitecture,

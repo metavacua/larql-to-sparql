@@ -7,7 +7,6 @@ use super::gqa::gqa_reduced_qk_all_weights;
 use super::{AttentionAllWeights, AttentionWeights, SharedKV};
 use ndarray::{s, Array2};
 
-
 /// Run the full attention block. Returns (h_post_attn, attn_projected, optional_weights).
 #[allow(clippy::too_many_arguments)]
 pub fn run_attention_block(

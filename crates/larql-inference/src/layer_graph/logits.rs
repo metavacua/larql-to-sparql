@@ -1,7 +1,5 @@
 //! Logits computation — final norm + vindex KNN + softmax.
 
-
-
 // No alloc_prelude import: both functions in this file
 // (finalize_logits, softmax_prob) are native-only -- nothing in the
 // portable subset needs Vec/String/Box/ToOwned.

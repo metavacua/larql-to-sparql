@@ -1,6 +1,5 @@
 //! Tokenizer-level generation policy shared by generation frontends.
 
-
 #[cfg(not(target_arch = "wasm32"))]
 use larql_models::ModelWeights;
 #[cfg(not(target_arch = "wasm32"))]

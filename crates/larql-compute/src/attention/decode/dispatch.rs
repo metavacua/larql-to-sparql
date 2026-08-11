@@ -5,7 +5,6 @@ use crate::attention::SharedKV;
 use super::gqa_step::gqa_attention_decode_step_windowed;
 use super::q4k_direct::run_attention_block_decode_step_q4k_direct;
 
-
 /// Decode-step attention with optional GPU-accelerated projections
 /// (Q/K/V/O matmuls route through `ComputeBackend::matmul_transb` when
 /// `backend` is `Some`). GQA softmax + weighted-V stays on CPU —

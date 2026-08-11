@@ -282,8 +282,10 @@ impl AddressProbeAccumulator {
             .sum::<usize>()
             .max(1);
         let correct_groups = self.prompts.iter().map(|p| p.groups_correct).sum::<usize>();
-        self.prompts
-            .sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(core::cmp::Ordering::Equal));
+        self.prompts.sort_by(|a, b| {
+            b.kl.partial_cmp(&a.kl)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
         AddressProbeReport {
             name: self.name,
             selected_group_keys: self.selected_group_keys,
@@ -323,8 +325,10 @@ impl AddressProbeAccumulator {
             .sum::<usize>()
             .max(1);
         let correct_groups = self.prompts.iter().map(|p| p.groups_correct).sum::<usize>();
-        self.prompts
-            .sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(core::cmp::Ordering::Equal));
+        self.prompts.sort_by(|a, b| {
+            b.kl.partial_cmp(&a.kl)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
         AddressCorruptionReport {
             label: self.name,
             oracle_groups_kept,
@@ -355,8 +359,10 @@ impl AddressProbeAccumulator {
             .sum::<usize>()
             .max(1);
         let correct_groups = self.prompts.iter().map(|p| p.groups_correct).sum::<usize>();
-        self.prompts
-            .sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(core::cmp::Ordering::Equal));
+        self.prompts.sort_by(|a, b| {
+            b.kl.partial_cmp(&a.kl)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
         AddressGroupImportanceReport {
             replaced_group,
             prompts: self.prompts.len(),

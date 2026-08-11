@@ -50,7 +50,6 @@ use core::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
-
 /// Retained fraction of shared-input channels, in `(0, 1]`. Absent or `>= 1`
 /// disables the probe entirely.
 pub const ENV_LATENT_RETENTION: &str = "LARQL_MOE_LATENT_RETENTION";

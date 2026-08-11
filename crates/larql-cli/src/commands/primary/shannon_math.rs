@@ -55,7 +55,10 @@ pub(crate) const HALF: u64 = FIRST_QTR * 2;
 pub(crate) const THIRD_QTR: u64 = FIRST_QTR * 3;
 pub(crate) const VINDEX_BLOCK_TARGET_TOKENS: usize = 512;
 
-pub(crate) fn validate_window(context: usize, stride: usize) -> Result<(), Box<dyn core::error::Error>> {
+pub(crate) fn validate_window(
+    context: usize,
+    stride: usize,
+) -> Result<(), Box<dyn core::error::Error>> {
     if context < 2 {
         return Err("--context must be at least 2 for scoring".into());
     }
@@ -232,7 +235,10 @@ pub(crate) fn logits_for_row(
         .collect())
 }
 
-pub(crate) fn bits_for_target(logits: &[f32], target: u32) -> Result<f64, Box<dyn core::error::Error>> {
+pub(crate) fn bits_for_target(
+    logits: &[f32],
+    target: u32,
+) -> Result<f64, Box<dyn core::error::Error>> {
     let target = target as usize;
     if target >= logits.len() {
         return Err(format!("target token {target} out of vocab").into());
@@ -288,7 +294,10 @@ pub(crate) fn bits_for_raw_row(
     Ok((logsumexp - target_logit as f64) / LN_2)
 }
 
-pub(crate) fn prob_for_target(logits: &[f32], target: u32) -> Result<f64, Box<dyn core::error::Error>> {
+pub(crate) fn prob_for_target(
+    logits: &[f32],
+    target: u32,
+) -> Result<f64, Box<dyn core::error::Error>> {
     Ok(2.0_f64.powf(-bits_for_target(logits, target)?))
 }
 

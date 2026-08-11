@@ -1,4 +1,3 @@
-
 // LayerGraph/FfnBackend's only uses (TemplateUniverse::build and the
 // GuidedWalkLayerGraph impl below) are both native-gated.
 #[cfg(not(target_arch = "wasm32"))]

@@ -1,6 +1,5 @@
 //! Dense (full-weight) forward passes and logit projection utilities.
 
-
 #[cfg(not(target_arch = "wasm32"))]
 use crate::collections::HashMap;
 
