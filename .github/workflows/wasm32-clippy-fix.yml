@@ -80,7 +80,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
-          components: clippy
+          components: clippy, rustfmt
 
       # No OpenBLAS install: every BLAS dependency in this workspace is
       # gated behind cfg(target_os = "linux"/"macos"/"windows"), and
@@ -112,7 +112,14 @@ jobs:
             cargo clippy --fix --target wasm32v1-none -p "$CRATE" -- -D warnings
           fi
 
-      - name: Capture the diff, whatever --fix produced (or didn't)
+      # --fix's machine-applied edits aren't guaranteed rustfmt-clean, and
+      # verify-native's first gate is `cargo fmt --check` -- format here so
+      # a purely cosmetic drift never turns an otherwise-safe patch red and
+      # muddies the one signal this workflow exists to give cleanly.
+      - name: cargo fmt (make --fix's output rustfmt-clean before capturing it)
+        run: cargo fmt -p "$CRATE"
+
+      - name: Capture the diff, whatever --fix (+ fmt) produced (or didn't)
         run: git diff -- crates/ > wasm32-clippy-fix.patch
 
       # Informational only: whatever's left after --fix is exactly the
@@ -129,7 +136,7 @@ jobs:
           fi
 
       - name: Upload the proposed patch + remaining-findings log
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wasm32-clippy-fix-${{ inputs.crate }}-${{ inputs.features }}
           path: |
@@ -155,7 +162,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      # Single named-artifact download extracts flat to the working
+      # directory by default on v8 too (same as v4) -- confirmed against
+      # actions/download-artifact's own docs before bumping this version;
+      # git apply below relies on that.
+      - uses: actions/download-artifact@v8
         with:
           name: wasm32-clippy-fix-${{ inputs.crate }}-${{ inputs.features }}
 
