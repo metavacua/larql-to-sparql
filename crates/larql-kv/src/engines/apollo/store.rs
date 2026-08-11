@@ -35,6 +35,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::entry::VecInjectEntry;
+#[cfg(not(target_arch = "wasm32"))]
 use super::npy;
 
 #[cfg(target_arch = "wasm32")]

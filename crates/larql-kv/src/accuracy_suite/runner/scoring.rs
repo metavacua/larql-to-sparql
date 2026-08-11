@@ -5,9 +5,10 @@
 // `Tokenizer` (not(wasm32)-gated upstream) and `AnyEngine` (re-exported
 // from larql-inference::kv_engine only on native) make every consumer of
 // this block native: score_one, shannon_bits_for_expected,
-// first_in_vocab_id, and the ScoreResult enum they produce. Only
-// `shannon_bits_at_id` below (pure &[f32] math, no Tokenizer param) has
-// no dependency on any of this and stays portable.
+// first_in_vocab_id, and the ScoreResult enum they produce.
+// `shannon_bits_at_id` below (pure &[f32] math, no Tokenizer param) has no
+// dependency on any of this, but its only caller is native-gated too, so
+// it's gated for the same dead-code reason, not this one.
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::FfnBackend;
 #[cfg(not(target_arch = "wasm32"))]
@@ -21,12 +22,6 @@ use larql_inference::tokenizers::Tokenizer;
 use super::types::ScoreOutcome;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::AnyEngine;
-
-// `shannon_bits_at_id` below uses f64::exp/log2, which core alone
-// doesn't provide (no libm link under wasm32v1-none) — brings the
-// `num_traits::Float` trait into scope for those methods.
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
 
 /// Outcome of a single [`score_one`] attempt: either `Served` with the
 /// three score components, or `Skipped` with the reason. Private — the
