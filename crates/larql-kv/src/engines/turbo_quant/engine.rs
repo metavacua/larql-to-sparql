@@ -56,6 +56,7 @@ use larql_inference::ffn::{BackendFfn, FfnBackend};
 use larql_inference::forward::ple::precompute_per_layer_inputs;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::{embed_tokens_pub, run_ffn};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::kv_engine::EngineError;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;

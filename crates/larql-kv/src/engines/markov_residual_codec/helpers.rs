@@ -7,6 +7,7 @@
 //! decode CPU pre-W8.2). Long-term these should dedupe against
 //! `markov_residual`'s copy.
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::{s, Array2};
 
 // All four helpers here are native-only: their sole caller,

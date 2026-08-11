@@ -112,6 +112,9 @@ impl RsStorePerLayer {
         self.stored.first().map_or(0, |s| s.shape()[0])
     }
 
+    // Callers (walk.rs, dispatch.rs, executor.rs) are all whole-module
+    // native-gated at their `mod` declarations in mod.rs.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn clip_layer_overflow(&mut self, layer: usize) -> Array2<f32> {
         let window = match self.max_window {
             Some(w) => w,

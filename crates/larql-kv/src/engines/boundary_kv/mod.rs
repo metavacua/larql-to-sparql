@@ -14,6 +14,10 @@
 
 pub mod archive;
 pub mod engine;
+// Every item here (build_frame and its 4 helpers) is only reachable from
+// engine.rs's native-gated `impl BoundaryKvEngine::maybe_emit_frame` and
+// its #[cfg(test)] callers.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod gate;
 pub mod identity;
 

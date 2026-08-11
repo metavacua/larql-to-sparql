@@ -356,6 +356,10 @@ fn load_entries(path: &Path) -> Result<Vec<VecInjectEntry>, StoreLoadError> {
 /// archive's descr must match name-for-name AND dtype-for-dtype in this
 /// exact order — a reordered or retyped descr would otherwise decode into
 /// garbage coefficients/ids without any error.
+// This cluster (ENTRY_DESCR_FIELDS/descr_quoted_tokens/check_entry_descr/
+// parse_structured_entries_npy) is native-only: its sole non-test caller,
+// `load_entries` above, is native-gated.
+#[cfg(not(target_arch = "wasm32"))]
 const ENTRY_DESCR_FIELDS: [(&str, &str); 5] = [
     ("token_id", "<u4"),
     ("coefficient", "<f4"),
@@ -367,6 +371,7 @@ const ENTRY_DESCR_FIELDS: [(&str, &str); 5] = [
 /// Extract every single-quoted token from a numpy structured descr, in
 /// order. For `[('token_id', '<u4'), ...]` this yields alternating
 /// field-name / dtype strings — numpy always emits single quotes here.
+#[cfg(not(target_arch = "wasm32"))]
 fn descr_quoted_tokens(descr: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut rest = descr;
@@ -382,6 +387,7 @@ fn descr_quoted_tokens(descr: &str) -> Vec<&str> {
 /// Validate that `descr` declares exactly [`ENTRY_DESCR_FIELDS`] — same
 /// fields, same dtypes, same order. Presence-by-substring is not enough:
 /// the decoder reads fixed offsets.
+#[cfg(not(target_arch = "wasm32"))]
 fn check_entry_descr(descr: &str) -> Result<(), String> {
     let tokens = descr_quoted_tokens(descr);
     let got: Vec<(&str, &str)> = tokens
@@ -403,6 +409,7 @@ fn check_entry_descr(descr: &str) -> Result<(), String> {
 /// Expected dtype (from the Python side): see [`ENTRY_DESCR_FIELDS`].
 /// Row size: 14 bytes, no padding (numpy packs structured dtypes tightly
 /// when fields are already aligned).
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_structured_entries_npy(bytes: &[u8]) -> Result<Vec<VecInjectEntry>, String> {
     let (header, data_off) = npy::parse_header(bytes).map_err(|e| e.to_string())?;
 

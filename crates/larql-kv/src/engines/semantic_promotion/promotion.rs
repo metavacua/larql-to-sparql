@@ -121,6 +121,9 @@ pub struct QualifiedPromotion {
 }
 
 impl QualifiedPromotion {
+    // Sole caller, control.rs::qualify_promotion, is inside the native-gated
+    // `impl SemanticKvControl for SemanticPromotionEngine`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn new(prepared: PreparedPromotion, certificate: QualificationCertificate) -> Self {
         Self {
             prepared,

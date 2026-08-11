@@ -306,6 +306,12 @@ pub fn metrics_from_logits(
     }
 }
 
+// Sole caller, compare_many above, is native-gated (unlike
+// metrics_from_logits below it, which is pub and ungated, keeping its
+// own private helpers -- argmax/top_k_ids/jaccard/cosine/softmax/
+// kl_divergence -- alive on wasm32 even though nothing calls
+// metrics_from_logits there either).
+#[cfg(not(target_arch = "wasm32"))]
 fn aggregate(
     prompts: Vec<PromptReport>,
     reference_label: &str,
@@ -436,6 +442,8 @@ fn kl_divergence(p: &[f64], q: &[f64]) -> f64 {
     kl
 }
 
+// Sole non-test caller, aggregate above, is native-only.
+#[cfg(not(target_arch = "wasm32"))]
 fn percentile(sorted: &[f64], q: f64) -> f64 {
     if sorted.is_empty() {
         return f64::NAN;

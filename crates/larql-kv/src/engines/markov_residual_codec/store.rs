@@ -1,7 +1,10 @@
 //! `RsStoreCodec` — `RsStore` with a codec-encoded cold tier.
 
 use larql_inference::attention::SharedKV;
-use ndarray::{s, Array2};
+use ndarray::Array2;
+// s! is only used inside clip_layer_overflow below, native-only.
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::s;
 
 use crate::engines::markov_residual_codec::codec::{decode_block, encode_block, ColdResidualCodec};
 

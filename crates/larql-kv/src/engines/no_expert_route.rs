@@ -17,11 +17,11 @@
 //! precisely what the variant is for.
 
 use larql_execution::{ExecutionRefusal, RefusalKind};
+// Only used by refuse_if_moe below, itself native-only.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::kv_engine::EngineError;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
-
-#[cfg(target_arch = "wasm32")]
-use crate::alloc_prelude::*;
 
 /// An engine whose forward has no expert-dispatch seam, asked to serve a
 /// hybrid-MoE architecture.

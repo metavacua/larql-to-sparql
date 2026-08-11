@@ -144,6 +144,10 @@ fn first_in_vocab_id(tokenizer: &Tokenizer, expected: &str, vocab: usize) -> Opt
 /// Compute `-log2(P(target_id | logits))` via numerically-stable softmax.
 /// Returns `NaN` if `target_id` is out of range or the logits don't sum
 /// to a positive value; `INFINITY` if the target's probability is zero.
+///
+/// Native-only: its sole caller, `shannon_bits_for_expected` above, is
+/// native-gated.
+#[cfg(not(target_arch = "wasm32"))]
 fn shannon_bits_at_id(logits: &[f32], target_id: usize) -> f64 {
     if target_id >= logits.len() {
         return f64::NAN;

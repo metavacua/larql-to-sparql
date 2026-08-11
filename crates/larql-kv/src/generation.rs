@@ -28,11 +28,13 @@
 //! the parity oracle for the unification migration (see
 //! `larql-inference/docs/specs/kv-engine-unification.md` §8.7).
 
-// Every fn in this file except `last_row_as_2d` and `is_stop_token_str`
-// takes `&larql_inference::tokenizers::Tokenizer` (not(wasm32)-gated
-// upstream) and/or `&dyn FfnBackend` / `&ModelWeights` /
-// `&larql_vindex::VectorIndex` used only by those native callers — no
-// portable pocket beyond the two pure helpers below.
+// Every fn in this file except `last_row_as_2d` takes
+// `&larql_inference::tokenizers::Tokenizer` (not(wasm32)-gated upstream)
+// and/or `&dyn FfnBackend` / `&ModelWeights` / `&larql_vindex::VectorIndex`
+// used only by those native callers -- no portable pocket beyond
+// `last_row_as_2d`. `is_stop_token_str` has no native markers of its own
+// either, but every one of its callers is native-gated, so it's gated too
+// (dead code on wasm32 otherwise) rather than left portable-but-uncalled.
 #[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::{
     run_attention_block_decode_step_backend, run_attention_with_kv_backend,
@@ -602,6 +604,10 @@ fn argmax_next_token_resident(
     argmax_next_token(weights, tokenizer, h_single)
 }
 
+// Pure/no native markers of its own, but every actual caller in this
+// file is native-gated (see the module doc comment above) -- dead code
+// on wasm32 despite being portable in principle.
+#[cfg(not(target_arch = "wasm32"))]
 fn is_stop_token_str(s: &str) -> bool {
     matches!(
         s,

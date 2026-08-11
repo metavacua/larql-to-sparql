@@ -115,7 +115,15 @@ pub mod standard;
 pub mod turbo_quant;
 pub mod windowed_checkpoint;
 
-pub(crate) use layer_ffn::{apply_ple_and_layer_scalar, layer_ffn_or_moe};
+pub(crate) use layer_ffn::layer_ffn_or_moe;
+// apply_ple_and_layer_scalar's own definition is portable, but every
+// external caller of THIS re-export path (crate::engines::
+// apply_ple_and_layer_scalar) lives in a native-only engine/walk/executor
+// file -- on wasm32 the only reachable caller is layer_ffn_or_moe itself,
+// via `super::apply_ple_and_layer_scalar` inside layer_ffn.rs, which
+// doesn't go through this path. So the re-export itself is native-only.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use layer_ffn::apply_ple_and_layer_scalar;
 // refuse_if_moe's own definition is native-only (see no_expert_route.rs);
 // this re-export must match.
 #[cfg(not(target_arch = "wasm32"))]
