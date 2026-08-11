@@ -42,6 +42,9 @@ const REPS: usize = 5;
 
 /// One weight matrix and how many times a single frame multiplies it.
 struct FrameOp {
+    // Human-readable label for the op list -- not read programmatically,
+    // kept for debug output / future eprintln when investigating results.
+    #[allow(dead_code)]
     name: &'static str,
     matrix: Array2<f32>,
     uses_per_frame: usize,

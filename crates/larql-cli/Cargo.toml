@@ -12,13 +12,19 @@ name = "larql"
 path = "src/main.rs"
 
 [dependencies]
-# default-features = false: see crates/larql-inference/Cargo.toml's
-# comment on this same edge -- larql-core's default features ("http",
-# "msgpack") pull in reqwest/rmp-serde, and Cargo unifies features
-# across the whole resolved graph, not per edge. No source in this
-# crate references larql_core's http/msgpack-gated APIs (confirmed via
-# grep).
-larql-core = { path = "../larql-core", default-features = false }
+# default-features = false + explicit features = ["http"]: larql-core's
+# "msgpack" default feature pulls in rmp-serde, unneeded here, but
+# commands/extraction/bfs_cmd.rs genuinely calls
+# larql_core::engine::http_provider::HttpProvider -- the "no source
+# references http/msgpack-gated APIs" claim in an earlier round's grep
+# was wrong (pattern 11: a documented gap needs re-verification, not
+# assumed permanent -- this instance only surfaced now because native
+# compilation was disabled all session, invisible to wasm32-only CI
+# since bfs_cmd.rs was masked behind other cascades until this round).
+# Safe regardless of target: larql-core's reqwest (which "http" pulls
+# in) is already under its own native-only target table (pattern 12),
+# so enabling this feature has zero effect on the wasm32 build.
+larql-core = { path = "../larql-core", default-features = false, features = ["http"] }
 larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-inference = { path = "../larql-inference" }
