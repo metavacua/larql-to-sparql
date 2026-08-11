@@ -13,42 +13,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # `larql-cli` runs as its own job below (`wasm32v1-none-cli`), gated
-  # on this one via `needs:`. It's the root of the whole dependency
-  # graph -- every other crate here is one of its transitive deps -- so
-  # there is no scenario where its own (slowest, 2-5 minute) legs tell
-  # you anything a dependency's failure wouldn't already tell you
-  # faster. Running it unconditionally alongside everything else (the
-  # old flat matrix) meant every round paid its full wall-clock cost
-  # even when a leaf/branch crate had already failed and made the round
-  # moot. `needs:` + GitHub's default skip-on-fail is the whole
-  # mechanism: no `if:`, no custom logic.
+  # OS is the outer ordering axis, crate-dependency is the inner one --
+  # ubuntu + wasm32v1-none is the absolute first thing that runs, for
+  # everything. Only once the entire ubuntu wave clears does anything
+  # on windows/macos start; only once windows/macos clear for the
+  # dependencies does larql-cli (the root) get its turn; forbid-unsafe
+  # is last. Every hop below is a plain `needs:` -- GitHub's default
+  # skip-on-fail does all the pruning, no `if:` anywhere.
   #
-  # `larql-cli` stays IN the `crate:` list (rather than being omitted)
-  # and is removed via `exclude:` instead -- `exclude` matches
-  # partially, on whichever keys it specifies (confirmed against
-  # GitHub's own docs: a 2-of-3-axis exclude entry there matches both
-  # values of the omitted third axis), so `- crate: larql-cli` alone
-  # removes it across every os/features combination. This is the
-  # pattern that has to survive into the dynamic-tier design (task #33,
-  # see the plan doc): once `crate:` comes from
-  # `fromJSON(needs.discover.outputs.crates)` instead of a hand-edited
-  # array, there's no line to delete -- `exclude:` is the only
-  # declarative way to carve one crate out of a dynamically-populated
-  # list.
-  wasm32v1-none:
-    name: wasm32v1-none / ${{ matrix.crate }} / ${{ matrix.os }} / ${{ matrix.features }}
-    runs-on: ${{ matrix.os }}
+  # `larql-compute-metal` has no ubuntu (or windows) leg at all -- Metal
+  # doesn't exist off macOS -- so it gets its own job (`wasm32v1-none-metal`)
+  # rather than a `crate:` entry here. It still `needs:` the ubuntu wave
+  # below rather than running concurrently with it: ubuntu+wasm32v1-none
+  # is meant to be a single global checkpoint everything else funnels
+  # through, not a per-crate-only gate.
+  wasm32v1-none-ubuntu:
+    name: wasm32v1-none / ${{ matrix.crate }} / ubuntu-latest / ${{ matrix.features }}
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
         crate:
-          - larql-cli
           - larql-core
           - larql-compute
-          - larql-compute-metal
           - larql-inference
           - larql-kv
           - larql-models
@@ -67,8 +55,6 @@ jobs:
           - larql-execution
           - larql-router-protocol
         features: [default, no-default-features]
-        exclude:
-          - crate: larql-cli
     steps:
       - uses: actions/checkout@v6
 
@@ -81,8 +67,60 @@ jobs:
       # cfg(target_os = "linux"/"macos"/"windows"), and wasm32v1-none's
       # target_os is "none" -- confirmed via `cargo tree --target
       # wasm32v1-none -e normal,build -p <crate>` showing no openblas-src
-      # in the graph for any of the 11 matrixed crates. Installing it here
-      # would be pure dead time on every one of the 66 legs.
+      # in the graph for any of the matrixed crates. Installing it here
+      # would be pure dead time on every leg.
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32v1-none-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32v1-none-
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features
+          else
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }}
+          fi
+
+  # Same 12 crates, windows + macos -- gated on the ubuntu wave above
+  # clearing in full.
+  wasm32v1-none-others:
+    name: wasm32v1-none / ${{ matrix.crate }} / ${{ matrix.os }} / ${{ matrix.features }}
+    needs: wasm32v1-none-ubuntu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+        crate:
+          - larql-core
+          - larql-compute
+          - larql-inference
+          - larql-kv
+          - larql-models
+          - larql-lql
+          - larql-vindex
+          - larql-vindex-spec
+          - larql-factory
+          - larql-boundary
+          - larql-execution
+          - larql-router-protocol
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
 
       - name: Install protoc (Windows)
         if: runner.os == 'Windows'
@@ -109,17 +147,94 @@ jobs:
             cargo build --target wasm32v1-none -p ${{ matrix.crate }}
           fi
 
-  # larql-cli's own wasm32 leg, split out of the matrix above and gated
-  # behind it -- see the comment on `wasm32v1-none` for why.
-  wasm32v1-none-cli:
+  # larql-compute-metal: macOS-only, no ubuntu/windows leg exists for
+  # it. Still gated on the ubuntu wave (see the top-level comment) even
+  # though it has no ubuntu leg of its own.
+  wasm32v1-none-metal:
+    name: wasm32v1-none / larql-compute-metal / macos-14 / ${{ matrix.features }}
+    needs: wasm32v1-none-ubuntu
+    runs-on: macos-14
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32v1-none-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32v1-none-
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p larql-compute-metal --no-default-features
+          else
+            cargo build --target wasm32v1-none -p larql-compute-metal
+          fi
+
+  # larql-cli (the root) on ubuntu -- gated on every dependency's
+  # windows/macos legs AND the metal leg, since larql-cli's default
+  # feature set (`gpu`) pulls in larql-compute-metal.
+  wasm32v1-none-cli-ubuntu:
+    name: wasm32v1-none / larql-cli / ubuntu-latest / ${{ matrix.features }}
+    needs: [wasm32v1-none-others, wasm32v1-none-metal]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32v1-none-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32v1-none-
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p larql-cli --no-default-features
+          else
+            cargo build --target wasm32v1-none -p larql-cli
+          fi
+
+  # larql-cli on windows + macos -- gated on its own ubuntu leg above.
+  wasm32v1-none-cli-others:
     name: wasm32v1-none / larql-cli / ${{ matrix.os }} / ${{ matrix.features }}
-    needs: wasm32v1-none
+    needs: wasm32v1-none-cli-ubuntu
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
+        os: [windows-latest, macos-14]
         features: [default, no-default-features]
     steps:
       - uses: actions/checkout@v6
@@ -155,7 +270,7 @@ jobs:
 
   forbid-unsafe:
     name: forbid-unsafe / larql-cli / ${{ matrix.os }} / ${{ matrix.features }}
-    needs: wasm32v1-none-cli
+    needs: wasm32v1-none-cli-others
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
