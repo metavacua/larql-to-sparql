@@ -1,19 +1,37 @@
 //! `BoundaryKvEngine` — Standard semantics + `larql-boundary` frame emission.
 
+// Only `BoundaryKvEngineConfig` (pure data) is portable here.
+// `BoundaryKvEngine` wraps `StandardEngine` (WHOLESALE_NATIVE) behind
+// `Arc<dyn BoundaryArchive>` (its `InMemoryArchive` default impl is
+// Mutex-backed) and implements `KvEngine` (not(wasm32)-gated upstream)
+// — everything below is native.
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 use larql_boundary::BoundaryGateConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::async_compute_backend::AsyncComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::kv_engine::EngineError;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::{cpu_engine_backend, EngineBackend};
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::engines::boundary_kv::archive::{ArchiveError, BoundaryArchive, InMemoryArchive};
 use crate::engines::boundary_kv::identity::BoundaryModelIdentity;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::engines::standard::StandardEngine;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::{EngineInfo, KvEngine};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Engine-level configuration.
 #[derive(Debug, Clone)]
@@ -57,10 +75,17 @@ impl BoundaryKvEngineConfig {
 /// counter in [`BoundaryKvEngine::current_sequence_id`]. Re-prefilled
 /// engines emit into `<sequence_id>#g<N>` so a new generation's frames
 /// never collide with (or interleave into) an earlier chain.
+#[cfg(not(target_arch = "wasm32"))]
 const GENERATION_SEQUENCE_SEPARATOR: &str = "#g";
 
 /// `BoundaryKvEngine` — production-equivalent in-session decode, with frame
 /// emission at chunk boundaries.
+///
+/// Native: holds `archive: Arc<dyn BoundaryArchive>` (constructs
+/// `InMemoryArchive::new()`, itself native — Mutex-backed), wraps
+/// `StandardEngine` (WHOLESALE_NATIVE), and `impl KvEngine for
+/// BoundaryKvEngine` below (`KvEngine` is not(wasm32)-gated upstream).
+#[cfg(not(target_arch = "wasm32"))]
 pub struct BoundaryKvEngine {
     inner: StandardEngine,
     config: BoundaryKvEngineConfig,
@@ -71,6 +96,7 @@ pub struct BoundaryKvEngine {
     generation: u64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl BoundaryKvEngine {
     /// Construct with the default CPU backend and an in-memory archive.
     pub fn new(config: BoundaryKvEngineConfig) -> Self {
@@ -252,6 +278,7 @@ impl BoundaryKvEngine {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvEngine for BoundaryKvEngine {
     fn name(&self) -> &str {
         "boundary-kv"

@@ -12,6 +12,9 @@
 
 use super::ids::{AuthorityId, OperationId, RecordId};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Session identifier carried on every event so a planner can
 /// demultiplex concurrent sessions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
@@ -121,11 +124,13 @@ pub trait SemanticPhaseSink: Send + Sync {
 }
 
 /// Sink that records everything, for gates and traces.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Default)]
 pub struct RecordingSink {
     events: std::sync::Mutex<Vec<SemanticPhaseEvent>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RecordingSink {
     pub fn new() -> Self {
         Self::default()
@@ -149,6 +154,7 @@ impl RecordingSink {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SemanticPhaseSink for RecordingSink {
     fn on_phase(&self, event: &SemanticPhaseEvent) {
         self.events

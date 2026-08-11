@@ -13,6 +13,9 @@
 use larql_boundary::codec::bf16 as codec_bf16;
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Codec selection for the cold residual tier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColdResidualCodec {

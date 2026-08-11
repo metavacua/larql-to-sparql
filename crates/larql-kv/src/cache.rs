@@ -13,6 +13,9 @@
 
 use larql_inference::attention::SharedKV;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-layer K/V cache. Can grow unbounded or be clamped to a fixed
 /// sliding window (Markov-residual-bounded strategy — keep the last W
 /// positions' K/V, evict older). When bounded, attention becomes

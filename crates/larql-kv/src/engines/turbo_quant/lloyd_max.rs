@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Lloyd-Max scalar quantization.
 ///
 /// After WHT rotation, each coordinate follows Beta(d/2, d/2) ≈ N(0, 1/d).

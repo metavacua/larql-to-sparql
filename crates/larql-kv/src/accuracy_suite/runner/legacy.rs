@@ -7,6 +7,9 @@
 //! are kept here so downstream code that consumed the older shape
 //! keeps compiling. New callers should use the split-axis types.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-strategy accuracy scores across all tests.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StrategyAccuracy {

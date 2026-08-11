@@ -4,7 +4,11 @@
 //! (K, V) pair per layer. Bytes per checkpoint on Gemma 3 4B ≈ 278 KB (f32).
 
 use larql_inference::attention::SharedKV;
-use std::collections::HashMap;
+
+use crate::collections::HashMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 #[derive(Default)]
 pub struct CheckpointStore {

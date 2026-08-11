@@ -5,6 +5,9 @@
 use super::super::prompts::KnowledgeSource;
 use larql_inference::kv_engine::EngineError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Outcome of attempting to score a prompt against an engine.
 ///
 /// Mirrors the [`larql_inference::EngineError`] taxonomy: each error

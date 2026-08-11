@@ -43,11 +43,20 @@ pub use cost::{
     pareto_frontier, rank, CostError, CostEstimate, CostObservation, QualifiedWalkCandidate,
     RankingPolicy, ResidencyState, WalkCost,
 };
-pub use enforce::{EnforceWalkExecutor, WalkTokens};
+// DISCREPANCY vs the round-1 survey: `EnforceWalkExecutor` and
+// `ObserveWalkExecutor` are native by transitive dependency on
+// `SemanticPromotionEngine`/`RecordingSink` (see enforce.rs/executor.rs
+// doc comments) even though this whole directory was surveyed as
+// blanket PORTABLE. Split their re-exports accordingly.
+pub use enforce::WalkTokens;
+#[cfg(not(target_arch = "wasm32"))]
+pub use enforce::EnforceWalkExecutor;
 pub use executor::{
-    AuthoritySnapshot, ModelWalkExecutor, ObserveWalkExecutor, PhysicalEffect, WalkAction,
-    WalkExecutionError, WalkTrace,
+    AuthoritySnapshot, ModelWalkExecutor, PhysicalEffect, WalkAction, WalkExecutionError,
+    WalkTrace,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use executor::ObserveWalkExecutor;
 pub use graph::{render_boundary, ModelEdge, ModelGraph, ModelNode, Relation};
 pub use plan::{ExpertPrefetchHint, ModelWalkPlan, WalkPlanId, WalkStep};
 pub use planner::{WalkPlanError, WalkPlanner, WalkStrategy};

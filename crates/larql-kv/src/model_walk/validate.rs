@@ -11,6 +11,9 @@ use crate::semantic_promotion::{AnswerBoundary, RecordId, RetirementScope};
 use super::graph::{ModelEdge, ModelGraph, ModelNode};
 use super::plan::{ModelWalkPlan, WalkStep};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum WalkValidationError {
     #[error("plan references a node that is not in the graph: {0}")]

@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// LQL Lexer — tokenises an input string into a stream of `Token`s
 
 #[derive(Debug, Clone, PartialEq)]
@@ -606,7 +609,7 @@ impl<'a> Lexer<'a> {
         // and a single '.', so the slice is always valid UTF-8. Returning
         // an error here keeps the code panic-free in case the byte filter
         // is ever loosened.
-        let text = std::str::from_utf8(&self.input[start..self.pos])
+        let text = core::str::from_utf8(&self.input[start..self.pos])
             .map_err(|e| LexError(format!("invalid UTF-8 in numeric literal: {e}")))?;
         if is_float {
             let val: f64 = text
@@ -635,7 +638,7 @@ impl<'a> Lexer<'a> {
         // and underscore, so the slice is always valid UTF-8. Returning an
         // error here keeps the code panic-free in case the byte filter is
         // ever loosened.
-        let word = std::str::from_utf8(&self.input[start..self.pos])
+        let word = core::str::from_utf8(&self.input[start..self.pos])
             .map_err(|e| LexError(format!("invalid UTF-8 in identifier: {e}")))?;
         if let Some(kw) = Keyword::from_str(word) {
             Ok(Token::Keyword(kw))
@@ -648,13 +651,13 @@ impl<'a> Lexer<'a> {
 #[derive(Debug, Clone)]
 pub struct LexError(pub String);
 
-impl std::fmt::Display for LexError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for LexError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Lex error: {}", self.0)
     }
 }
 
-impl std::error::Error for LexError {}
+impl core::error::Error for LexError {}
 
 #[cfg(test)]
 mod tests {

@@ -16,6 +16,9 @@
 use super::error::PromotionError;
 use super::ids::CheckpointId;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Encoding version of the v1 token rendering. Bump when the record →
 /// token mapping changes in a way that invalidates existing certificates.
 pub const TOKEN_SEQUENCE_ENCODING_VERSION: u32 = 1;

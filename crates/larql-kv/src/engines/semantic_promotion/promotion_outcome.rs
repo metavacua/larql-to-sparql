@@ -29,6 +29,9 @@ use super::ids::RecordId;
 use super::record::SemanticValue;
 use super::typed_support::TypedSupport;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// The observed result of one promotion attempt.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PromotionOutcome {

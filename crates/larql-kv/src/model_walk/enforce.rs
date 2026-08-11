@@ -12,22 +12,40 @@
 //! record is appended *after* the source span is gone, which is
 //! invariant I3.
 
+// DISCREPANCY vs the round-1 survey: this file was classified blanket
+// PORTABLE, but (like executor.rs) `EnforceWalkExecutor` holds `&mut
+// SemanticPromotionEngine` and `Arc<RecordingSink>` and calls
+// `self.engine.decode_step(...)` through the `KvEngine` trait — all
+// native-gated upstream. `WalkTokens` (pure `Vec<u32>` data) is the only
+// portable item in this file.
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
 
 use crate::semantic_promotion::{
     AbortReason, MaterialisationPolicy, OperationLease, OperationOutcome, PromotionError,
-    PromotionRequest, QualificationEvidence, RecordingSink, SemanticKvControl,
-    SemanticPromotionEngine,
+    PromotionRequest, QualificationEvidence, SemanticKvControl,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::semantic_promotion::{RecordingSink, SemanticPromotionEngine};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::KvEngine;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::executor::{PhysicalEffect, WalkAction, WalkExecutionError, WalkTrace};
+#[cfg(not(target_arch = "wasm32"))]
 use super::graph::{render_boundary, ModelEdge, ModelGraph, ModelNode};
+#[cfg(not(target_arch = "wasm32"))]
 use super::plan::WalkStep;
+#[cfg(not(target_arch = "wasm32"))]
 use super::validate::ValidatedWalkPlan;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Token material the caller supplies. The walk layer never invents
 /// tokens: it sequences, the caller renders.
@@ -41,6 +59,7 @@ pub struct WalkTokens {
 
 /// Executes a validated walk for real, keeping the excluded source in a
 /// rollback journal.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct EnforceWalkExecutor<'e> {
     engine: &'e mut SemanticPromotionEngine,
     graph: &'e ModelGraph,
@@ -50,6 +69,7 @@ pub struct EnforceWalkExecutor<'e> {
     sink: Arc<RecordingSink>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'e> EnforceWalkExecutor<'e> {
     pub fn new(
         engine: &'e mut SemanticPromotionEngine,

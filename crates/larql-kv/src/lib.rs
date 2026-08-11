@@ -25,12 +25,25 @@ extern crate alloc;
 ))]
 extern crate blas_src;
 
+mod alloc_prelude;
+mod collections;
+
+// `EngineKind` (String/Box fields), `from_name` (`.to_string()`/`.into()`),
+// and `split_specs` (`Vec<String>`) all stay portable but name
+// String/Vec/Box in type position -- `#[macro_use] extern crate alloc`
+// above provides only the `vec!`/`format!` macros, not these names.
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub mod accuracy;
 pub mod accuracy_suite;
 pub mod cache;
 pub mod engines;
 pub mod generation;
 pub mod model_walk;
+// `StageAccumulator::record` takes `std::time::Instant`, which has no
+// core/alloc equivalent under wasm32v1-none — whole-module exclusion.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod profiler;
 pub mod vindex_compare;
 
@@ -41,15 +54,25 @@ pub use engines::boundary_kv;
 pub use engines::boundary_per_layer;
 pub use engines::markov_residual;
 pub use engines::markov_residual_codec;
+// `no_cache.rs`/`standard.rs` are WHOLESALE_NATIVE (`impl KvEngine for
+// ...`, and `KvEngine` itself is not(wasm32)-gated upstream in
+// larql-inference) so their `pub mod` declarations in `engines/mod.rs`
+// are gated; these re-exports must match.
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::no_cache;
 pub use engines::semantic_promotion;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::standard;
 pub use engines::turbo_quant;
 pub use engines::windowed_checkpoint;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::markov_residual::MarkovResidualEngine;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::no_cache::NoCacheEngine;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::standard::StandardEngine;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::windowed_checkpoint::WindowedCheckpointEngine;
 
 // ─── Trait surface re-exported from larql-inference ──────────────────────────
@@ -61,9 +84,14 @@ pub use engines::windowed_checkpoint::WindowedCheckpointEngine;
 // `larql_kv::KvEngine` continues to resolve to the same trait.
 //
 // See `crates/larql-inference/docs/specs/kv-engine-unification.md` §10.4.
-pub use larql_inference::kv_engine::{
-    AnyEngine, DecodeStageSummary, EngineError, EngineInfo, KvEngine, RetrievalEngine,
-};
+//
+// `AnyEngine`/`KvEngine`/`RetrievalEngine` are `#[cfg(not(target_arch =
+// "wasm32"))]`-gated upstream (kv.rs/any.rs/retrieval.rs put &VectorIndex
+// in every trait method signature); `DecodeStageSummary`/`EngineError`/
+// `EngineInfo` are not gated there and stay portable.
+#[cfg(not(target_arch = "wasm32"))]
+pub use larql_inference::kv_engine::{AnyEngine, KvEngine, RetrievalEngine};
+pub use larql_inference::kv_engine::{DecodeStageSummary, EngineError, EngineInfo};
 
 // ─── EngineKind ───────────────────────────────────────────────────────────────
 
@@ -157,7 +185,7 @@ impl EngineKind {
     pub fn from_name(spec: &str) -> Option<Self> {
         // Split "name:key=val,key=val" into name + param pairs.
         let (name, params_str) = spec.split_once(':').unwrap_or((spec, ""));
-        let params: std::collections::HashMap<&str, &str> = params_str
+        let params: crate::collections::HashMap<&str, &str> = params_str
             .split(',')
             .filter(|s| !s.is_empty())
             .filter_map(|kv| kv.split_once('='))
@@ -418,6 +446,15 @@ impl EngineKind {
     }
 
     /// Build a boxed engine, dispatching compute through `backend`.
+    ///
+    /// Native only: returns `AnyEngine` (not(wasm32)-gated upstream) and
+    /// constructs every engine struct, all of which are themselves
+    /// WHOLESALE_NATIVE or NEEDS_SURGICAL_SPLIT with a native
+    /// constructor. The rest of `EngineKind` (the enum, `from_name`,
+    /// `display_name`, `supported_names`, `split_specs`, `bench_specs`,
+    /// `bench_excluded_names`) is pure string/enum logic and stays
+    /// portable.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build(self, backend: Box<dyn larql_inference::EngineBackend>) -> AnyEngine {
         self.build_with_profiling(backend, false)
     }
@@ -437,6 +474,7 @@ impl EngineKind {
     /// of the ComputeBackend redesign) can dispatch through the
     /// trait. Construct via `larql_inference::cpu_engine_backend()` /
     /// `larql_inference::default_engine_backend()`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build_with_profiling(
         self,
         backend: Box<dyn larql_inference::EngineBackend>,

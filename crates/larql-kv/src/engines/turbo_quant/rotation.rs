@@ -27,6 +27,9 @@
 //! re-association of the scaling multiply. The `wht_inplace_matches_scalar`
 //! test pins this within 1e-5 tolerance.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[inline(always)]
 fn apply_sign_flips(y: &mut [f32]) {
     for (i, v) in y.iter_mut().enumerate() {

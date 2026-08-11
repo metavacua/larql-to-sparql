@@ -20,6 +20,9 @@ use larql_execution::{ExecutionRefusal, RefusalKind};
 use larql_inference::kv_engine::EngineError;
 use larql_inference::model::ModelWeights;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// An engine whose forward has no expert-dispatch seam, asked to serve a
 /// hybrid-MoE architecture.
 #[derive(Debug, Clone)]
@@ -30,8 +33,8 @@ pub struct NoExpertDispatchPath {
     pub because: &'static str,
 }
 
-impl std::fmt::Display for NoExpertDispatchPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for NoExpertDispatchPath {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "engine '{}' has no expert-dispatch path ({}), and this architecture \
@@ -42,7 +45,7 @@ impl std::fmt::Display for NoExpertDispatchPath {
     }
 }
 
-impl std::error::Error for NoExpertDispatchPath {}
+impl core::error::Error for NoExpertDispatchPath {}
 
 impl ExecutionRefusal for NoExpertDispatchPath {
     fn kind(&self) -> RefusalKind {

@@ -36,6 +36,9 @@ use ndarray::Array2;
 use super::error::PromotionError;
 use super::ids::CheckpointId;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One layer's captured rows and the positions they hold.
 ///
 /// The positions travel with the rows because a checkpoint of a cache
@@ -172,8 +175,8 @@ impl BoundaryCheckpoint {
         self.per_layer
             .iter()
             .map(|l| {
-                let cells = (l.k.len() + l.v.len()) * std::mem::size_of::<f32>();
-                (cells + l.positions.len() * std::mem::size_of::<u64>()) as u64
+                let cells = (l.k.len() + l.v.len()) * core::mem::size_of::<f32>();
+                (cells + l.positions.len() * core::mem::size_of::<u64>()) as u64
             })
             .sum()
     }
@@ -193,7 +196,7 @@ pub enum SuffixVisibility {
     /// later position keeps its original index.
     ChainReplacedByDecoy {
         /// Positions the chain occupied, relative to the checkpoint.
-        chain: std::ops::Range<usize>,
+        chain: core::ops::Range<usize>,
         /// Replacement tokens. Must be exactly `chain.len()` long, or
         /// the branches stop being positionally comparable.
         decoy: Vec<u32>,

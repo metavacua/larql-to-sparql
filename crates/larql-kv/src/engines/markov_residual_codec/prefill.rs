@@ -4,14 +4,27 @@
 //! built into locals and handed back only on success, so a refusal leaves an
 //! engine's existing store untouched.
 
+// DISCREPANCY vs the round-1 survey (WHOLESALE_NATIVE by transitive
+// dependency on `recompute_kv`): same split as the markov_residual
+// twin's prefill.rs -- `RsPrefillResultCodec` (pure data) and
+// `roundtrip` (pure codec math, no recompute_kv/VectorIndex touch) stay
+// portable; only `rs_prefill_codec` and its native-only imports are
+// gated.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::{run_attention_with_kv_backend, SharedKV};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::BackendFfn;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::embed_tokens_pub;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::kv_engine::EngineError;
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::engines::markov_residual::recompute_kv;
 use crate::engines::markov_residual_codec::codec::ColdResidualCodec;
 use crate::engines::markov_residual_codec::helpers::last_row;
@@ -22,6 +35,7 @@ pub struct RsPrefillResultCodec {
     pub store: RsStoreCodec,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub fn rs_prefill_codec(
     weights: larql_inference::WeightsView,

@@ -1,13 +1,28 @@
 //! Residual-stream prefill: build the store the decode step walks.
 
+// DISCREPANCY vs the round-1 survey (which classified this file
+// WHOLESALE_NATIVE by transitive dependency on `recompute_kv`): the
+// mod.rs re-export notes explicitly flag `RsPrefillResult` as pure data
+// that "could stay portable even though its only producer (rs_prefill)
+// is native" -- doing that real split here rather than gating the
+// whole file, mirroring compute.rs's own kv_memory_bytes_for_seq split.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::{run_attention_with_kv_backend, SharedKV};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::BackendFfn;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::embed_tokens_pub;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::kv_engine::EngineError;
 use ndarray::Array2;
 
+// `recompute_kv` is itself cfg-gated inside compute.rs, so this import
+// must be native-only regardless of `last_row`'s own portability.
+#[cfg(not(target_arch = "wasm32"))]
 use super::compute::{last_row, recompute_kv};
 use super::store::RsStore;
 
@@ -24,6 +39,7 @@ pub struct RsPrefillResult {
 /// store is handed back only on success, so a failure costs the caller nothing
 /// it already had — an engine holding an earlier store keeps it, and a caller
 /// that fixes the cause can drive the same prompt again.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn rs_prefill(
     weights: larql_inference::WeightsView,
     token_ids: &[u32],

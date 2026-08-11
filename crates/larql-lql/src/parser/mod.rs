@@ -14,6 +14,9 @@ mod tests;
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub struct Parser {
     pub(crate) tokens: Vec<Token>,
     pub(crate) pos: usize,
@@ -22,13 +25,13 @@ pub struct Parser {
 #[derive(Debug, Clone)]
 pub struct ParseError(pub String);
 
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Parse error: {}", self.0)
     }
 }
 
-impl std::error::Error for ParseError {}
+impl core::error::Error for ParseError {}
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
@@ -91,7 +94,7 @@ impl Parser {
 }
 
 /// Convenience: parse a string directly into a Statement.
-pub fn parse(input: &str) -> Result<Statement, Box<dyn std::error::Error>> {
+pub fn parse(input: &str) -> Result<Statement, Box<dyn core::error::Error>> {
     let mut lexer = crate::lexer::Lexer::new(input);
     let tokens = lexer.tokenise()?;
     let mut parser = Parser::new(tokens);

@@ -18,9 +18,13 @@
 //! work. Reference: `chuk-mlx/.../research/_stopwords.py`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+use crate::collections::HashMap;
 
 use super::store::ApolloStore;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Window ids are `u16` throughout the index, the store entries, and the
 /// engine's routing surface, so at most `u16::MAX + 1` windows (ids
@@ -69,7 +73,7 @@ impl RoutingIndex {
                 max: MAX_ROUTABLE_WINDOWS,
             });
         }
-        let mut index: HashMap<u32, HashMap<u16, u32>> = HashMap::new();
+        let mut index: HashMap<u32, HashMap<u16, u32>> = HashMap::default();
         for (window_id, tokens) in store.window_tokens.iter().enumerate() {
             // Safe cast: count <= MAX_ROUTABLE_WINDOWS checked above.
             let wid = window_id as u16;
@@ -100,7 +104,7 @@ impl RoutingIndex {
             return vec![];
         }
         let n = self.num_windows as f64;
-        let mut scores: HashMap<u16, f64> = HashMap::new();
+        let mut scores: HashMap<u16, f64> = HashMap::default();
         for &tok in &query.token_ids {
             let Some(postings) = self.index.get(&tok) else {
                 continue;
@@ -118,7 +122,7 @@ impl RoutingIndex {
         let mut ranked: Vec<(u16, f64)> = scores.into_iter().collect();
         ranked.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(core::cmp::Ordering::Equal)
                 .then_with(|| a.0.cmp(&b.0))
         });
         ranked.into_iter().take(top_k).map(|(w, _)| w).collect()
@@ -128,7 +132,7 @@ impl RoutingIndex {
     pub fn total_bytes(&self) -> usize {
         self.index
             .values()
-            .map(|v| 4 + v.len() * std::mem::size_of::<(u16, u32)>())
+            .map(|v| 4 + v.len() * core::mem::size_of::<(u16, u32)>())
             .sum()
     }
 

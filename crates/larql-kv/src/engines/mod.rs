@@ -102,9 +102,15 @@ pub mod boundary_per_layer;
 mod layer_ffn;
 pub mod markov_residual;
 pub mod markov_residual_codec;
+// `impl KvEngine for NoCacheEngine`; `KvEngine` is not(wasm32)-gated
+// upstream in larql-inference, and the file has no separable portable
+// pocket (struct + trait impl + Default only).
+#[cfg(not(target_arch = "wasm32"))]
 pub mod no_cache;
 pub mod no_expert_route;
 pub mod semantic_promotion;
+// `impl KvEngine for StandardEngine`; same upstream gating as no_cache.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod standard;
 pub mod turbo_quant;
 pub mod windowed_checkpoint;
@@ -133,6 +139,14 @@ pub(crate) use no_expert_route::refuse_if_moe;
 /// Tests inject a value through `set_w10_disabled_override` (per-thread)
 /// rather than mutating the process env, so they don't race other
 /// parallel tests that also call this helper.
+///
+/// `std::env::var` + `std::thread_local!` have no core/alloc equivalent
+/// under wasm32v1-none — exclusion-native. Every non-test caller
+/// (markov_residual/{dispatch,engine}.rs, markov_residual_codec/{dispatch,
+/// engine}.rs, windowed_checkpoint/dispatch.rs, boundary_per_layer/
+/// dispatch.rs) is itself WHOLESALE_NATIVE, so this gate has no portable
+/// caller to break.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn w10_enabled() -> bool {
     let overridden = W10_DISABLED_OVERRIDE.with(|o| *o.borrow());
     match overridden {
@@ -141,6 +155,7 @@ pub(crate) fn w10_enabled() -> bool {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 std::thread_local! {
     /// Per-thread override for [`w10_enabled`]. `Some(true)` simulates
     /// `LARQL_W10_DISABLE=1` (cascade off); `Some(false)` simulates the

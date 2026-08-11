@@ -7,7 +7,10 @@
 //! this branch can hide a span or snapshot its state. The refusals are
 //! [`PromotionError::UnsupportedCapability`], not silent no-ops.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
+#[cfg(target_arch = "wasm32")]
+use alloc::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 use super::authority::{SourceAuthority, SourceAuthorityRef};
@@ -28,6 +31,9 @@ use super::record::SemanticRecord;
 use super::replay::{AccessPlan, ReplayPlan, RollbackPlan, SnapshotRef};
 use super::scope::RetirementScope;
 use super::visibility::AuthorityState;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Snapshot handle used by plans while no real snapshot exists. Phase C
 /// replaces this with a handle the base session actually issues.
@@ -61,8 +67,8 @@ impl PromotionSession {
             capabilities,
             session_id,
             graph: InMemoryAuthorityGraph::new(session_epoch),
-            states: HashMap::new(),
-            open_operations: HashMap::new(),
+            states: HashMap::default(),
+            open_operations: HashMap::default(),
             metrics: PromotionMetrics::new(),
             sink: None,
             token_position: 0,

@@ -48,12 +48,17 @@
 //!   predates the split-axis runner.
 
 pub mod aggregate;
+// All 3 drivers (evaluate_parametric/evaluate_in_context/evaluate_conflict)
+// take `tokenizer: &larql_inference::tokenizers::Tokenizer` unconditionally;
+// `tokenizers` is not(wasm32)-gated upstream — no portable pocket.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod drivers;
 pub mod legacy;
 pub mod scoring;
 pub mod types;
 
 pub use aggregate::{compute_strategy_split, format_strategy_split};
+#[cfg(not(target_arch = "wasm32"))]
 pub use drivers::{evaluate_conflict, evaluate_in_context, evaluate_parametric};
 pub use legacy::{
     compute_strategy_accuracy, format_accuracy_table, format_category_breakdown,

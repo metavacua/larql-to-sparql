@@ -11,6 +11,9 @@ use super::authority::SourceAuthorityRef;
 use super::error::PromotionError;
 use super::ids::CheckpointId;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Opaque handle to a captured engine state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct SnapshotRef(pub u64);
@@ -39,7 +42,7 @@ pub enum ReplayPlan {
     /// Re-decode a token range from a checkpoint. Phase F's route.
     BoundaryReplay {
         checkpoint: CheckpointId,
-        tokens: std::ops::Range<u64>,
+        tokens: core::ops::Range<u64>,
     },
     /// Rebuild the span from its original content.
     SourceRematerialisation { authority: SourceAuthorityRef },
@@ -82,7 +85,7 @@ impl ReplayPlan {
 /// stores — and Phase B has to be able to assert they agree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccessPlan {
-    pub excluded_tokens: std::ops::Range<u64>,
+    pub excluded_tokens: core::ops::Range<u64>,
     /// Layers the exclusion applies to. Empty means every layer.
     ///
     /// Non-empty is the measured case: EXP-25 excluded the span on the
@@ -96,7 +99,7 @@ pub struct AccessPlan {
 
 impl AccessPlan {
     /// Exclude a span on every layer.
-    pub fn all_layers(excluded_tokens: std::ops::Range<u64>) -> Self {
+    pub fn all_layers(excluded_tokens: core::ops::Range<u64>) -> Self {
         Self {
             excluded_tokens,
             layers: Vec::new(),
@@ -104,7 +107,7 @@ impl AccessPlan {
     }
 
     /// Exclude a span on the named layers only.
-    pub fn on_layers(excluded_tokens: std::ops::Range<u64>, layers: Vec<u32>) -> Self {
+    pub fn on_layers(excluded_tokens: core::ops::Range<u64>, layers: Vec<u32>) -> Self {
         Self {
             excluded_tokens,
             layers,
@@ -239,7 +242,7 @@ mod tests {
     fn an_inverted_exclusion_is_rejected() {
         // Built field-wise: a literal `20..10` is a compile-time lint.
         let plan = AccessPlan {
-            excluded_tokens: std::ops::Range { start: 20, end: 10 },
+            excluded_tokens: core::ops::Range { start: 20, end: 10 },
             layers: Vec::new(),
         };
         assert!(plan.validate().is_err());

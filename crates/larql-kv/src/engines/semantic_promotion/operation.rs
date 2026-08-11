@@ -13,6 +13,9 @@
 
 use super::ids::{OperationId, RecordId};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Coarse operation family. Selects which qualification questions even
 /// apply; the fine-grained key is [`OperationSignature`].
 ///

@@ -77,6 +77,9 @@ pub mod capabilities;
 pub mod checkpoint;
 pub mod config;
 pub mod control;
+// `impl KvEngine for SemanticPromotionEngine` (upstream-gated) plus 6
+// methods taking `index: &larql_vindex::VectorIndex` directly.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod engine;
 pub mod error;
 pub mod events;
@@ -108,9 +111,15 @@ pub use capabilities::PromotionEngineCapabilities;
 pub use checkpoint::{BoundaryCheckpoint, CheckpointLayer, SuffixReplay, SuffixVisibility};
 pub use config::SemanticPromotionConfig;
 pub use control::SemanticKvControl;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engine::SemanticPromotionEngine;
 pub use error::PromotionError;
-pub use events::{RecordingSink, SemanticPhase, SemanticPhaseEvent, SemanticPhaseSink, SessionId};
+// `RecordingSink` holds `Mutex<Vec<SemanticPhaseEvent>>`; the rest of
+// events.rs (SessionId, SemanticPhaseEvent, the SemanticPhaseSink trait
+// definition) is pure data / method signatures and stays portable.
+pub use events::{SemanticPhase, SemanticPhaseEvent, SemanticPhaseSink, SessionId};
+#[cfg(not(target_arch = "wasm32"))]
+pub use events::RecordingSink;
 pub use exclusion::{
     apply_exclusion, restore_exclusion, ExclusionJournal, JournalledLayer, LayerAttention,
 };

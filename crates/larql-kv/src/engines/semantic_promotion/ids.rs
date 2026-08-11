@@ -11,6 +11,9 @@
 //! bit-exact trace differ in its `Debug` output. Uniqueness is required
 //! only within one engine instance.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Bit position at which the domain tag is stored in a minted id.
 ///
 /// The low 96 bits hold the per-domain counter, the high 32 bits the

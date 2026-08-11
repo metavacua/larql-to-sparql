@@ -8,7 +8,7 @@
 //! content changed underneath the reference fails the digest check
 //! rather than silently resolving to different tokens.
 
-use std::ops::Range;
+use core::ops::Range;
 
 use sha2::{Digest, Sha256};
 

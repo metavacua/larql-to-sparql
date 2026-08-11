@@ -9,6 +9,9 @@
 
 use crate::cache::KvCache;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Logical row count per layer, `None` for layers that share another's K/V.
 pub(super) fn cache_row_counts(cache: &KvCache) -> Vec<Option<usize>> {
     cache

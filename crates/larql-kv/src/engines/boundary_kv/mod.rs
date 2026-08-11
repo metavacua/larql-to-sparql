@@ -17,6 +17,15 @@ pub mod engine;
 pub(crate) mod gate;
 pub mod identity;
 
-pub use archive::{ArchiveError, BoundaryArchive, InMemoryArchive};
-pub use engine::{BoundaryKvEngine, BoundaryKvEngineConfig};
+pub use archive::{ArchiveError, BoundaryArchive};
+// `InMemoryArchive` holds `Mutex<HashMap<...>>` — no core/alloc
+// equivalent under wasm32v1-none.
+#[cfg(not(target_arch = "wasm32"))]
+pub use archive::InMemoryArchive;
+// `BoundaryKvEngineConfig` is pure data; `BoundaryKvEngine` wraps
+// `StandardEngine` (WHOLESALE_NATIVE) and `impl KvEngine for
+// BoundaryKvEngine` (KvEngine is not(wasm32)-gated upstream).
+pub use engine::BoundaryKvEngineConfig;
+#[cfg(not(target_arch = "wasm32"))]
+pub use engine::BoundaryKvEngine;
 pub use identity::BoundaryModelIdentity;

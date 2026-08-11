@@ -11,6 +11,9 @@ use crate::semantic_promotion::{
 
 use super::graph::render_boundary;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Deterministic plan identity: same operation and same primary record
 /// give the same id, so two planning runs are comparable (gate W0).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]

@@ -30,6 +30,9 @@ use larql_inference::kv_engine::PerLayerKvAccess;
 use super::error::PromotionError;
 use super::exclusion::LayerAttention;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// What the policy did, per layer.
 ///
 /// Reported rather than summarised: "12 rows dropped" cannot distinguish

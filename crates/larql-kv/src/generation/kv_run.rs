@@ -25,6 +25,9 @@ use ndarray::Array2;
 use crate::cache::KvCache;
 use crate::generation::last_row_as_2d;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[cfg(test)]
 mod tests;
 mod transaction;

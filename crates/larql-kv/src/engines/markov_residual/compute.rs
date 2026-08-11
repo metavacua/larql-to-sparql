@@ -4,22 +4,41 @@
 //!
 //! Prefill and the decode step live in [`super::prefill`] and [`super::step`].
 
+// DISCREPANCY vs the round-1 survey (which classified this file
+// WHOLESALE_NATIVE and gated `pub mod compute;` at mod.rs): the mod.rs
+// re-export split explicitly wants `kv_memory_bytes_for_seq` portable,
+// and it (plus `last_row`) has zero native markers — pure arithmetic
+// over `WeightsView`/`Array2`. Doing the real per-item split here
+// instead of gating the whole file: `recompute_kv` and every private
+// helper feeding it (VectorIndex param, `std::env`/`thread_local!`,
+// and `eprintln!` in the diag path, which also has no core/alloc
+// equivalent) are native; `kv_memory_bytes_for_seq`/`last_row` stay
+// portable, matching mod.rs's own re-export split.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::{dot_proj_gpu, ComputeBackend, QuantFormat};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
 use ndarray::{s, Array2, ArrayBase, ArrayView1, Data, Ix2};
+#[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
+#[cfg(not(target_arch = "wasm32"))]
 use std::cmp::Ordering;
 
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::apply_rope_partial_at;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::{add_bias, apply_norm};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::residual::{rms_norm_heads_no_weight, rms_norm_qk_for_arch};
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 enum KvProjection {
     K,
     V,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 struct WalkKvSelection {
     select_layer: usize,
@@ -29,6 +48,7 @@ struct WalkKvSelection {
     v_indices: Vec<Vec<usize>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static WALK_KV_SELECTION: RefCell<Option<WalkKvSelection>> = const { RefCell::new(None) };
     /// Per-thread override for `LARQL_MARKOV_*` env vars consulted by
@@ -47,6 +67,7 @@ thread_local! {
 /// behaves like the env var being set to that value; `None` behaves
 /// like the var being unset. With no override the helper delegates to
 /// the real process env, so production callers see no change.
+#[cfg(not(target_arch = "wasm32"))]
 fn read_markov_env(key: &'static str) -> Option<String> {
     let overridden = MARKOV_ENV_OVERRIDE.with(|o| {
         o.borrow()
@@ -81,6 +102,7 @@ pub(crate) fn clear_markov_env_overrides() {
 /// backend's `quant_matvec` inspects the format byte and dispatches to
 /// the right kernel (Q4K today; Q6K / future formats slot in
 /// automatically). `None` keeps the f32 fallback for legacy callers.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn recompute_kv(
     weights: larql_inference::WeightsView,
     h_stored: &Array2<f32>,
@@ -259,11 +281,13 @@ pub fn recompute_kv(
 /// `weights.tensors` (Arc-shared, `Ix2`). Used by `attn_kv_projection_weights`
 /// to keep its signature readable; the clippy `type_complexity` lint
 /// triggers on the inline tuple form.
+#[cfg(not(target_arch = "wasm32"))]
 type AttnKvWeightPair<'a> = (
     &'a ArrayBase<ndarray::OwnedArcRepr<f32>, Ix2>,
     &'a ArrayBase<ndarray::OwnedArcRepr<f32>, Ix2>,
 );
 
+#[cfg(not(target_arch = "wasm32"))]
 fn attn_kv_projection_weights<'a>(
     weights: larql_inference::WeightsView<'a>,
     layer: usize,
@@ -284,6 +308,7 @@ fn attn_kv_projection_weights<'a>(
 /// Set `LARQL_MARKOV_WALK_KV_TOPK=N` to replace the K/V projection
 /// matmul with row-wise top-K projection. By default it applies to all
 /// layers; restrict it with `LARQL_MARKOV_WALK_KV_LAYERS=5-20,26`.
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_top_k(layer: usize, kv_dim: usize) -> Option<usize> {
     let top_k = markov_walk_kv_requested_top_k(kv_dim)?;
     if let Some(select_layer) = markov_walk_kv_select_at() {
@@ -299,6 +324,7 @@ fn markov_walk_kv_top_k(layer: usize, kv_dim: usize) -> Option<usize> {
     Some(top_k)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_requested_top_k(kv_dim: usize) -> Option<usize> {
     let raw = read_markov_env("LARQL_MARKOV_WALK_KV_TOPK")?;
     let top_k = raw.trim().parse::<usize>().ok()?;
@@ -308,6 +334,7 @@ fn markov_walk_kv_requested_top_k(kv_dim: usize) -> Option<usize> {
     Some(top_k.min(kv_dim))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_select_at() -> Option<usize> {
     read_markov_env("LARQL_MARKOV_WALK_KV_SELECT_AT")?
         .trim()
@@ -315,11 +342,13 @@ fn markov_walk_kv_select_at() -> Option<usize> {
         .ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_diag_enabled() -> bool {
     read_markov_env("LARQL_MARKOV_WALK_KV_DIAG")
         .is_some_and(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "yes" | "on"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_kv_force_f32_projection() -> bool {
     read_markov_env("LARQL_MARKOV_KV_FORCE_F32")
         .is_some_and(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "yes" | "on"))
@@ -334,6 +363,7 @@ fn markov_kv_force_f32_projection() -> bool {
 /// `run_..._inplace ≡ run_..._q4k_direct` at the compute level and the
 /// engine-level A/B test). Shared with the codec twin (same mechanism, one
 /// toggle for both residual engines).
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn markov_inplace_kv_enabled() -> bool {
     !matches!(
         read_markov_env("LARQL_MARKOV_INPLACE_KV").as_deref(),
@@ -341,6 +371,7 @@ pub(crate) fn markov_inplace_kv_enabled() -> bool {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_diag_layer(layer: usize) -> bool {
     // Env-var absent → true (diag applies to all layers); present → check
     // the comma-list. This was a `map_or(true, ..)` while the workspace
@@ -349,6 +380,7 @@ fn markov_walk_kv_diag_layer(layer: usize) -> bool {
     read_markov_env("LARQL_MARKOV_WALK_KV_LAYERS").is_none_or(|spec| layer_in_spec(&spec, layer))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn layer_in_spec(spec: &str, layer: usize) -> bool {
     spec.split(',').any(|part| {
         let part = part.trim();
@@ -368,6 +400,7 @@ fn layer_in_spec(spec: &str, layer: usize) -> bool {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn cache_walk_kv_selection<SK, SV>(
     select_layer: usize,
     top_k: usize,
@@ -392,6 +425,7 @@ fn cache_walk_kv_selection<SK, SV>(
     });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_select_topk_indices<S>(
     x: &Array2<f32>,
     weights: &ArrayBase<S, Ix2>,
@@ -408,6 +442,7 @@ where
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_project_topk<S>(
     x: &Array2<f32>,
     weights: &ArrayBase<S, Ix2>,
@@ -432,6 +467,7 @@ where
     Some(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_select_topk_scores<S>(
     x_row: ArrayView1<'_, f32>,
     weights: &ArrayBase<S, Ix2>,
@@ -452,6 +488,7 @@ where
     scores
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_project_cached_topk<S>(
     x: &Array2<f32>,
     weights: &ArrayBase<S, Ix2>,
@@ -497,14 +534,19 @@ where
     Some(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn compare_abs_desc(a: &(usize, f32), b: &(usize, f32)) -> Ordering {
     b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(Ordering::Equal)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dot_rows(a: ArrayView1<'_, f32>, b: ArrayView1<'_, f32>) -> f32 {
     a.iter().zip(b.iter()).map(|(x, w)| x * w).sum()
 }
 
+// `eprintln!` has no core/alloc equivalent under wasm32v1-none (no
+// stderr without std) — native regardless of the VectorIndex question.
+#[cfg(not(target_arch = "wasm32"))]
 fn print_walk_kv_diag(
     layer: usize,
     path: &str,
@@ -519,6 +561,7 @@ fn print_walk_kv_diag(
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn array_diff_stats(a: &Array2<f32>, b: &Array2<f32>) -> (f64, f64, f64) {
     if a.shape() != b.shape() {
         return (f64::NAN, f64::NAN, f64::NAN);
@@ -550,6 +593,7 @@ fn array_diff_stats(a: &Array2<f32>, b: &Array2<f32>) -> (f64, f64, f64) {
     (max_abs, rms, cos)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_quant_format(fmt: &str) -> Option<QuantFormat> {
     match fmt {
         "Q4_K" => Some(QuantFormat::Q4_K),

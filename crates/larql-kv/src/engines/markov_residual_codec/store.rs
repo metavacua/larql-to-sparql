@@ -5,6 +5,9 @@ use ndarray::{s, Array2};
 
 use crate::engines::markov_residual_codec::codec::{decode_block, encode_block, ColdResidualCodec};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-layer encoded cold residuals.
 #[derive(Debug, Clone)]
 pub struct EncodedColdLayer {

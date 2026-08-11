@@ -12,7 +12,15 @@
 //! [`PromotionError::UnsupportedCapability`], so a caller cannot mistake
 //! "this substrate cannot hide a span" for "the span was hidden".
 
+// DISCREPANCY vs the round-1 survey (blanket PORTABLE): `impl
+// SemanticPromotionEngine` and `impl SemanticKvControl for
+// SemanticPromotionEngine` below both name `SemanticPromotionEngine`
+// directly, which is native-gated (engine.rs is WHOLESALE_NATIVE). Only
+// the `SemanticKvControl` trait DEFINITION itself (pure method
+// signatures over already-portable types) has no such dependency and
+// stays portable.
 use super::authority::SourceAuthority;
+#[cfg(not(target_arch = "wasm32"))]
 use super::engine::SemanticPromotionEngine;
 use super::error::PromotionError;
 use super::ids::{AuthorityId, RecordId};
@@ -22,7 +30,9 @@ use super::promotion::{
     AbortReason, OperationLease, OperationOutcome, PreparedPromotion, PromotionLease,
     PromotionPlan, PromotionRequest, QualifiedPromotion,
 };
-use super::qualification::{CapabilityKey, QualificationEvidence, RegimeFingerprint};
+use super::qualification::QualificationEvidence;
+#[cfg(not(target_arch = "wasm32"))]
+use super::qualification::{CapabilityKey, RegimeFingerprint};
 use super::record::SemanticRecord;
 
 /// Optional control surface for engines that manage semantic authority.
@@ -74,6 +84,7 @@ pub trait SemanticKvControl {
     ) -> Result<(), PromotionError>;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SemanticPromotionEngine {
     /// Declare the model / runtime / prompt-protocol regime this session
     /// runs in. Required before [`SemanticKvControl::qualify_promotion`]
@@ -153,6 +164,7 @@ impl SemanticPromotionEngine {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SemanticKvControl for SemanticPromotionEngine {
     fn register_source(&mut self, source: SourceAuthority) -> Result<AuthorityId, PromotionError> {
         self.session_mut().register_source(source)

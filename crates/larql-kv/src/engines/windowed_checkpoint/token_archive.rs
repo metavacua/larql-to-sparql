@@ -3,7 +3,10 @@
 //! Append-only; never evicted. Provides the raw token stream for replay.
 //! Four bytes per token (u32), regardless of model size.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 #[derive(Default)]
 pub struct TokenArchive {

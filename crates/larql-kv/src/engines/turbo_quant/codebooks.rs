@@ -15,7 +15,21 @@
 //! numerically; `unit_codebook_matches_regenerated` pins the tables to the
 //! in-repo generator.
 
+// `unit_codebook` is one of the round's rare genuine REIMPLEMENTATIONS,
+// not an exclusion: it is pure arithmetic over the already-const
+// centroid arrays, so wasm32v1-none CAN express it -- it just can't
+// cache the result behind `std::sync::LazyLock` (no core/alloc
+// equivalent). Native keeps its zero-copy `LazyLock`-cached path
+// unchanged; wasm32 rebuilds the (tiny, 8- or 16-entry) codebook per
+// call. Both arms return byte-identical values -- `Cow<'static,
+// Codebook>` lets both share one return type and one set of call
+// sites in `engine.rs`.
+#[cfg(not(target_arch = "wasm32"))]
+use std::borrow::Cow;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::LazyLock;
+#[cfg(target_arch = "wasm32")]
+use alloc::borrow::Cow;
 
 use super::lloyd_max::Codebook;
 
@@ -76,9 +90,11 @@ pub fn wht_coordinate_sigma(dim: usize) -> f32 {
     1.0 / (dim as f32).sqrt()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 static UNIT_CODEBOOK_3BIT: LazyLock<Codebook> =
     LazyLock::new(|| codebook_from_centroids(&UNIT_CENTROIDS_3BIT));
 
+#[cfg(not(target_arch = "wasm32"))]
 static UNIT_CODEBOOK_4BIT: LazyLock<Codebook> =
     LazyLock::new(|| codebook_from_centroids(&UNIT_CENTROIDS_4BIT));
 
@@ -96,11 +112,28 @@ fn codebook_from_centroids(centroids: &[f32]) -> Codebook {
 /// [`wht_coordinate_sigma`] for the actual block dim; every power-of-two
 /// dim the WHT accepts gets a correctly-scaled codebook (no silent
 /// fallback to a mis-scaled table).
-pub fn unit_codebook(bits: u8) -> &'static Codebook {
-    match bits {
-        3 => &UNIT_CODEBOOK_3BIT,
-        4 => &UNIT_CODEBOOK_4BIT,
-        _ => panic!("turbo-quant: unsupported bit width {bits} (expected 3 or 4)"),
+///
+/// Native: `Cow::Borrowed` from the process-lifetime `LazyLock` cache
+/// (computed once, zero-copy thereafter — unchanged behaviour). Wasm32:
+/// `Cow::Owned`, rebuilt from the const centroid arrays on every call
+/// (no LazyLock/OnceLock under core+alloc-only) — the one genuine
+/// reimplementation in this round; see the module-level doc comment.
+pub fn unit_codebook(bits: u8) -> Cow<'static, Codebook> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        match bits {
+            3 => Cow::Borrowed(&*UNIT_CODEBOOK_3BIT),
+            4 => Cow::Borrowed(&*UNIT_CODEBOOK_4BIT),
+            _ => panic!("turbo-quant: unsupported bit width {bits} (expected 3 or 4)"),
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        match bits {
+            3 => Cow::Owned(codebook_from_centroids(&UNIT_CENTROIDS_3BIT)),
+            4 => Cow::Owned(codebook_from_centroids(&UNIT_CENTROIDS_4BIT)),
+            _ => panic!("turbo-quant: unsupported bit width {bits} (expected 3 or 4)"),
+        }
     }
 }
 

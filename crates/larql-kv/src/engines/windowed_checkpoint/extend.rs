@@ -3,17 +3,34 @@
 //! Runs a CPU/GPU forward pass over new tokens, seeding each layer's attention
 //! with an optional prior K,V cache (the window boundary checkpoint).
 
+// Portable: `ExtendOutput`/`ExtendStep` (pure data), `truncate_kv_rows`
+// (pure `&mut [SharedKV]` slicing), `empty_prior` (pure `&ModelWeights`
+// arithmetic). Native: `rs_extend_from_checkpoint{,_backend}`,
+// `rs_extend_inplace`, `rs_extend_from_checkpoint_quant` -- all take
+// `Option<&VectorIndex>`/`&VectorIndex` directly or (for the first)
+// transitively via calling the `_backend` variant.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
 use ndarray::{s, Array2};
 
-use larql_inference::attention::{run_attention_block_decode_step_backend, SharedKV};
+use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::run_attention_block_decode_step_backend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::BackendFfn;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::{embed_tokens_pub, run_ffn};
 use larql_inference::kv_engine::EngineError;
 use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 pub struct ExtendOutput {
     /// Hidden state at the last processed token, shape (1, hidden).
@@ -58,6 +75,7 @@ pub fn truncate_kv_rows(kv_cache: &mut [SharedKV], rows: usize) {
 /// checkpoint at each layer. Matmuls route through `backend`.
 ///
 /// `abs_start` is the absolute position of the *first new token*.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn rs_extend_from_checkpoint(
     weights: larql_inference::WeightsView,
     token_ids: &[u32],
@@ -89,6 +107,7 @@ pub fn rs_extend_from_checkpoint(
 /// the window can rewind it after a failure. **On `Err` the cache is left
 /// partially advanced**: layers before the failing one hold the new row.
 /// [`truncate_kv_rows`] is how the owner undoes that.
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub fn rs_extend_from_checkpoint_backend(
     weights: larql_inference::WeightsView,
@@ -195,6 +214,7 @@ pub fn rs_extend_from_checkpoint_backend(
 /// returns `None`, so this writes the owned-concat result back into the buffer
 /// for that layer — buffers stay consistent. Same numerics as the owned-concat
 /// form (engine-level A/B test), only the cache representation differs.
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub fn rs_extend_inplace(
     weights: larql_inference::WeightsView,
@@ -305,6 +325,7 @@ pub fn rs_extend_inplace(
 /// `BackendFfn` (needs f32 tensors in `weights.tensors`). Attention projection
 /// uses the dequantised f32 tensors already inserted by
 /// `ensure_attn_tensors_dequantised`. Call that before this function.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn rs_extend_from_checkpoint_quant(
     weights: larql_inference::WeightsView,
     index: &VectorIndex,

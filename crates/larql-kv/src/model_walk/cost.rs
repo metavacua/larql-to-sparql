@@ -16,6 +16,9 @@ use super::plan::{ModelWalkPlan, WalkStep};
 use super::validate::ValidatedWalkPlan;
 use crate::semantic_promotion::AnswerBoundary;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Bytes per resident K/V row, per layer, at f32 — K and V together.
 /// Used by the structural estimator; real observations come from
 /// [`PhysicalEffect`](super::executor::PhysicalEffect).

@@ -11,12 +11,15 @@
 //! planner's view. Keeping them separate is what stops the KV engine
 //! from becoming the planner.
 
-use std::collections::{BTreeMap, BTreeSet};
+use crate::collections::{BTreeMap, BTreeSet};
 
 use crate::semantic_promotion::{
     AnswerBoundary, AuthorityId, CheckpointId, OperationId, OperationSpec,
     QualificationCertificate, QualificationId, RecordId, RetirementScope,
 };
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// A node. Ordered so iteration — and therefore planning — is
 /// deterministic (gate W0).

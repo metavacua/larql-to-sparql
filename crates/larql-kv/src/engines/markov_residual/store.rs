@@ -3,6 +3,9 @@
 use larql_inference::attention::SharedKV;
 use ndarray::{s, Array2};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-layer pre-attention residuals for all stored positions.
 ///
 /// **Hot K/V caching (W2, 2026-05-17 night):** `hot_kv`, when `Some`,

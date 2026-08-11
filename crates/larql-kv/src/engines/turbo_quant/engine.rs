@@ -22,24 +22,46 @@
 //! 4-bit / ≈ 0.980 at 3-bit on isotropic unit vectors (Gaussian
 //! simulation, 2026-07-30).
 
+// Portable: `TurboQuant` (stateless codec), `CompressedLayer::{compress,
+// append_row, truncate_rows, memory_bytes}`, `detect_head_dim`,
+// `resolve_block_dim`, `compress_matrix`, `last_row` -- no
+// VectorIndex/Instant/spin_pool touch. Native: `TurboQuantEngine` (`impl
+// KvEngine`, upstream-gated) and `CompressedLayer::decompress` /
+// `decompress_matrix` (routes through
+// `larql_compute::cpu::spin_pool::par_chunks_mut`, a rayon-class
+// thread pool that is itself not(wasm32)-gated in larql-compute).
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::{cpu_engine_backend, EngineBackend};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
 use ndarray::{s, Array2};
 
 use super::{codebooks, lloyd_max, packing, rotation};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::{EngineInfo, KvEngine};
 use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::{
     run_attention_block_decode_step_backend, run_attention_with_kv_backend,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::{BackendFfn, FfnBackend};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::{embed_tokens_pub, run_ffn};
 use larql_inference::kv_engine::EngineError;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 // ─── TurboQuant codec ────────────────────────────────────────────────────────
 
@@ -107,7 +129,7 @@ impl TurboQuant {
         let codebook = codebooks::unit_codebook(self.bits);
         let inv_sigma = 1.0 / codebooks::wht_coordinate_sigma(d);
         for &val in scratch_f32.iter() {
-            scratch_u8.push(lloyd_max::quantize_scalar(val * inv_sigma, codebook));
+            scratch_u8.push(lloyd_max::quantize_scalar(val * inv_sigma, &codebook));
         }
         out.extend_from_slice(&norm.to_le_bytes());
         packing::pack_indices(scratch_u8, self.bits, out);
@@ -181,6 +203,7 @@ impl CompressedLayer {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn decompress(&self, tq: &TurboQuant) -> SharedKV {
         let k = decompress_matrix(
             &self.compressed_k,
@@ -297,6 +320,7 @@ pub(super) fn compress_matrix(m: &Array2<f32>, tq: &TurboQuant, head_dim: usize)
     buf
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn decompress_matrix(
     bytes: &[u8],
     num_vecs: usize,
@@ -345,6 +369,7 @@ pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct TurboQuantEngine {
     pub(super) tq: TurboQuant,
     pub(super) backend: Box<dyn EngineBackend>,
@@ -361,6 +386,7 @@ pub struct TurboQuantEngine {
     pub(super) dequant_scratch: larql_inference::DequantScratch,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TurboQuantEngine {
     pub fn new(bits: u8) -> Self {
         Self::with_backend(bits, cpu_engine_backend())
@@ -403,6 +429,7 @@ impl TurboQuantEngine {
 // additional `impl TurboQuantEngine` block. They mutate the
 // `pub(super)` fields above.
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TurboQuantEngine {
     /// Shared body for `decode_step` / `decode_step_resident`.
     ///
@@ -510,6 +537,7 @@ impl TurboQuantEngine {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvEngine for TurboQuantEngine {
     fn name(&self) -> &str {
         "turbo-quant"
@@ -799,6 +827,7 @@ impl KvEngine for TurboQuantEngine {
 
 // ── CPU quant-path helper methods (not part of the KvEngine trait) ───────────
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TurboQuantEngine {
     fn prefill_quant_cpu(
         &mut self,

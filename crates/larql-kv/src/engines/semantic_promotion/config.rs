@@ -5,6 +5,9 @@ use super::mode::PromotionMode;
 use super::qualification::{QualificationPolicy, DEFAULT_TOLERANCE_BITS};
 use super::scope::RetirementScopePolicy;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Cap on how many tokens one promoted record may occupy. A record that
 /// needs more than this is not compact enough to be replacing anything.
 pub const DEFAULT_MAX_PROMOTED_TOKENS: usize = 64;

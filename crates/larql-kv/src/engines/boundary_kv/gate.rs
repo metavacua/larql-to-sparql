@@ -23,6 +23,9 @@ use ndarray::Array2;
 
 use crate::engines::boundary_kv::engine::BoundaryKvEngineConfig;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Build a frame for the boundary ending at `token_end`.
 ///
 /// `sequence_id` is the effective chain id (the engine's

@@ -14,24 +14,44 @@
 //!   Token archive = 4 bytes/token
 //!   Total ≈ 30 MB  vs  25.8 GB for Standard KV  (≈2,000×)
 
+// `EngineStats` is pure data + a `String`/`format!`-only `summary()` --
+// no VectorIndex/Instant/env touch -- and stays portable.
+// `WindowedCheckpointEngine` (`impl KvEngine`, upstream-gated) and every
+// import it alone needs are native.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::{cpu_engine_backend, EngineBackend};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 use serde::Serialize;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::checkpoint_store::CheckpointStore;
+#[cfg(not(target_arch = "wasm32"))]
 use super::extend::{
     empty_prior, rs_extend_from_checkpoint_backend, rs_extend_from_checkpoint_quant,
     rs_extend_inplace, truncate_kv_rows,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use super::token_archive::TokenArchive;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::{EngineInfo, KvEngine};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::kv_engine::EngineError;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 // ─── EngineStats ─────────────────────────────────────────────────────────────
 
@@ -59,6 +79,7 @@ impl EngineStats {
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct WindowedCheckpointEngine {
     pub window_size: usize,
     pub checkpoints: CheckpointStore,
@@ -104,8 +125,10 @@ pub struct WindowedCheckpointEngine {
 /// in `process()` (`current_window_tokens.len() >= window_size`) true
 /// forever with nothing consumed — an infinite close loop — so it is
 /// rejected at construction. `window_size == 1` is legal.
+#[cfg(not(target_arch = "wasm32"))]
 const MIN_WINDOW_SIZE: usize = 1;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl WindowedCheckpointEngine {
     /// # Panics
     ///
@@ -564,6 +587,7 @@ impl WindowedCheckpointEngine {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvEngine for WindowedCheckpointEngine {
     fn name(&self) -> &str {
         "windowed-checkpoint"
@@ -806,6 +830,7 @@ impl KvEngine for WindowedCheckpointEngine {
 
 // ── Executor-driven window extension ─────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 impl WindowedCheckpointEngine {
     /// Executor-aware analogue of `process_quant`: feeds tokens into the
     /// current window, auto-closes on fill, drives per-layer compute

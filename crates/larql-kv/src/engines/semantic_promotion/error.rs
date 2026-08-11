@@ -8,6 +8,9 @@
 use super::ids::{AuthorityId, OperationId, RecordId};
 use crate::EngineError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Errors from the semantic promotion protocol.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PromotionError {

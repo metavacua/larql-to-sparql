@@ -13,6 +13,9 @@ use super::materialisation::MaterialisationKind;
 use super::operation::OperationSignature;
 use super::scoring::{QualificationMetrics, ScoredObject, DEFAULT_KL_TOLERANCE_BITS};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Identifies the weights a certificate was established against.
 ///
 /// Must distinguish anything that changes logits: architecture, weights,

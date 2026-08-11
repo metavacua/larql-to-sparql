@@ -16,6 +16,9 @@
 //!   - `'<u4'` → u32
 //!   - structured dtypes are parsed by the `apollo::store` module directly.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Debug)]
 pub struct NpyHeader {
     pub descr: String,
@@ -32,7 +35,7 @@ pub enum NpyError {
     #[error("truncated .npy header")]
     TruncatedHeader,
     #[error("header is not valid UTF-8: {0}")]
-    InvalidUtf8(std::str::Utf8Error),
+    InvalidUtf8(core::str::Utf8Error),
     #[error("could not parse header field '{field}' from: {snippet}")]
     ParseField {
         field: &'static str,
@@ -73,7 +76,7 @@ pub fn parse_header(bytes: &[u8]) -> Result<(NpyHeader, usize), NpyError> {
     if bytes.len() < header_end {
         return Err(NpyError::TruncatedHeader);
     }
-    let header_str = std::str::from_utf8(&bytes[10..header_end]).map_err(NpyError::InvalidUtf8)?;
+    let header_str = core::str::from_utf8(&bytes[10..header_end]).map_err(NpyError::InvalidUtf8)?;
     // `descr` may be either a quoted string (simple dtype like '<f4') or a
     // Python list literal (structured dtype like `[('token_id', '<u4'), ...]`).
     // Extract as raw text so both cases succeed.

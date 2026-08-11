@@ -16,6 +16,9 @@ use super::error::PromotionError;
 use super::ids::AuthorityId;
 use super::replay::AccessPlan;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// How a model's layers attend, as far as exclusion is concerned.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LayerAttention {
@@ -55,7 +58,7 @@ impl LayerAttention {
     /// source visible there, and excluding the sliding layer too would
     /// change which tokens that layer sees. Either way the promotion is
     /// not the one EXP-25 measured, so it is refused.
-    pub fn sliding_window_reaches(&self, span: &std::ops::Range<u64>, next_position: u64) -> bool {
+    pub fn sliding_window_reaches(&self, span: &core::ops::Range<u64>, next_position: u64) -> bool {
         let Some(window) = self.sliding_window else {
             // No declared window means the "sliding" layers attend over
             // everything; treat that as reaching.
@@ -71,7 +74,7 @@ impl LayerAttention {
     /// Build the access plan for a span, or refuse.
     pub fn access_plan_for(
         &self,
-        span: std::ops::Range<u64>,
+        span: core::ops::Range<u64>,
         next_position: u64,
     ) -> Result<AccessPlan, PromotionError> {
         if span.start >= span.end {
@@ -112,7 +115,7 @@ pub struct JournalledLayer {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExclusionJournal {
     pub authority: AuthorityId,
-    pub logical_span: std::ops::Range<u64>,
+    pub logical_span: core::ops::Range<u64>,
     pub layers: Vec<JournalledLayer>,
     /// The engine's logical position before the exclusion. Must be
     /// unchanged by it — the promoted record appends here, not at the
@@ -128,8 +131,8 @@ impl ExclusionJournal {
             .iter()
             .map(|l| {
                 let kv = l.rows.kv();
-                let cells = (kv.k.len() + kv.v.len()) * std::mem::size_of::<f32>();
-                (cells + l.rows.len() * std::mem::size_of::<u64>()) as u64
+                let cells = (kv.k.len() + kv.v.len()) * core::mem::size_of::<f32>();
+                (cells + l.rows.len() * core::mem::size_of::<u64>()) as u64
             })
             .sum()
     }

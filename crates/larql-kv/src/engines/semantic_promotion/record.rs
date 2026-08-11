@@ -31,6 +31,9 @@ use serde::{Deserialize, Serialize};
 use super::ids::{AuthorityId, RecordId};
 use super::operation::OperationSignature;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// An opaque semantic token — a subject or a relation name.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct SemanticAtom(pub String);

@@ -18,15 +18,29 @@
 //! for the `.npz` containers. No `ndarray-npy` dependency because its
 //! current release (0.10) pins ndarray 0.17 and our workspace is on 0.16.
 
+// `read_file`/`load_manifest`/`load_boundaries`/`load_boundary_residual`/
+// `load_window_tokens`/`load_entries`/`ApolloStore::load` all use
+// `std::fs`/`std::path::Path`/`zip::ZipArchive`; zip has no wasm32
+// Cargo.toml entry at all (same pattern as larql-compute's rayon), so
+// this is pure exclusion, not a reimplementation candidate.
+// `StoreLoadError` embeds `zip::result::ZipError`/`std::io::Error`
+// directly in its variants and cannot exist portably even as a type.
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use thiserror::Error;
 
 use super::entry::VecInjectEntry;
 use super::npy;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Error)]
 pub enum StoreLoadError {
     #[error("i/o error reading {path}: {source}")]
@@ -112,6 +126,7 @@ pub struct ApolloStore {
 
 impl ApolloStore {
     /// Load an Apollo store from a directory.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &Path) -> Result<Self, StoreLoadError> {
         let manifest = load_manifest(path)?;
         let boundaries = load_boundaries(path, manifest.num_windows)?;
@@ -161,7 +176,7 @@ impl ApolloStore {
             .map(|b| b.len() * 4)
             .unwrap_or(0);
         let token_bytes: usize = self.window_tokens.iter().map(|w| w.len() * 4).sum();
-        let entry_bytes = self.entries.len() * std::mem::size_of::<VecInjectEntry>();
+        let entry_bytes = self.entries.len() * core::mem::size_of::<VecInjectEntry>();
         boundary_bytes + boundary_residual_bytes + token_bytes + entry_bytes
     }
 
@@ -172,6 +187,7 @@ impl ApolloStore {
 
 // ── internals ────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read_file(path: &Path) -> Result<Vec<u8>, StoreLoadError> {
     std::fs::read(path).map_err(|source| StoreLoadError::Io {
         path: path.display().to_string(),
@@ -179,11 +195,13 @@ fn read_file(path: &Path) -> Result<Vec<u8>, StoreLoadError> {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_manifest(path: &Path) -> Result<StoreManifest, StoreLoadError> {
     let bytes = read_file(&path.join("manifest.json"))?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_boundaries(path: &Path, num_windows: usize) -> Result<Vec<Vec<f32>>, StoreLoadError> {
     let dir = path.join("boundaries");
     let mut out = Vec::with_capacity(num_windows);
@@ -199,6 +217,7 @@ fn load_boundaries(path: &Path, num_windows: usize) -> Result<Vec<Vec<f32>>, Sto
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_boundary_residual(path: &Path) -> Result<Vec<f32>, StoreLoadError> {
     let p = path.join("boundary_residual.npy");
     let bytes = read_file(&p)?;
@@ -209,6 +228,7 @@ fn load_boundary_residual(path: &Path) -> Result<Vec<f32>, StoreLoadError> {
     Ok(flat)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_window_tokens(path: &Path) -> Result<Vec<Vec<u32>>, StoreLoadError> {
     let p = path.join("window_token_lists.npz");
     let file = std::fs::File::open(&p).map_err(|source| StoreLoadError::Io {
@@ -278,6 +298,7 @@ fn load_window_tokens(path: &Path) -> Result<Vec<Vec<u32>>, StoreLoadError> {
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_entries(path: &Path) -> Result<Vec<VecInjectEntry>, StoreLoadError> {
     let p = path.join("entries.npz");
     let file = std::fs::File::open(&p).map_err(|source| StoreLoadError::Io {

@@ -28,19 +28,32 @@
 //! the parity oracle for the unification migration (see
 //! `larql-inference/docs/specs/kv-engine-unification.md` §8.7).
 
+// Every fn in this file except `last_row_as_2d` and `is_stop_token_str`
+// takes `&larql_inference::tokenizers::Tokenizer` (not(wasm32)-gated
+// upstream) and/or `&dyn FfnBackend` / `&ModelWeights` /
+// `&larql_vindex::VectorIndex` used only by those native callers — no
+// portable pocket beyond the two pure helpers below.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::{
     run_attention_block_decode_step_backend, run_attention_with_kv_backend,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::hooks::{LayerHook, NoopHook};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::layer::apply_layer_scalar;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::ple::{apply_per_layer_embedding, precompute_per_layer_inputs};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::{
     embed_tokens_pub, hidden_to_raw_logits, logits_to_predictions_pub, run_ffn,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ModelWeights;
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::cache::KvCache;
 
 mod kv_run;
@@ -55,6 +68,7 @@ pub use kv_run::{kv_decode_step_run, kv_prefill_run};
 ///
 /// Returns the concatenated generated IDs. Stops on EOS or when
 /// `max_new_tokens` have been produced.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn generate_cached<F>(
     weights: &ModelWeights,
     tokenizer: &larql_inference::tokenizers::Tokenizer,
@@ -80,6 +94,7 @@ where
 
 /// Variant of [`generate_cached`] that runs Q/K/V/O projections on a
 /// GPU `ComputeBackend` when provided. GQA softmax stays on CPU.
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub fn generate_cached_backend<F>(
     weights: &ModelWeights,
@@ -112,6 +127,7 @@ where
 /// longer attendable. Memory stays O(num_layers × window × kv_dim)
 /// regardless of total generation length. Pass `window = None` for
 /// unbounded growth.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn generate_cached_with_window<F>(
     weights: &ModelWeights,
     tokenizer: &larql_inference::tokenizers::Tokenizer,
@@ -136,6 +152,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 fn generate_cached_bounded(
     weights: &ModelWeights,
@@ -185,6 +202,7 @@ fn generate_cached_bounded(
 /// capture those intermediates. Use
 /// [`larql_inference::forward::trace_forward_full_hooked`] for a single
 /// forward pass when you need them.
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub fn generate_cached_hooked<F>(
     weights: &ModelWeights,
@@ -227,6 +245,7 @@ where
 /// `generate_cached_backend(weights, tokenizer, ffn, prompt, max,
 /// backend, window, ...)`. This is the parity gate for the unification
 /// migration (see `larql-inference/docs/specs/kv-engine-unification.md` §8.4).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn generate_with_engine<F>(
     engine: &mut crate::AnyEngine,
     weights: &ModelWeights,
@@ -297,6 +316,7 @@ where
 /// lets `ffn` borrow the same `&weights` concurrently (the moe-shards path's
 /// `RemoteMoeFfn`). With `LARQL_Q4K_DIRECT_ATTN` unset, the backend ignores the
 /// index and runs the f32 path — output is identical to [`generate_with_engine`].
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub fn generate_with_engine_resident<F>(
     engine: &mut crate::AnyEngine,
@@ -377,6 +397,7 @@ where
 /// `generate_with_engine(engine, ..., prompt_ids, max_new_tokens, on_token)`
 /// — same sampling, same EOS, same callback shape. Pinned by the
 /// `wrapper_text_only_plan_matches_generate_with_engine` test below.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn generate_with_engine_from_hidden<F>(
     engine: &mut crate::AnyEngine,
     weights: &ModelWeights,
@@ -442,6 +463,7 @@ where
     generated
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 fn generate_cached_hooked_inner(
     weights: &ModelWeights,
@@ -515,6 +537,7 @@ fn last_row_as_2d(h: &Array2<f32>) -> Array2<f32> {
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn argmax_next_token(
     weights: &ModelWeights,
     tokenizer: &larql_inference::tokenizers::Tokenizer,
@@ -536,6 +559,11 @@ fn argmax_next_token(
 /// 262K-vocab head this drops lm_head bandwidth ~4× (e.g. 2.95 GB → 0.42 GB
 /// per step on Gemma 4 26B-A4B). **Default on** (`LARQL_Q4K_LM_HEAD=0` opts
 /// out); falls back to the f32 path when no Q4_K head view exists.
+///
+/// Delegates to `larql_compute::options`, an env-var/OnceLock-backed
+/// module; its only caller, `argmax_next_token_resident`, is native
+/// anyway.
+#[cfg(not(target_arch = "wasm32"))]
 fn q4k_lm_head_enabled() -> bool {
     larql_compute::options::q4k_lm_head_enabled()
 }
@@ -545,6 +573,7 @@ fn q4k_lm_head_enabled() -> bool {
 /// `LARQL_Q4K_LM_HEAD=1`. Falls back to the f32 path when the flag is off
 /// or the vindex has no Q4_K lm_head view (untied model without
 /// `lm_head_q4.bin`).
+#[cfg(not(target_arch = "wasm32"))]
 fn argmax_next_token_resident(
     weights: &ModelWeights,
     tokenizer: &larql_inference::tokenizers::Tokenizer,
@@ -598,6 +627,7 @@ fn is_stop_token_str(s: &str) -> bool {
 ///
 /// Useful for grammar-constrained generation: the caller tracks the partial
 /// output and restricts the vocabulary to tokens valid at each position.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn generate_cached_constrained<F, M>(
     weights: &ModelWeights,
     tokenizer: &larql_inference::tokenizers::Tokenizer,
@@ -703,6 +733,7 @@ where
     generated
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn masked_argmax(
     logits: &[f32],
     tokenizer: &larql_inference::tokenizers::Tokenizer,

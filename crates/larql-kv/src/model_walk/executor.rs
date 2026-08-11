@@ -11,17 +11,33 @@
 //! plan, in order — so a diff between the plan and the trace is empty by
 //! construction, which is what gate W8 asserts.
 
+// DISCREPANCY vs the round-1 survey: this file was classified blanket
+// PORTABLE ("zero hits" for the checklist markers), but `crate::KvEngine`
+// / `SemanticPromotionEngine` / `RecordingSink` aren't on that checklist
+// and ARE native-gated upstream (engine.rs is WHOLESALE_NATIVE;
+// `RecordingSink` is the native half of events.rs's own surgical split).
+// `ObserveWalkExecutor` holds `&mut SemanticPromotionEngine` and
+// `Arc<RecordingSink>`, so it — and only it — is native here. Everything
+// else (WalkAction, PhysicalEffect, AuthoritySnapshot, WalkTrace,
+// WalkExecutionError, the `ModelWalkExecutor` trait) is pure data/trait
+// definition and stays portable.
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 use crate::semantic_promotion::{
     AuthorityId, AuthorityState, CapabilityKey, MaterialisationPolicy, OperationId, OperationLease,
-    OperationOutcome, PromotionError, PromotionRequest, RecordId, RecordingSink, SemanticKvControl,
-    SemanticPhaseEvent, SemanticPromotionEngine,
+    OperationOutcome, PromotionError, PromotionRequest, RecordId, SemanticKvControl,
+    SemanticPhaseEvent,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::semantic_promotion::{RecordingSink, SemanticPromotionEngine};
 
 use super::graph::{render_boundary, ModelEdge, ModelGraph, ModelNode};
 use super::plan::WalkStep;
 use super::validate::ValidatedWalkPlan;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// What a step proposes. In observe mode these are recorded, not done.
 #[derive(Clone, Debug, PartialEq)]
@@ -115,6 +131,7 @@ pub trait ModelWalkExecutor {
 ///
 /// `materialisation` is the caller's record rendering; the walk layer
 /// does not invent token sequences.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct ObserveWalkExecutor<'e> {
     engine: &'e mut SemanticPromotionEngine,
     graph: &'e ModelGraph,
@@ -124,6 +141,7 @@ pub struct ObserveWalkExecutor<'e> {
     sink: Arc<RecordingSink>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'e> ObserveWalkExecutor<'e> {
     pub fn new(
         engine: &'e mut SemanticPromotionEngine,
@@ -148,6 +166,7 @@ impl<'e> ObserveWalkExecutor<'e> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ModelWalkExecutor for ObserveWalkExecutor<'_> {
     fn execute_observe(
         &mut self,

@@ -23,6 +23,9 @@ use super::graph::ModelGraph;
 use super::plan::{ModelWalkPlan, WalkPlanId, WalkStep};
 use super::validate::{DefaultWalkValidator, WalkValidator};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Why no walk could be planned.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum WalkPlanError {
@@ -140,7 +143,7 @@ impl WalkPlanner {
             }
         }
 
-        candidates.sort_by_key(|c| std::cmp::Reverse(c.rank()));
+        candidates.sort_by_key(|c| core::cmp::Reverse(c.rank()));
         let mut plans = candidates
             .iter()
             .map(|c| self.plan_for(graph, operation, c))
@@ -294,7 +297,7 @@ impl WalkPlanner {
                 });
             }
         }
-        candidates.sort_by_key(|c| std::cmp::Reverse(c.rank()));
+        candidates.sort_by_key(|c| core::cmp::Reverse(c.rank()));
         Ok(candidates)
     }
 

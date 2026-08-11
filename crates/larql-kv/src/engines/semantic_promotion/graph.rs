@@ -6,7 +6,7 @@
 //! property of a record, because "this record replaces that source" is
 //! only ever true *for an operation, under a scope, on evidence*.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 
 use super::authority::{SourceAuthority, SourceAuthorityRef};
 use super::error::PromotionError;
@@ -14,6 +14,9 @@ use super::ids::{AuthorityId, CheckpointId, IdAllocator, OperationId, Qualificat
 use super::operation::OperationSpec;
 use super::record::SemanticRecord;
 use super::scope::RetirementScope;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// A node in the graph.
 #[derive(Clone, Debug, PartialEq)]

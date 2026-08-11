@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Bit-packing for 3-bit and 4-bit quantized indices.
 ///
 /// 4-bit: two values per byte (trivial nibble packing)
