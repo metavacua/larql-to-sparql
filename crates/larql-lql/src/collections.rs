@@ -20,22 +20,27 @@
 #[allow(unused_imports)]
 pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-// BTreeMap/BTreeSet need no hasher (Ord-keyed) -- alloc's own types,
-// identical to std's (std::collections::BTreeMap literally re-exports
-// alloc's), just needs `extern crate alloc;` in scope, which the
-// wasm32 crate root already declares.
-
+// Currently unused on wasm32 too, for the same reason the native
+// re-export above needs #[allow(unused_imports)]: every HashMap/HashSet
+// site in this crate lives inside relations.rs/executor/ (native-only).
+// Kept for parity with every other gated crate and for any future
+// portable code that needs it, per this file's own top-of-file rationale.
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub type HashMap<K, V> = hashbrown::HashMap<K, V, ::core::hash::BuildHasherDefault<FnvHasher>>;
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub type HashSet<K> = hashbrown::HashSet<K, ::core::hash::BuildHasherDefault<FnvHasher>>;
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 const FNV_PRIME: u64 = 0x100000001b3;
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub struct FnvHasher(u64);
 
 #[cfg(target_arch = "wasm32")]
