@@ -1,12 +1,22 @@
-#![forbid(unsafe_code)]
-// See crates/larql-core/src/lib.rs for the pattern-2 rationale. Applied
-// here too even though this is a [[bin]] target expected to remain
-// permanently native (its whole point is CLI file/network/GPU I/O) --
-// per the standing instruction to treat every crate the same way and
-// let the compiler reveal the boundary rather than assume it in
-// advance. A #![no_std] fn main() with no #[no_main]/custom entry point
-// will very likely fail differently than the library crates did; that
-// failure signature becomes the next real pattern to classify.
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale on
+// treating every crate the same way and letting the compiler reveal
+// the boundary rather than assume it in advance -- applied here too
+// even though this is a [[bin]] target expected to remain permanently
+// native (its whole point is CLI file/network/GPU I/O).
+//
+// `forbid(unsafe_code)` is NOT declared crate-wide here (pattern 18):
+// `ndarray::s![...]` (used throughout commands/dev/ov_rd and a handful
+// of commands/extraction and commands/primary::shannon_cmd call sites)
+// expands to its own internal `#[allow(unsafe_code)] unsafe {...}`,
+// which `forbid` cannot locally override even through a macro
+// expansion -- a crate-wide forbid makes those modules uncompilable,
+// CI-confirmed via workflow run 31464601274 (40 E0453 errors). Instead
+// every module and top-level item in this crate that does NOT reach
+// `ndarray::s!` carries its own `#[forbid(unsafe_code)]`, applied at
+// the exact boundary the compiler's own error list established --
+// this file's own top-level items below, and see commands/mod.rs,
+// commands/dev/ov_rd/mod.rs, commands/extraction/mod.rs, and
+// commands/primary/mod.rs for the per-submodule scoping.
 #![cfg_attr(target_arch = "wasm32", no_std)]
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::type_complexity)]
@@ -28,11 +38,16 @@
 
 use clap::{Parser, Subcommand};
 
+#[forbid(unsafe_code)]
 mod anyres_tiler;
+#[forbid(unsafe_code)]
 mod backend_select;
 mod commands;
+#[forbid(unsafe_code)]
 mod formatting;
+#[forbid(unsafe_code)]
 mod image_input;
+#[forbid(unsafe_code)]
 mod utils;
 
 use commands::dev::*;
@@ -41,6 +56,7 @@ use commands::extraction::*;
 use commands::primary::*;
 use commands::query::*;
 
+#[forbid(unsafe_code)]
 #[derive(Parser)]
 #[command(
     name = "larql",
@@ -64,6 +80,7 @@ struct Cli {
 //   * "Research"      — `larql dev <subcmd>`
 // ══════════════════════════════════════════════════════════════════════
 
+#[forbid(unsafe_code)]
 #[derive(Subcommand)]
 enum Commands {
     // ── Primary user-facing ─────────────────────────────────────────
@@ -233,6 +250,7 @@ enum Commands {
 // continue to work without a breaking change.
 // ══════════════════════════════════════════════════════════════════════
 
+#[forbid(unsafe_code)]
 #[derive(Subcommand)]
 enum DevCommand {
     /// Extract edges from FFN weights. Zero forward passes.
@@ -315,6 +333,7 @@ enum DevCommand {
 // Minor glue types
 // ══════════════════════════════════════════════════════════════════════
 
+#[forbid(unsafe_code)]
 #[derive(clap::Args)]
 struct ChatArgs {
     /// Vindex directory, `hf://owner/name`, or cache shorthand.
@@ -338,6 +357,7 @@ struct ChatArgs {
     verbose: bool,
 }
 
+#[forbid(unsafe_code)]
 impl From<ChatArgs> for run_cmd::RunArgs {
     fn from(c: ChatArgs) -> Self {
         run_cmd::RunArgs {
@@ -383,12 +403,14 @@ impl From<ChatArgs> for run_cmd::RunArgs {
     }
 }
 
+#[forbid(unsafe_code)]
 #[derive(clap::Args)]
 struct LqlArgs {
     /// LQL statement (e.g. `WALK "The capital of France is" TOP 5;`).
     statement: String,
 }
 
+#[forbid(unsafe_code)]
 #[derive(clap::Args)]
 struct ServeArgs {
     /// Path to a .vindex directory (or `hf://` path).
@@ -565,6 +587,7 @@ const LEGACY_DEV_NAMES: &[&str] = &[
     "ffn-latency",
 ];
 
+#[forbid(unsafe_code)]
 fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
     if args.len() >= 2 && LEGACY_DEV_NAMES.contains(&args[1].as_str()) {
         let mut rewritten = Vec::with_capacity(args.len() + 1);
@@ -576,6 +599,7 @@ fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
     args
 }
 
+#[forbid(unsafe_code)]
 fn main() {
     // Windows defaults the main thread to a 1 MiB stack, which our large
     // clap-derived `Commands` enum overflows during parse_from in debug
@@ -595,6 +619,7 @@ fn main() {
     std::process::exit(code);
 }
 
+#[forbid(unsafe_code)]
 fn real_main() -> i32 {
     let raw_args: Vec<String> = std::env::args().collect();
     let args = rewrite_legacy_argv(raw_args);
@@ -672,6 +697,7 @@ fn real_main() -> i32 {
     0
 }
 
+#[forbid(unsafe_code)]
 fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
         DevCommand::WeightExtract(a) => weight_walk_cmd::run(a),
@@ -702,6 +728,7 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+#[forbid(unsafe_code)]
 fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd_args = Vec::new();
     if let Some(ref path) = args.vindex_path {

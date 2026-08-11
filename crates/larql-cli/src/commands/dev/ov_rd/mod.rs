@@ -40,37 +40,63 @@
     clippy::explicit_auto_deref
 )]
 
+// Per-module `forbid(unsafe_code)`, not crate-wide (pattern 18): the
+// modules left unmarked below call `ndarray::s![...]`, whose macro
+// expansion embeds its own `#[allow(unsafe_code)] unsafe {...}` --
+// `forbid` can't be locally overridden even through a macro expansion,
+// so forbid has to stop one level above each such file. Every module
+// here IS a leaf CI-confirmed either way (workflow run 31464601274):
+// leaving one unmarked is a deliberate exemption, not an oversight.
+#[forbid(unsafe_code)]
 mod address;
 mod basis;
 mod capture;
+#[forbid(unsafe_code)]
 pub mod cmd;
 mod edit_catalog;
+#[forbid(unsafe_code)]
 mod eval_program;
 mod gamma_address;
+#[forbid(unsafe_code)]
 mod induce_program;
+#[forbid(unsafe_code)]
 mod input;
+#[forbid(unsafe_code)]
 mod metal_backend;
+#[forbid(unsafe_code)]
 mod metrics;
+#[forbid(unsafe_code)]
 mod normalize_program;
 mod oracle;
+#[forbid(unsafe_code)]
 mod oracle_pq;
 mod oracle_pq_address;
+#[forbid(unsafe_code)]
 mod oracle_pq_eval;
 mod oracle_pq_fit;
 mod oracle_pq_forward;
 mod oracle_pq_mode_d;
+#[forbid(unsafe_code)]
 mod oracle_pq_reports;
 mod oracle_pq_stability;
+#[forbid(unsafe_code)]
 mod pq;
 mod pq_exception;
 mod probe_program_class;
+#[forbid(unsafe_code)]
 mod program;
+#[forbid(unsafe_code)]
 mod program_cache;
+#[forbid(unsafe_code)]
 mod reports;
+#[forbid(unsafe_code)]
 mod runtime;
 mod sanity;
 mod static_replace;
+#[forbid(unsafe_code)]
 mod stats;
+#[forbid(unsafe_code)]
 mod synthesize_program;
+#[forbid(unsafe_code)]
 mod types;
 mod zero_ablate;
