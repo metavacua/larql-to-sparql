@@ -38,6 +38,7 @@ impl DecodeStageSummary {
     }
 
     /// Print a human-readable breakdown table.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn print(&self) {
         let total = self.avg_total_decode_us;
         let pct = |v: f64| if total > 0.0 { v / total * 100.0 } else { 0.0 };

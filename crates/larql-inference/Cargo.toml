@@ -108,6 +108,11 @@ rand = { version = "0.8", default-features = false }
 rand_distr = { version = "0.4", default-features = false }
 half = { version = "2", default-features = false }
 ndarray = { version = "0.16", default-features = false }
+# Portable HashMap/HashSet (crate::collections) and Float trait
+# (crate::alloc_prelude) backing -- same pattern as every other crate
+# gated this session.
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+hashbrown = { version = "0.15", default-features = false }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }

@@ -1,8 +1,12 @@
 use ndarray::Array2;
 
 use super::{LayerGraph, LayerOutput};
+use crate::collections::{HashMap, HashSet};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 // ── Template detection ──
 
@@ -13,7 +17,7 @@ pub struct TemplatePattern {
     /// Token prefix that identifies this template (before the entity slot).
     pub prefix_tokens: Vec<u32>,
     /// Layer range for cached regime.
-    pub cached_layers: std::ops::RangeInclusive<usize>,
+    pub cached_layers: core::ops::RangeInclusive<usize>,
 }
 
 /// Detect which template a token sequence matches, if any.
@@ -55,7 +59,7 @@ pub fn detect_template(token_ids: &[u32], templates: &[TemplatePattern]) -> Opti
 pub struct TemplateUniverse {
     pub name: String,
     /// layer → sorted vec of feature indices that fire for this template.
-    pub features: std::collections::HashMap<usize, Vec<usize>>,
+    pub features: HashMap<usize, Vec<usize>>,
 }
 
 impl TemplateUniverse {
@@ -63,6 +67,7 @@ impl TemplateUniverse {
     /// `template`: format string with `{}` for entity slot.
     /// `entities`: list of entities to test.
     /// `activation_threshold`: minimum |activation| to count a feature as firing.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build(
         weights: &ModelWeights,
         tokenizer: &tokenizers::Tokenizer,
@@ -73,8 +78,7 @@ impl TemplateUniverse {
         activation_threshold: f32,
     ) -> Self {
         let all_layers: Vec<usize> = (0..weights.num_layers).collect();
-        let mut layer_features: std::collections::HashMap<usize, std::collections::HashSet<usize>> =
-            std::collections::HashMap::new();
+        let mut layer_features: HashMap<usize, HashSet<usize>> = HashMap::default();
 
         for entity in entities {
             let prompt = template.replace("{}", entity);
@@ -130,6 +134,7 @@ impl TemplateUniverse {
     }
 
     /// Print a summary.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn summary(&self) {
         let mut layers: Vec<usize> = self.features.keys().copied().collect();
         layers.sort();
@@ -148,12 +153,14 @@ impl TemplateUniverse {
 ///
 /// Instead of scoring all 10,240 features, scores only the ~100-400
 /// that the template ever activates. Per-feature dot products + accumulations.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct GuidedWalkLayerGraph<'a> {
     pub weights: &'a ModelWeights,
     pub universe: &'a TemplateUniverse,
     pub index: &'a dyn larql_vindex::GateIndex,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> LayerGraph for GuidedWalkLayerGraph<'a> {
     fn forward_layer(
         &self,
@@ -190,6 +197,7 @@ impl<'a> LayerGraph for GuidedWalkLayerGraph<'a> {
 /// the template universe features for up/down. The gate call is the same cost
 /// as dense, but up/down computation drops from 10,240 to ~100-400 features.
 /// Up/down: per-feature dot products and scaled adds (no matmul).
+#[cfg(not(target_arch = "wasm32"))]
 fn guided_walk_ffn(
     weights: &ModelWeights,
     h_post_attn: &Array2<f32>,
