@@ -33,6 +33,7 @@ impl core::fmt::Display for StorageDtype {
 /// `extract::build`, `extract::streaming`, and `format::weights::write` —
 /// they all need the same f32→bytes encode + write + length-tracking
 /// pattern.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn write_floats(
     w: &mut impl std::io::Write,
     data: &[f32],

@@ -125,6 +125,7 @@ pub use extract::{
 };
 
 // Format
+#[cfg(not(target_arch = "wasm32"))]
 pub use format::checksums;
 #[cfg(not(target_arch = "wasm32"))]
 pub use format::down_meta;

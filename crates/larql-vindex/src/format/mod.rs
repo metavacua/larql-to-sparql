@@ -35,5 +35,7 @@ pub mod weights;
 // in the 2026-04-25 round-2 cleanup (the file does encoding-side
 // codec work; the runtime store lives at `index::storage::fp4_store`).
 // Drop this alias once external callers are migrated.
+#[cfg(not(target_arch = "wasm32"))]
 pub use describes::model_id_at;
+#[cfg(not(target_arch = "wasm32"))]
 pub use fp4_codec as fp4_storage;

@@ -62,4 +62,5 @@ pub use region_format::{Packing, RegionFormat};
 pub use region_role::RegionRole;
 pub use region_schema::RegionSchema;
 pub use segment::SegmentDescriptor;
+#[cfg(not(target_arch = "wasm32"))]
 pub use write::{Lyrw2Writer, RegionCursor};

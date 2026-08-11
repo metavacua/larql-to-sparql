@@ -110,7 +110,7 @@ fn apply(activation: Activation, x: f32) -> f32 {
             0.5 * x * (1.0 + inner.tanh())
         }
         Activation::GeluExact => {
-            const SQRT_2: f32 = std::f32::consts::SQRT_2;
+            const SQRT_2: f32 = core::f32::consts::SQRT_2;
             0.5 * x * (1.0 + erf(x / SQRT_2))
         }
         Activation::ReLU => x.max(0.0),

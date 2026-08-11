@@ -2,6 +2,10 @@
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use alloc::sync::Arc;
 
 /// Q4_0/Q4_K/Q6_K FFN storage access.
 pub trait QuantizedFfnAccess: Send + Sync {
@@ -75,7 +79,7 @@ pub trait QuantizedFfnAccess: Send + Sync {
         &self,
         _layer: usize,
         _component: usize,
-    ) -> Option<std::sync::Arc<Vec<f32>>> {
+    ) -> Option<Arc<Vec<f32>>> {
         None
     }
 
