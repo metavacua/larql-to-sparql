@@ -21,22 +21,30 @@
 //! re-exported flat, so `larql_inference::kv_engine::EngineError` and its
 //! siblings keep resolving as they did when this was one file.
 
+// kv.rs/any.rs/retrieval.rs put `&VectorIndex` in every trait method
+// signature -- architecturally native, not incidental.
+#[cfg(not(target_arch = "wasm32"))]
 mod any;
 mod dispatch_path;
 mod error;
 mod info;
+#[cfg(not(target_arch = "wasm32"))]
 mod kv;
 mod per_layer;
+#[cfg(not(target_arch = "wasm32"))]
 mod retrieval;
 mod stages;
 #[cfg(test)]
 mod test_stubs;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use any::AnyEngine;
 pub use dispatch_path::DispatchPath;
 pub use error::EngineError;
 pub use info::EngineInfo;
+#[cfg(not(target_arch = "wasm32"))]
 pub use kv::KvEngine;
 pub use per_layer::{ExcisedKvRows, ExcisedRows, KvExtent, PerLayerKvAccess};
+#[cfg(not(target_arch = "wasm32"))]
 pub use retrieval::RetrievalEngine;
 pub use stages::DecodeStageSummary;

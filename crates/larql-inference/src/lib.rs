@@ -58,10 +58,24 @@ extern crate alloc;
 ))]
 extern crate blas_src;
 
+mod alloc_prelude;
+mod collections;
+pub use collections::{FnvHasher, HashMap, HashSet};
+
 pub mod async_compute_backend;
 pub mod attention;
+// Loads a model, tokenizes entities, runs forward passes, writes NDJSON --
+// real tokenizers/std::fs/std::path/Instant throughout. Pattern 3.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod capture;
+// mod.rs/source.rs read tokenizer_config.json/chat_template.jinja from
+// disk (std::fs); render.rs is minijinja-native. Pattern 3.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod chat;
+// Per-stage wall-clock timers: thread_local!, OnceLock, env::var,
+// Instant -- none exist in core+alloc, and that's the module's entire
+// purpose. Pattern 3.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod decode_stages;
 pub mod error;
 pub mod experts;
@@ -80,9 +94,21 @@ pub mod residual;
 pub mod residual_diff;
 pub mod speech;
 pub mod ternary;
+// In-memory VectorIndex + WordLevel tokenizer test fixtures -- not
+// #[cfg(test)]-gated despite the name (larql-vindex's test_support.rs
+// shape). Pattern 3.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod test_utils;
+// Wraps the native-only `tokenizers` crate end to end (load/decode),
+// plus real std::fs/std::path. Pattern 3.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tokenizer;
 pub mod trace;
+// Every top-level fn/re-export requires &VectorIndex (module's own doc:
+// "provides only WalkFfn"); the "portable-looking" config types
+// (WalkFfnConfig/CellRouter/FeatureSelector) are never constructed
+// independently of it. Pattern 3.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod vindex;
 
 // Re-export dependencies for downstream crates.
@@ -186,13 +212,21 @@ pub use async_compute_backend::{
     ReadyResidualUpload, ResidualUploadHandle, ResidualUploadHandleInner,
 };
 pub use attention::AttentionWeights;
+#[cfg(not(target_arch = "wasm32"))]
 pub use capture::{
     CaptureCallbacks, CaptureConfig, InferenceModel, TopKEntry, VectorFileHeader, VectorRecord,
     DEFAULT_ACTIVATION_TOP_K, DEFAULT_RESIDUAL_TOP_K,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use chat::{wrap_chat_prompt, wrap_prompt_raw, wrap_with_vindex_template, ChatWrap};
 pub use error::InferenceError;
+// Mixed native/portable per-symbol; not split further this round (native
+// builds are unaffected by wholesale-gating a mixed block -- only wasm32
+// reachability of the portable subset is deferred). Individually
+// reachable via `larql_inference::ffn::*` regardless.
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn::graph_backend::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn::{
     decode_q8k_batch_response_entries, decode_single_response, encode_binary_request,
     encode_binary_request_as, encode_q8k_batch_request, expert_weights_resolvable, BackendFfn,
@@ -201,11 +235,17 @@ pub use ffn::{
     RemoteWalkBackend, ShardConfig, SparseFfn, WeightFfn, WireFormat, WirePreference, BINARY_CT,
     F16_CT, I8_CT, Q8K_BATCH_CT,
 };
+// All of these come from the portable `larql_compute::kv_dispatch` shim
+// (already green upstream) -- `helpers.rs` (native, VectorIndex-coupled)
+// contributes no crate-root-re-exported symbol. Must stay ungated:
+// `cpu_engine_backend()` above uses `Box<dyn EngineBackend>` unconditionally.
 pub use kv_dispatch::{
     CompressionCodec, EngineBackend, KvDispatch, KvHandle, KvHandleInner, PerLayerDecodeState,
     ResidualHandle, ResidualHandleInner,
 };
-pub use kv_engine::{DecodeStageSummary, EngineInfo, KvEngine};
+pub use kv_engine::{DecodeStageSummary, EngineInfo};
+#[cfg(not(target_arch = "wasm32"))]
+pub use kv_engine::KvEngine;
 // Crate-root forward re-exports — kept for any name with external use OR
 // in-crate examples/tests/benches that already import from the root. The
 // curated `research` module (below) re-sources these from subpaths so it
@@ -220,6 +260,12 @@ pub use kv_engine::{DecodeStageSummary, EngineInfo, KvEngine};
 // `PredictResultWithResiduals`, `RawForward`, `SpecCapture`,
 // `TargetDelta`, `TraceResult`, `KNN_COSINE_THRESHOLD`. They remain
 // accessible via `larql_inference::forward::*` and `research::*`.
+// Mixed native (infer_patched/InferenceWeights/KnnOverride/KnnRouteMode/
+// walk_trace_from_residuals -- from infer_patched.rs/inference_weights.rs)
+// and portable (the rest) symbols; wholesale-gated this round for safety
+// -- not used unconditionally elsewhere in this file. Individually
+// reachable via `larql_inference::forward::*` regardless.
+#[cfg(not(target_arch = "wasm32"))]
 pub use forward::{
     apply_knn_override, apply_knn_override_two_tier, apply_knn_override_verified,
     calibrate_scalar_gains, capture_decoy_residuals, capture_residuals, capture_spec_residuals,
@@ -235,6 +281,10 @@ pub use forward::{
 // `GridGenerateResult`, `ChatMLRenderer`, `GemmaRenderer`, `LayerOutput`,
 // `Llama3Renderer`, `PerLayerGraph`, `TurnRenderer`. They remain reachable
 // via `larql_inference::layer_graph::*`.
+// Wholesale-gated this round (mixed native/portable, not used
+// unconditionally elsewhere in this file); reachable via
+// `larql_inference::layer_graph::*` regardless.
+#[cfg(not(target_arch = "wasm32"))]
 pub use layer_graph::{
     build_adaptive_graph,
     detect_template,
@@ -279,13 +329,20 @@ pub use layer_graph::{
     TemplateUniverse,
     WalkLayerGraph,
 };
-pub use model::{load_model_dir, resolve_model_path, DequantScratch, ModelWeights, WeightsView};
+#[cfg(not(target_arch = "wasm32"))]
+pub use model::{load_model_dir, resolve_model_path};
+pub use model::{DequantScratch, ModelWeights, WeightsView};
+#[cfg(not(target_arch = "wasm32"))]
 pub use tokenizer::{decode_token, decode_token_raw, encode_prompt, load_tokenizer};
+// Wholesale-gated this round (mixed boundary/context/store [native] +
+// capture/types/vocab [portable]).
+#[cfg(not(target_arch = "wasm32"))]
 pub use trace::{
     trace as trace_decomposed, trace_residuals, AnswerWaypoint, BoundaryStore, BoundaryWriter,
     ContextStore, ContextTier, ContextWriter, LayerSummary, ResidualTrace, TraceNode,
     TracePositions, TraceStore, TraceWriter,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use vindex::{
     generate_kquant_cpu_remote, open_inference_vindex, predict_kquant, FfnL1Cache, WalkFfn,
     WalkFfnConfig,
@@ -296,6 +353,10 @@ pub use vindex::{
 /// New downstream code should prefer this module over broad crate-root
 /// glob imports. The crate root remains source-compatible while the public
 /// surface is gradually narrowed.
+// Wholesale-gated: every symbol here traces back to a native-gated
+// module (generate/load_tokenizer/open_inference_vindex/predict_kquant/
+// WalkFfn/etc.) or a mixed block already gated above.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod prelude {
     pub use crate::{
         default_backend, generate, generate_streaming, generate_with_sampling, load_model_dir,
@@ -322,6 +383,9 @@ pub mod prelude {
 /// `EngineKind` and accuracy helpers (`compare_hidden`,
 /// `cosine_similarity`, `kl_divergence`, …) live in the `larql-kv`
 /// crate — depend on it directly when you need concrete engines.
+// Wholesale-gated: sources from forward/layer_graph/trace, all
+// mixed-and-wholesale-gated above.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod research {
     // Source directly from subpaths so this curated surface keeps working
     // even when individual root re-exports are dropped. Kept as a single

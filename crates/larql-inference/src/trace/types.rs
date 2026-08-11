@@ -86,6 +86,7 @@ impl ResidualTrace {
         super::vocab::project_to_logits(weights, vec)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn top_k(
         &self,
         weights: &ModelWeights,
@@ -143,6 +144,7 @@ impl ResidualTrace {
         traj
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn layer_summaries<'a>(
         &'a self,
         weights: &'a ModelWeights,

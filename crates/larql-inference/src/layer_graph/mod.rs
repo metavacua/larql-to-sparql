@@ -15,20 +15,32 @@
 mod cached;
 mod dense;
 pub mod generate;
+// grid/hybrid/logits/predict/prefill: &VectorIndex + GPU-pipeline/remote-
+// shard dispatch throughout -- native-only. grid/config.rs's portable
+// pieces (if any downstream consumer needs them independently of the
+// rest of grid/) become a follow-up refinement, not gated separately here.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod grid;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod hybrid;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod logits;
 pub mod pipeline_layer;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod predict;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod prefill;
 mod template;
 mod walk;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use generate::{
     generate, generate_constrained, generate_constrained_streaming,
     generate_constrained_streaming_sampled, generate_streaming, generate_with_sampling,
     lm_head_topk, try_generate, try_generate_constrained, try_generate_constrained_streaming,
     try_generate_constrained_streaming_sampled, try_generate_streaming, try_generate_with_sampling,
+};
+pub use generate::{
     ChatMLRenderer, ChatSession, Detokenizer, EosConfig, GemmaRenderer, GenerateError,
     GenerateResult, Llama3Renderer, Sampler, SamplingConfig, StageTimings, TurnRenderer,
 };
@@ -41,6 +53,7 @@ use crate::model::ModelWeights;
 // Re-export everything publicly
 pub use cached::*;
 pub use dense::*;
+#[cfg(not(target_arch = "wasm32"))]
 pub use predict::*;
 pub use template::*;
 pub use walk::*;

@@ -4,6 +4,9 @@ use crate::model::ModelWeights;
 use larql_models::NormType;
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Project a vector through final_norm → lm_head → logits.
 pub fn project_to_logits(weights: &ModelWeights, vec: &[f32]) -> Vec<f32> {
     let hidden = weights.hidden_size;
@@ -34,6 +37,7 @@ pub fn project_to_logits(weights: &ModelWeights, vec: &[f32]) -> Vec<f32> {
 
 pub use crate::forward::softmax;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn top_k_from_logits(
     logits: &[f32],
     tokenizer: &tokenizers::Tokenizer,

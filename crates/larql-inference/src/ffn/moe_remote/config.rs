@@ -170,6 +170,7 @@ impl UnitManifest {
 /// `ShardConfig`s.  Returns `RemoteMoeError::Client` on read or parse
 /// failure with the path included so the operator can fix it without
 /// grepping logs.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn parse_unit_manifest(path: &std::path::Path) -> Result<Vec<ShardConfig>, RemoteMoeError> {
     let bytes = std::fs::read(path).map_err(|e| {
         RemoteMoeError::Client(format!("unit-manifest: read {}: {e}", path.display()))

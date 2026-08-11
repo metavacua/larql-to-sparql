@@ -9,9 +9,14 @@
 //! Eliminates the gate matmul entirely. One embedding projection + hash lookup
 //! replaces 500ms of BLAS.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufRead, BufReader, BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 use ndarray::Array2;
 
@@ -62,7 +67,7 @@ impl GateIndex {
         // Scale embeddings once (Gemma convention)
         let scaled_embed = &weights.embed * embed_scale;
 
-        let mut index = HashMap::new();
+        let mut index = HashMap::default();
 
         for (idx, &layer) in layers.iter().enumerate() {
             callbacks.on_layer_start(layer, total);
@@ -122,6 +127,7 @@ impl GateIndex {
 
     /// Build the gate index and stream directly to disk — never holds more than
     /// one layer's worth of index data in memory at a time.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build_streaming(
         weights: &ModelWeights,
         layers: &[usize],
@@ -216,6 +222,7 @@ impl GateIndex {
 
     /// Save the gate index to an NDJSON file.
     /// Format: header line, then one line per (layer, token) entry.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save(&self, path: &Path) -> Result<(), InferenceError> {
         let file = std::fs::File::create(path)?;
         let mut writer = BufWriter::new(file);
@@ -259,11 +266,12 @@ impl GateIndex {
     }
 
     /// Load a gate index from an NDJSON file.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &Path, top_tokens: usize) -> Result<Self, InferenceError> {
         let file = std::fs::File::open(path)?;
         let reader = BufReader::new(file);
 
-        let mut index: HashMap<usize, Vec<Vec<(usize, f32)>>> = HashMap::new();
+        let mut index: HashMap<usize, Vec<Vec<(usize, f32)>>> = HashMap::default();
         let mut features_per_token = 0;
 
         for line in reader.lines() {
@@ -334,7 +342,7 @@ impl GateIndex {
         };
 
         // Union features from matched tokens, dedup, keep highest-magnitude precomputed score for ranking
-        let mut feature_map: HashMap<usize, f32> = HashMap::new();
+        let mut feature_map: HashMap<usize, f32> = HashMap::default();
         for &(tok_id, _) in token_scores {
             if tok_id < layer_index.len() {
                 for &(feat_id, gate_act) in &layer_index[tok_id] {
@@ -406,7 +414,7 @@ impl GateIndex {
         }
 
         // Union all features from top-N tokens, dedup by feature_id (keep max activation)
-        let mut feature_map: HashMap<usize, f32> = HashMap::new();
+        let mut feature_map: HashMap<usize, f32> = HashMap::default();
         for &(tok_id, _token_score) in &token_scores {
             if tok_id < layer_index.len() {
                 for &(feat_id, gate_act) in &layer_index[tok_id] {

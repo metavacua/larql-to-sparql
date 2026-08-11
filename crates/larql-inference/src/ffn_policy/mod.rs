@@ -84,12 +84,15 @@
 
 pub mod backend_kind;
 pub mod policy;
+// Live `WalkFfn`/`VectorIndex` binding -- native-only.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod router;
 pub mod routing;
 pub mod validated;
 
 pub use backend_kind::FfnBackendKind;
 pub use policy::{FfnLayerPolicy, PolicyParseError, PolicyValidationError};
+#[cfg(not(target_arch = "wasm32"))]
 pub use router::{BoundFfnRouter, BuildError};
 pub use routing::RoutingPredicate;
 pub use validated::ValidatedFfnLayerPolicy;

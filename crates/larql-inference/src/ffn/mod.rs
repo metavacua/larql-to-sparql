@@ -14,11 +14,18 @@
 //! backends) stay here because they pull in inference-side topology.
 
 pub mod graph_backend;
+// Option<&VectorIndex> field.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod local_moe;
 pub mod moe_backend;
 pub mod moe_bound;
+// Vindex3Container::open(root) -- real filesystem container open.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod moe_container;
+// Splits internally (backend/shard/stream/runtime native; config/error/
+// ffn_adapter/metrics/multi_layer_wire/router/wire portable).
 pub mod moe_remote;
+// Splits internally (http/sharded native; codec/q8k_wire/timing portable).
 pub mod remote;
 pub mod sparse;
 pub mod sparse_compute;
@@ -34,21 +41,26 @@ pub use larql_compute::ffn::{
 
 // ── Re-exports ──
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use local_moe::LocalMoeFfn;
 pub use moe_backend::{
     InProcessMoeBackend, MoeBackendError, MoeExpertBackend, MoeFailurePolicy, MoeRoute,
 };
 pub use moe_bound::BoundMoeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 pub use moe_container::{CompositionError, ContainerRoutedBackend};
+#[cfg(not(target_arch = "wasm32"))]
+pub use moe_remote::RemoteMoeBackend;
 pub use moe_remote::{
-    MoeFfn, MoeRouterWeights, RecordedRefusal, RefusalPolicy, RemoteMoeBackend, RemoteMoeError,
-    RemoteMoeFfn, ShardConfig,
+    MoeFfn, MoeRouterWeights, RecordedRefusal, RefusalPolicy, RemoteMoeError, RemoteMoeFfn,
+    ShardConfig,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote::{LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference};
 pub use remote::{
     decode_q8k_batch_response_entries, decode_single_response, encode_binary_request,
-    encode_binary_request_as, encode_q8k_batch_request, LayerShardedBackend, RemoteFfnConfig,
-    RemoteFfnError, RemoteLatencyStats, RemoteWalkBackend, WireFormat, WirePreference, BINARY_CT,
-    F16_CT, I8_CT, Q8K_BATCH_CT,
+    encode_binary_request_as, encode_q8k_batch_request, RemoteLatencyStats, WireFormat,
+    BINARY_CT, F16_CT, I8_CT, Q8K_BATCH_CT,
 };
 pub use sparse::SparseFfn;
 pub use sparse_compute::{

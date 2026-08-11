@@ -54,6 +54,7 @@ pub fn run_layer_with_zeroed_pre_o_heads(
         heads,
         shared_kv,
     )?;
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(dir) = crate::forward::dump_config::DumpConfig::get().layer_dir() {
         let slice = h_post_attn.as_slice().unwrap_or(&[]);
         let bytes: Vec<u8> = slice.iter().flat_map(|v| v.to_le_bytes()).collect();

@@ -10,8 +10,12 @@
 //! `vindex::is_end_of_turn` had a longer list; `forward::kv_generate` had
 //! a third superset including Llama-3 markers.
 
-use std::collections::HashSet;
+use crate::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 pub use larql_vindex::format::filenames::GENERATION_CONFIG_JSON as GENERATION_CONFIG_FILENAME;
 
@@ -53,7 +57,7 @@ impl EosConfig {
     /// in `generation_config.json` overrides.
     pub fn builtin() -> Self {
         Self {
-            eos_token_ids: HashSet::new(),
+            eos_token_ids: HashSet::default(),
             stop_strings: BUILTIN_STOP_STRINGS.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -103,6 +107,7 @@ impl EosConfig {
 
     /// Convenience: read `<vindex_dir>/generation_config.json` and apply
     /// it. Missing file falls back to [`Self::builtin`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_vindex_dir(vindex_dir: &Path) -> Self {
         let path = vindex_dir.join(GENERATION_CONFIG_FILENAME);
         if !path.is_file() {

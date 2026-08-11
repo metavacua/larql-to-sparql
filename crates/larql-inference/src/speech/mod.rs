@@ -7,9 +7,16 @@
 //! and interpretation (text detokenisation, codec decode) belongs to
 //! whatever consumes them.
 
+// Pull `larql_models::speech::*` (native-only upstream) and/or
+// `tokenizers::Tokenizer` directly in real (non-test) code.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod moss_prompt;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod moss_realtime;
 pub mod moss_sampling;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod moss_session;
 pub mod stream_timing;
+// Not #[cfg(test)]-gated despite the name -- always-compiled fixture code.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod test_support;

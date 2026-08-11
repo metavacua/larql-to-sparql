@@ -63,8 +63,14 @@
 //! ```
 
 pub mod codec;
+// reqwest HTTP client.
+#[cfg(not(target_arch = "wasm32"))]
 mod http;
 pub mod q8k_wire;
+// LayerShardedBackend wraps http::RemoteWalkBackend directly -- native,
+// not portable (correcting an earlier survey miss: no keyword hit on
+// `reqwest::`/`std::fs` in this file itself, but it's still coupled).
+#[cfg(not(target_arch = "wasm32"))]
 pub mod sharded;
 pub mod timing;
 
@@ -75,6 +81,7 @@ pub use codec::{
     encode_binary_request_as, encode_json_full_output, DecodedFfnRequest, FfnEntry, FfnOutput,
     RemoteLatencyStats, WireFormat, BATCH_MARKER, BINARY_CT, F16_CT, I8_CT,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use http::{
     RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference, STATS_PATH, WALK_FFN_PATH,
     WALK_FFN_Q8K_PATH,
@@ -83,6 +90,7 @@ pub use q8k_wire::{
     decode_q8k_batch_request, decode_q8k_batch_response, decode_q8k_batch_response_entries,
     encode_q8k_batch_request, encode_q8k_batch_response, Q8KRequestEntry, Q8K_BATCH_CT,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use sharded::LayerShardedBackend;
 pub use timing::{
     append_timing_trailer, split_timing_trailer, timing_requested, TIMING_HEADER,

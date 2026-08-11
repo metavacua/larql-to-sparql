@@ -24,7 +24,11 @@
 pub mod dump_config;
 pub mod embed;
 pub mod hooks;
+// infer_patched/_q4k/_early_exit take &VectorIndex directly.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod infer_patched;
+// InferenceWeights::load calls VectorIndex::load_vindex.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod inference_weights;
 pub mod layer;
 mod layer_interventions;
@@ -55,12 +59,14 @@ pub use hooks::{
     AttnZeroHook, CompositeHook, FFNZeroHook, LayerHook, NoopHook, RecordHook, SteerHook,
     ZeroAblateHook,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use infer_patched::{
     apply_knn_override, apply_knn_override_two_tier, apply_knn_override_verified, infer_patched,
     infer_patched_early_exit, infer_patched_q4k, infer_patched_q4k_early_exit,
     walk_trace_from_residuals, InferPatchedResult, KnnOverride, KnnRouteMode, KNN_COSINE_THRESHOLD,
     KNN_VERIFY_TOPK,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use inference_weights::InferenceWeights;
 pub use layer::{run_attention_public, run_ffn, run_layer_with_capture_hooked, run_layer_with_ffn};
 pub use layer_interventions::{

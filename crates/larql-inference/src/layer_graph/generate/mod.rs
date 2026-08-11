@@ -6,13 +6,21 @@
 //! - [`sampling`]: greedy / temperature / top-k / top-p sampler.
 
 pub mod chat_session;
+// constrained/cpu/gpu/gpu_setup/lm_head/policy: &VectorIndex + Metal/GPU
+// dispatch throughout -- native-only.
+#[cfg(not(target_arch = "wasm32"))]
 mod constrained;
+#[cfg(not(target_arch = "wasm32"))]
 mod cpu;
 pub mod detok;
 pub mod eos;
+#[cfg(not(target_arch = "wasm32"))]
 mod gpu;
+#[cfg(not(target_arch = "wasm32"))]
 mod gpu_setup;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod lm_head;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod policy;
 pub mod sampling;
 mod types;
@@ -20,6 +28,7 @@ mod types;
 pub use chat_session::{
     ChatMLRenderer, ChatSession, GemmaRenderer, Llama3Renderer, TurnRenderer, DEFAULT_MAX_CONTEXT,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use constrained::{
     generate_constrained, generate_constrained_streaming, generate_constrained_streaming_sampled,
     try_generate_constrained, try_generate_constrained_streaming,
@@ -27,10 +36,12 @@ pub use constrained::{
 };
 pub use detok::Detokenizer;
 pub use eos::{EosConfig, BUILTIN_STOP_STRINGS, GENERATION_CONFIG_FILENAME};
+#[cfg(not(target_arch = "wasm32"))]
 pub use gpu::{
     generate, generate_streaming, generate_with_sampling, stream_forced_full_logits, try_generate,
     try_generate_streaming, try_generate_with_sampling, ForcedLogitsResult,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use lm_head::lm_head_topk;
 pub use sampling::{Sampler, SamplingConfig};
 pub use types::{GenerateError, GenerateResult, StageTimings};
