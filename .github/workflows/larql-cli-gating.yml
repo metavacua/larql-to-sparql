@@ -13,6 +13,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # `cargo fmt --check` is target- and feature-independent -- formatting
+  # doesn't care what triple you're building for, so unlike everything
+  # below it needs no os:/features: axis and no wasm32 toolchain target
+  # at all, just the rustfmt component. Scoped to exactly the 14 crates
+  # in larql-cli's closure (not a bare workspace-wide `cargo fmt
+  # --check`), so it can't fail on formatting debt in an out-of-closure
+  # crate (larql-server/demos/router/python/experts) that this campaign
+  # has never touched. Runs first, gates everything else via
+  # wasm32v1-none-ubuntu's `needs:` below -- it's the cheapest possible
+  # check, so there's no reason to spend any build time before it runs.
+  fmt-check:
+    name: fmt-check / ${{ matrix.crate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - larql-cli
+          - larql-core
+          - larql-compute
+          - larql-compute-metal
+          - larql-inference
+          - larql-kv
+          - larql-models
+          - larql-lql
+          - larql-vindex
+          - larql-vindex-spec
+          - larql-factory
+          - larql-boundary
+          - larql-execution
+          - larql-router-protocol
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: cargo fmt --check
+        run: cargo fmt -p ${{ matrix.crate }} -- --check
+
   # OS is the outer ordering axis, crate-dependency is the inner one --
   # ubuntu + wasm32v1-none is the absolute first thing that runs, for
   # everything. Only once the entire ubuntu wave clears does anything
@@ -29,6 +71,7 @@ jobs:
   # through, not a per-crate-only gate.
   wasm32v1-none-ubuntu:
     name: wasm32v1-none / ${{ matrix.crate }} / ubuntu-latest / ${{ matrix.features }}
+    needs: fmt-check
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
@@ -61,6 +104,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
+          components: clippy
 
       # No OpenBLAS install here (unlike forbid-unsafe below): every BLAS
       # dependency in this workspace is gated behind
@@ -88,6 +132,23 @@ jobs:
             cargo build --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features
           else
             cargo build --target wasm32v1-none -p ${{ matrix.crate }}
+          fi
+
+      # No --all-targets: that would pull in #[cfg(test)] modules, which
+      # this whole campaign has deliberately never gated for wasm32
+      # (they're not compiled by a plain `cargo build` either -- same
+      # scope boundary, just enforced for lint as well as build now).
+      # This is the first time any of this crate's wasm32-cfg'd code has
+      # ever been linted by anything: native clippy runs on the disabled
+      # per-crate workflows never see it (cfg'd out entirely), and the
+      # build step above only checks for compile errors, not lint warnings.
+      - name: cargo clippy --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features -- -D warnings
+          else
+            cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} -- -D warnings
           fi
 
   # Same 12 crates, windows + macos -- gated on the ubuntu wave above
@@ -121,6 +182,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
+          components: clippy
 
       - name: Install protoc (Windows)
         if: runner.os == 'Windows'
@@ -147,6 +209,15 @@ jobs:
             cargo build --target wasm32v1-none -p ${{ matrix.crate }}
           fi
 
+      - name: cargo clippy --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features -- -D warnings
+          else
+            cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} -- -D warnings
+          fi
+
   # larql-compute-metal: macOS-only, no ubuntu/windows leg exists for
   # it. Still gated on the ubuntu wave (see the top-level comment) even
   # though it has no ubuntu leg of its own.
@@ -165,6 +236,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
+          components: clippy
 
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v6
@@ -186,6 +258,15 @@ jobs:
             cargo build --target wasm32v1-none -p larql-compute-metal
           fi
 
+      - name: cargo clippy --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p larql-compute-metal --no-default-features -- -D warnings
+          else
+            cargo clippy --target wasm32v1-none -p larql-compute-metal -- -D warnings
+          fi
+
   # larql-cli (the root) on ubuntu -- gated on every dependency's
   # windows/macos legs AND the metal leg, since larql-cli's default
   # feature set (`gpu`) pulls in larql-compute-metal.
@@ -204,6 +285,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
+          components: clippy
 
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v6
@@ -225,6 +307,15 @@ jobs:
             cargo build --target wasm32v1-none -p larql-cli
           fi
 
+      - name: cargo clippy --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p larql-cli --no-default-features -- -D warnings
+          else
+            cargo clippy --target wasm32v1-none -p larql-cli -- -D warnings
+          fi
+
   # larql-cli on windows + macos -- gated on its own ubuntu leg above.
   wasm32v1-none-cli-others:
     name: wasm32v1-none / larql-cli / ${{ matrix.os }} / ${{ matrix.features }}
@@ -242,6 +333,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
+          components: clippy
 
       - name: Install protoc (Windows)
         if: runner.os == 'Windows'
@@ -266,6 +358,15 @@ jobs:
             cargo build --target wasm32v1-none -p larql-cli --no-default-features
           else
             cargo build --target wasm32v1-none -p larql-cli
+          fi
+
+      - name: cargo clippy --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p larql-cli --no-default-features -- -D warnings
+          else
+            cargo clippy --target wasm32v1-none -p larql-cli -- -D warnings
           fi
 
   forbid-unsafe:
