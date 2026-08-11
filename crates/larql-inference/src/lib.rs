@@ -60,7 +60,13 @@ extern crate blas_src;
 
 mod alloc_prelude;
 mod collections;
-pub use collections::{FnvHasher, HashMap, HashSet};
+// `FnvHasher` only exists on wasm32 (native uses std's HashMap/HashSet
+// with their own default hasher) -- re-exporting it unconditionally
+// broke native compilation (E0432, caught by the native test oracle,
+// invisible in wasm32-only CI since FnvHasher genuinely exists there).
+#[cfg(target_arch = "wasm32")]
+pub use collections::FnvHasher;
+pub use collections::{HashMap, HashSet};
 
 #[cfg(target_arch = "wasm32")]
 use crate::alloc_prelude::*;

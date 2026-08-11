@@ -108,7 +108,13 @@ mod collections;
 // reachable even though the module itself stays private. See
 // crates/larql-models/src/lib.rs for the confirmed instance of this
 // landmine and the same fix.
-pub use collections::{FnvHasher, HashMap, HashSet};
+// `FnvHasher` only exists on wasm32 (native uses std's HashMap/HashSet
+// with their own default hasher) -- re-exporting it unconditionally
+// broke native compilation (E0432, caught by the native test oracle,
+// invisible in wasm32-only CI since FnvHasher genuinely exists there).
+#[cfg(target_arch = "wasm32")]
+pub use collections::FnvHasher;
+pub use collections::{HashMap, HashSet};
 // Both directly depend on larql_models::{connectors,encoders}, which
 // are themselves wholesale wasm32-excluded (mmap/file-loading
 // pipelines, see crates/larql-models/src/lib.rs) -- confirmed via grep

@@ -31,7 +31,13 @@ mod collections;
 // code needs to resolve a trait bound through it, e.g. calling `.get()`),
 // so the collections module's own items must be reachable even though the
 // module itself stays private (its internal layout isn't API).
-pub use collections::{FnvHasher, HashMap, HashSet};
+// `FnvHasher` only exists on wasm32 (native uses std's HashMap/HashSet
+// with their own default hasher) -- re-exporting it unconditionally
+// broke native compilation (E0432, caught by the native test oracle,
+// invisible in wasm32-only CI since FnvHasher genuinely exists there).
+#[cfg(target_arch = "wasm32")]
+pub use collections::FnvHasher;
+pub use collections::{HashMap, HashSet};
 pub mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod connectors;
