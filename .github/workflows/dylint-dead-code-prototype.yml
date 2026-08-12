@@ -83,9 +83,18 @@ jobs:
           echo "---- grepping for the lint's own diagnostic text ----"
           grep -F "wasm32_orphaned_portable::wasm32_orphaned_portable" "$RUNNER_TEMP/dylint-check.log" || grep -F "portable fn \`render_*\` has no" "$RUNNER_TEMP/dylint-check.log"
 
+      # `--allow-dirty` is required here, not optional: the preceding steps
+      # generate untracked `Cargo.lock` files under `dylint/` (`target/` is
+      # gitignored in this repo, but `Cargo.lock` is not -- confirmed via
+      # `git check-ignore -v` before this step was added), and `cargo fix`
+      # (which `cargo dylint --fix` shells out to -- see
+      # dylint_internal::cargo::fix, called from dylint/src/lib.rs's
+      # check_or_fix) refuses to run against a dirty git tree otherwise.
+      # Trailing `-- ARGS` are passed straight through to that `cargo fix`
+      # invocation (see check_opts.args in cargo-dylint/src/main.rs).
       - name: cargo dylint --fix --lib wasm32_orphaned_portable
         working-directory: dylint/example
-        run: cargo dylint --fix --lib wasm32_orphaned_portable
+        run: cargo dylint --fix --lib wasm32_orphaned_portable -- --allow-dirty
 
       - name: Show the applied diff (the actual fix-application evidence)
         run: |
