@@ -10,18 +10,11 @@ mod bytes;
 mod cost;
 mod dims;
 mod executor;
-// http.rs is reqwest-only (network fetch) -- no core/alloc equivalent,
-// same as build/'s std::process::Command exclusion. bytes/cost/dims/
-// executor/preset_weights are pure computation (confirmed via grep: no
-// std::/reqwest:: references) and stay available on wasm32, same shape
-// as larql-models' detect/ surgical split.
-#[cfg(not(target_arch = "wasm32"))]
 mod http;
 mod preset_weights;
 
 pub use dims::ModelDims;
 pub use executor::ExecutorClass;
-#[cfg(not(target_arch = "wasm32"))]
 pub use http::HttpError;
 
 #[cfg(target_arch = "wasm32")]
@@ -68,7 +61,6 @@ pub struct SizeEstimate {
 }
 
 /// Fetch upstream data over the network and compute the estimate.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn estimate(recipe: &Recipe) -> Result<SizeEstimate, HttpError> {
     estimate_from_base_url(recipe, http::HF_API_BASE)
 }
@@ -77,7 +69,6 @@ pub fn estimate(recipe: &Recipe) -> Result<SizeEstimate, HttpError> {
 /// tests point at a local mock server through, so the real fetch
 /// sequence (two calls, dims derived from the second) is exercised
 /// without a network dependency.
-#[cfg(not(target_arch = "wasm32"))]
 fn estimate_from_base_url(recipe: &Recipe, base_url: &str) -> Result<SizeEstimate, HttpError> {
     let client = reqwest::blocking::Client::new();
     let token = http::hf_token();

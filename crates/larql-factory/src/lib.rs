@@ -39,23 +39,17 @@ mod recipe;
 mod test_support;
 mod validate;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use build::{run as run_build, CommandOutput, CommandRunner, SubprocessRunner};
 pub use build::{BuildRecord, BuildStatus, OutputRecord, Stage};
 pub use build_id::build_id;
 pub use capabilities::{
     manifest as capabilities_manifest, ArchitectureCapability, CapabilityManifest,
 };
-// card::render needs serde_yaml transitively (via body::render_recipe),
-// native-only -- see card/body/mod.rs. Recipe::from_yaml below is the
-// same shape.
-#[cfg(not(target_arch = "wasm32"))]
 pub use card::render as render_card;
 pub use card::{
     revision_tag, CardInputs, LogitMatchResult, ReconstructionResult, SliceSummary,
     VerificationReport,
 };
-#[cfg(not(target_arch = "wasm32"))]
 pub use estimate::{estimate as estimate_size, HttpError as EstimateError};
 pub use estimate::{ExecutorClass, ModelDims, OutputEstimate, SizeEstimate};
 pub use recipe::{

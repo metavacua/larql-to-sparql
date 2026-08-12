@@ -21,10 +21,6 @@ pub use types::{
 
 /// Render a full Hub model card: YAML frontmatter delimited by `---`,
 /// then the body.
-// body::render_body needs serde_yaml (native-only, see body/mod.rs) --
-// this entry point is native-only too, so the wasm32 prelude glob this
-// file previously needed for String is no longer required here.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn render(inputs: &CardInputs) -> String {
     let tag = revision_tag::revision_tag(inputs.recipe, inputs.manifest, inputs.build_id);
     format!(

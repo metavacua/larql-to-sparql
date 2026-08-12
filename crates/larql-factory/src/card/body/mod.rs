@@ -7,17 +7,9 @@ mod overview;
 mod usage;
 mod verification;
 
-// Both users of CardInputs below (render_body, render_recipe) are
-// native-only (serde_yaml) -- see their own #[cfg] for why.
-#[cfg(not(target_arch = "wasm32"))]
 use crate::card::types::CardInputs;
 
 /// Render the full body (everything after the frontmatter).
-// render_recipe needs serde_yaml (no no_std mode at all, see Cargo.toml's
-// pattern-1 comment) unconditionally -- there's no partial-output
-// fallback that would make sense, so the whole function is native-only,
-// same shape as recipe::Recipe::from_yaml.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn render_body(inputs: &CardInputs, revision_tag: &str) -> String {
     let sections = [
         overview::render_overview(inputs.manifest),
@@ -39,7 +31,6 @@ pub fn render_body(inputs: &CardInputs, revision_tag: &str) -> String {
 
 /// Inline the exact recipe that produced this build, so the card is a
 /// self-contained reproduction instruction.
-#[cfg(not(target_arch = "wasm32"))]
 fn render_recipe(recipe: &crate::Recipe) -> String {
     let yaml = serde_yaml::to_string(recipe).unwrap_or_default();
     format!("## Recipe\n\n```yaml\n{}```", yaml)
