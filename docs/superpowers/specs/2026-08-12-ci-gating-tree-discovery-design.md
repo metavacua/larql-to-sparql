@@ -1,0 +1,108 @@
+# CI Gating: Automated Dependency-Tree Discovery — Design
+
+**Status:** design, not yet implemented. Supersedes `docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md` as the forward-looking source of truth for this effort. That plan doc is not deleted or wrong — it's the historical record of the R&D that produced the 20-pattern taxonomy this spec builds on, and it stays as reference. But its actual applied source-level edits (the hand-placed `cfg`/`forbid` annotations currently on this branch) are not treated as a durable foundation by this spec — see §4.
+
+## 1. Purpose
+
+Three days of hand-driven `wasm32v1-none`/`forbid(unsafe_code)` gating by an LLM coding agent covered 10 of 13 crates and never reached the root (`larql-cli`). The actual value produced by that effort is the **20-pattern taxonomy** — the catalogued knowledge of what breaks and why. The actual hand-applied annotations are not a durable asset; most of that code is not being kept. This spec exists to replace hand-driven gating with a **cheaply, mechanically re-runnable automated discovery tool** that can regenerate the gating boundary layer by layer, leaf by leaf, root by root, against whatever the codebase looks like at the time — including after a rebase.
+
+## 2. Scope and the decidability boundary
+
+The campaign targets exactly two properties, deliberately, not as an arbitrary starting pair:
+
+- **Does this crate compile under `wasm32v1-none`?**
+- **Does this crate contain unsafe code?**
+
+Both are fully decidable by the compiler — a binary verdict, zero ambiguity, no separate analysis tool required. This is why `wasm32v1-none` specifically (not `wasm32-unknown-unknown`) is the near-term target: `wasm32v1-none`'s minimal runtime (no host imports, no OS, no dynamic capabilities) means that **compiling to it at all already entails the containment properties** a richer target's analysis would need a separate pass to verify — import-freedom, bounded/deterministic behavior are implied by what the target is even capable of, not approximated by the compile signal. `wasm32-unknown-unknown` reintroduces those richer-runtime questions and is explicitly future scope, revisited when it becomes relevant, not solved preemptively.
+
+**Explicitly and permanently out of scope for this mechanism**: call-graph containment analysis, mutation-tested Datalog rule sets, binary `.wasm`-level certification. Not because they're uninteresting — a materially larger, more formally rigorous prior attempt at exactly this existed (§3) — but because building and maintaining that class of tool is a different, harder engineering problem than "run the compiler and act on its verdict," and pursuing it here repeats the specific failure mode that killed the prior attempt (§3). This project is not automating for all possible properties — only the ones the compiler itself decides.
+
+## 3. Relationship to prior art
+
+Two genuinely distinct prior efforts exist in this repo's history, both abandoned, neither an ancestor of the current work. Both are **reference material, not authoritative** — specifically because both predate understanding that's now been established (forbid-as-decidable-oracle; `wasm32v1-none`-compile-implies-containment):
+
+- `crates/larql-compute/docs/adr/005-safe-buffer-reads.md` (2026-04-06) — predates blanket forbid by four months, proposes consolidating FFI unsafe into one audited function rather than forbidding it. Superseded: the codebase and the understanding of forbid-as-oracle have both moved on; this ADR does not carve out a standing exception for `larql-compute`/`larql-compute-metal`. Whether those crates need any accommodation gets discovered the same way as every other crate — real, fresh `forbid` attempts against current source, not inherited from a four-month-old document.
+- A much larger, more formally rigorous, fully-abandoned wasm32 campaign on sibling branches (`origin/wasm/wasm32v1-none-gating`, `origin/claude/wasm-blocker4-source-gates`, 162–185 commits deep) — full-workspace source-cfg gating, a Datalog-based (`ascent` crate) call-graph certifier (`cargo xtask wasm-certify`) with a mutation-testing zero-survivor gate, a binary-level `.wasm` certifier (`larql-wasm-certify --strict`, checking import/indirect-call/`memory.grow`/recursion freedom via `wasmparser`), and a formal ADR classifying every LQL `Statement` variant by certification status. **It was abandoned because, by the time it neared completion, the codebase had drifted several weeks behind `chrishayuk/larql`'s ongoing architectural changes, forcing a full rebase-and-redo.** This is the direct cautionary precedent for §4: a large, slow, manually-maintained effort against a continuously-moving upstream target goes stale before it finishes, regardless of how rigorous the underlying analysis is. Confirmed by direct source inspection: neither the Datalog analyzer nor the binary certifier ever touched Rust source-level AST editing — both are pure `wasmparser`-on-compiled-bytes analysis. Nothing from them is salvageable for the auto-remediation mechanism in §7; the JSON-diagnostic-parsing scaffolding in the abandoned `xtask`'s `check.rs` is the one reusable piece.
+
+## 4. Rebase/upstream-resilience (first-class, standing requirement — not a one-time recovery step)
+
+`origin/main` (the fork's own main branch) is stale and is being replaced by this branch, not merged into — confirmed empirically: `upstream/main` is 426 commits ahead of `origin/main`. But `upstream/main` is *also* 24 commits ahead of this branch's own fork point, while this branch carries 99 commits of gating work upstream doesn't have — a genuine three-way divergence, not simply "behind a stale fork main."
+
+The general requirement is not specific to this one 24-commit gap: **the CI must survive arbitrary future upstream edits as a standing property, continuously — not as a special "post-rebase recovery" operation run once.** The next upstream sync will produce a different, unpredictable diff; whatever this session's specific check found is evidence the mechanism needs to actually work, not the thing the design targets.
+
+Two complementary properties, not one:
+
+1. **Discovery runs as a standing part of the CI, not a special recovery mode.** If a crate arrives with no gating annotations — a new crate pulled in from upstream, or an existing one rewritten heavily enough that its gating no longer applies — the same mechanism that gates the rest of the tree (§5, §7) picks it up automatically on the next relevant run. Rebase survival is one instance of this standing property, not a distinct case requiring its own handling.
+2. **Preserve gating automatically wherever the diff is mechanically decidable; rediscover only where it genuinely isn't.** Plain git three-way merge already does this for free wherever changes don't textually overlap — confirmed empirically below. For content that *does* change in a gating-relevant region, the discovery tool (§7) needs to distinguish a decidable transformation (a move/rename/reformat where the item's actual compiled behavior is unchanged) from a genuine rewrite, and default to full rediscovery whenever that distinction itself isn't decidable — the same "if ambiguous, don't force a mechanical answer" rule already governing the policy table (§8, pattern 13). The CST-based tooling already chosen for §7 (`ra_ap_syntax`) is the natural mechanism: the same span/item-identity machinery that inserts a fix precisely can also tell whether an item's actual content is unchanged versus genuinely modified, rather than treating every touched file as needing rediscovery from zero.
+
+**Empirical evidence the fragility is real, and precisely located** — checked via `git merge-tree` (non-destructive trial merge, no working-tree changes, no commits) against `upstream/main`'s 24 newer commits: **5 real conflicts** among 26 files touched by both sides, including a **modify/delete conflict** — `crates/larql-cli/src/commands/primary/shannon_cmd.rs` was deleted entirely by upstream's architectural work while this branch's gating work (this session included) had modified it, making that gating work moot. The other 21 overlapping files, including `crates/larql-cli/src/main.rs` and `.github/workflows/quality.yml`, merged cleanly with no help needed — property 2 above, already working for free wherever changes don't textually collide. `larql-cli-gating.yml` doesn't exist upstream at all, so it can't conflict; it carries straight through regardless.
+
+The fragility is entirely in **hand-placed, per-file source annotations** — exactly the class of artifact this spec already treats as disposable by default (§1), with property 2 above as the refinement: disposable is the correct fallback specifically where preservation isn't decidable, not the default assumption for every case. This is the direct fix for the failure mode that killed the prior campaign (§3): the tool must never require multiple days to converge, or the same staleness trap recurs.
+
+## 5. Forbid-unsafe-tree mechanism
+
+- **`forbid`, never `deny`, anywhere, no exceptions.** Where a `deny`-with-local-`allow` pattern would be needed to make something compile alongside a `forbid` elsewhere, the `deny` gets removed — not weighed case by case. This is fixed policy, not a per-instance tradeoff.
+- **Root-parameterized.** Today `larql-cli`; the mechanism must generalize to any future root (binary or library) without redesign — matching the retired `clippy-fix.yml`'s own `ROOTS = [...]` precedent.
+- **Attempted crate-root first, on every crate in the root's transitive closure, unconditionally.** Never assume a crate needs narrowing because a different crate did, or because an old document/ADR says so. Narrowing to module, then per-*item* (the finest unit Rust's attribute system supports — there is no finer addressable scope for lint control) happens **only after a fresh, real CI run proves it's structurally forced**, and the fix is recorded via §6, not inherited from precedent.
+- **Leaves-first sequencing**, matching the existing `wasm32v1-none-ubuntu → {others, metal} → cli-ubuntu → cli-others → forbid-unsafe` tiering. This decomposes the spec along the dependency tree itself: each tier is the same mechanism (attempt forbid, narrow only where the compiler forces it, record via §6) applied to the crates at that depth, gated on the tier below it succeeding — not a separate spec per crate, one mechanism applied uniformly per tier.
+- **Demonstrated end-to-end this session**, not theorized: a crate-root `forbid` probe on `larql-cli`, dispatched via a real CI run (bypassing the `wasm32v1-none` chain, which was blocked on an unrelated finding), produced exactly 38 genuine `E0453` conflicts across 22 files that call `ndarray::s!` (a macro whose internal `#[allow(unsafe_code)]` cannot coexist with an enclosing `forbid` — confirmed live, not inherited from the original claim's narrative), plus 2 plain forbidden-unsafe-block errors with no macro involvement at all, in two files (`walk_cmd.rs`, `trajectory_trace_cmd.rs`) that had been **incorrectly** grouped under the `ndarray::s!` exemption. Fixed and validated: restoring `forbid` to those two files produces exactly the expected 2 errors and 0 new `E0453`s, confirmed via a second live CI run.
+
+## 6. Structured exemption registry
+
+Every `forbid` exemption gets a machine-readable record with a reason-code drawn from a fixed vocabulary (e.g. `macro-hidden-unsafe:ndarray::s!`, `ffi-required`) — never a free-text comment. This makes every exemption mechanically checkable against what the compiler actually says, closing exactly the class of bug found and fixed in §5: a comment claiming a reason (`ndarray::s!`) that neither grep nor the compiler's own output supported for two of the seven files it covered.
+
+## 7. Auto-remediation (`xtask`)
+
+An `xtask` crate (the standard `cargo xtask` convention), not ad-hoc bash/YAML logic embedded in workflow files.
+
+**Core loop, an outer fixpoint:**
+1. `cargo clippy --fix --message-format=json` — disposes of clippy's own `MachineApplicable` suggestion tier via its internal `rustfix` machinery. Not reimplemented.
+2. `cargo clippy --message-format=json` again — collect the residue clippy's own `--fix` didn't resolve.
+3. Match each remaining diagnostic against the **policy table** (§8). Matched diagnostics get grouped by file.
+4. Per file: parse once via `ra_ap_syntax::SourceFile::parse` (rust-analyzer's published lossless CST — comments and whitespace are first-class tokens, unlike `syn`, which is disqualified below), build one `SyntaxEditor`, apply each matched fix at its diagnostic's exact span via `editor.insert_with_whitespace`/`Position::before`/`after`, call `editor.finish()` once, write the result.
+5. Repeat from step 1 until zero policy-matched diagnostics remain, or a genuinely new/uncatalogued diagnostic shape surfaces — which becomes a candidate policy-table addition (resolved once, by a human/agent; mechanical for every instance after that), not something the loop guesses at.
+
+**Tool choice, verified, not assumed**: `ra_ap_syntax`'s `SyntaxEditor` is the library backing precise, format-preserving edits. `syn` is disqualified outright, not merely weaker — `syn::File` stores no non-doc comments at all (dropped at tokenization), and even content that does survive re-prints via `prettyplease`'s own formatting rules rather than the original bytes. This repo has already paid for exactly that failure mode by hand: an import inserted inside an unrelated multi-line `use {...}` group because braces still balanced, and imports inserted before a file's own leading `//!` doc comment because a naive "last `use` line" heuristic couldn't distinguish a doc-comment boundary from an item boundary. Regex and line-based text heuristics are excluded categorically, not case by case.
+
+The same CST/span machinery is not single-purpose: §4's decidable-vs-undecidable diff distinction (preserve gating automatically where a change is a decidable move/rename/reformat, rediscover only where it genuinely isn't) is built on this identical infrastructure, not a second tool bolted on alongside it.
+
+Changed files upload as the literal changed files (via `git diff --name-only` fed into `actions/upload-artifact`'s `path:` input, preserving directory structure), never a patch requiring `git apply` — already built and validated in `wasm32v1-none-ubuntu`'s existing auto-fix step this session.
+
+## 8. Policy table
+
+Seeded from the full 20-pattern taxonomy in `plan.md` — filtered by one test: **if applying a "known" pattern still requires per-instance interpretation once matched, it doesn't belong in the table.**
+
+**In the table** (diagnostic signature → deterministic fix, verified against the test): patterns 1/6/9/12 (dependency `std`-feature splits — diagnosis is a deterministic `cargo tree -i <suspect>` trace, not guesswork; the resulting Cargo.toml edit is mechanical), 3 (whole-module native exclusion), 7/10 (transitive/sibling feature-unification — same deterministic-trace shape), 11's dead-code rule (rustc's `dead_code` lint has no native machine-applicable suggestion, but this repo's own standing policy — `#[cfg(not(target_arch = "wasm32"))]` at the flagged item, never deletion without in-place evidence — is itself fully deterministic once matched), 14 (private-hasher-leaks — widen visibility + add a re-export, two deterministic steps), 16 (cross-target alias inference — insert the one explicit type annotation), 18's actual fix mechanism (scope-narrow `forbid` at the exact item `E0453` names, recorded via §6).
+
+**Not fix rules at all — already expressed as CI architecture, not policy-table entries**: patterns 8 (leaves-first sequencing — §5), 15 (native oracle must run alongside the wasm32 oracle — §11), 17 (fmt-check blind spot), 19/20 (coverage-baseline handling, tiered CI topology). These are structural lessons about how the CI itself must be built, not diagnostic-to-edit mappings.
+
+**Excluded, decisively, not ambiguously**: pattern 13 (nominally-distinct cross-crate hashmap types). This is not a hard case within the taxonomy — it isn't a member of it. It's a downstream symptom of one specific implementation choice made while hand-fixing pattern 4 (each crate independently reinventing its own portable hasher/collections module, producing structurally-identical but nominally-distinct types across crate boundaries) — not a property of the codebase's actual `wasm32v1-none`/unsafe classification. The correct response is not a mechanical rule for the symptom; it's not repeating the implementation mistake that caused it — §7's eventual portable-collections handling (wherever pattern 4's fix is needed) should use a single shared implementation rather than independent per-crate reinvention, so this class of problem doesn't recur in the first place.
+
+## 9. Inventory
+
+The deliverable is not "CI green/red" — it's a queryable map. Per item: `wasm32v1-none` compilability (schema extensible to the future multi-target lattice — `wasm32-unknown-unknown`, `wasip1`, `wasip3`, emscripten, wali-linux-musl — added when each becomes relevant, per §2) crossed against unsafe-code presence, built from the compiler's own exhaustive diagnostic output rather than scraped from human-authored comments.
+
+**Cross-referenced against real data**: `metavacua/larql-to-sparql`'s GitHub issues (167 total, 162 open), joined on the existing `crate:<name>` label taxonomy that already matches this campaign's crate structure exactly (`crate:larql-vindex`: 47 issues, `crate:larql-cli`: 45, `crate:larql-lql`: 23, `crate:larql-models`: 21, ...), further joined against the repo's own `evidenced:problem`/`speculative:solution` epistemics labels. This makes "how much of the problem surface concentrates in expensive, non-portable, unsafe code vs. safe portable code" a directly answerable query against real data, not a hypothesis.
+
+## 10. CI architecture (implemented and live-validated this session)
+
+- **Dual trigger, deduped correctly.** `push` (survives the oracle going dark if a PR closes without merging — confirmed this actually happened) plus `pull_request`, deduped via a concurrency group keyed on the actual head commit SHA (`github.event.pull_request.head.sha || github.sha`), not `github.ref` (which differs between the two event types for the identical commit). Verified live: an initial oversight let both trigger types run to completion simultaneously for the same commit (~60 redundant jobs); the SHA-keyed fix was confirmed via a subsequent push, where the second-arriving trigger correctly cancelled the first within seconds.
+- **`clippy-fix.yml` retired.** Its separate `discover` job, deps/roots two-tier split, and patch-plus-standalone-verify-native-job ceremony are replaced by folding the fix-and-upload mechanism (§7, once built) directly into the relevant tier's existing job — no separate crate-discovery duplication, no patch/`git apply` indirection.
+
+## 11. What "red" means — pinned per axis, not re-litigated per finding
+
+Stated explicitly because the failure mode has recurred: an agent (this session included, once) treating an expected, deliverable "red" as a defect to route around, or vice versa, at inconsistent points.
+
+- `wasm32v1-none` red-until-gated: **expected and correct.** The failure to compile is the discovery signal driving the next policy-table entry, not a bug in the CI.
+- `forbid-unsafe` red-until-narrowed-or-genuinely-caught: **expected and correct.** A real, uncaught unsafe block or macro conflict is the deliverable, exactly as demonstrated in §5.
+- Auto-fix (§7) still red after uploading a partial fix: **informational, not itself a failure.** The upload captures whatever progress was made regardless of final pass/fail; the re-run clippy check afterward is the real, honest gate.
+- `deny(unsafe_code)` appearing anywhere, for any reason: **always wrong**, per §5 — never a case-by-case call.
+
+## 12. Completion criteria
+
+Given §4 (`origin/main` is being replaced, not a merge target): the 16-workflow skip-gating mechanism (`verify_gating_skip.py` + the `github.head_ref != 'gating/larql-cli-wasm-and-safe'` condition on 32 jobs) is temporary scaffolding for surviving `origin/main`'s staleness during active development on this branch. It is removed, not migrated, once this branch becomes the new main.
+
+## 13. Explicitly deferred
+
+- Multi-target lattice expansion beyond `wasm32v1-none` (§2) — revisit the decidability-boundary argument when `wasm32-unknown-unknown` or another target actually becomes relevant; do not build for it speculatively now.
+- Any future pattern-13-shaped symptom (§8) from a *different* implementation mistake gets evaluated the same way pattern 13 was: is it a property of the wasm32/unsafe classification itself, or a symptom of one specific fix's implementation choice — not assumed into the policy table by default.
