@@ -12,13 +12,19 @@ on:
   # closed without merging, pushes to this branch fire zero workflows of
   # any kind, and the workflow_dispatch fallback is inert until the file
   # lands on main -- a real failure mode, not a documentation nit; this is
-  # what actually happened. Known, accepted tradeoff of keeping both:
-  # while the PR is open, a push to this branch fires BOTH events for the
-  # same commit, and concurrency: below does not dedupe them (github.ref
+  # what actually happened. While the PR is open, a push fires BOTH events
+  # for the same commit -- concurrency: below is keyed on the actual head
+  # commit SHA (identical for both event types), not github.ref (which
   # differs: refs/heads/gating/... for push vs refs/pull/290/merge for
-  # pull_request), so two full runs execute concurrently. Accepted per
-  # this campaign's own standing rule that runner cost is not a
-  # constraint (plan doc, Global Constraints).
+  # pull_request), specifically so cancel-in-progress dedupes ACROSS event
+  # types, not just within each -- confirmed empirically that keying on
+  # github.ref does not: two full runs executed concurrently to completion
+  # for the same commit (~60+ redundant jobs) before this was caught and
+  # fixed. Running the same commit through the same jobs twice for zero
+  # additional signal is waste, not the kind of cost this campaign's
+  # standing "runner cost is not a constraint" rule licenses -- that rule
+  # is about not trimming coverage breadth (OS/feature legs), not about
+  # tolerating pure duplication.
   push:
     branches: [gating/larql-cli-wasm-and-safe]
   pull_request:
@@ -29,7 +35,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # github.event.pull_request.head.sha resolves on pull_request events;
+  # it's absent (null) on push/workflow_dispatch events, where the `||`
+  # falls through to github.sha -- either way this lands on the actual
+  # commit being tested, so a push-triggered and a pull_request-triggered
+  # run for the same commit land in the same group and cancel-in-progress
+  # cancels the earlier one instead of letting both run to completion.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
