@@ -13,12 +13,11 @@ mod verification;
 use crate::card::types::CardInputs;
 
 /// Render the full body (everything after the frontmatter).
-// EXPERIMENTAL PROBE (see commit message): #[cfg] removed here on
-// purpose to test whether ungating the wrapper while leaving
-// render_recipe() itself gated produces a real, unambiguous compile
-// error (undergating) as opposed to today's dead_code warnings
-// (overgating) -- not a design decision, will be resolved into a real
-// fix or reverted based on the actual CI result.
+// render_recipe needs serde_yaml (no no_std mode at all, see Cargo.toml's
+// pattern-1 comment) unconditionally -- there's no partial-output
+// fallback that would make sense, so the whole function is native-only,
+// same shape as recipe::Recipe::from_yaml.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn render_body(inputs: &CardInputs, revision_tag: &str) -> String {
     let sections = [
         overview::render_overview(inputs.manifest),
