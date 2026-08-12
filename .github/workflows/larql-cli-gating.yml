@@ -89,6 +89,33 @@ jobs:
   # below rather than running concurrently with it: ubuntu+wasm32v1-none
   # is meant to be a single global checkpoint everything else funnels
   # through, not a per-crate-only gate.
+  #
+  # AUTO-FIX, folded in here (retiring the former standalone
+  # clippy-fix.yml -- its discover job, deps/roots two-tier split, and
+  # patch-plus-separate-native-verify-job design added ceremony this
+  # replaces): each leg's clippy step (`check`, continue-on-error) gates
+  # a best-effort `clippy --fix` + `cargo fmt`, and whatever changed gets
+  # uploaded as an artifact of the ACTUAL changed files (via `git diff
+  # --name-only`, fed straight into upload-artifact's path: input, which
+  # preserves the relative directory structure) -- download, unzip into
+  # the repo root, done. No patch, no `git apply`, no separate
+  # verify-native job: clippy re-runs for real immediately after (no
+  # continue-on-error this time), so the job's actual pass/fail reflects
+  # whether findings remain, not whether --fix ran or how far it got.
+  # The upload itself is unconditional on that final outcome (`if:
+  # always()`), so a still-red leg still surfaces whatever partial
+  # progress --fix made, not just an empty-handed failure. No native
+  # (fmt/check/clippy/test) re-verification gate before the fix is
+  # exposed -- deliberately dropped relative to the old design, which
+  # built that gate in direct response to a documented incident (a local
+  # `--fix` regression that silently broke 5 crates' native builds,
+  # invisible for a full session because only the wasm32 leg was ever
+  # re-checked). Accepted tradeoff: this campaign's own downstream
+  # native oracles (per-crate `larql-*.yml` workflows, dispatchable
+  # independent of this file) are the real backstop if that risk
+  # resurfaces here; construct minimal, push, let real signal decide
+  # whether a lighter check needs to come back, rather than pre-building
+  # ceremony against a hypothetical.
   wasm32v1-none-ubuntu:
     name: wasm32v1-none / ${{ matrix.crate }} / ubuntu-latest / ${{ matrix.features }}
     needs: fmt-check
@@ -118,13 +145,20 @@ jobs:
           - larql-execution
           - larql-router-protocol
         features: [default, no-default-features]
+    env:
+      CRATE: ${{ matrix.crate }}
+      # Fixed literal (default|no-default-features), never free text --
+      # safe to leave unquoted at each call site below, since it needs
+      # to vanish entirely when empty (the "default" case), not become
+      # a stray empty-string argument.
+      FEATURE_FLAG: ${{ matrix.features == 'no-default-features' && '--no-default-features' || '' }}
     steps:
       - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
-          components: clippy
+          components: clippy, rustfmt
 
       # No OpenBLAS install here (unlike forbid-unsafe below): every BLAS
       # dependency in this workspace is gated behind
@@ -157,26 +191,56 @@ jobs:
       # wasm32-cfg'd code has ever been linted by anything: native
       # clippy runs on the disabled per-crate workflows never see it
       # (cfg'd out entirely).
-      - name: cargo clippy --target wasm32v1-none
+      - name: cargo clippy --target wasm32v1-none (gates whether an auto-fix pass runs)
+        id: check
+        continue-on-error: true
+        shell: bash
+        run: cargo clippy --target wasm32v1-none -p "$CRATE" $FEATURE_FLAG -- -D warnings
+
+      - name: cargo clippy --fix --target wasm32v1-none
+        if: steps.check.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        run: cargo clippy --fix --target wasm32v1-none -p "$CRATE" $FEATURE_FLAG -- -D warnings
+
+      - name: cargo fmt (normalize whatever --fix produced)
+        if: steps.check.outcome == 'failure'
+        run: cargo fmt -p "$CRATE"
+
+      - name: List files --fix changed
+        id: changed
+        if: always() && steps.check.outcome == 'failure'
         shell: bash
         run: |
-          if [ "${{ matrix.features }}" = "no-default-features" ]; then
-            cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features -- -D warnings
-          else
-            cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} -- -D warnings
-          fi
+          files=$(git diff --name-only -- crates/)
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$files" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Upload files --fix changed (real files, not a patch)
+        if: always() && steps.check.outcome == 'failure' && steps.changed.outputs.files != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: clippy-fix-${{ matrix.crate }}-wasm32v1-none-${{ matrix.features }}-${{ runner.os }}
+          path: ${{ steps.changed.outputs.files }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: cargo clippy --target wasm32v1-none (real gate -- fails if findings remain)
+        shell: bash
+        run: cargo clippy --target wasm32v1-none -p "$CRATE" $FEATURE_FLAG -- -D warnings
 
       - name: cargo build --target wasm32v1-none
         shell: bash
-        run: |
-          if [ "${{ matrix.features }}" = "no-default-features" ]; then
-            cargo build --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features
-          else
-            cargo build --target wasm32v1-none -p ${{ matrix.crate }}
-          fi
+        run: cargo build --target wasm32v1-none -p "$CRATE" $FEATURE_FLAG
 
   # Same 12 crates, windows + macos -- gated on the ubuntu wave above
-  # clearing in full.
+  # clearing in full. Not yet given the wasm32v1-none-ubuntu auto-fix
+  # mechanism below -- per the leaves-first sequencing this campaign
+  # already follows (fix leaves, then root, then per-OS/forbid-unsafe
+  # clusters), this job can't even run until wasm32v1-none-ubuntu is
+  # fully green, so building the mechanism into it now is premature;
+  # it gets the identical treatment once this stage is actually active.
   wasm32v1-none-others:
     name: wasm32v1-none / ${{ matrix.crate }} / ${{ matrix.os }} / ${{ matrix.features }}
     needs: wasm32v1-none-ubuntu
@@ -244,7 +308,8 @@ jobs:
 
   # larql-compute-metal: macOS-only, no ubuntu/windows leg exists for
   # it. Still gated on the ubuntu wave (see the top-level comment) even
-  # though it has no ubuntu leg of its own.
+  # though it has no ubuntu leg of its own. Not yet given the auto-fix
+  # mechanism -- same reasoning as wasm32v1-none-others above.
   wasm32v1-none-metal:
     name: wasm32v1-none / larql-compute-metal / macos-14 / ${{ matrix.features }}
     needs: wasm32v1-none-ubuntu
@@ -293,7 +358,10 @@ jobs:
 
   # larql-cli (the root) on ubuntu -- gated on every dependency's
   # windows/macos legs AND the metal leg, since larql-cli's default
-  # feature set (`gpu`) pulls in larql-compute-metal.
+  # feature set (`gpu`) pulls in larql-compute-metal. Not yet given the
+  # auto-fix mechanism -- same reasoning as wasm32v1-none-others above;
+  # this is the root stage, sequenced after every dependency leg above
+  # it is green.
   wasm32v1-none-cli-ubuntu:
     name: wasm32v1-none / larql-cli / ubuntu-latest / ${{ matrix.features }}
     needs: [wasm32v1-none-others, wasm32v1-none-metal]
@@ -341,6 +409,8 @@ jobs:
           fi
 
   # larql-cli on windows + macos -- gated on its own ubuntu leg above.
+  # Not yet given the auto-fix mechanism -- same reasoning as
+  # wasm32v1-none-others above.
   wasm32v1-none-cli-others:
     name: wasm32v1-none / larql-cli / ${{ matrix.os }} / ${{ matrix.features }}
     needs: wasm32v1-none-cli-ubuntu
