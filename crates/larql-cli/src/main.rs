@@ -1,3 +1,16 @@
+// EXPERIMENTAL PROBE, not a design decision (see commit message):
+// crate-root #![forbid(unsafe_code)] restored temporarily to get a
+// FRESH, real compiler verdict on the current state of this crate,
+// rather than continuing to reason from pattern 18's narrative account
+// of a past CI run (31464601274) that was never independently
+// re-verified against today's source -- and which is already known to
+// be wrong in at least two cases (walk_cmd.rs, trajectory_trace_cmd.rs
+// were exempted under this same rationale despite not using
+// ndarray::s! at all, discovered this session). This will either
+// reproduce the same E0453/ndarray::s! wall the per-module scoping
+// below was built to route around, or reveal something has drifted --
+// either way that's real signal, not assumed.
+#![forbid(unsafe_code)]
 // See crates/larql-core/src/lib.rs for the pattern-2 rationale on
 // treating every crate the same way and letting the compiler reveal
 // the boundary rather than assume it in advance -- applied here too
