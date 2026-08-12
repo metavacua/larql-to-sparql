@@ -1,0 +1,10 @@
+[package]
+name = "wasm32_orphaned_portable_example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[workspace.metadata.dylint]
+libraries = [{ path = "../wasm32_orphaned_portable" }]

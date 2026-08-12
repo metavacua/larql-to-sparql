@@ -1,0 +1,29 @@
+[package]
+name = "wasm32_orphaned_portable"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "PoC dylint lint: flags render_*-named portable fns with no target_arch cfg guard, with a MachineApplicable #[cfg(not(target_arch = \"wasm32\"))] suggestion"
+
+[lib]
+crate-type = ["cdylib"]
+
+# Pinned together deliberately: dylint_linting's version and clippy_utils's
+# git rev must stay paired to the toolchain in rust-toolchain.toml. This
+# exact trio (dylint_linting 6.0 / clippy_utils rev 9fca3bc / nightly-2026-05-28)
+# was copied verbatim from trailofbits/dylint's own currently-maintained
+# `internal/template` (the scaffold `cargo dylint new` generates), NOT
+# reconstructed from memory -- see README.md in this directory for
+# provenance and why the old, archived trailofbits/dylint-template repo
+# (nightly-2022-02-24 / dylint_linting 2.0.1) was rejected as stale.
+[dependencies]
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "9fca3bc9fc2bc83c60bde26d18ed68f11564b228" }
+dylint_linting = "6.0"
+
+[dev-dependencies]
+dylint_testing = "6.0"
+
+[workspace]
+
+[package.metadata.rust-analyzer]
+rustc_private = true

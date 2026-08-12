@@ -1,0 +1,107 @@
+# Bounded proof-of-concept CI for the `wasm32_orphaned_portable` dylint
+# lint prototype (see dylint/README.md). Not part of the gating
+# campaign's own workflow set -- this is a standalone experiment, kept in
+# its own file so it never interferes with (or is confused for) the real
+# larql-cli-gating.yml / larql-cli.yml oracles.
+#
+# Both `workflow_dispatch` (so it can be triggered by name once the file
+# exists on this branch) and a path-filtered `push` are declared: a
+# brand-new workflow file that exists only on a non-default branch is
+# sometimes not yet dispatchable by name via `gh workflow run` on the very
+# first push (GitHub has to index it first). The `push` trigger is the
+# fallback that guarantees a run happens regardless.
+name: dylint-dead-code-prototype
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/dylint-dead-code-prototype
+    paths:
+      - "dylint/**"
+      - ".github/workflows/dylint-dead-code-prototype.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-fire:
+    name: build lint, fire it, apply --fix
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      # cargo-dylint resolves each lint library's own toolchain (from its
+      # rust-toolchain.toml) and asks rustup for it on demand -- rustup
+      # auto-installs an uninstalled toolchain named by an override file
+      # (including its listed `components`) the first time a `cargo`/
+      # `rustc` invocation respects that override, so no manual
+      # `rustup toolchain install nightly-2026-05-28 ...` step is needed
+      # here. This step + its cache exist purely to make that automatic
+      # provisioning fast on repeat runs.
+      - name: Cache cargo + rustup state
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup/toolchains
+            ~/.rustup/update-hashes
+            ~/.dylint_drivers
+          key: ${{ runner.os }}-dylint-poc-v1-${{ hashFiles('dylint/wasm32_orphaned_portable/Cargo.toml', 'dylint/wasm32_orphaned_portable/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-dylint-poc-v1-
+
+      - name: Report rustup/cargo versions before anything else
+        run: |
+          rustup --version
+          cargo --version
+          rustc --version
+
+      - name: Install cargo-dylint + dylint-link
+        run: cargo install cargo-dylint dylint-link
+
+      # Isolated compile signal for the lint crate itself (rustc_private +
+      # nightly-2026-05-28 + dylint_linting 6.0 + the pinned clippy_utils
+      # rev), independent of cargo-dylint's own build machinery below.
+      - name: Build the lint crate directly (isolated compile signal)
+        working-directory: dylint/wasm32_orphaned_portable
+        run: |
+          rustup show
+          cargo build
+
+      - name: cargo dylint --lib wasm32_orphaned_portable (expect it to fire)
+        working-directory: dylint/example
+        run: |
+          cargo dylint --lib wasm32_orphaned_portable -- --message-format=human 2>&1 | tee "$RUNNER_TEMP/dylint-check.log"
+          echo "---- grepping for the lint's own diagnostic text ----"
+          grep -F "wasm32_orphaned_portable::wasm32_orphaned_portable" "$RUNNER_TEMP/dylint-check.log" || grep -F "portable fn \`render_*\` has no" "$RUNNER_TEMP/dylint-check.log"
+
+      - name: cargo dylint --fix --lib wasm32_orphaned_portable
+        working-directory: dylint/example
+        run: cargo dylint --fix --lib wasm32_orphaned_portable
+
+      - name: Show the applied diff (the actual fix-application evidence)
+        run: |
+          git diff -- dylint/example | tee "$RUNNER_TEMP/dylint-fix.patch"
+          echo "---- asserting the patch is non-empty ----"
+          test -s "$RUNNER_TEMP/dylint-fix.patch"
+
+      - name: Show the fixed file in full
+        run: cat dylint/example/src/main.rs
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dylint-dead-code-prototype-evidence
+          path: |
+            ${{ runner.temp }}/dylint-check.log
+            ${{ runner.temp }}/dylint-fix.patch
+          if-no-files-found: warn
+          retention-days: 14
