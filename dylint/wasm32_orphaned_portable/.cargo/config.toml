@@ -1,0 +1,14 @@
+# `linker = "dylint-link"` (not `rustflags = ["-C", "linker=dylint-link"]`,
+# which is what trailofbits/dylint's own internal/template ships and what
+# this file originally copied) -- switched after run 31632406735's
+# "cargo dylint --lib ..." step built successfully but then failed with
+# "Could not find `...@nightly-2026-05-28-...so` despite successful
+# build": the @-toolchain-suffixed copy is produced by dylint-link itself
+# (see dylint-link/src/main.rs's copy_library()), so a missing copy is
+# exactly what you'd see if dylint-link never actually ran as the linker.
+# dylint's own currently-CI-green example libraries (examples/general,
+# examples/restriction, examples/supplementary in trailofbits/dylint) all
+# use the `linker = "..."` key directly, not the `rustflags` form -- see
+# dylint/README.md for the fuller writeup.
+[target.'cfg(all())']
+linker = "dylint-link"
