@@ -7,17 +7,20 @@ mod overview;
 mod usage;
 mod verification;
 
-// Both users of CardInputs below (render_body, render_recipe) are
-// native-only (serde_yaml) -- see their own #[cfg] for why.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
+// DESIGN A (function split): render_body itself only ever calls the
+// four genuinely portable section renderers below -- render_recipe
+// (the one native-only call, serde_yaml) is not one of its section
+// exprs anymore, so render_body has no native dependency and needs no
+// #[cfg] at all. CardInputs is read by render_body on every target.
 use crate::card::types::CardInputs;
 
-/// Render the full body (everything after the frontmatter).
-// render_recipe needs serde_yaml (no no_std mode at all, see Cargo.toml's
-// pattern-1 comment) unconditionally -- there's no partial-output
-// fallback that would make sense, so the whole function is native-only,
-// same shape as recipe::Recipe::from_yaml.
-#[cfg(not(target_arch = "wasm32"))]
+/// Render the body's portable sections: overview, slice table, usage,
+/// and verification. Everything except the recipe -- see
+/// [`render_body_with_recipe`] for the native entry point that adds
+/// that section too.
 pub fn render_body(inputs: &CardInputs, revision_tag: &str) -> String {
     let sections = [
         overview::render_overview(inputs.manifest),
@@ -28,6 +31,23 @@ pub fn render_body(inputs: &CardInputs, revision_tag: &str) -> String {
             revision_tag,
         ),
         verification::render_verification(&inputs.recipe.spec.verify, inputs.verification),
+    ];
+    sections
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Render the full body, including the Recipe section -- native-only,
+/// since [`render_recipe`] needs `serde_yaml` (no no_std mode at all,
+/// see Cargo.toml's pattern-1 comment); there's no partial-output
+/// fallback that would make sense, so this wrapper is native-only, same
+/// shape as `recipe::Recipe::from_yaml`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn render_body_with_recipe(inputs: &CardInputs, revision_tag: &str) -> String {
+    let sections = [
+        render_body(inputs, revision_tag),
         render_recipe(inputs.recipe),
     ];
     sections
@@ -80,7 +100,7 @@ mod tests {
             },
             verified_from_hub: true,
         };
-        let out = render_body(
+        let out = render_body_with_recipe(
             &sample_inputs(&recipe, &manifest, &verification),
             "v1-larql0.14.2-deadbeef",
         );

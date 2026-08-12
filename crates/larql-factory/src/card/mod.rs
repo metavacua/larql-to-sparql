@@ -8,6 +8,9 @@
 //! will eventually produce — there's no driver yet to validate them
 //! against, so treat their fields as provisional.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 mod body;
 mod frontmatter;
 pub(crate) mod naming;
@@ -20,17 +23,20 @@ pub use types::{
 };
 
 /// Render a full Hub model card: YAML frontmatter delimited by `---`,
-/// then the body.
-// body::render_body needs serde_yaml (native-only, see body/mod.rs) --
-// this entry point is native-only too, so the wasm32 prelude glob this
-// file previously needed for String is no longer required here.
-#[cfg(not(target_arch = "wasm32"))]
+/// then the body. Native builds include the Recipe section
+/// ([`body::render_body_with_recipe`]); wasm32 builds get every other
+/// section ([`body::render_body`]) -- see body/mod.rs (DESIGN A) for
+/// why only the Recipe section is native-only.
 pub fn render(inputs: &CardInputs) -> String {
     let tag = revision_tag::revision_tag(inputs.recipe, inputs.manifest, inputs.build_id);
+    #[cfg(not(target_arch = "wasm32"))]
+    let body = body::render_body_with_recipe(inputs, &tag);
+    #[cfg(target_arch = "wasm32")]
+    let body = body::render_body(inputs, &tag);
     format!(
         "---\n{}\n---\n\n{}",
         frontmatter::render_frontmatter(inputs.recipe, inputs.manifest),
-        body::render_body(inputs, &tag),
+        body,
     )
 }
 
