@@ -1,16 +1,3 @@
-// EXPERIMENTAL PROBE, not a design decision (see commit message):
-// crate-root #![forbid(unsafe_code)] restored temporarily to get a
-// FRESH, real compiler verdict on the current state of this crate,
-// rather than continuing to reason from pattern 18's narrative account
-// of a past CI run (31464601274) that was never independently
-// re-verified against today's source -- and which is already known to
-// be wrong in at least two cases (walk_cmd.rs, trajectory_trace_cmd.rs
-// were exempted under this same rationale despite not using
-// ndarray::s! at all, discovered this session). This will either
-// reproduce the same E0453/ndarray::s! wall the per-module scoping
-// below was built to route around, or reveal something has drifted --
-// either way that's real signal, not assumed.
-#![forbid(unsafe_code)]
 // See crates/larql-core/src/lib.rs for the pattern-2 rationale on
 // treating every crate the same way and letting the compiler reveal
 // the boundary rather than assume it in advance -- applied here too
@@ -22,14 +9,26 @@
 // of commands/extraction and commands/primary::shannon_cmd call sites)
 // expands to its own internal `#[allow(unsafe_code)] unsafe {...}`,
 // which `forbid` cannot locally override even through a macro
-// expansion -- a crate-wide forbid makes those modules uncompilable,
-// CI-confirmed via workflow run 31464601274 (40 E0453 errors). Instead
-// every module and top-level item in this crate that does NOT reach
-// `ndarray::s!` carries its own `#[forbid(unsafe_code)]`, applied at
-// the exact boundary the compiler's own error list established --
-// this file's own top-level items below, and see commands/mod.rs,
-// commands/dev/ov_rd/mod.rs, commands/extraction/mod.rs, and
-// commands/primary/mod.rs for the per-submodule scoping.
+// expansion. Re-verified live, not just inherited from pattern 18's
+// original claim: a fresh crate-root #![forbid(unsafe_code)] probe
+// (run 31604654148, 2026-08-12, dispatched larql-cli.yml directly)
+// reproduces exactly 38 E0453 "allow(unsafe_code) incompatible with
+// previous forbid" errors across 22 files, all attributed to
+// "this error originates in the macro `ndarray::s`" -- a genuine,
+// structural conflict, not assumed. The same probe also caught 2
+// PLAIN "usage of an `unsafe` block" errors (no E0453, no macro) in
+// walk_cmd.rs:10 and trajectory_trace_cmd.rs:707 -- these were
+// previously, incorrectly grouped under this same ndarray::s!
+// rationale (grep shows neither file references it), so both now
+// correctly carry their own #[forbid(unsafe_code)] instead of being
+// exempted; that's forbid catching real, hand-written unsafe exactly
+// as intended, not a wall to route around. Every module and top-level
+// item in this crate that does NOT reach `ndarray::s!` carries its own
+// `#[forbid(unsafe_code)]`, applied at the exact boundary the
+// compiler's own error list established -- this file's own top-level
+// items below, and see commands/mod.rs, commands/dev/ov_rd/mod.rs,
+// commands/extraction/mod.rs, and commands/primary/mod.rs for the
+// per-submodule scoping.
 #![cfg_attr(target_arch = "wasm32", no_std)]
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::type_complexity)]

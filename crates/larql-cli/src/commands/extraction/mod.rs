@@ -1,6 +1,20 @@
 // Per-module `forbid(unsafe_code)` (pattern 18) -- see
-// commands/dev/ov_rd/mod.rs for the rationale. Unmarked modules call
-// `ndarray::s![...]`, CI-confirmed via workflow run 31464601274.
+// commands/dev/ov_rd/mod.rs for the rationale. Unmarked modules
+// (circuit_discover_cmd, fingerprint_extract_cmd, ov_gate_cmd,
+// qk_modes_cmd, qk_rank_cmd) call `ndarray::s![...]`, which is a real,
+// structural E0453 conflict -- confirmed via a fresh, live experiment
+// (run 31604654148, 2026-08-12, dispatched larql-cli.yml directly
+// rather than trusting the original claim's narrative: 38 E0453 errors
+// across exactly these 22 files workspace-wide, "allow(unsafe_code)
+// incompatible with previous forbid", all attributed to
+// "this error originates in the macro `ndarray::s`"). walk_cmd and
+// trajectory_trace_cmd were PREVIOUSLY, INCORRECTLY grouped under this
+// same comment despite grep showing neither references `ndarray::s!`
+// at all -- the same fresh run confirms it precisely: their unsafe
+// blocks (walk_cmd.rs:10, trajectory_trace_cmd.rs:707) produce a plain
+// "error: usage of an `unsafe` block", no E0453, no macro involved --
+// forbid working exactly as intended, not blocked by anything. Both
+// now correctly carry `#[forbid(unsafe_code)]` below.
 //
 // Per-module `#[cfg(not(target_arch = "wasm32"))]` (wasm32v1-none gating,
 // round 1) -- every module in this file turned out WHOLESALE_NATIVE
@@ -81,6 +95,7 @@ pub mod qk_templates_cmd;
 #[forbid(unsafe_code)]
 pub mod residuals_cmd;
 #[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 pub mod trajectory_trace_cmd;
 #[cfg(not(target_arch = "wasm32"))]
 #[forbid(unsafe_code)]
@@ -89,6 +104,7 @@ pub mod vector_extract_cmd;
 #[forbid(unsafe_code)]
 pub mod verify_cmd;
 #[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 pub mod walk_cmd;
 // pub mod vindex_bench_cmd;  // Removed: uses deprecated DownClusteredFfn
 #[cfg(not(target_arch = "wasm32"))]
