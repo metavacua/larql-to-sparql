@@ -7,17 +7,20 @@ mod overview;
 mod usage;
 mod verification;
 
-// Both users of CardInputs below (render_body, render_recipe) are
-// native-only (serde_yaml) -- see their own #[cfg] for why.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
+// DESIGN B (inline expression-level #[cfg]): render_body is one
+// function, ungated -- CardInputs is read by every section call below
+// on every target, native and wasm32 alike.
 use crate::card::types::CardInputs;
 
-/// Render the full body (everything after the frontmatter).
-// render_recipe needs serde_yaml (no no_std mode at all, see Cargo.toml's
-// pattern-1 comment) unconditionally -- there's no partial-output
-// fallback that would make sense, so the whole function is native-only,
-// same shape as recipe::Recipe::from_yaml.
-#[cfg(not(target_arch = "wasm32"))]
+/// Render the full body (everything after the frontmatter). The Recipe
+/// section (last element below) needs `serde_yaml` (no no_std mode at
+/// all, see Cargo.toml's pattern-1 comment) -- narrowed with an
+/// expression-level `#[cfg]` on just that one array element, rather
+/// than gating the whole function the way `render_recipe` itself still
+/// is.
 pub fn render_body(inputs: &CardInputs, revision_tag: &str) -> String {
     let sections = [
         overview::render_overview(inputs.manifest),
@@ -28,6 +31,7 @@ pub fn render_body(inputs: &CardInputs, revision_tag: &str) -> String {
             revision_tag,
         ),
         verification::render_verification(&inputs.recipe.spec.verify, inputs.verification),
+        #[cfg(not(target_arch = "wasm32"))]
         render_recipe(inputs.recipe),
     ];
     sections

@@ -46,10 +46,11 @@ pub use build_id::build_id;
 pub use capabilities::{
     manifest as capabilities_manifest, ArchitectureCapability, CapabilityManifest,
 };
-// card::render needs serde_yaml transitively (via body::render_recipe),
-// native-only -- see card/body/mod.rs. Recipe::from_yaml below is the
-// same shape.
-#[cfg(not(target_arch = "wasm32"))]
+// card::render is portable on every target now (DESIGN B, see
+// card/body/mod.rs): only its Recipe section needs serde_yaml, and
+// that's narrowed to a single expression-level #[cfg] inside
+// body::render_body. Recipe::from_yaml below is still native-only in
+// its own right (unrelated to this).
 pub use card::render as render_card;
 pub use card::{
     revision_tag, CardInputs, LogitMatchResult, ReconstructionResult, SliceSummary,
