@@ -12,12 +12,44 @@ breaks outside its native target. This is a deliberate first pass on raw
 upstream code (no target-conditional dependency splitting exists yet on this
 branch, unlike the separate `gating/larql-cli-wasm-and-safe` effort). Failures
 are expected and are the point: they are the analysis data that later
-migration/refactoring work will act on. This workflow does not attempt to fix
-anything — it only needs to run every planned target/job to completion and
-leave each job's real pass/fail visible.
+migration/refactoring work will act on. The workflow does attempt `clippy
+--fix` per target (see "Clippy --fix and cross-job accumulation" below), but
+never commits anything — every job's real pass/fail (before and after any fix
+attempt) stays visible.
 
 This branch is independent of `gating/larql-cli-wasm-and-safe` — no code or
 CI is reused from it.
+
+## Experimentation methodology
+
+This workflow is not written once and pushed whole. It's built up as a
+series of standalone, throwaway workflow files (matching the `experiment/*`
+branch convention already used elsewhere in this environment), in two
+overlapping ways:
+
+- **Incremental build-up**: each job first as its own standalone
+  single-job workflow (validates toolchain setup for that target in
+  isolation), then small sub-chains (e.g. `wasm32v1-none →
+  wasm32-unknown-unknown`, to validate the artifact hand-off mechanism
+  itself), before assembling the full graph. Keeps the blast radius of any
+  one failure small and legible.
+- **Technical-choice variants**: wherever there's a genuinely undecided
+  implementation detail (e.g. which action installs `wasmtime`), two or
+  more standalone variants are run side by side on real CI and compared;
+  the winner carries into the consolidated workflow.
+
+Both of these exist specifically to test GitHub Actions itself, not just
+`larql-cli`. Any uncertainty about Actions syntax or behavior — artifact
+upload/download semantics between jobs, whether `git apply` behaves
+consistently against a fresh Actions checkout, exact `clippy --fix` flags
+needed against an already-dirty tree, `needs.<job>.result` edge cases, etc.
+— becomes an explicit test case in one of these standalone workflows.
+Documentation is not trusted as the source of truth here: this design
+process already hit a case (`continue-on-error` at the job level) where
+GitHub's own docs page was incomplete and a web search summary
+self-contradicted before a specific secondary source resolved it. Where
+docs are absent or contradictory, the standalone experiment workflow's
+actual observed behavior on a real hosted runner is what's authoritative.
 
 ## Target graph
 
@@ -68,15 +100,55 @@ Each target job (`wasm32v1-none`, `wasm32-unknown-unknown`, `wasm32-wasip1`,
 `wasm32-wasip2`, `wasm32-wasip1-threads`, `wasm32-unknown-emscripten`) runs,
 in order:
 
-1. `cargo clippy --target <T> -p larql-cli`
-2. `cargo build --target <T> -p larql-cli`
-3. `cargo test --target <T> -p larql-cli` (skipped for
+1. If this job has a real upstream in the graph (i.e. every job except
+   `wasm32v1-none`): download the upstream job's cumulative diff artifact
+   and `git apply` it to a fresh checkout.
+2. `cargo clippy --target <T> -p larql-cli`
+3. If clippy reports fixable findings: `cargo clippy --fix --target <T> -p
+   larql-cli` (partial fixes are fine — a `--fix` pass is not expected to
+   resolve everything in one go).
+4. Upload the current full cumulative diff (original source → now,
+   including whatever was inherited in step 1 plus this job's own fix) as
+   this job's artifact, so any job downstream of it only ever applies one
+   patch file, never a stack of them.
+5. `cargo build --target <T> -p larql-cli`
+6. `cargo test --target <T> -p larql-cli` (skipped for
    `wasm32-unknown-emscripten` — see below)
 
-Each step has **step-level `continue-on-error: true`**, so a clippy failure
-does not prevent the job from still attempting build and test on that same
-target — all three signals are wanted per target regardless of whether an
-earlier step failed.
+Steps 2, 3, 5, and 6 each have **step-level `continue-on-error: true`**, so
+a clippy or fix failure does not prevent the job from still attempting
+build and test on that same target — all signals are wanted per target
+regardless of whether an earlier step failed. Build and test run against
+the patched tree (post-step-3), not the original source, so the workflow
+also surfaces whether a target's own fixes actually resolve its build/test
+failures.
+
+## Clippy --fix and cross-job accumulation
+
+No job ever commits anything — not to the working branch, not anywhere.
+All fix propagation is via GitHub Actions artifacts scoped to a single
+workflow run, following the real `needs:` edges only:
+
+- `wasm32v1-none` has no upstream fix to inherit; it starts clean from the
+  checked-out source.
+- `wasm32-unknown-unknown` inherits `wasm32v1-none`'s cumulative diff.
+- `wasm32-wasip1`, `wasm32-wasip2`, `wasm32-wasip1-threads`, and
+  `wasm32-unknown-emscripten` each independently inherit
+  `wasm32-unknown-unknown`'s cumulative diff and extend it with their own
+  target-specific fixes. They do **not** see each other's fixes — they are
+  genuinely independent siblings in the graph, not a false sequence, so
+  their fix output isn't reconciled with each other by the workflow.
+- `kani` is untouched by any of this — it stays on its separate
+  native-only branch off `fmt-check`, with no artifact exchange with the
+  wasm chain.
+
+Expected outcome: as fixes accumulate down the `wasm32v1-none →
+wasm32-unknown-unknown → {sibling}` chain, later jobs' clippy passes may
+surface issues that only become visible once earlier fixes are applied —
+that's useful signal, not something to prevent. Over however many
+standalone experiment runs this takes, the accumulated diffs are reviewed
+and applied to source by hand — the workflow's job is to produce and
+surface the diffs, not to land them.
 
 ### Test execution via wasmtime
 
@@ -153,6 +225,13 @@ sources at implementation time rather than asserted from memory here.
   without a demonstrated need.
 - **No `wasm32-wali-linux-musl` or native musl targets** (see "Targets
   explicitly excluded" above).
+- **No commits from CI, ever.** Not to the working branch, not to a
+  side branch, not via a bot. Fix output is a transient workflow-run
+  artifact only; landing it in source is a manual, later step.
+- **No forced sequencing between genuinely independent jobs.** The
+  `wasip1`/`wasip2`/`wasip1-threads`/`emscripten` fan-out stays parallel
+  because that's the real dependency graph — it is not restructured into
+  a chain merely to make fix accumulation easier.
 
 ## Validation approach
 
@@ -163,3 +242,8 @@ target-list`, `rustup target add ... `, checking for `emcc`/`wasmtime`) were
 used only to inform toolchain-requirement decisions in this design, not to
 pre-validate whether `larql-cli` itself builds or tests successfully on any
 target.
+
+This extends to GitHub Actions mechanics themselves, not just
+`larql-cli`'s code: per "Experimentation methodology" above, uncertainty
+about Actions syntax/behavior is resolved by observing a standalone
+experiment workflow's actual run, not by further documentation research.
