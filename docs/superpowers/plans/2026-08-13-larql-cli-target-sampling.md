@@ -6,7 +6,7 @@
 
 **Architecture:** Each task adds one standalone, `workflow_dispatch`-triggered experiment workflow file, pushed and run for real on GitHub-hosted runners (`gh workflow run` / `gh run watch` — never simulated locally). Later tasks reuse patterns validated by earlier ones. The final task assembles everything into one consolidated workflow (`larql-cli-target-sampling.yml`) matching the approved target graph, and removes the now-superseded standalone experiment files.
 
-**Tech Stack:** GitHub Actions (`dtolnay/rust-toolchain`, `actions/checkout@v7`, `actions/upload-artifact@v4`/`download-artifact@v4`), Rust stable (edition 2021, rust-version 1.88 per `Cargo.toml`), `wasmtime` CLI, `kani-verifier`, Emscripten SDK, `gh` CLI for triggering/observing runs.
+**Tech Stack:** GitHub Actions (`dtolnay/rust-toolchain`, `actions/checkout@v7`, `actions/upload-artifact@v7`/`download-artifact@v8`), Rust stable (edition 2021, rust-version 1.88 per `Cargo.toml`), `wasmtime` CLI, `kani-verifier`, Emscripten SDK, `gh` CLI for triggering/observing runs.
 
 **Spec:** `docs/superpowers/specs/2026-08-13-larql-cli-target-sampling-design.md`
 
@@ -249,7 +249,7 @@ jobs:
 
       - name: Upload diff artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: diff-wasm32v1-none
           path: wasm32v1-none.patch
@@ -439,7 +439,7 @@ jobs:
 
       - name: Upload diff artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: diff-wasm32v1-none
           path: wasm32v1-none.patch
@@ -463,7 +463,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Download upstream diff artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: diff-wasm32v1-none
 
@@ -498,7 +498,7 @@ jobs:
 
       - name: Upload diff artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: diff-wasm32-unknown-unknown
           path: wasm32-unknown-unknown.patch
@@ -1010,7 +1010,7 @@ jobs:
         run: git diff > wasm32v1-none.patch
       - name: Upload diff artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: diff-wasm32v1-none
           path: wasm32v1-none.patch
@@ -1030,7 +1030,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: diff-wasm32v1-none
       - name: Apply upstream diff
@@ -1056,7 +1056,7 @@ jobs:
         run: git diff > wasm32-unknown-unknown.patch
       - name: Upload diff artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: diff-wasm32-unknown-unknown
           path: wasm32-unknown-unknown.patch
@@ -1076,7 +1076,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: diff-wasm32-unknown-unknown
       - name: Apply upstream diff
@@ -1112,7 +1112,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: diff-wasm32-unknown-unknown
       - name: Apply upstream diff
@@ -1148,7 +1148,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: diff-wasm32-unknown-unknown
       - name: Apply upstream diff
@@ -1184,7 +1184,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: diff-wasm32-unknown-unknown
       - name: Apply upstream diff
