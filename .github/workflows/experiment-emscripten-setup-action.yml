@@ -1,0 +1,41 @@
+name: experiment-emscripten-setup-action
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
+
+jobs:
+  wasm32-unknown-emscripten:
+    name: wasm32-unknown-emscripten (setup-emsdk action)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+          components: clippy
+
+      - name: Install Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+
+      - name: Verify emcc
+        run: emcc --version
+
+      - name: Clippy
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-unknown-emscripten -- -D warnings
+
+      - name: Clippy --fix
+        if: steps.clippy.outcome == 'failure'
+        continue-on-error: true
+        run: cargo clippy --fix -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-unknown-emscripten --allow-dirty --allow-staged -- -D warnings
+
+      - name: Build
+        continue-on-error: true
+        run: cargo build -p larql-cli --bins --no-default-features --target wasm32-unknown-emscripten
