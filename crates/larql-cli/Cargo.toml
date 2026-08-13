@@ -7,6 +7,9 @@ license.workspace = true
 rust-version.workspace = true
 description = "CLI for LARQL knowledge graph extraction and querying"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "larql"
 path = "src/main.rs"
