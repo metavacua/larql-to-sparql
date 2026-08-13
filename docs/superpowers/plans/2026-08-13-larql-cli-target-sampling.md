@@ -20,7 +20,7 @@
 - Step-level `continue-on-error: true` on every clippy/fix/build/test step; job-level `continue-on-error: true` on every job except `fmt-check` — confirmed via Ken Muse's writeup (linked in the spec) that this makes `needs.<job>.result` report `"success"` downstream even when the job's own steps failed, so the `needs:` chain is never blocked by expected breakage.
 - No `wasm32-wali-linux-musl` or native musl targets (excluded per spec).
 - No summary/report job.
-- Standalone experiment workflows use `on: workflow_dispatch: {}` only (deliberate, one-run-per-invocation, avoids every push re-triggering every prior experiment). The final consolidated workflow (Task 10) uses `push`/`pull_request` on `main` plus `workflow_dispatch`, matching the existing `larql-cli.yml` convention.
+- Standalone experiment workflows use `workflow_dispatch: {}` plus `push: branches: [feat/larql-cli-target-sampling]`. `workflow_dispatch`-only does not work on a non-default branch — GitHub Actions only registers a workflow as dispatchable once it has run via a non-dispatch trigger (or exists on the default branch); this was discovered empirically in Task 1 (see ledger), not assumed from docs. The `push` trigger is scoped to this one branch so pushing a later task's file doesn't silently mass-retrigger every earlier experiment workflow beyond what's expected. The final consolidated workflow (Task 10) uses `push`/`pull_request` on `main` plus `workflow_dispatch`, matching the existing `larql-cli.yml` convention.
 - Repo: `metavacua/larql-to-sparql`, branch `feat/larql-cli-target-sampling`, working tree at `/home/metavacua/larql-upstream-2026-08-13`, remote `fork`.
 - `larql-cli` package name: `larql-cli`; binary: `larql`; path: `crates/larql-cli`.
 
@@ -41,6 +41,8 @@ name: experiment-fmt-check
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   fmt-check:
@@ -71,7 +73,6 @@ git push fork feat/larql-cli-target-sampling
 - [ ] **Step 3: Trigger and watch the run**
 
 ```bash
-gh workflow run experiment-fmt-check.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
 sleep 8
 RUN_ID=$(gh run list --workflow=experiment-fmt-check.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
 gh run watch "$RUN_ID" -R metavacua/larql-to-sparql --exit-status
@@ -107,6 +108,8 @@ name: experiment-wasmtime-install-taiki
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   install-wasmtime:
@@ -130,6 +133,8 @@ name: experiment-wasmtime-install-script
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   install-wasmtime:
@@ -156,8 +161,6 @@ git add .github/workflows/experiment-wasmtime-install-taiki.yml .github/workflow
 git commit -m "ci(experiment): compare wasmtime install methods"
 git push fork feat/larql-cli-target-sampling
 
-gh workflow run experiment-wasmtime-install-taiki.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
-gh workflow run experiment-wasmtime-install-script.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
 sleep 8
 RUN_A=$(gh run list --workflow=experiment-wasmtime-install-taiki.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
 RUN_B=$(gh run list --workflow=experiment-wasmtime-install-script.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
@@ -209,6 +212,8 @@ name: experiment-wasm32v1-none
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   wasm32v1-none:
@@ -267,7 +272,6 @@ git add .github/workflows/experiment-wasm32v1-none.yml
 git commit -m "ci(experiment): add wasm32v1-none standalone workflow"
 git push fork feat/larql-cli-target-sampling
 
-gh workflow run experiment-wasm32v1-none.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
 sleep 8
 RUN_ID=$(gh run list --workflow=experiment-wasm32v1-none.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
 gh run watch "$RUN_ID" -R metavacua/larql-to-sparql --exit-status || true
@@ -304,6 +308,8 @@ name: experiment-kani-action
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   kani:
@@ -327,6 +333,8 @@ name: experiment-kani-manual
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   kani:
@@ -358,8 +366,6 @@ git add .github/workflows/experiment-kani-action.yml .github/workflows/experimen
 git commit -m "ci(experiment): compare kani install methods"
 git push fork feat/larql-cli-target-sampling
 
-gh workflow run experiment-kani-action.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
-gh workflow run experiment-kani-manual.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
 sleep 8
 RUN_A=$(gh run list --workflow=experiment-kani-action.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
 RUN_B=$(gh run list --workflow=experiment-kani-manual.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
@@ -396,6 +402,8 @@ name: experiment-chain-v1none-unknown
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   wasm32v1-none:
@@ -520,7 +528,6 @@ git add .github/workflows/experiment-chain-v1none-unknown.yml .cargo/config.toml
 git commit -m "ci(experiment): validate wasm32v1-none -> wasm32-unknown-unknown artifact hand-off"
 git push fork feat/larql-cli-target-sampling
 
-gh workflow run experiment-chain-v1none-unknown.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
 sleep 8
 RUN_ID=$(gh run list --workflow=experiment-chain-v1none-unknown.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
 gh run watch "$RUN_ID" -R metavacua/larql-to-sparql --exit-status || true
@@ -557,6 +564,8 @@ name: experiment-wasm32-wasip1
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   wasm32-wasip1:
@@ -610,7 +619,6 @@ git add .github/workflows/experiment-wasm32-wasip1.yml .cargo/config.toml
 git commit -m "ci(experiment): add wasm32-wasip1 standalone workflow"
 git push fork feat/larql-cli-target-sampling
 
-gh workflow run experiment-wasm32-wasip1.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
 sleep 8
 RUN_ID=$(gh run list --workflow=experiment-wasm32-wasip1.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
 gh run watch "$RUN_ID" -R metavacua/larql-to-sparql --exit-status || true
@@ -644,6 +652,8 @@ name: experiment-wasm32-wasip2
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   wasm32-wasip2:
@@ -697,7 +707,6 @@ git add .github/workflows/experiment-wasm32-wasip2.yml .cargo/config.toml
 git commit -m "ci(experiment): add wasm32-wasip2 standalone workflow"
 git push fork feat/larql-cli-target-sampling
 
-gh workflow run experiment-wasm32-wasip2.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
 sleep 8
 RUN_ID=$(gh run list --workflow=experiment-wasm32-wasip2.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
 gh run watch "$RUN_ID" -R metavacua/larql-to-sparql --exit-status || true
@@ -731,6 +740,8 @@ name: experiment-wasm32-wasip1-threads
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   wasm32-wasip1-threads:
@@ -784,7 +795,6 @@ git add .github/workflows/experiment-wasm32-wasip1-threads.yml .cargo/config.tom
 git commit -m "ci(experiment): add wasm32-wasip1-threads standalone workflow"
 git push fork feat/larql-cli-target-sampling
 
-gh workflow run experiment-wasm32-wasip1-threads.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
 sleep 8
 RUN_ID=$(gh run list --workflow=experiment-wasm32-wasip1-threads.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
 gh run watch "$RUN_ID" -R metavacua/larql-to-sparql --exit-status || true
@@ -818,6 +828,8 @@ name: experiment-emscripten-setup-action
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   wasm32-unknown-emscripten:
@@ -862,6 +874,8 @@ name: experiment-emscripten-manual
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   wasm32-unknown-emscripten:
@@ -915,8 +929,6 @@ git add .github/workflows/experiment-emscripten-setup-action.yml .github/workflo
 git commit -m "ci(experiment): compare emsdk install methods"
 git push fork feat/larql-cli-target-sampling
 
-gh workflow run experiment-emscripten-setup-action.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
-gh workflow run experiment-emscripten-manual.yml --ref feat/larql-cli-target-sampling -R metavacua/larql-to-sparql
 sleep 8
 RUN_A=$(gh run list --workflow=experiment-emscripten-setup-action.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
 RUN_B=$(gh run list --workflow=experiment-emscripten-manual.yml --branch=feat/larql-cli-target-sampling -R metavacua/larql-to-sparql --limit=1 --json databaseId --jq '.[0].databaseId')
