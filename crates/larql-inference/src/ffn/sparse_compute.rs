@@ -11,7 +11,10 @@
 use ndarray::Array2;
 
 use super::weight::dense_ffn_forward;
-use super::{gelu_tanh, sigmoid};
+use super::{gelu_tanh, sigmoid, FfnActivations, SparseActivations};
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+use crate::collections::HashMap;
 use crate::forward::add_bias;
 use crate::model::ModelWeights;
 
@@ -20,27 +23,41 @@ use crate::model::ModelWeights;
 /// Architecture-correct: reads ffn_type, activation, and bias from the model.
 /// Falls back to dense (via `weight::dense_ffn_forward`) when K >= 80%.
 ///
-/// `overrides`: optional down vector replacements for patched features.
-/// When a feature has an override, its custom down vector is used instead of
-/// the model's W_down column. This enables training-free INSERT.
+/// Hot path: no activation buffer is allocated. Observation is opt-in
+/// via [`sparse_ffn_forward_observed`] (2026-07-30 review, item 15).
 pub fn sparse_ffn_forward(
     weights: &ModelWeights,
     layer: usize,
     x: &Array2<f32>,
     features: &[usize],
-) -> (Array2<f32>, Array2<f32>) {
-    sparse_ffn_forward_impl(weights, layer, x, features, &[])
+) -> Array2<f32> {
+    sparse_ffn_forward_impl(weights, layer, x, features, &[], false).0
+}
+
+/// [`sparse_ffn_forward`] plus an honest activation observation:
+/// `(feature, activation)` pairs for exactly the computed features, or
+/// [`FfnActivations::Dense`] when the ≥80%-K dense fallback fires.
+pub fn sparse_ffn_forward_observed(
+    weights: &ModelWeights,
+    layer: usize,
+    x: &Array2<f32>,
+    features: &[usize],
+) -> (Array2<f32>, FfnActivations) {
+    let (out, obs) = sparse_ffn_forward_impl(weights, layer, x, features, &[], true);
+    (out, obs.expect("observe=true always yields an observation"))
 }
 
 /// Sparse FFN with down vector overrides (for patched features).
+/// When a feature has an override, its custom down vector is used instead
+/// of the model's W_down column. This enables training-free INSERT.
 pub fn sparse_ffn_forward_with_overrides(
     weights: &ModelWeights,
     layer: usize,
     x: &Array2<f32>,
     features: &[usize],
     overrides: &[(usize, &[f32])],
-) -> (Array2<f32>, Array2<f32>) {
-    sparse_ffn_forward_impl(weights, layer, x, features, overrides)
+) -> Array2<f32> {
+    sparse_ffn_forward_impl(weights, layer, x, features, overrides, false).0
 }
 
 /// Per-slot override carrying any combination of gate / up / down vectors.
@@ -70,8 +87,21 @@ pub fn sparse_ffn_forward_with_full_overrides(
     x: &Array2<f32>,
     features: &[usize],
     overrides: &[FeatureSlotOverride<'_>],
-) -> (Array2<f32>, Array2<f32>) {
-    sparse_ffn_forward_full_impl(weights, layer, x, features, overrides)
+) -> Array2<f32> {
+    sparse_ffn_forward_full_impl(weights, layer, x, features, overrides, false).0
+}
+
+/// [`sparse_ffn_forward_with_full_overrides`] plus the honest
+/// observation of the post-override slot activations.
+pub fn sparse_ffn_forward_with_full_overrides_observed(
+    weights: &ModelWeights,
+    layer: usize,
+    x: &Array2<f32>,
+    features: &[usize],
+    overrides: &[FeatureSlotOverride<'_>],
+) -> (Array2<f32>, FfnActivations) {
+    let (out, obs) = sparse_ffn_forward_full_impl(weights, layer, x, features, overrides, true);
+    (out, obs.expect("observe=true always yields an observation"))
 }
 
 fn sparse_ffn_forward_impl(
@@ -80,7 +110,8 @@ fn sparse_ffn_forward_impl(
     x: &Array2<f32>,
     features: &[usize],
     overrides: &[(usize, &[f32])],
-) -> (Array2<f32>, Array2<f32>) {
+    observe: bool,
+) -> (Array2<f32>, Option<FfnActivations>) {
     let arch = &*weights.arch;
     let w_up = weights.tensors.get(&arch.ffn_up_key(layer)).unwrap();
     let w_down = weights.tensors.get(&arch.ffn_down_key(layer)).unwrap();
@@ -90,22 +121,22 @@ fn sparse_ffn_forward_impl(
     let k = features.len();
 
     if k == 0 {
+        // Nothing computed: the honest observation is an empty sparse
+        // record, not a zero-filled dense matrix.
         return (
             Array2::<f32>::zeros((seq_len, hidden)),
-            Array2::<f32>::zeros((seq_len, intermediate)),
+            observe.then(|| FfnActivations::Sparse(SparseActivations::new(seq_len, intermediate))),
         );
     }
 
     // Fall back to dense when most features are selected
     if k * 5 >= intermediate * 4 && overrides.is_empty() {
-        return dense_ffn_forward(larql_models::WeightsView::dense(weights), layer, x);
+        let (out, act) = dense_ffn_forward(larql_models::WeightsView::dense(weights), layer, x);
+        return (out, observe.then(|| FfnActivations::Dense(act)));
     }
 
     let is_gated = arch.ffn_type() == larql_models::FfnType::Gated;
-    let use_gelu = matches!(
-        arch.activation(),
-        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
-    );
+    let use_gelu = arch.activation().uses_gelu_tanh_gate_up();
 
     // Gather weight rows for selected features
     let up_buf = gather_rows(w_up, features, hidden);
@@ -126,33 +157,38 @@ fn sparse_ffn_forward_impl(
     let down_view = ndarray::ArrayView2::from_shape((hidden, k), &down_sub).unwrap();
 
     // Override lookup (only built when overrides are present)
-    let override_map: std::collections::HashMap<usize, &[f32]> = if overrides.is_empty() {
-        std::collections::HashMap::new()
+    let override_map: HashMap<usize, &[f32]> = if overrides.is_empty() {
+        HashMap::default()
     } else {
         overrides.iter().copied().collect()
     };
 
-    let mut full_activation = Array2::<f32>::zeros((seq_len, intermediate));
+    let mut obs = observe.then(|| SparseActivations::new(seq_len, intermediate));
     let mut sparse_act = vec![0.0f32; k];
     let mut out = Array2::<f32>::zeros((seq_len, hidden));
 
     for s in 0..seq_len {
         let x_row = x.row(s);
 
-        // Compute sparse activations
+        // Compute sparse activations. Each arm records its own
+        // observation so the projection scores it computed ride along
+        // (runtime trace, 2026-07-30 review item 17).
         if let Some(ref gate_sub) = gate_sub {
             let gate_proj = gate_sub.dot(&x_row);
             let up_proj = up_sub.dot(&x_row);
-            for (i, &feat) in features.iter().enumerate() {
+            for i in 0..k {
                 let g = gate_proj[i];
                 let activated = if use_gelu {
                     gelu_tanh(g)
                 } else {
                     g * sigmoid(g)
                 };
-                let val = activated * up_proj[i];
-                sparse_act[i] = val;
-                full_activation[[s, feat]] = val;
+                sparse_act[i] = activated * up_proj[i];
+            }
+            if let Some(o) = obs.as_mut() {
+                for (i, &feat) in features.iter().enumerate() {
+                    o.record_scored(s, feat, sparse_act[i], Some(gate_proj[i]), Some(up_proj[i]));
+                }
             }
         } else {
             let up_proj = up_sub.dot(&x_row);
@@ -167,15 +203,21 @@ fn sparse_ffn_forward_impl(
                     }
                 }
             }
-            for (i, &feat) in features.iter().enumerate() {
+            for i in 0..k {
                 let v = vals[i];
-                let val = if use_gelu {
+                sparse_act[i] = if use_gelu {
                     gelu_tanh(v)
                 } else {
                     v * sigmoid(v)
                 };
-                sparse_act[i] = val;
-                full_activation[[s, feat]] = val;
+            }
+            if let Some(o) = obs.as_mut() {
+                // Non-gated FFN: the single pre-activation projection
+                // (incl. up-bias) is the gate-position score; there is
+                // no separate up projection to report.
+                for (i, &feat) in features.iter().enumerate() {
+                    o.record_scored(s, feat, sparse_act[i], Some(vals[i]), None);
+                }
             }
         }
 
@@ -210,7 +252,7 @@ fn sparse_ffn_forward_impl(
         add_bias(&mut out, bias);
     }
 
-    (out, full_activation)
+    (out, obs.map(FfnActivations::Sparse))
 }
 
 fn sparse_ffn_forward_full_impl(
@@ -219,7 +261,8 @@ fn sparse_ffn_forward_full_impl(
     x: &Array2<f32>,
     features: &[usize],
     overrides: &[FeatureSlotOverride<'_>],
-) -> (Array2<f32>, Array2<f32>) {
+    observe: bool,
+) -> (Array2<f32>, Option<FfnActivations>) {
     let arch = &*weights.arch;
     let w_up = weights.tensors.get(&arch.ffn_up_key(layer)).unwrap();
     let w_down = weights.tensors.get(&arch.ffn_down_key(layer)).unwrap();
@@ -231,15 +274,12 @@ fn sparse_ffn_forward_full_impl(
     if k == 0 {
         return (
             Array2::<f32>::zeros((seq_len, hidden)),
-            Array2::<f32>::zeros((seq_len, intermediate)),
+            observe.then(|| FfnActivations::Sparse(SparseActivations::new(seq_len, intermediate))),
         );
     }
 
     let is_gated = arch.ffn_type() == larql_models::FfnType::Gated;
-    let use_gelu = matches!(
-        arch.activation(),
-        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
-    );
+    let use_gelu = arch.activation().uses_gelu_tanh_gate_up();
 
     // Gather original weight rows. Per-feature overrides will be
     // applied below by re-computing the dot products for the
@@ -262,31 +302,42 @@ fn sparse_ffn_forward_full_impl(
     let down_view = ndarray::ArrayView2::from_shape((hidden, k), &down_sub).unwrap();
 
     // Per-feature override lookup. Built once.
-    let override_map: std::collections::HashMap<usize, &FeatureSlotOverride<'_>> =
+    let override_map: HashMap<usize, &FeatureSlotOverride<'_>> =
         overrides.iter().map(|o| (o.feature, o)).collect();
 
-    let mut full_activation = Array2::<f32>::zeros((seq_len, intermediate));
+    let mut obs = observe.then(|| SparseActivations::new(seq_len, intermediate));
     let mut sparse_act = vec![0.0f32; k];
     let mut out = Array2::<f32>::zeros((seq_len, hidden));
 
     for s in 0..seq_len {
         let x_row = x.row(s);
 
+        // Per-slot projection scores retained for the observation
+        // record (runtime trace, 2026-07-30 review item 17). Only
+        // allocated when observing; phase 2 overwrites the entries of
+        // any recomputed (overridden) slots so the record carries the
+        // POST-override scores the executed output used.
+        let mut scored: Option<Vec<(Option<f32>, Option<f32>)>> =
+            obs.is_some().then(|| vec![(None, None); k]);
+
         // Phase 1: compute baseline activations for every feature
         // using gathered dense weights.
         if let Some(ref gate_sub) = gate_sub {
             let gate_proj = gate_sub.dot(&x_row);
             let up_proj = up_sub.dot(&x_row);
-            for (i, &feat) in features.iter().enumerate() {
+            for i in 0..k {
                 let g = gate_proj[i];
                 let activated = if use_gelu {
                     gelu_tanh(g)
                 } else {
                     g * sigmoid(g)
                 };
-                let val = activated * up_proj[i];
-                sparse_act[i] = val;
-                full_activation[[s, feat]] = val;
+                sparse_act[i] = activated * up_proj[i];
+            }
+            if let Some(sc) = scored.as_mut() {
+                for i in 0..k {
+                    sc[i] = (Some(gate_proj[i]), Some(up_proj[i]));
+                }
             }
         } else {
             let up_proj = up_sub.dot(&x_row);
@@ -301,15 +352,20 @@ fn sparse_ffn_forward_full_impl(
                     }
                 }
             }
-            for (i, &feat) in features.iter().enumerate() {
+            for i in 0..k {
                 let v = vals[i];
-                let val = if use_gelu {
+                sparse_act[i] = if use_gelu {
                     gelu_tanh(v)
                 } else {
                     v * sigmoid(v)
                 };
-                sparse_act[i] = val;
-                full_activation[[s, feat]] = val;
+            }
+            if let Some(sc) = scored.as_mut() {
+                // Non-gated: the single pre-activation projection
+                // (incl. up-bias) is the gate-position score.
+                for i in 0..k {
+                    sc[i] = (Some(vals[i]), None);
+                }
             }
         }
 
@@ -365,13 +421,28 @@ fn sparse_ffn_forward_full_impl(
                 up_sub.row(i).dot(&x_row)
             };
 
-            let new_act = if is_gated {
+            sparse_act[i] = if is_gated {
                 activated * up_score
             } else {
                 activated
             };
-            sparse_act[i] = new_act;
-            full_activation[[s, feat]] = new_act;
+            if let Some(sc) = scored.as_mut() {
+                sc[i] = if is_gated {
+                    (Some(g), Some(up_score))
+                } else {
+                    (Some(g), None)
+                };
+            }
+        }
+
+        // Observation records the POST-override slot activations and
+        // the projection scores that produced them — phase 2 has
+        // already re-computed any overridden slots.
+        if let Some(o) = obs.as_mut() {
+            let sc = scored.as_ref().expect("scored allocated iff observing");
+            for (i, &feat) in features.iter().enumerate() {
+                o.record_scored(s, feat, sparse_act[i], sc[i].0, sc[i].1);
+            }
         }
 
         // Phase 3: down projection using gathered dense down vectors,
@@ -412,7 +483,7 @@ fn sparse_ffn_forward_full_impl(
         add_bias(&mut out, bias);
     }
 
-    (out, full_activation)
+    (out, obs.map(FfnActivations::Sparse))
 }
 
 /// Gather rows from a weight matrix for selected features.
@@ -461,10 +532,7 @@ pub fn select_top_k_features(
 ) -> Vec<usize> {
     let arch = &*weights.arch;
     let is_gated = arch.ffn_type() == larql_models::FfnType::Gated;
-    let use_gelu = matches!(
-        arch.activation(),
-        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
-    );
+    let use_gelu = arch.activation().uses_gelu_tanh_gate_up();
 
     let proj = if is_gated {
         let w_gate = weights.tensors.get(&arch.ffn_gate_key(layer)).unwrap();
@@ -525,33 +593,52 @@ mod tests {
     fn sparse_forward_empty_features_returns_zeros() {
         let weights = make_test_weights();
         let x = input(2, weights.hidden_size);
-        let (out, act) = sparse_ffn_forward(&weights, 0, &x, &[]);
+        let (out, obs) = sparse_ffn_forward_observed(&weights, 0, &x, &[]);
         assert_eq!(out.shape(), &[2, weights.hidden_size]);
         assert!(
             out.iter().all(|v| v.abs() < 1e-9),
             "empty features → zero output"
         );
-        assert_eq!(act.shape()[0], 2);
+        // Honest observation: nothing was computed, so the sparse
+        // record is empty — not a fabricated zero matrix.
+        match obs {
+            FfnActivations::Sparse(s) => {
+                assert_eq!(s.seq_len(), 2);
+                assert!(s.position(0).is_empty() && s.position(1).is_empty());
+            }
+            other => panic!("expected Sparse observation, got {other:?}"),
+        }
     }
 
     #[test]
     fn sparse_forward_single_feature_output_shape() {
         let weights = make_test_weights();
         let x = input(1, weights.hidden_size);
-        let (out, act) = sparse_ffn_forward(&weights, 0, &x, &[0]);
+        let out = sparse_ffn_forward(&weights, 0, &x, &[0]);
         assert_eq!(out.shape(), &[1, weights.hidden_size]);
-        assert_eq!(act.shape()[0], 1);
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
     #[test]
-    fn sparse_forward_multi_token_shape() {
+    fn sparse_forward_multi_token_observed_emits_only_computed_features() {
         let weights = make_test_weights();
         let x = input(3, weights.hidden_size);
-        let (out, act) = sparse_ffn_forward(&weights, 0, &x, &[0, 1, 2]);
+        let feats = [0usize, 1, 2];
+        let (out, obs) = sparse_ffn_forward_observed(&weights, 0, &x, &feats);
         assert_eq!(out.shape(), &[3, weights.hidden_size]);
-        assert_eq!(act.shape()[0], 3);
         assert!(out.iter().all(|v| v.is_finite()));
+        // The plain forward is the same computation minus observation.
+        assert_eq!(out, sparse_ffn_forward(&weights, 0, &x, &feats));
+        match obs {
+            FfnActivations::Sparse(s) => {
+                assert_eq!(s.seq_len(), 3);
+                for pos in 0..3 {
+                    let recorded: Vec<usize> = s.position(pos).iter().map(|e| e.feature).collect();
+                    assert_eq!(recorded, feats, "exactly the K computed features");
+                }
+            }
+            other => panic!("expected Sparse observation, got {other:?}"),
+        }
     }
 
     #[test]
@@ -588,7 +675,7 @@ mod tests {
         // When K >= 80% of intermediate, sparse_ffn_forward falls back to dense.
         // Request all features to trigger that path.
         let all: Vec<usize> = (0..weights.intermediate_size).collect();
-        let (sparse_out, _) = sparse_ffn_forward(&weights, 0, &x, &all);
+        let sparse_out = sparse_ffn_forward(&weights, 0, &x, &all);
         let (dense_out, _) = crate::ffn::weight::dense_ffn_forward(
             larql_models::WeightsView::dense(&weights),
             0,
@@ -597,6 +684,13 @@ mod tests {
         for (s, d) in sparse_out.iter().zip(dense_out.iter()) {
             assert!((s - d).abs() < 1e-4, "sparse/dense mismatch: {s} vs {d}");
         }
+        // The observed variant reports the dense fallback honestly: a
+        // Dense observation, since every feature was computed.
+        let (_, obs) = sparse_ffn_forward_observed(&weights, 0, &x, &all);
+        assert!(
+            matches!(obs, FfnActivations::Dense(_)),
+            "≥80%-K fallback computes densely and must observe densely"
+        );
     }
 
     // ── sparse_ffn_forward_with_overrides ─────────────────────────────────────
@@ -607,9 +701,9 @@ mod tests {
         let x = input(1, weights.hidden_size);
         let feats = &[0usize];
         let custom_down = vec![99.0f32; weights.hidden_size];
-        let (out_override, _) =
+        let out_override =
             sparse_ffn_forward_with_overrides(&weights, 0, &x, feats, &[(0, &custom_down)]);
-        let (out_baseline, _) = sparse_ffn_forward(&weights, 0, &x, feats);
+        let out_baseline = sparse_ffn_forward(&weights, 0, &x, feats);
         // The two outputs should differ because the down vector was replaced.
         let diff: f32 = out_override
             .iter()
@@ -626,7 +720,7 @@ mod tests {
         // Test via sparse_ffn_forward by requesting two specific features
         let weights = make_test_weights();
         let x = input(2, weights.hidden_size);
-        let (out, _) = sparse_ffn_forward(&weights, 0, &x, &[0, weights.intermediate_size - 1]);
+        let out = sparse_ffn_forward(&weights, 0, &x, &[0, weights.intermediate_size - 1]);
         assert_eq!(out.shape(), &[2, weights.hidden_size]);
     }
 
@@ -652,9 +746,8 @@ mod tests {
                 down: None,
             },
         ];
-        let (out_full, _) =
-            sparse_ffn_forward_with_full_overrides(&weights, 0, &x, feats, &overrides);
-        let (out_baseline, _) = sparse_ffn_forward(&weights, 0, &x, feats);
+        let out_full = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, feats, &overrides);
+        let out_baseline = sparse_ffn_forward(&weights, 0, &x, feats);
         for (a, b) in out_full.iter().zip(out_baseline.iter()) {
             assert!(
                 (a - b).abs() < 1e-4,
@@ -675,9 +768,9 @@ mod tests {
             up: None,
             down: None,
         }];
-        let (out_override, _) =
+        let out_override =
             sparse_ffn_forward_with_full_overrides(&weights, 0, &x, feats, &overrides);
-        let (out_baseline, _) = sparse_ffn_forward(&weights, 0, &x, feats);
+        let out_baseline = sparse_ffn_forward(&weights, 0, &x, feats);
         let diff: f32 = out_override
             .iter()
             .zip(out_baseline.iter())
@@ -698,9 +791,9 @@ mod tests {
             up: Some(&custom_up),
             down: None,
         }];
-        let (out_override, _) =
+        let out_override =
             sparse_ffn_forward_with_full_overrides(&weights, 0, &x, feats, &overrides);
-        let (out_baseline, _) = sparse_ffn_forward(&weights, 0, &x, feats);
+        let out_baseline = sparse_ffn_forward(&weights, 0, &x, feats);
         let diff: f32 = out_override
             .iter()
             .zip(out_baseline.iter())
@@ -723,7 +816,7 @@ mod tests {
             up: Some(&custom_up),
             down: Some(&custom_down),
         }];
-        let (out, _) = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, feats, &overrides);
+        let out = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, feats, &overrides);
         assert_eq!(out.shape(), &[2, weights.hidden_size]);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -732,10 +825,56 @@ mod tests {
     fn full_overrides_empty_features_returns_zeros() {
         let weights = make_test_weights();
         let x = input(2, weights.hidden_size);
-        let (out, act) = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, &[], &[]);
+        let (out, obs) = sparse_ffn_forward_with_full_overrides_observed(&weights, 0, &x, &[], &[]);
         assert_eq!(out.shape(), &[2, weights.hidden_size]);
         assert!(out.iter().all(|v| v.abs() < 1e-9));
-        assert_eq!(act.shape()[0], 2);
+        match obs {
+            FfnActivations::Sparse(s) => {
+                assert_eq!(s.seq_len(), 2);
+                assert!(s.position(0).is_empty() && s.position(1).is_empty());
+            }
+            other => panic!("expected empty Sparse observation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn full_overrides_observed_reports_post_override_activations() {
+        // The observation must carry the POST-override slot activation
+        // (phase 2's recompute), not the baseline value the dense rows
+        // would have produced.
+        let weights = make_test_weights();
+        let x = input(1, weights.hidden_size);
+        let feats = &[0usize, 1];
+        let custom_gate = vec![5.0f32; weights.hidden_size];
+        let overrides = vec![FeatureSlotOverride {
+            feature: 0,
+            gate: Some(&custom_gate),
+            up: None,
+            down: None,
+        }];
+        let (_, obs_base) =
+            sparse_ffn_forward_with_full_overrides_observed(&weights, 0, &x, feats, &[]);
+        let (_, obs_ov) =
+            sparse_ffn_forward_with_full_overrides_observed(&weights, 0, &x, feats, &overrides);
+        let (FfnActivations::Sparse(base), FfnActivations::Sparse(ov)) = (obs_base, obs_ov) else {
+            panic!("both observations must be Sparse");
+        };
+        let lookup = |s: &SparseActivations, feat: usize| {
+            s.position(0)
+                .iter()
+                .find(|e| e.feature == feat)
+                .map(|e| e.activation)
+                .expect("computed feature must be recorded")
+        };
+        assert!(
+            (lookup(&base, 0) - lookup(&ov, 0)).abs() > 0.0,
+            "gate override must change the observed slot activation"
+        );
+        assert_eq!(
+            lookup(&base, 1),
+            lookup(&ov, 1),
+            "non-overridden slot observation must be untouched"
+        );
     }
 
     // ── select_top_k_features additional cases ─────────────────────────
@@ -774,7 +913,7 @@ mod tests {
         // non-gated activation loop (lines 158-180).
         let weights = crate::test_utils::make_starcoder2_test_weights();
         let x = input(2, weights.hidden_size);
-        let (out, _) = sparse_ffn_forward(&weights, 0, &x, &[0, 5, 17]);
+        let out = sparse_ffn_forward(&weights, 0, &x, &[0, 5, 17]);
         assert_eq!(out.shape(), &[2, weights.hidden_size]);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -792,7 +931,7 @@ mod tests {
             up: Some(&custom_up),
             down: None,
         }];
-        let (out, _) = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, &[0], &overrides);
+        let out = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, &[0], &overrides);
         assert_eq!(out.shape(), &[1, weights.hidden_size]);
         assert!(out.iter().all(|v| v.is_finite()));
     }
@@ -813,7 +952,7 @@ mod tests {
             up: None,
             down: None,
         }];
-        let (out, _) = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, &[0], &overrides);
+        let out = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, &[0], &overrides);
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
@@ -828,7 +967,7 @@ mod tests {
             up: Some(&bad_up),
             down: None,
         }];
-        let (out, _) = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, &[0], &overrides);
+        let out = sparse_ffn_forward_with_full_overrides(&weights, 0, &x, &[0], &overrides);
         assert!(out.iter().all(|v| v.is_finite()));
     }
 }

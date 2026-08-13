@@ -55,13 +55,15 @@ kernel void q4_sparse_matvec(
         uint w2 = uint(qb[8]) | (uint(qb[9]) << 8) | (uint(qb[10]) << 16) | (uint(qb[11]) << 24);
         uint w3 = uint(qb[12]) | (uint(qb[13]) << 8) | (uint(qb[14]) << 16) | (uint(qb[15]) << 24);
 
+        // ggml planar Q4_0: byte j holds element j (low nibble) and element
+        // j+16 (high nibble). See `q4_matvec_v4` for the full note.
         int isum = 0;
         #define D8(w, o) \
-            isum += (int((w>> 0)&0xFu)-8)*int(q8[o+0]) + (int((w>> 4)&0xFu)-8)*int(q8[o+1]) \
-                  + (int((w>> 8)&0xFu)-8)*int(q8[o+2]) + (int((w>>12)&0xFu)-8)*int(q8[o+3]) \
-                  + (int((w>>16)&0xFu)-8)*int(q8[o+4]) + (int((w>>20)&0xFu)-8)*int(q8[o+5]) \
-                  + (int((w>>24)&0xFu)-8)*int(q8[o+6]) + (int((w>>28)&0xFu)-8)*int(q8[o+7]);
-        D8(w0,0); D8(w1,8); D8(w2,16); D8(w3,24);
+            isum += (int((w>> 0)&0xFu)-8)*int(q8[o+0]) + (int((w>> 4)&0xFu)-8)*int(q8[o+0+16]) \
+                  + (int((w>> 8)&0xFu)-8)*int(q8[o+1]) + (int((w>>12)&0xFu)-8)*int(q8[o+1+16]) \
+                  + (int((w>>16)&0xFu)-8)*int(q8[o+2]) + (int((w>>20)&0xFu)-8)*int(q8[o+2+16]) \
+                  + (int((w>>24)&0xFu)-8)*int(q8[o+3]) + (int((w>>28)&0xFu)-8)*int(q8[o+3+16]);
+        D8(w0,0); D8(w1,4); D8(w2,8); D8(w3,12);
         #undef D8
 
         acc += float(isum) * cs;

@@ -23,6 +23,8 @@ a local directory path — see [Model resolution](#model-resolution) below.
 | `publish <source>` | Publish a vindex to HuggingFace — full + slice siblings + collections. |
 | `rm <model>` | Evict a cached vindex. |
 | `bench <model>` | Benchmark decode throughput on a real vindex (Metal / CPU / Ollama). |
+| `accuracy <model>` | Split-axis accuracy suite for KV engines — parametric vs in-context vs conflict, scored by top-1 match and Shannon bits/token. |
+| `dec-bench <subcmd>` | DEC residual-replay loadgen — `capture` a residual pool, `replay` batch × wire × dispatch sweeps, `drift` the C6 wire-fidelity gate. |
 | `shannon <subcmd>` | Next-token bit scoring, slot probes, repetition probes, layer lens, demo arithmetic coding. |
 | `serve <model>` | Serve a vindex over HTTP + gRPC. |
 
@@ -39,6 +41,21 @@ a local directory path — see [Model resolution](#model-resolution) below.
 | `verify` | Verify vindex file integrity (SHA256 checksums). |
 | `diag` | Engine diagnostic — print which kernel paths fire for a vindex, validate Q4_K/Q6_K strides, optional `--probe` runs a real forward pass. |
 | `parity` | Cross-backend numerical diff (`reference` / `cpu` / `metal`) at well-known checkpoints. |
+
+## Factory
+
+Vindex Factory tooling ([docs/vindex-factory.md](vindex-factory.md)) —
+recipe validation, `build_id`, capability reporting, card generation,
+and the PREFLIGHT→RELEASE build driver.
+
+| Command | Description |
+|---|---|
+| `recipe validate <FILE>` | Structurally validate a recipe file; prints every problem found. |
+| `recipe build-id <FILE>` | Print a recipe's `build_id` (content hash over source+extractor+outputs). |
+| `recipe estimate <FILE>` | Upstream size, per-output size, executor recommendation, and a cost band. Touches the network. |
+| `recipe build <FILE> [--scratch-dir DIR]` | Run PREFLIGHT→RELEASE: fetch the pinned revision, extract, slice, verify checksums, publish private, then flip public. Prints a `BuildRecord` as JSON; exits non-zero on a stage failure. |
+| `capabilities` | Print this release's capability manifest — recognised architectures and what each supports. |
+| `card render` | Render a Hub model card from a recipe, manifest, and verification report. |
 
 ## LQL
 
@@ -177,6 +194,216 @@ larql bench gemma3-4b-it-vindex --backends metal,cpu
 larql bench gemma3-4b-it-vindex --ollama gemma3:4b
 larql bench gemma4-26b-a4b.vindex --moe-shards "0-63=http://a:8081,64-127=http://b:8082"
 ```
+
+### `larql accuracy`
+
+Split-axis accuracy suite for KV engines. Runs each selected engine through
+three corpora and reports them **separately**, because a single aggregate score
+hides the thing that discriminates engines:
+
+- **Parametric** — short factual completions; the answer is in the weights, so
+  any K/V strategy should score near 100%. A low score here means something is
+  broken, not compressed.
+- **In-context** — needle-in-haystack at scaling context lengths. The answer is
+  planted in the prompt, so compressed engines (sliding window, residual
+  replacement, quantised K/V) may lose it as context grows.
+- **Conflict** — the in-context premise contradicts pretraining; scored as
+  `followed_context` vs `parametric_fallback`. The most engine-discriminating
+  axis of the three.
+
+Each cell reports both top-1 match rate and Shannon bits-per-token
+(`-log2 P(expected_first_token | prompt)`, lower = more confident).
+
+```
+larql accuracy <MODEL> [OPTIONS]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Vindex dir, `hf://owner/name`, or cache shorthand | — |
+| `--engines <LIST>` | Comma-separated KV engine specs (same syntax as `larql bench --engine`) | `standard,markov-rs,unlimited-context,turbo-quant,apollo` |
+| `--quick` | 5-prompt parametric, 2 shortest needles, 5-prompt conflict | false (full: 101 parametric + 7 needles + 20 conflict) |
+| `--parametric-n <N>` | Override parametric corpus size; ignored under `--quick` | — |
+| `--needle-max-tokens <N>` | Max needle context length; `32768` for the full sweep | 8192 |
+| `--no-conflict` | Skip the conflict corpus | false |
+| `--ffn <SPEC>` | FFN dispatch policy, e.g. `dense`, `walk:k=100`, `'{walk:k=100}@layers=14-27;{dense}@otherwise'` | uniform `dense` |
+| `--output-file <PATH>` | Write a JSON report; the split table still prints to stdout | — |
+
+Apollo is in the default engine set deliberately: without a constellation store
+loaded it shows a 0% served rate on every corpus, surfacing as
+`SkippedRetrievalMiss` outcomes with a visible `served_rate < 1.0`. That row is
+honest about being unable to serve rather than silently dropped or
+mis-attributed.
+
+```bash
+larql accuracy gemma3-4b-it-vindex --quick
+larql accuracy gemma3-4b-it-vindex --engines standard,turbo-quant --needle-max-tokens 32768
+```
+
+### `larql dec-bench`
+
+The DEC funnel's residual-replay loadgen ([`docs/dec-funnel.md`](dec-funnel.md)).
+larql's decode loop is single-sequence — `--ffn-dispatch batch` batches *layer
+dispatches* within one token step, not sequences — so the batch axis cannot be
+measured with `larql bench`. `dec-bench` captures real per-layer residuals from
+single-stream decode, then replays them as B-row requests against an expert
+server. Replay is model-free, so a pool captured on a Mac runs unchanged on the
+x86/Linux arms.
+
+```
+larql dec-bench <capture|replay|drift> [OPTIONS]
+```
+
+#### `larql dec-bench capture`
+
+Runs single-stream decode over a fixed prompt set against a live expert server,
+recording each step's pre-normed per-layer residuals into a portable pool
+(`manifest.json` + `residuals.bin`).
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Vindex dir, `hf://owner/name`, or cache shorthand | — |
+| `--ffn <URL>` | Expert-server URL (loopback for DEC-0 arm M) | — |
+| `--prompts-file <PATH>` | Prompts file, one per line (fixed set, checked in) | — |
+| `--num-prompts <N>` | Prompts to capture — this is the **max replay batch size** | 64 |
+| `--steps <N>` | Decode steps captured per prompt | 16 |
+| `--routing` | Also capture routed-experts sidecars (`raw.bin`/`normed.bin`/`routing.bin`) for the routed replay arm. `top_k` comes from the model arch; errors if the model has no MoE. Without it the pool is byte-identical to the walk-ffn-only format | false |
+| `--metal` | Use the Metal GPU attention backend (required on macOS for remote-FFN decode) | false |
+| `--out <PATH>` | Output pool directory | — |
+| `--ffn-timeout-secs <N>` | Per-request timeout | 60 |
+
+#### `larql dec-bench replay`
+
+Sweeps batch × wire × dispatch against the server using B-row frames built from
+the pool, emitting the `dec/*` metric schema. Distinct prompts per row keep MoE
+routing realistic.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--ffn <URL>` | Expert-server URL | — |
+| `--capture <PATH>` | Capture pool directory | — |
+| `--endpoint <walk-ffn\|experts>` | `walk-ffn` = dense/shared-expert path; `experts` = routed multi-layer path (needs a `--routing` pool; wire limited to f32/q8k) | walk-ffn |
+| `--batch <LIST>` | Comma-separated rows per request | 1,8,16,32,64 |
+| `--wire <LIST>` | `f32`/`f16`/`i8`/`q8k`, or asymmetric in/return pairs like `f16/i8` (walk-ffn only — q8k is its own endpoint and cannot pair) | f32,f16,i8,q8k |
+| `--dispatch <LIST>` | `streaming` (sequential per-layer), `batch` (all layers in parallel) | streaming,batch |
+| `--layers <A-B>` | Inclusive layer range to replay | all |
+| `--steps <N>` | Steps replayed per repeat | all captured |
+| `--repeats <N>` | Repeats per sweep point | 3 |
+| `--warmup-passes <N>` | Discarded full passes per point — mmap-backed weights pay first-touch faults per layer | 1 |
+| `--timeout-secs <N>` | Per-request timeout (note: `capture` and `drift` spell this `--ffn-timeout-secs`) | 60 |
+| `--output-file <PATH>` | Full JSON run record | — |
+| `--pulse-file <PATH>` | `dec/*` pulse JSONL (rig `$CHUK_METRICS` format) | — |
+| `--pulse-per-layer` | Include per-layer p50/p99 in pulse lines (always in the JSON record) | false |
+| `--net-rtt-ms <F>` / `--net-gbps <F>` | Record measured link characteristics (spec §6 gate) | — |
+
+i8 **return** frames need `LARQL_I8_WIRE=1` server-side or the direction falls
+back — the fallback is recorded in `served_wire_out`, never silently.
+
+#### `larql dec-bench drift`
+
+The C6 wire-fidelity gate. Scores a pinned corpus **teacher-forced** (NLL of
+fixed text, not generation) through the production remote-FFN decode path once
+per wire arm plus once at f32/f32 as the in-run baseline, then gates each arm's
+bits/char drift. The metric is exact math given weights + wire — no sampling, no
+timing — so unlike `replay` and `larql bench` it is **battery- and thermal-safe**.
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Client-side attention weights — must match the expert server's model | — |
+| `--ffn <URL>` | Expert-server URL, or an `A-B=URL,...` shard map | — |
+| `--corpus <PATH>` | UTF-8 corpus to score | the shannon-verify CI corpus |
+| `--bytes <N>` | Limit to first N bytes (UTF-8 boundary) | whole corpus |
+| `--wire <LIST>` | Arms to score; the f32/f32 baseline always runs first regardless | f32,f16,i8,q8k |
+| `--gate-pct <F>` | Max \|bits/char drift\| vs baseline, percent (pre-registered C6 gate) | 0.5 |
+| `--metal` | Metal GPU attention backend (required on macOS) | false |
+| `--output-file <PATH>` / `--pulse-file <PATH>` | JSON run record / `dec/*` pulse JSONL | — |
+
+Examples:
+
+```bash
+# capture a 64-prompt pool, routed sidecars included (DEC-0 arm M)
+larql dec-bench capture gemma4-26b-a4b.vindex --ffn http://127.0.0.1:8081 \
+  --prompts-file bench/dec0/prompts.txt --routing --metal \
+  --out bench/dec0/residuals-gemma4-26b-a4b-q4k
+
+# dense batch curve
+larql dec-bench replay --ffn http://127.0.0.1:8081 \
+  --capture bench/dec0/residuals-gemma4-26b-a4b-q4k --pulse-file dec0.jsonl
+
+# routed-experts arm (needs the --routing pool)
+larql dec-bench replay --ffn http://127.0.0.1:8081 --endpoint experts \
+  --capture bench/dec0/residuals-gemma4-26b-a4b-q4k --wire f32,q8k
+
+# C6 fidelity gate, including asymmetric pairs
+larql dec-bench drift gemma4-26b-a4b.vindex --ffn http://127.0.0.1:8081 \
+  --wire f16,i8,q8k,f16/i8 --metal
+```
+
+Drivers wrapping these for whole DEC stages live in `scripts/dec0-loopback.sh`
+(arm M), `scripts/dec0-arm-l.sh` (arm L / Linux) and `scripts/dec0p5-x86.sh`.
+
+### `larql k3-ledger`
+
+Checkpoint-derived serving arithmetic for the DEC-8/9 ladder — see
+[`docs/dec-funnel.md`](dec-funnel.md). Most subcommands are zero-compute: two
+HTTP range requests against the model repo for its tensor table, then division.
+Subcommands: `budget`, `touch`, `frontier`, `block`, `ceilings`, `formats`,
+`transcode-scan`, `symbol-census`, `kda-graph`, `freq-mass`.
+
+`formats` and `freq-mass` take **no checkpoint and no network** — the first is
+decided by counting the source alphabet, the second reads a local capture pool.
+
+#### `larql k3-ledger freq-mass`
+
+**Frequency-mass coverage**: what fraction of routing *events* a resident set of
+C symbols per layer actually serves. Support asks *which* symbols a session
+touches; mass asks *how often* — and only the second prices a cache. Consumes a
+`dec-bench capture --routing` pool.
+
+Four estimators, all scored on the **same** held-out window so only the
+residency-ranking key differs:
+
+| Arm | Key |
+|---|---|
+| `λ=1` static slice | pooled prior, **leave-one-out** so a session never fits itself |
+| `λ=0` causal cache | that session's own history only |
+| interior `λ` | shrinkage cache — the design that exists if neither pure arm wins |
+| oracle | ranks by the scored events themselves; unrealisable upper bound |
+| null | eval half redrawn from the pooled marginal, session identity destroyed |
+
+The null is load-bearing: a short fit window concentrates by counting noise
+alone, so `oracle − null` is the locality signal and `oracle` alone overstates it.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--pool <DIR>` | Capture pool written with `dec-bench capture --routing` | — |
+| `--cache-sizes <LIST>` | Resident-set sizes, symbols per stratum | 1 2 4 8 16 32 64 |
+| `--lambdas <LIST>` | Shrinkage weights on the pooled prior | 0 .25 .5 .75 .9 1 |
+| `--fit-fraction <F>` | Share of each session's steps used to fit the adaptive key | 0.5 |
+| `--seed <N>` | Seed for the marginal-preserving null | 20260801 |
+| `--support-steps <LIST>` | Step counts at which to report support growth | 1 2 4 8 16 |
+| `--operating-residency <F>` | Residency fraction to grade at (K3's 55–65 GB slice is 5–7%) | 0.0625 |
+| `--per-symbol` | Also emit the measured per-symbol mass vector (JSON only) | false |
+| `--json` | Full record as JSON | false |
+
+```bash
+# grade a resident set against the banked DEC-0 routed pool
+larql k3-ledger freq-mass --pool bench/dec0/residuals-gemma4-26b-a4b-q4k-routed
+
+# DEC-8.4's allocator input: per-expert counts and probabilities, per layer
+larql k3-ledger freq-mass --pool bench/dec0/residuals-gemma4-26b-a4b-q4k-routed \
+  --per-symbol --json > mass.json
+```
+
+The instrument is **symbol-agnostic**: `SelectionTrace` calls the selected
+things *symbols* and never learns whether they are MoE experts (DEC-8.4) or FFN
+feature rows (DEC-8.1), so one set of conventions grades the resident-bank bet
+and the compact-subexpert bet. The export names its unit rather than assuming.
+
+Cold-tail counts (`observed_symbols`, `unobserved_symbols`, per-stratum
+coverage) are emitted whether or not `--per-symbol` is set — the row vector is
+opt-in because at K3's 92 × 896 it dwarfs the rest of the document. An absent
+symbol means **unobserved in this capture**, never zero probability.
 
 ### `larql model`
 
@@ -1123,7 +1350,7 @@ larql convert quantize q4k \
 
 Supported GGUF quantization types for reading: F32, F16, BF16, Q4_0, Q4_1, Q8_0. All tensors are dequantized to f32 during conversion.
 
-**`quantize` family** — see [`docs/specs/quantize-cli-spec.md`](specs/quantize-cli-spec.md) for the full surface (flags, exit codes, output layout, atomic-rename semantics). Both subcommands require the source vindex to carry full model weights (`--level inference` or `--level all`); browse-only sources are rejected with a clear error.
+**`quantize` family** — see [`docs/specs/quantize-cli-spec.md`](../crates/larql-cli/docs/quantize-spec.md) for the full surface (flags, exit codes, output layout, atomic-rename semantics). Both subcommands require the source vindex to carry full model weights (`--level inference` or `--level all`); browse-only sources are rejected with a clear error.
 
 ### `larql hf`
 
@@ -1293,6 +1520,212 @@ larql parity gemma3-4b-q4k.vindex --component lm-head
 larql parity gemma4-31b.vindex --component layer --prompt "The capital of France is"
 ```
 
+## Factory commands
+
+Vindex Factory tooling — [docs/vindex-factory.md](vindex-factory.md) is
+the full spec; [crates/larql-factory/README.md](../crates/larql-factory/README.md)
+is the crate reference. `recipe estimate` fetches the upstream repo's
+file listing and `config.json` over HTTP; `recipe build` goes further
+and actually runs the pipeline (network + Hub credentials + disk) —
+everything else here is local and read-only. The recipe repo's
+remaining PR checks (upstream existence, licence allowlist, Hub name
+collision) aren't built yet.
+
+### `larql recipe validate`
+
+Structurally validate a recipe file: schema shape, required fields,
+value ranges. Prints every problem found in one pass — not just the
+first — and exits non-zero if any exist.
+
+```
+larql recipe validate <FILE>
+```
+
+**Example:**
+
+```bash
+larql recipe validate gemma-3-4b-it.yaml
+# ✓ gemma-3-4b-it.yaml is structurally valid (gemma-3-4b-it)
+
+larql recipe validate broken-recipe.yaml
+# ✗ broken-recipe.yaml — 3 problem(s):
+#   - spec.source.revision 'main' must be a full 40-character commit SHA, not a branch or short SHA
+#   - spec.outputs[2].preset 'bogus-preset' is not a known preset (full, client, attn, ...)
+#   - spec.budget.max_usd (0) must be greater than 0
+```
+
+### `larql recipe build-id`
+
+Print a recipe's `build_id` — the content hash of the fields that
+determine its produced bytes (`source`, `extractor`, `outputs`).
+Changing `verify`/`publish`/`budget`/`metadata` doesn't change it.
+
+```
+larql recipe build-id <FILE>
+```
+
+**Example:**
+
+```bash
+larql recipe build-id gemma-3-4b-it.yaml
+# 398f1b8e29adecf2ef3838748558ae6b82b292b96ed8ab412725886e4194e30a
+```
+
+### `larql recipe estimate`
+
+Upstream download size, per-output size, an executor recommendation,
+and a cost band (§6.1 step 4) — so a recipe PR's approval is informed.
+The only `recipe` subcommand that touches the network: it fetches the
+upstream repo's file listing and `config.json` from HuggingFace.
+
+```
+larql recipe estimate <FILE>
+```
+
+Model dimensions come from the same architecture-detection path the
+real extractor uses. Per-output byte estimates are a coarse
+order-of-magnitude model, not manifest-exact. The cost band prices the
+recipe's own declared `budget.max_wall_minutes` against
+[docs/dec-funnel-v0.2.md](dec-funnel-v0.2.md) §7's rate basis — it does
+not predict a duration from bytes, since there's no real throughput
+measurement in this codebase to ground that in.
+
+**Example:**
+
+```bash
+larql recipe estimate gemma-3-4b-it.yaml
+# {
+#   "upstream_bytes": 8500000000,
+#   "outputs": [
+#     { "preset": "full", "estimated_bytes": 6200000000 },
+#     { "preset": "client", "estimated_bytes": 1100000000 },
+#     ...
+#   ],
+#   "total_estimated_output_bytes": 10900000000,
+#   "recommended_executor": "leased",
+#   "executor_threshold_gib": 40.0,
+#   "declared_executor": "auto",
+#   "cost_estimate_usd": { "low_usd": 1.31, "high_usd": 2.60 },
+#   "declared_max_usd": 12.0,
+#   "budget_warning": null
+# }
+```
+
+### `larql recipe build`
+
+Run PREFLIGHT through RELEASE (§7): check the scratch directory is
+writable, fetch the recipe's pinned revision, `larql extract`, `larql
+slice` for each declared output, measure what came out, `larql verify`
+(checksum integrity — not the numeric reconstruction/logit-match
+checks §8.1 describes, which need per-architecture tensor knowledge
+this driver doesn't have), `larql hf publish --private` per output,
+then `larql hf visibility --public` once every output has verified
+(§8's "nothing goes public unverified"). Every step self-invokes this
+same `larql` binary as a subprocess.
+
+MIRROR (R2) and REGISTER (chuk-experiments-server) aren't run here —
+nothing in this codebase talks to either, and the spec's own text
+assumes both belong to the rig worker. Pipe the printed `BuildRecord`
+JSON to whatever external harness owns them, the way `dec0-loopback.sh`
+already wraps `dec-bench`'s own JSON output.
+
+```
+larql recipe build <FILE> [--scratch-dir <DIR>]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--scratch-dir <DIR>` | Working directory for the HF cache and extracted/sliced outputs | a fresh temp directory, removed when the build finishes |
+
+Always prints a `BuildRecord` as JSON, whether the build passed or
+failed — a stage failure is data (`"status": "failed"`, which stage,
+its error message), not a crash. Exits non-zero when `"status"` isn't
+`"passed"`.
+
+**Example:**
+
+```bash
+larql recipe build gemma-3-4b-it.yaml
+# {
+#   "build_id": "398f1b8e29adecf2ef3838748558ae6b82b292b96ed8ab412725886e4194e30a",
+#   "recipe_name": "gemma-3-4b-it",
+#   "outputs": [
+#     { "preset": "full", "size_bytes": 6198374400, "repo": "chrishayuk/gemma-3-4b-it-vindex", "released": true },
+#     { "preset": "client", "size_bytes": 1073741824, "repo": "chrishayuk/gemma-3-4b-it-vindex-client", "released": true }
+#   ],
+#   "status": "passed"
+# }
+
+# A stage failure keeps whatever earlier stages completed:
+# {
+#   "build_id": "...",
+#   "recipe_name": "gemma-3-4b-it",
+#   "outputs": [{ "preset": "full", "size_bytes": 6198374400, "repo": null, "released": false }],
+#   "status": "failed",
+#   "stage": "publish",
+#   "message": "larql hf publish failed for chrishayuk/gemma-3-4b-it-vindex: 401 unauthorized"
+# }
+```
+
+### `larql capabilities`
+
+Print this release's capability manifest as JSON: every architecture
+`larql` recognises, its attention mechanism, and its supported quant
+formats. Built from `larql-models`' real architecture registry, not a
+hand-typed list — see [`larql capabilities`'s module
+docs](../crates/larql-factory/src/capabilities/mod.rs) for why that
+matters.
+
+```
+larql capabilities
+```
+
+**Example:**
+
+```bash
+larql capabilities
+# {
+#   "larql_version": "0.1.0",
+#   "architectures": [
+#     { "model_type": "gemma3", "attention_kind": "standard", "quant_formats": ["none", "q4k"] },
+#     { "model_type": "deepseek", "attention_kind": "mla", "quant_formats": ["none"] },
+#     ...
+#   ]
+# }
+```
+
+### `larql card render`
+
+Render a Hub model card from a recipe, its manifest, and a verification
+report: YAML frontmatter, model dims, slice table, `USE "hf://..."`
+snippet with a computed revision tag, verification summary, and the
+inlined recipe for reproduction.
+
+```
+larql card render --recipe <FILE> --manifest <FILE> --verification <FILE> [--slices <FILE>]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--recipe <PATH>` | Recipe YAML file | — |
+| `--manifest <PATH>` | vindex-v1 manifest (`index.json`) | — |
+| `--verification <PATH>` | Verification report JSON (§8's VERIFY-A/B output) | — |
+| `--slices <PATH>` | Slice-summary JSON — array of `{"preset": ..., "size_bytes": ...}` | none (no slice table) |
+
+`build_id` is never passed in — it's derived from the recipe the same
+way `larql recipe build-id` does, so it can't drift from what the
+recipe actually hashes to.
+
+**Example:**
+
+```bash
+larql card render \
+  --recipe gemma-3-4b-it.yaml \
+  --manifest index.json \
+  --verification verification.json \
+  --slices slices.json
+```
+
 ## Graph-file commands
 
 These operate on the NDJSON/MessagePack knowledge-graph files produced
@@ -1368,6 +1801,37 @@ larql merge <INPUT>... --output <OUTPUT> [OPTIONS]
 ```bash
 larql merge weights.larql.json attention.larql.json -o combined.larql.json
 larql merge weights.larql.json bfs.larql.json -o combined.larql.json --strategy max_confidence
+```
+
+### `larql filter`
+
+Filter graph edges by confidence, layer, selectivity, relation, or source, and
+write the surviving subgraph to a new file. Predicates combine with AND; the
+repeatable flags accumulate.
+
+```
+larql filter <GRAPH> --output <OUTPUT> [OPTIONS]
+```
+
+| Flag | Description |
+|---|---|
+| `<GRAPH>` | Input graph file (`.larql.json` or `.larql.bin`) |
+| `-o, --output <OUTPUT>` | Output graph file |
+| `--min-confidence <F>` / `--max-confidence <F>` | Confidence band (0.0–1.0) |
+| `--min-layer <N>` / `--max-layer <N>` | Layer band, inclusive, from edge metadata |
+| `--min-selectivity <F>` | Minimum selectivity, from edge metadata |
+| `--min-c-in <F>` / `--min-c-out <F>` | Minimum `c_in` / `c_out` magnitude, from edge metadata |
+| `--relation <REL>` | Include only these relations (repeatable) |
+| `--exclude-relation <REL>` | Exclude these relations (repeatable) |
+| `--source <SRC>` | Include only these source types — `parametric`, `document`, … (repeatable) |
+| `--subject-contains <TEXT>` | Subject must contain this substring |
+| `--object-contains <TEXT>` | Object must contain this substring |
+
+**Examples:**
+
+```bash
+larql filter knowledge.larql.json -o high-conf.larql.json --min-confidence 0.8
+larql filter knowledge.larql.json -o late-layers.larql.json --min-layer 20 --relation capital-of
 ```
 
 ## Templates format

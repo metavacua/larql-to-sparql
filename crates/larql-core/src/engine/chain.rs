@@ -1,4 +1,6 @@
 use super::provider::{ModelProvider, ProviderError};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 /// Result of chaining multiple forward passes.
 #[derive(Debug, Clone)]

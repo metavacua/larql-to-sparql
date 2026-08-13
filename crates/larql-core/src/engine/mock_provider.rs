@@ -1,5 +1,7 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::collections::HashMap;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+use ::core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::provider::*;
 
@@ -18,7 +20,7 @@ impl MockProvider {
     pub fn new() -> Self {
         Self {
             name: "mock/empty".to_string(),
-            knowledge: HashMap::new(),
+            knowledge: HashMap::default(),
             call_count: AtomicUsize::new(0),
         }
     }
@@ -26,7 +28,7 @@ impl MockProvider {
     /// Create a mock provider with the given knowledge entries.
     /// Each entry is (prompt_suffix, answer, probability).
     pub fn with_knowledge(entries: Vec<(String, String, f64)>) -> Self {
-        let mut knowledge = HashMap::new();
+        let mut knowledge = HashMap::default();
         for (prompt, answer, prob) in entries {
             knowledge.insert(prompt, (answer, prob));
         }
@@ -64,13 +66,23 @@ impl ModelProvider for MockProvider {
         for (suffix, (answer, prob)) in &self.knowledge {
             if trimmed.ends_with(suffix.trim()) || trimmed == suffix.trim() {
                 let first_token = answer.split_whitespace().next().unwrap_or(answer);
+                // f64::ln() is a std-only inherent method (core's f64 has no
+                // transcendental math -- it needs a libm implementation,
+                // which std links against the platform's). libm is the
+                // standard no_std-compatible pure-Rust replacement. See
+                // docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
+                // Task 7, pattern 6: core-f64-lacks-transcendental-math.
+                #[cfg(target_arch = "wasm32")]
+                let logit = libm::log(*prob);
+                #[cfg(not(target_arch = "wasm32"))]
+                let logit = prob.ln();
                 return Ok(PredictionResult {
                     prompt: prompt.to_string(),
                     predictions: vec![TokenPrediction {
                         token: format!(" {first_token}"),
                         token_id: -1,
                         probability: *prob,
-                        logit: prob.ln(),
+                        logit,
                     }],
                 });
             }

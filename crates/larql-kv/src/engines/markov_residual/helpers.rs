@@ -8,11 +8,18 @@
 //! cached-state engines (`__bzero` + `zip_mut_with_same_shape` +
 //! `madvise`).
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::{s, Array2};
+
+// All three helpers here are native-only: their sole caller,
+// `super::dispatch`, is `#[cfg(not(target_arch = "wasm32"))]`-gated in
+// full (markov_residual/mod.rs) since it unconditionally uses
+// `std::time::Instant`/`std::mem::take`.
 
 /// Initial doubling-capacity for `stored` / `hot_kv` given the
 /// prefill's `prompt_len` and the engine's optional sliding-window
 /// cap.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn window_capacity(prompt_len: usize, window_size: Option<usize>) -> usize {
     match window_size {
         Some(w) => prompt_len.max(w),
@@ -24,6 +31,7 @@ pub(super) fn window_capacity(prompt_len: usize, window_size: Option<usize>) -> 
 /// from `src` (which is shape `[len, cols]`). Asserts
 /// `src.shape()[0] == len`. Used at prefill to convert the captured
 /// `[prompt_len, dim]` state into the doubling-capacity layout.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn grow_capacity_2d(src: &Array2<f32>, len: usize, cap: usize) -> Array2<f32> {
     debug_assert_eq!(src.shape()[0], len, "src shape disagrees with len");
     debug_assert!(cap >= len, "cap {cap} smaller than len {len}");
@@ -39,6 +47,7 @@ pub(super) fn grow_capacity_2d(src: &Array2<f32>, len: usize, cap: usize) -> Arr
 /// the buffer is full (`len == cap`), doubles capacity, copies the
 /// live rows, and falls through to the in-place assign. `len` is
 /// the pre-append logical row count; caller increments it after.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn append_row(buf: &mut Array2<f32>, row: &Array2<f32>, len: usize) {
     let cap = buf.shape()[0];
     if len == cap {

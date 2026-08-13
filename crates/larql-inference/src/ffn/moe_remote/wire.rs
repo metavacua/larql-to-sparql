@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 // ── Binary wire format ────────────────────────────────────────────────────────
 //
 // Content-Type: application/x-larql-expert
@@ -16,7 +19,11 @@ pub const EXPERT_BINARY_CONTENT_TYPE: &str = "application/x-larql-expert";
 pub type DecodedLayerBatchRequest = (usize, Vec<f32>, Vec<u32>, Vec<f32>);
 
 /// HTTP path served by the single-expert / batched-expert binary
-/// endpoint matched to [`EXPERT_BINARY_CONTENT_TYPE`].
+/// endpoint matched to [`EXPERT_BINARY_CONTENT_TYPE`]. Native-only:
+/// unlike the CONTENT_TYPE consts above, this isn't part of `moe_remote`'s
+/// public re-export surface -- its only consumer is `shard::expert_batch`,
+/// itself in the native-only `shard` module.
+#[cfg(not(target_arch = "wasm32"))]
 pub const EXPERT_BATCH_PATH: &str = "/v1/expert/batch";
 
 /// Content type for the `/v1/experts/layer-batch` endpoint — the layer-batched
@@ -27,7 +34,10 @@ pub const EXPERT_BATCH_PATH: &str = "/v1/expert/batch";
 /// server (~10-20 µs per layer of CPU work).
 pub const LAYER_BATCH_CONTENT_TYPE: &str = "application/x-larql-experts-layer";
 
-/// HTTP path for the f32 layer-batch endpoint.
+/// HTTP path for the f32 layer-batch endpoint. Native-only: its only
+/// consumer is `shard::layer_batch`, itself in the native-only `shard`
+/// module.
+#[cfg(not(target_arch = "wasm32"))]
 pub const LAYER_BATCH_PATH: &str = "/v1/experts/layer-batch";
 
 /// f16 variant of the layer-batch wire format.  Halves the per-call wire
@@ -39,7 +49,10 @@ pub const LAYER_BATCH_PATH: &str = "/v1/experts/layer-batch";
 /// dequantise to f32 before compute.
 pub const LAYER_BATCH_F16_CONTENT_TYPE: &str = "application/x-larql-experts-layer-f16";
 
-/// HTTP path for the f16 layer-batch endpoint.
+/// HTTP path for the f16 layer-batch endpoint. Native-only: its only
+/// consumer is `shard::layer_batch`, itself in the native-only `shard`
+/// module.
+#[cfg(not(target_arch = "wasm32"))]
 pub const LAYER_BATCH_F16_PATH: &str = "/v1/experts/layer-batch-f16";
 
 fn checked_mul(a: usize, b: usize) -> Option<usize> {

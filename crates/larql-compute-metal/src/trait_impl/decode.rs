@@ -81,7 +81,9 @@ impl DecodeBackend for MetalBackend {
             &self.norms.residual_norm_q8_pipeline,
             Some(&self.attention.q4k_qkv_proj_pipeline.state),
             Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+            Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
             Some(&self.attention.q4kf_proj_pipeline.state),
+            Some(&self.attention.bias_add_pipeline),
             None,
             Some(&self.norms.qk_norm_pipeline),
             Some(&self.norms.scale_vector_pipeline),
@@ -168,7 +170,9 @@ impl DecodeBackend for MetalBackend {
             &self.norms.residual_norm_q8_pipeline,
             Some(&self.attention.q4k_qkv_proj_pipeline.state),
             Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+            Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
             Some(&self.attention.q4kf_proj_pipeline.state),
+            Some(&self.attention.bias_add_pipeline),
             Some(&self.attention.rope_at_pos_pipeline), // per-position RoPE — required for seq_len > 1
             Some(&self.norms.qk_norm_pipeline),
             Some(&self.norms.scale_vector_pipeline),
@@ -262,7 +266,9 @@ impl DecodeBackend for MetalBackend {
                     &self.norms.residual_norm_q8_pipeline,
                     Some(&self.attention.q4k_qkv_proj_pipeline.state),
                     Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+                    Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
                     Some(&self.attention.q4kf_proj_pipeline.state),
+                    Some(&self.attention.bias_add_pipeline),
                     Some(&self.attention.rope_at_pos_pipeline),
                     Some(&self.norms.qk_norm_pipeline),
                     Some(&self.norms.scale_vector_pipeline),
@@ -415,7 +421,9 @@ impl DecodeBackend for MetalBackend {
             &self.norms.residual_norm_q8_pipeline,
             Some(&self.attention.q4k_qkv_proj_pipeline.state),
             Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+            Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
             Some(&self.attention.q4kf_proj_pipeline.state),
+            Some(&self.attention.bias_add_pipeline),
             Some(&self.attention.rope_at_pos_pipeline),
             Some(&self.norms.qk_norm_pipeline),
             Some(&self.norms.scale_vector_pipeline),
@@ -518,7 +526,9 @@ impl DecodeBackend for MetalBackend {
             &self.norms.residual_norm_q8_pipeline,
             Some(&self.attention.q4k_qkv_proj_pipeline.state),
             Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+            Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
             Some(&self.attention.q4kf_proj_pipeline.state),
+            Some(&self.attention.bias_add_pipeline),
             Some(&self.attention.rope_at_pos_pipeline),
             Some(&self.norms.qk_norm_pipeline),
             Some(&self.norms.scale_vector_pipeline),
@@ -624,6 +634,25 @@ impl DecodeBackend for MetalBackend {
         // decode would read off the end of a global-layer buffer.
         let mut cache_guard = self.kv_cache.lock().unwrap();
         *cache_guard = Some(self.create_kv_cache_per_layer(shapes, max_seq));
+    }
+
+    fn preallocate_kv_cache_per_layer_with_capacity(
+        &self,
+        shapes: &[(usize, usize)],
+        capacities: &[usize],
+    ) {
+        // Same replace-outright contract as the uniform variant above;
+        // only the per-layer row count differs.
+        let default_capacity = capacities.iter().copied().max().unwrap_or(0);
+        let mut cache_guard = self.kv_cache.lock().unwrap();
+        *cache_guard = Some(
+            crate::ops::kv_cache::KVCache::new_per_layer_with_capacities(
+                &self.bufs,
+                shapes,
+                capacities,
+                default_capacity,
+            ),
+        );
     }
 
     fn decode_token(
@@ -815,6 +844,7 @@ impl DecodeBackend for MetalBackend {
             Some(moe_collect_fn),
             None, // no state capture on split fire/collect MoE path
             larql_compute::StateDumpMask::Full,
+            None,
         ))
     }
 
@@ -843,6 +873,13 @@ impl DecodeBackend for MetalBackend {
                 attn_ms: wall_ms,
                 gate_up_ms: 0.0,
                 down_ms: 0.0,
+                // No split was recorded, so nothing is known about how much
+                // of this wall was GPU. Report zero rather than guessing —
+                // a fabricated `gpu_ms` here would be the same mistake the
+                // "GPU fwd" counter made.
+                gpu_ms: 0.0,
+                wall_ms,
+                cmd_buffers: 0,
             }
         });
         (result, timings.attn_ms, timings.gate_up_ms, timings.down_ms)

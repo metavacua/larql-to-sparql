@@ -4,6 +4,9 @@ use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl Parser {
     // ── Composite parsers ──
 
@@ -436,7 +439,7 @@ impl Parser {
 
     pub(crate) fn expect_token(&mut self, expected: &Token) -> Result<(), ParseError> {
         let tok = self.peek();
-        if std::mem::discriminant(&tok) == std::mem::discriminant(expected) {
+        if core::mem::discriminant(&tok) == core::mem::discriminant(expected) {
             self.advance();
             Ok(())
         } else {

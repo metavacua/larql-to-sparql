@@ -3,13 +3,26 @@
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+// `LmHeadPolicy` and its `from_env`/`env_bool`/const machinery are
+// native-only: `lm_head_topk`/`lm_head_topk_with_policy` below (the only
+// production constructors) are native-gated, and its two struct-field
+// consumers in `generate/policy.rs` (`TokenSelectionPolicy`,
+// `GenerationRuntimeConfig`) are themselves native-only there (their sole
+// production caller is the `grid` module, which is
+// `#[cfg(not(target_arch = "wasm32"))]`-gated in full at `layer_graph/mod.rs`).
+#[cfg(not(target_arch = "wasm32"))]
 const ENV_LM_HEAD_SKIP_Q4K: &str = "LARQL_LM_HEAD_SKIP_Q4K";
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct LmHeadPolicy {
     pub skip_q4k: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LmHeadPolicy {
     pub(crate) fn from_env() -> Self {
         Self {
@@ -23,6 +36,7 @@ impl LmHeadPolicy {
 /// so tests can toggle the flag via the thread-local override instead of
 /// `std::env::set_var`, which races concurrent `getenv` on the decode path →
 /// SIGSEGV.
+#[cfg(not(target_arch = "wasm32"))]
 fn env_bool(name: &str) -> bool {
     larql_compute::options::env_opt_in(name)
 }
@@ -42,6 +56,7 @@ fn env_bool(name: &str) -> bool {
 /// a one-shot matvec per generated token — negligible compared to the
 /// per-layer attention + FFN. It lets every model generate tokens through
 /// the Metal pipeline regardless of how its vindex was packaged.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn lm_head_topk(
     index: &larql_vindex::VectorIndex,
     weights: &ModelWeights,
@@ -59,6 +74,7 @@ pub fn lm_head_topk(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn lm_head_topk_with_policy(
     index: &larql_vindex::VectorIndex,
     weights: &ModelWeights,
@@ -236,7 +252,7 @@ pub(super) fn backend_lm_head_topk(
         }
     }
 
-    heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
     heap.into_iter().map(|(s, i)| (i, s)).collect()
 }
 
@@ -255,7 +271,10 @@ pub(super) fn cpu_lm_head_topk(
 /// constrained decoding — the sparse vindex KNN can't apply an arbitrary
 /// vocabulary mask because masked-out tokens might fall outside the top-K.
 /// Same compute kernel as [`backend_lm_head_topk`], just no truncation.
-pub(super) fn backend_lm_head_scores(
+/// Native-only: its only non-test caller, `grid::forced_score`, lives in
+/// the native-only `grid` module.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn backend_lm_head_scores(
     weights: &ModelWeights,
     query: &ndarray::Array1<f32>,
     backend: &dyn ComputeBackend,
@@ -291,6 +310,7 @@ pub(super) fn backend_lm_head_scores(
 /// Returns `(id, raw_post_mask_score)` so callers that record per-token
 /// probability still get the masked logit for the picked id (even
 /// though the multinomial draw used the softmaxed distribution).
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn pick_next_token_masked_sampled<M>(
     weights: &ModelWeights,
     h_1d: &ndarray::Array1<f32>,

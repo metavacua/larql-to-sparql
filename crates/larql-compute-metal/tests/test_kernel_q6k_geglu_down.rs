@@ -32,10 +32,62 @@ fn synth_vec(n: usize, seed: f32) -> Vec<f32> {
         .collect()
 }
 
-fn synth_matrix_q6k_friendly(rows: usize, cols: usize, seed: f32) -> Vec<f32> {
+/// Weights for the parity fixtures — deliberately decorrelated in the element
+/// index.
+///
+/// **This property is load-bearing.** Both sides of these tests read the *same*
+/// Q6_K bytes, so quantisation error cancels and the comparison is purely
+/// kernel-vs-kernel; the weights need not be "Q6_K friendly" at all. What they
+/// must be is uncorrelated between neighbouring element indices, because the
+/// defect class this file guards against is a nibble-**layout** error, which
+/// *permutes* elements within a 256-element super-block rather than corrupting
+/// them.
+///
+/// The previous generator was `cos(seed + 0.001·i) + 0.3·sin(i >> 8)`, which
+/// failed that on both terms: a super-block spanned 0.26 rad of a smooth curve,
+/// and the second term was constant across a whole super-block, so it survived
+/// any permutation *exactly*. Every test here passed against shaders that
+/// decoded the pre-ggml interleaved layout.
+/// `fixture_can_distinguish_planar_from_interleaved_layout` now pins the
+/// property so it cannot silently regress again.
+fn synth_matrix_decorrelated(rows: usize, cols: usize, seed: f32) -> Vec<f32> {
     (0..rows * cols)
-        .map(|i| ((seed + i as f32 * 0.001).cos() + 0.3 * ((i >> 8) as f32).sin()) * 0.5)
+        .map(|i| {
+            let h =
+                (i as u64 ^ ((seed.to_bits() as u64) << 32)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            // Top 24 bits → [-1, 1), then scale into the range the old
+            // generator used so the parity thresholds keep their meaning.
+            let u = ((h >> 40) as f32) / ((1u32 << 23) as f32) - 1.0;
+            u * 0.5
+        })
         .collect()
+}
+
+/// Dequantise Q6_K under the **pre-2026-08-07 interleaved** reading
+/// (`lo4 = ql[i/2] >> 4*(i&1)`, `hi2 = qh[i/4] >> 2*(i%4)`).
+///
+/// Exists only so a fixture can prove it would notice the difference; nothing
+/// in production decodes this way any more.
+fn dequant_q6k_interleaved(bytes: &[u8], rows: usize, cols: usize) -> Vec<f32> {
+    const BLOCK: usize = 210;
+    let superblocks = cols / 256;
+    let mut out = vec![0.0f32; rows * cols];
+    for r in 0..rows {
+        for sb in 0..superblocks {
+            let b = &bytes[(r * superblocks + sb) * BLOCK..][..BLOCK];
+            let d = larql_compute::cpu::ops::q4_common::f16_to_f32(u16::from_le_bytes([
+                b[208], b[209],
+            ]));
+            for i in 0..256 {
+                let lo4 = (b[i / 2] >> (4 * (i % 2))) & 0x0F;
+                let hi2 = (b[128 + i / 4] >> (2 * (i % 4))) & 0x03;
+                let raw = ((lo4 | (hi2 << 4)) as i32) - 32;
+                let sc = b[192 + i / 16] as i8;
+                out[r * cols + sb * 256 + i] = d * sc as f32 * raw as f32;
+            }
+        }
+    }
+    out
 }
 
 /// CPU reference: `geglu(gate, up) → q6k_matvec(W_down)`. Matches the
@@ -115,7 +167,7 @@ fn assert_fused_q6k_geglu_down_matches_separated(label: &str, n: usize, inter: u
     let metal = get_metal();
     let cpu = larql_compute::cpu::CpuBackend;
 
-    let down_f32 = synth_matrix_q6k_friendly(n, inter, 0.21);
+    let down_f32 = synth_matrix_decorrelated(n, inter, 0.21);
     let gate = synth_vec(inter, 0.41);
     let up = synth_vec(inter, 0.83);
     let down_q6k = larql_compute::cpu::ops::q4_common::quantize_q6_k(&down_f32);
@@ -138,6 +190,54 @@ fn assert_fused_q6k_geglu_down_matches_separated(label: &str, n: usize, inter: u
     assert!(
         nonzero > n / 10,
         "{label}: only {nonzero}/{n} fused rows non-zero — possible row-drop regression"
+    );
+}
+
+/// Fixture adequacy: prove these parity tests *can* see a nibble-layout error.
+///
+/// Every parity test in this file compares the fused Metal kernel against a CPU
+/// reference over the same Q6_K bytes. If the fixture's weights are smooth
+/// enough, permuting elements within a super-block barely moves the dot product
+/// and the comparison passes whatever layout the shader decodes — which is
+/// exactly what happened before 2026-08-07. So assert the *counterfactual*:
+/// decoding this fixture the old interleaved way breaches the same threshold
+/// the parity tests enforce. If someone smooths the generator, this fails first.
+#[test]
+fn fixture_can_distinguish_planar_from_interleaved_layout() {
+    let (n, inter) = (32usize, 256usize);
+    let cpu = larql_compute::cpu::CpuBackend;
+
+    let down_f32 = synth_matrix_decorrelated(n, inter, 0.21);
+    let gate = synth_vec(inter, 0.41);
+    let up = synth_vec(inter, 0.83);
+    let down_q6k = larql_compute::cpu::ops::q4_common::quantize_q6_k(&down_f32);
+
+    // Planar — what the CPU backend and (now) the shaders agree on.
+    let planar = cpu_geglu_then_q6k_matvec(&cpu, &down_q6k, &gate, &up, true, n, inter);
+
+    // Interleaved — what a regressed shader would compute from the same bytes.
+    let w_interleaved = dequant_q6k_interleaved(&down_q6k, n, inter);
+    let act: Vec<f32> = (0..inter)
+        .map(|i| {
+            let g = gate[i];
+            (g / (1.0 + (-g).exp())) * up[i]
+        })
+        .collect();
+    let interleaved: Vec<f32> = (0..n)
+        .map(|r| {
+            (0..inter)
+                .map(|c| w_interleaved[r * inter + c] * act[c])
+                .sum()
+        })
+        .collect();
+
+    let cos = cos_sim(&planar, &interleaved);
+    let diff = max_diff(&planar, &interleaved);
+    assert!(
+        cos <= 0.999 || diff >= 0.5,
+        "fixture cannot distinguish the two Q6_K layouts (cos={cos:.6}, max_abs={diff:.3e}) — \
+         the parity tests in this file would pass against a wrongly-decoding shader. Increase \
+         the phase step in `synth_matrix_decorrelated`."
     );
 }
 
@@ -187,4 +287,44 @@ fn q6k_geglu_gelu_tanh_down_gemma4_31b_ffn() {
         21504,
         false,
     );
+}
+
+/// Regression for the missing tanh clamp (capability audit F1) — Q6_K
+/// twin of `q4k_geglu_gelu_tanh_down_survives_large_gate_values`.
+/// Gate magnitudes ~±12 push the GELU-tanh argument past Apple tanh's
+/// ≈44 NaN threshold; the clamp at ±15 keeps it finite with error
+/// below f32 precision. Rust's `tanh` is exact, so the CPU reference
+/// stays finite — pre-fix this test fails with NaN everywhere.
+#[test]
+fn q6k_geglu_gelu_tanh_down_survives_large_gate_values() {
+    let n = 32usize;
+    let inter = 256usize;
+    let metal = get_metal();
+
+    let down_f32 = synth_matrix_decorrelated(n, inter, 0.21);
+    let gate: Vec<f32> = (0..inter)
+        .map(|i| if i % 2 == 0 { 12.0 } else { -12.0 })
+        .collect();
+    let up = synth_vec(inter, 0.83);
+    let down_q6k = larql_compute::cpu::ops::q4_common::quantize_q6_k(&down_f32);
+    let cpu = larql_compute::cpu::CpuBackend;
+
+    let cpu_ref = cpu_geglu_then_q6k_matvec(&cpu, &down_q6k, &gate, &up, false, n, inter);
+    let fused = metal_fused_q6k_geglu_down(&metal, &down_q6k, &gate, &up, false, n, inter);
+
+    assert!(
+        fused.iter().all(|v| v.is_finite()),
+        "fused Q6_K GELU-tanh output contains non-finite values on large gates"
+    );
+    let cos = cos_sim(&cpu_ref, &fused);
+    assert!(cos > 0.999, "large-gate parity: cos={cos:.6}");
+}
+
+/// The synthetic decode suite's exact FFN shape (hidden=256,
+/// inter=512). Pinned because the decode INTEGRATION of this kernel
+/// produces all-NaN at this shape while this isolation test passes —
+/// keeping the shape here proves any future NaN is not the kernel's.
+#[test]
+fn q6k_geglu_gelu_tanh_down_decode_suite_shape() {
+    assert_fused_q6k_geglu_down_matches_separated("decode-suite shape 512->256", 256, 512, false);
 }

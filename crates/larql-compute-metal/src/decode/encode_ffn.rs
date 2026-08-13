@@ -60,11 +60,63 @@ pub(super) struct FfnDims {
     pub inter_padded: usize,
 }
 
+/// Validate a layer's FFN formats and return the format that drives
+/// route selection (capability audit F3).
+///
+/// Called at decode entry, before any command buffer or encoder is
+/// created, so a refusal panic unwinds cleanly instead of tripping
+/// Metal's "encoder released without endEncoding" abort. Rules:
+/// - a gated layer's gate and up must share a format — no fused kernel
+///   decodes a mixed pair, and reinterpretation is silent corruption;
+/// - a non-gated layer routes on `up` (its actual first matvec; `gate`
+///   may be a default-constructed placeholder);
+/// - only Q4_K / Q4_KF / Q6_K / Q4_0 have decode FFN paths.
+pub(super) fn validate_ffn_formats(layer: &FullPipelineLayer) -> larql_compute::QuantFormat {
+    use larql_compute::QuantFormat;
+    if layer.is_gated() {
+        assert_eq!(
+            layer.gate.format(),
+            layer.up.format(),
+            "mixed gate/up FFN formats have no fused Metal kernel; \
+             gate={:?} up={:?}",
+            layer.gate.format(),
+            layer.up.format(),
+        );
+    }
+    let route_fmt = if layer.is_gated() {
+        layer.gate.format()
+    } else {
+        layer.up.format()
+    };
+    match route_fmt {
+        QuantFormat::Q4_K | QuantFormat::Q4_KF | QuantFormat::Q6_K | QuantFormat::Q4_0 => route_fmt,
+        other => panic!(
+            "FFN has no Metal decode path for {other:?} gate/up weights; \
+             supported: Q4_K, Q4_KF, Q6_K, Q4_0"
+        ),
+    }
+}
+
 impl MetalBackend {
     /// Encode the full FFN block (gate / up / activation / down) into
-    /// the encoder. `ffn_uses_kquant` selects the path; the function
-    /// returns the same `down_out` buffer the caller passed in via
-    /// `bufs`. No commit/flush — the caller owns encoder lifecycle.
+    /// the encoder. The path is selected per-operand from the layer's
+    /// own weight formats; the function returns the same `down_out`
+    /// buffer the caller passed in via `bufs`. No commit/flush — the
+    /// caller owns encoder lifecycle.
+    ///
+    /// Routing rules (capability audit F3). The previous branch keyed
+    /// on `gate.format().is_kquant_family()` alone, which decoded a
+    /// Q6_K gate with the Q4_K kernels (210-byte blocks read at a
+    /// 144-byte stride) and a Q8_0 gate with the Q4_0 kernels — silent
+    /// corruption in both cases — and never consulted `up.format()` at
+    /// all. Now:
+    /// - a gated layer's gate and up must share a format (no fused
+    ///   kernel decodes a mixed pair; refuse rather than reinterpret);
+    /// - a non-gated layer routes on `up`, its actual first matvec —
+    ///   `gate` may be a default-constructed placeholder;
+    /// - Q6_K runs the separated per-format chain (`q6k_matvec` per
+    ///   projection), mirroring the prefill path;
+    /// - formats with no decode FFN kernel refuse loudly.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn encode_ffn_step(
         &self,
@@ -72,7 +124,6 @@ impl MetalBackend {
         layer: &FullPipelineLayer,
         bufs: FfnBufs<'_>,
         dims: FfnDims,
-        ffn_uses_kquant: bool,
     ) {
         let FfnDims {
             hidden,
@@ -83,24 +134,171 @@ impl MetalBackend {
         let inter_padded_val = inter_padded as u32;
         let hidden_val = hidden as u32;
 
-        let ffn_is_q4kf = layer.gate.format == larql_compute::QuantFormat::Q4_KF;
+        use larql_compute::QuantFormat;
+        let route_fmt = validate_ffn_formats(layer);
 
-        if ffn_is_q4kf {
-            self.encode_q4kf_ffn(enc, layer, &bufs, hidden, inter, hidden_val, inter_val);
-        } else if ffn_uses_kquant {
-            self.encode_q4k_ffn(
+        match route_fmt {
+            QuantFormat::Q4_KF => {
+                self.encode_q4kf_ffn(enc, layer, &bufs, hidden, inter, hidden_val, inter_val);
+            }
+            QuantFormat::Q4_K => {
+                self.encode_q4k_ffn(
+                    enc,
+                    layer,
+                    &bufs,
+                    hidden,
+                    inter,
+                    inter_padded,
+                    hidden_val,
+                    inter_val,
+                    inter_padded_val,
+                );
+            }
+            QuantFormat::Q6_K => {
+                self.encode_q6k_ffn(enc, layer, &bufs, hidden, inter, inter_val);
+            }
+            QuantFormat::Q4_0 => {
+                self.encode_q4_0_ffn(enc, layer, &bufs, hidden, inter, hidden_val, inter_val);
+            }
+            // validate_ffn_formats admits only the four arms above.
+            other => unreachable!("validate_ffn_formats admitted {other:?}"),
+        }
+    }
+
+    // ── Q6_K (separated per-format chain) ────────────────────────────────────
+
+    /// Q6_K gate/up FFN via the separated per-format chain: one
+    /// `q6k_matvec` per projection through `quant_matvec::encode`,
+    /// activation in between, down per its own format. No fused Q6_K
+    /// gate+up kernel exists; before this path was added, a Q6_K gate
+    /// fell into the Q4_K branch and was silently mis-decoded
+    /// (capability audit F3). The prefill path has always routed Q6_K
+    /// this way — this brings decode into line.
+    fn encode_q6k_ffn(
+        &self,
+        enc: &ComputeCommandEncoderRef,
+        layer: &FullPipelineLayer,
+        bufs: &FfnBufs<'_>,
+        hidden: usize,
+        inter: usize,
+        inter_val: u32,
+    ) {
+        use crate::stages::quant_matvec::{self as qmv, Pipelines};
+        let pipes = Pipelines {
+            q4kf_proj: Some(&self.attention.q4kf_proj_pipeline.state),
+            q4k_matvec_fallback: &self.quant.q4k_matvec_pipeline,
+            q6k_matvec: &self.quant.q6k_matvec_pipeline,
+            q4_matvec: &self.q4.matvec,
+            q4k_matmul: None,
+        };
+        if layer.is_gated() {
+            qmv::encode(
+                enc,
+                larql_compute::QuantFormat::Q6_K,
+                bufs.gate_w,
+                bufs.ffn_norm_out,
+                0,
+                bufs.ffn_norm_out,
+                0,
+                bufs.ffn_norm_out,
+                0, // Q8 operands unused for f32-input formats
+                bufs.gate_out_scratch,
+                0,
+                &pipes,
+                inter,
+                hidden,
+            );
+            qmv::encode(
+                enc,
+                larql_compute::QuantFormat::Q6_K,
+                bufs.up_w,
+                bufs.ffn_norm_out,
+                0,
+                bufs.ffn_norm_out,
+                0,
+                bufs.ffn_norm_out,
+                0,
+                bufs.up_out,
+                0,
+                &pipes,
+                inter,
+                hidden,
+            );
+            self.encode_geglu(enc, layer, bufs, inter_val, inter as u64);
+        } else {
+            qmv::encode(
+                enc,
+                larql_compute::QuantFormat::Q6_K,
+                bufs.up_w,
+                bufs.ffn_norm_out,
+                0,
+                bufs.ffn_norm_out,
+                0,
+                bufs.ffn_norm_out,
+                0,
+                bufs.up_out,
+                0,
+                &pipes,
+                inter,
+                hidden,
+            );
+            self.encode_activation(
                 enc,
                 layer,
-                &bufs,
-                hidden,
-                inter,
-                inter_padded,
-                hidden_val,
+                bufs.up_out,
+                bufs.act_buf,
                 inter_val,
-                inter_padded_val,
+                inter as u64,
             );
+        }
+        // Down per its own format. K = `inter` (unpadded): the
+        // activation wrote [0, inter) and the Q6_K fused-down parity
+        // tests pin this convention.
+        self.encode_qmv_down(enc, layer, bufs, hidden, inter);
+    }
+
+    /// The Q4_K gate+up kernel variant selected by the decode flags —
+    /// coop > 4sg+f16 > 4sg > 8sg (default). One selection consulted by
+    /// BOTH the production FFN encode and the profile-split gate+up
+    /// phase, so split-mode measurements run the kernel production
+    /// would; the phase previously hardcoded 8sg and silently ignored
+    /// `LARQL_GATE_UP_COOP` / `LARQL_GATE_UP_8SG=0` / `LARQL_F16_ACC`
+    /// (capability audit, slice 2).
+    fn q4k_gate_up_selection(&self) -> (&metal::ComputePipelineState, u64, u64) {
+        use crate::shaders::q4k_ffn_gate_up as q4k_gu;
+        use crate::shaders::q4k_ffn_gate_up_8sg as q4k_gu_8sg;
+        use crate::shaders::q4k_ffn_gate_up_coop as q4k_gu_coop;
+        let use_coop = self.decode_flags.gate_up_coop;
+        let use_4sg = self.decode_flags.gate_up_use_4sg;
+        let use_f16 = self.decode_flags.f16_acc;
+        if use_coop {
+            // Cooperative wins over the other flags — it's the newest
+            // variant under measurement.
+            (
+                &self.ffn.q4k_ffn_gate_up_coop_pipeline.state,
+                q4k_gu_coop::ROWS_PER_TG,
+                q4k_gu_coop::THREADS_PER_TG,
+            )
+        } else if use_4sg && use_f16 {
+            (
+                &self.ffn.q4k_ffn_gate_up_f16acc_pipeline.state,
+                q4k_gu::ROWS_PER_TG,
+                q4k_gu::THREADS_PER_TG,
+            )
+        } else if use_4sg {
+            (
+                &self.ffn.q4k_ffn_gate_up_pipeline.state,
+                q4k_gu::ROWS_PER_TG,
+                q4k_gu::THREADS_PER_TG,
+            )
         } else {
-            self.encode_q4_0_ffn(enc, layer, &bufs, hidden, inter, hidden_val, inter_val);
+            // Default (8sg) — f16 is incompatible-untested with 8sg
+            // dispatch, so 8sg wins if both flags conflict.
+            (
+                &self.ffn.q4k_ffn_gate_up_8sg_pipeline.state,
+                q4k_gu_8sg::ROWS_PER_TG,
+                q4k_gu_8sg::THREADS_PER_TG,
+            )
         }
     }
 
@@ -166,16 +364,12 @@ impl MetalBackend {
                 inter as u64,
             );
 
-            enc.set_compute_pipeline_state(&self.attention.q4kf_proj_pipeline.state);
-            enc.set_buffer(0, Some(bufs.down_w), 0);
-            enc.set_buffer(1, Some(bufs.act_buf), 0);
-            enc.set_buffer(2, Some(bufs.down_out), 0);
-            enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_thread_groups(
-                MTLSize::new(n_tgs_down, 1, 1),
-                MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
-            );
+            // Down per its OWN format, like the gated arm above — the
+            // previous hardcoded `q4kf_proj` dispatch mis-decoded any
+            // non-Q4_KF down weight on a standard-FFN layer (audit
+            // route-table gap, slice 2).
+            self.encode_qmv_down(enc, layer, bufs, hidden, inter);
+            let _ = n_tgs_down;
         }
     }
 
@@ -194,7 +388,6 @@ impl MetalBackend {
         inter_val: u32,
         inter_padded_val: u32,
     ) {
-        use crate::shaders::q4k_ffn_gate_up as q4k_gu;
         // Pull `q4k_matvec` dispatch geometry from the bound pipeline so
         // dispatches work for both 4sg and 8sg variants. Hardcoding the
         // 4sg constants while dispatching the 8sg pipeline (production
@@ -223,8 +416,6 @@ impl MetalBackend {
             //   - `LARQL_F16_ACC=1`: f16 inner accumulator. Kernel-isolated
             //     1.79× but end-to-end at parity on quiet GPU. Kept as
             //     opt-in for future hardware/fusion scenarios.
-            use crate::shaders::q4k_ffn_gate_up_8sg as q4k_gu_8sg;
-            use crate::shaders::q4k_ffn_gate_up_coop as q4k_gu_coop;
             // `LARQL_GATE_UP_COOP=1`: cooperative scale-loading variant.
             // Tried 2026-05-01 — null end-to-end (kernel-isolated ALU
             // diagnosis was misleading). Kept opt-in.
@@ -233,39 +424,7 @@ impl MetalBackend {
             // `metal::flags::DecodeFlags`) — the decode hot path is
             // ~34 layers/tok and `getenv` per layer per flag was a
             // measurable syscall tax.
-            let use_coop = self.decode_flags.gate_up_coop;
-            let use_4sg = self.decode_flags.gate_up_use_4sg;
-            let use_f16 = self.decode_flags.f16_acc;
-            let (pipeline, rows_per_tg, threads_per_tg) = if use_coop {
-                // Cooperative wins over the other flags — it's the
-                // newest variant under measurement.
-                (
-                    &self.ffn.q4k_ffn_gate_up_coop_pipeline.state,
-                    q4k_gu_coop::ROWS_PER_TG,
-                    q4k_gu_coop::THREADS_PER_TG,
-                )
-            } else if use_4sg && use_f16 {
-                (
-                    &self.ffn.q4k_ffn_gate_up_f16acc_pipeline.state,
-                    q4k_gu::ROWS_PER_TG,
-                    q4k_gu::THREADS_PER_TG,
-                )
-            } else if use_4sg {
-                (
-                    &self.ffn.q4k_ffn_gate_up_pipeline.state,
-                    q4k_gu::ROWS_PER_TG,
-                    q4k_gu::THREADS_PER_TG,
-                )
-            } else {
-                // Default (8sg) — and f16 is incompatible-untested with
-                // 8sg dispatch, so 8sg wins if both flags conflict.
-                let _ = use_f16;
-                (
-                    &self.ffn.q4k_ffn_gate_up_8sg_pipeline.state,
-                    q4k_gu_8sg::ROWS_PER_TG,
-                    q4k_gu_8sg::THREADS_PER_TG,
-                )
-            };
+            let (pipeline, rows_per_tg, threads_per_tg) = self.q4k_gate_up_selection();
             let n_tgs_per_mat = (inter as u64).div_ceil(rows_per_tg);
             enc.set_compute_pipeline_state(pipeline);
             enc.set_buffer(0, Some(bufs.gate_w), 0);
@@ -315,9 +474,21 @@ impl MetalBackend {
             // a no-op (keeps the kernel and pipeline registered as
             // dead code for the investigation in
             // `larql-inference/ROADMAP.md` G-3 follow-up).
-            let use_fused_q6k_down = self.decode_flags.fused_q6k_down
-                && layer.down.format == larql_compute::QuantFormat::Q6_K
-                && matches!(layer.activation, larql_compute::Activation::GeluTanh);
+            // 2026-08-09 status update: the kernel-level parity suite
+            // (test_kernel_q6k_geglu_down, planar bytes, incl. the exact
+            // decode shape 512->256) now PASSES, so the layout-drift
+            // hypothesis above is falsified. But the decode INTEGRATION
+            // still produces all-NaN output (reproducer:
+            // decode_token_with_q4k_ffn_and_fused_q6k_down_option,
+            // #[ignore]d). The defect is in what this dispatch binds or
+            // sequences, not in the kernel. Hard-disabled until that is
+            // found — a flag that ships all-NaN is the audit's silent-
+            // corruption class with extra steps.
+            // Original gate, for when the integration bug is fixed:
+            //   self.decode_flags.fused_q6k_down
+            //     && layer.down.format() == Q6_K
+            //     && activation == GeluTanh
+            let use_fused_q6k_down = false;
             if use_fused_q6k_down {
                 let kh = &self.ffn.q6k_geglu_gelu_tanh_down_pipeline;
                 let n_tgs = (hidden as u64).div_ceil(kh.rows_per_tg);
@@ -338,7 +509,7 @@ impl MetalBackend {
                     metal::MTLSize::new(n_tgs, 1, 1),
                     metal::MTLSize::new(kh.threads_per_tg, 1, 1),
                 );
-            } else if layer.down.format == larql_compute::QuantFormat::Q4_K
+            } else if layer.down.format() == larql_compute::QuantFormat::Q4_K
                 && inter_padded <= MAX_FUSED_GEGLU_DOWN_INTER
                 && self.decode_flags.fused_down
             {
@@ -370,7 +541,7 @@ impl MetalBackend {
                 };
                 qmv::encode(
                     enc,
-                    layer.down.format,
+                    layer.down.format(),
                     bufs.down_w,
                     bufs.act_buf,
                     0,
@@ -408,20 +579,13 @@ impl MetalBackend {
                 inter as u64,
             );
 
-            enc.set_compute_pipeline_state(&self.quant.q4k_matvec_pipeline.state);
-            enc.set_buffer(0, Some(bufs.down_w), 0);
-            enc.set_buffer(1, Some(bufs.act_buf), 0);
-            enc.set_buffer(2, Some(bufs.down_out), 0);
-            enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(
-                4,
-                4,
-                &inter_padded_val as *const u32 as *const std::ffi::c_void,
-            );
-            enc.dispatch_thread_groups(
-                MTLSize::new(n_tgs_down, 1, 1),
-                MTLSize::new(q4k_matvec_threads_per_tg, 1, 1),
-            );
+            // Down per its OWN format (the hardcoded q4k_matvec here
+            // mis-decoded a Q6_K down on a standard-FFN layer — audit
+            // route-table gap, slice 2). K = inter_padded: the weight's
+            // per-row superblock stride is derived from the padded
+            // width, and act_buf's zeroed tail is inert.
+            self.encode_qmv_down(enc, layer, bufs, hidden, inter_padded);
+            let _ = n_tgs_down;
         }
     }
 
@@ -524,7 +688,7 @@ impl MetalBackend {
     /// Fused `activation(gate) * up → q4k_matvec(W_down)` in one
     /// dispatch, replacing the separated GEGLU + Q4_K down pair.
     ///
-    /// Only fires when `layer.down.format == Q4_K` — gated by the
+    /// Only fires when `layer.down.format() == Q4_K` — gated by the
     /// caller. Picks `silu_down` or `gelu_tanh_down` based on the
     /// layer's activation. Behaviour pinned by
     /// `test_kernel_q4k_geglu_down.rs::*_gemma3_4b_ffn`.
@@ -609,14 +773,19 @@ impl MetalBackend {
         layer: &FullPipelineLayer,
         bufs: &FfnBufs<'_>,
         dims: FfnDims,
-        ffn_uses_kquant: bool,
     ) {
         let FfnDims { hidden, inter, .. } = dims;
         let inter_val = inter as u32;
         let hidden_val = hidden as u32;
-        let ffn_is_q4kf = layer.gate.format == larql_compute::QuantFormat::Q4_KF;
+        // Same per-operand route as `encode_ffn_step`. The previous
+        // family-boolean split hardcoded the 8sg Q4_K kernel (ignoring
+        // every variant flag, so split-mode profiled a kernel
+        // production might not run) and sent a Q6_K gate to the Q4_K
+        // pipelines (capability audit, slice 2).
+        use larql_compute::QuantFormat;
+        let route_fmt = validate_ffn_formats(layer);
 
-        if ffn_is_q4kf {
+        if route_fmt == QuantFormat::Q4_KF {
             use crate::shaders::q4kf_ffn_gate_up as q4kf_gu;
             use crate::shaders::q4kf_qkv_proj as q4kf;
             if layer.is_gated() {
@@ -646,12 +815,56 @@ impl MetalBackend {
                     MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
                 );
             }
-        } else if ffn_uses_kquant {
-            let rows = self.ffn.q4k_ffn_gate_up_8sg_pipeline.rows_per_tg;
-            let tgs = self.ffn.q4k_ffn_gate_up_8sg_pipeline.threads_per_tg;
+        } else if route_fmt == QuantFormat::Q6_K {
+            // Separated per-format gate/up via quant_matvec — mirrors
+            // `encode_q6k_ffn`'s first half.
+            use crate::stages::quant_matvec::{self as qmv, Pipelines};
+            let pipes = Pipelines {
+                q4kf_proj: Some(&self.attention.q4kf_proj_pipeline.state),
+                q4k_matvec_fallback: &self.quant.q4k_matvec_pipeline,
+                q6k_matvec: &self.quant.q6k_matvec_pipeline,
+                q4_matvec: &self.q4.matvec,
+                q4k_matmul: None,
+            };
             if layer.is_gated() {
+                qmv::encode(
+                    enc,
+                    QuantFormat::Q6_K,
+                    bufs.gate_w,
+                    bufs.ffn_norm_out,
+                    0,
+                    bufs.ffn_norm_out,
+                    0,
+                    bufs.ffn_norm_out,
+                    0,
+                    bufs.gate_out_scratch,
+                    0,
+                    &pipes,
+                    inter,
+                    hidden,
+                );
+            }
+            qmv::encode(
+                enc,
+                QuantFormat::Q6_K,
+                bufs.up_w,
+                bufs.ffn_norm_out,
+                0,
+                bufs.ffn_norm_out,
+                0,
+                bufs.ffn_norm_out,
+                0,
+                bufs.up_out,
+                0,
+                &pipes,
+                inter,
+                hidden,
+            );
+        } else if route_fmt == QuantFormat::Q4_K {
+            if layer.is_gated() {
+                let (pipeline, rows, tgs) = self.q4k_gate_up_selection();
                 let n = (inter as u64).div_ceil(rows);
-                enc.set_compute_pipeline_state(&self.ffn.q4k_ffn_gate_up_8sg_pipeline.state);
+                enc.set_compute_pipeline_state(pipeline);
                 enc.set_buffer(0, Some(bufs.gate_w), 0);
                 enc.set_buffer(1, Some(bufs.up_w), 0);
                 enc.set_buffer(2, Some(bufs.ffn_norm_out), 0);
@@ -710,7 +923,6 @@ impl MetalBackend {
         layer: &FullPipelineLayer,
         bufs: &FfnBufs<'_>,
         dims: FfnDims,
-        ffn_uses_kquant: bool,
     ) {
         let FfnDims {
             hidden,
@@ -720,12 +932,21 @@ impl MetalBackend {
         let inter_val = inter as u32;
         let inter_padded_val = inter_padded as u32;
         let hidden_val = hidden as u32;
-        let ffn_is_q4kf = layer.gate.format == larql_compute::QuantFormat::Q4_KF;
+        // Same per-operand route and the SAME fused-down guards as
+        // `encode_q4k_ffn`. This phase previously fired the fused
+        // Q4_K GEGLU+down on `down == Q4_K` alone — no
+        // MAX_FUSED_GEGLU_DOWN_INTER ceiling, no LARQL_FUSED_DOWN
+        // opt-out — so split-mode routed Gemma 4 31B through the very
+        // kernel that guard exists to avoid, and measurements were not
+        // the production configuration (capability audit, slice 2).
+        use larql_compute::QuantFormat;
+        let route_fmt = validate_ffn_formats(layer);
 
-        if ffn_is_q4kf {
+        if route_fmt == QuantFormat::Q4_KF || route_fmt == QuantFormat::Q6_K {
+            // Both route their down per its own format via qmv; only
+            // the gate/up side differed, and that phase has run.
             if layer.is_gated() {
                 self.encode_geglu(enc, layer, bufs, inter_val, inter as u64);
-                self.encode_qmv_down(enc, layer, bufs, hidden, inter);
             } else {
                 self.encode_activation(
                     enc,
@@ -735,25 +956,19 @@ impl MetalBackend {
                     inter_val,
                     inter as u64,
                 );
-                use crate::shaders::q4kf_qkv_proj as q4kf;
-                let n = (hidden as u64).div_ceil(q4kf::ROWS_PER_TG);
-                enc.set_compute_pipeline_state(&self.attention.q4kf_proj_pipeline.state);
-                enc.set_buffer(0, Some(bufs.down_w), 0);
-                enc.set_buffer(1, Some(bufs.act_buf), 0);
-                enc.set_buffer(2, Some(bufs.down_out), 0);
-                enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                enc.dispatch_thread_groups(
-                    MTLSize::new(n, 1, 1),
-                    MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
-                );
             }
-        } else if ffn_uses_kquant {
+            self.encode_qmv_down(enc, layer, bufs, hidden, inter);
+        } else if route_fmt == QuantFormat::Q4_K {
             if layer.is_gated() {
-                let use_fused_q6k = self.decode_flags.fused_q6k_down
-                    && layer.down.format == larql_compute::QuantFormat::Q6_K
-                    && matches!(layer.activation, larql_compute::Activation::GeluTanh);
-                if layer.down.format == larql_compute::QuantFormat::Q4_K {
+                // Hard-disabled — see the integration-NaN note in
+                // `encode_q4k_ffn`'s fused-q6k arm. Original gate:
+                //   decode_flags.fused_q6k_down && down == Q6_K
+                //     && activation == GeluTanh
+                let use_fused_q6k = false;
+                if layer.down.format() == larql_compute::QuantFormat::Q4_K
+                    && inter_padded <= MAX_FUSED_GEGLU_DOWN_INTER
+                    && self.decode_flags.fused_down
+                {
                     self.encode_q4k_fused_geglu_down(
                         enc,
                         layer,
@@ -790,20 +1005,8 @@ impl MetalBackend {
                     inter_val,
                     inter as u64,
                 );
-                let rpt = self.quant.q4k_matvec_pipeline.rows_per_tg;
-                let tpt = self.quant.q4k_matvec_pipeline.threads_per_tg;
-                let n = (hidden as u64).div_ceil(rpt);
-                enc.set_compute_pipeline_state(&self.quant.q4k_matvec_pipeline.state);
-                enc.set_buffer(0, Some(bufs.down_w), 0);
-                enc.set_buffer(1, Some(bufs.act_buf), 0);
-                enc.set_buffer(2, Some(bufs.down_out), 0);
-                enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(
-                    4,
-                    4,
-                    &inter_padded_val as *const u32 as *const std::ffi::c_void,
-                );
-                enc.dispatch_thread_groups(MTLSize::new(n, 1, 1), MTLSize::new(tpt, 1, 1));
+                // Down per its own format (was hardcoded q4k_matvec).
+                self.encode_qmv_down(enc, layer, bufs, hidden, inter_padded);
             }
         } else {
             // Q4_0
@@ -874,7 +1077,7 @@ impl MetalBackend {
         };
         qmv::encode(
             enc,
-            layer.down.format,
+            layer.down.format(),
             bufs.down_w,
             bufs.act_buf,
             0,

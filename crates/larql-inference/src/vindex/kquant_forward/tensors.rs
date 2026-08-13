@@ -21,11 +21,18 @@ pub fn insert_q4k_layer_tensors(
     let attn = index
         .attn_kquant_layer_data(layer)
         .ok_or_else(|| format!("attn Q4K slices missing for layer {layer}"))?;
-    let ffn = index
-        .interleaved_kquant_layer_data(layer)
-        .ok_or_else(|| format!("ffn Q4K slices missing for layer {layer}"))?;
 
     let arch = &*weights.arch;
+    // Pure MoE (GraniteMoE, OLMoE) has no dense FFN slab — its FFN *is* the
+    // expert block, served from the per-layer expert store. Requiring
+    // `interleaved_kquant` here rejected those models before the forward ever
+    // reached its MoE branch. Hybrid MoE and dense models still require it.
+    let needs_dense_ffn = !arch.is_moe() || arch.is_hybrid_moe();
+    let ffn = match index.interleaved_kquant_layer_data(layer) {
+        Some(ffn) => Some(ffn),
+        None if !needs_dense_ffn => None,
+        None => return Err(format!("ffn Q4K slices missing for layer {layer}")),
+    };
     let hidden = weights.hidden_size;
     let num_q = arch.num_q_heads_for_layer(layer);
     let num_kv = arch.num_kv_heads_for_layer(layer);
@@ -58,6 +65,12 @@ pub fn insert_q4k_layer_tensors(
         o_key.clone(),
         dequantize_matrix(attn[3].0, attn[3].1, hidden, q_dim).into_shared(),
     );
+    let Some(ffn) = ffn else {
+        // Pure MoE: attention only. The expert block sources its own weights
+        // from the per-layer store, so no dense gate/up/down keys are claimed.
+        return Ok(vec![q_key, k_key, v_key, o_key]);
+    };
+
     scratch.insert(
         gate_key.clone(),
         dequantize_matrix(ffn[0].0, ffn[0].1, intermediate, hidden).into_shared(),
@@ -67,14 +80,9 @@ pub fn insert_q4k_layer_tensors(
         dequantize_matrix(ffn[1].0, ffn[1].1, intermediate, hidden).into_shared(),
     );
 
-    let inter_padded = intermediate.div_ceil(larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS)
-        * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
-    let w_down = if inter_padded != intermediate {
-        let w = dequantize_matrix(ffn[2].0, ffn[2].1, hidden, inter_padded);
-        w.slice(ndarray::s![.., ..intermediate]).to_owned()
-    } else {
-        dequantize_matrix(ffn[2].0, ffn[2].1, hidden, intermediate)
-    };
+    // `dequantize_matrix` strips the writer's per-row super-block
+    // padding internally — logical dims only.
+    let w_down = dequantize_matrix(ffn[2].0, ffn[2].1, hidden, intermediate);
     scratch.insert(down_key.clone(), w_down.into_shared());
 
     Ok(vec![q_key, k_key, v_key, o_key, gate_key, up_key, down_key])

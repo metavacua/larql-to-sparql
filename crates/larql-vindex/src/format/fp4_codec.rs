@@ -19,6 +19,9 @@ use larql_models::quant::fp4_block::{
 
 use crate::error::VindexError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Layout descriptor for one layer inside a per-projection file. Mirrors
 /// the information that `VindexConfig.layers[i]` already carries; exposed
 /// here as a dedicated struct so the writer / reader signatures are

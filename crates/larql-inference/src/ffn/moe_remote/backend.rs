@@ -866,3 +866,38 @@ impl RemoteMoeBackend {
         Ok(h2_per_layer)
     }
 }
+
+/// The remote route as a [`MoeExpertBackend`].
+///
+/// Builds its own router from `weights`, which is the one line that moved in
+/// from `moe_ffn_block_cpu` when the seam became a trait. A layer with no
+/// router returns zeros, matching what the block loop did when
+/// `build_moe_router_weights` returned `None` — the behaviour is unchanged,
+/// it simply now lives with the route that needs it.
+impl crate::ffn::moe_backend::MoeExpertBackend for RemoteMoeBackend {
+    fn forward_moe_seq(
+        &self,
+        weights: &larql_models::ModelWeights,
+        layer: usize,
+        h: &ndarray::Array2<f32>,
+        norm_offset: f32,
+        eps: f32,
+    ) -> Result<ndarray::Array2<f32>, crate::ffn::moe_backend::MoeBackendError> {
+        let arch = &*weights.arch;
+        let Some(router) = crate::vindex::build_moe_router_weights(weights, arch, layer) else {
+            return Ok(ndarray::Array2::zeros((h.nrows(), h.ncols())));
+        };
+        Ok(RemoteMoeBackend::forward_moe_seq(
+            self,
+            layer,
+            h,
+            &router,
+            norm_offset,
+            eps,
+        )?)
+    }
+
+    fn name(&self) -> &'static str {
+        "remote"
+    }
+}

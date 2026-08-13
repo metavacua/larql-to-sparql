@@ -7,8 +7,8 @@ variant. Each format is a sibling subcommand under `quantize`, with
 its own flag surface. FP4 and Q4K are wired today; future formats
 land as additional subcommands without changing the grammar.
 **Format-specific references:**
-- FP4: [`fp4-format-spec.md`](fp4-format-spec.md) (byte layout),
-  [`fp4-precision-policy.md`](fp4-precision-policy.md) (A/B/C
+- FP4: [`fp4-format-spec.md`](../../larql-vindex/docs/fp4-format-spec.md) (byte layout),
+  [`fp4-precision-policy.md`](../../larql-vindex/docs/fp4-precision-policy.md) (A/B/C
   policies + compliance gate).
 - Q4K: GGML "Q4_K_M" mix (Q4_K gate/up + Q6_K down), Ollama-
   compatible. Library entry: `larql_vindex::quant::vindex_to_q4k`

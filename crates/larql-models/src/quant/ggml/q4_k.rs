@@ -2,6 +2,8 @@
 //! Ollama-compatible FFN format. NEON-accelerated row dot and
 //! scaled-add, with scalar fallbacks.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::ModelError;
 
 use super::check_block_input;

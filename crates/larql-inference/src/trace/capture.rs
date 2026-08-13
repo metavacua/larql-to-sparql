@@ -1,10 +1,9 @@
 //! Trace capture — decomposed forward pass recording attn and FFN deltas.
 
-use std::collections::HashMap;
-
 use ndarray::Array2;
 
 use crate::attention::SharedKV;
+use crate::collections::HashMap;
 use crate::ffn::{FfnBackend, WeightFfn};
 use crate::forward::hooks::LayerHook;
 use crate::forward::ple::precompute_per_layer_inputs;
@@ -12,6 +11,9 @@ use crate::forward::{embed_tokens_pub, run_layer_with_capture_hooked};
 use crate::model::ModelWeights;
 
 use super::types::*;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Which positions to capture.
 pub enum TracePositions {
@@ -51,7 +53,7 @@ pub fn trace_residuals(
 
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::default();
     let mut nodes = Vec::new();
     let mut attention_captures = Vec::new();
     let zero = vec![0.0f32; hidden];
@@ -169,16 +171,8 @@ mod tests {
             Array2::zeros((x.nrows(), x.ncols()))
         }
 
-        fn forward_with_activation(
-            &self,
-            _layer: usize,
-            x: &Array2<f32>,
-        ) -> (Array2<f32>, Array2<f32>) {
-            (
-                Array2::zeros((x.nrows(), x.ncols())),
-                Array2::zeros((x.nrows(), x.ncols())),
-            )
-        }
+        // `forward_observed` keeps the trait default (Absent): this
+        // stub computes nothing, so it observes nothing.
 
         fn name(&self) -> &str {
             "zero"
@@ -213,7 +207,7 @@ mod tests {
         let t = trace(w, &[0u32, 1, 2, 3], TracePositions::Positions(vec![0, 2]));
         // 2 positions × (n_layers + 1) nodes
         assert_eq!(t.nodes.len(), 2 * (w.num_layers + 1));
-        let positions: std::collections::HashSet<usize> =
+        let positions: crate::collections::HashSet<usize> =
             t.nodes.iter().map(|n| n.position).collect();
         assert_eq!(positions.len(), 2);
         assert!(positions.contains(&0) && positions.contains(&2));

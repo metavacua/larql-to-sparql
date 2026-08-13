@@ -240,9 +240,15 @@ pub fn infer_patched_q4k(
     let walk_ffn = WalkFfn::new_unlimited_with_trace(weights_ref, gate_index);
 
     let start = std::time::Instant::now();
+    // `WalkFfn` serves every layer locally and leaves `forward_moe_full_layer`
+    // at the trait default (`Ok(None)`), so it has no way to refuse. Asserting
+    // that here keeps the impossibility auditable: if a refusing backend is
+    // ever threaded through this path it fails loudly instead of answering
+    // with a token the route declined to compute.
     let PredictResult {
         predictions: raw, ..
-    } = predict_kquant_with_ffn(weights, tokenizer, token_ids, top_k, index, &walk_ffn);
+    } = predict_kquant_with_ffn(weights, tokenizer, token_ids, top_k, index, &walk_ffn)
+        .expect("WalkFfn cannot refuse a layer; a refusal here needs a real error channel");
     let walk_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     let residuals = walk_ffn.take_residuals();
@@ -301,6 +307,8 @@ pub fn infer_patched_q4k_early_exit(
             fired = Some(ovr);
             Some(preds)
         };
+        // See `infer_patched_q4k`: `WalkFfn` leaves `forward_moe_full_layer` at
+        // the trait default, so it cannot refuse. Loud if that ever changes.
         (predictions, exited) = predict_kquant_with_ffn_early_exit(
             weights,
             tokenizer,
@@ -310,7 +318,8 @@ pub fn infer_patched_q4k_early_exit(
             &walk_ffn,
             stop,
             &mut on_stop,
-        );
+        )
+        .expect("WalkFfn cannot refuse a layer; a refusal here needs a real error channel");
     }
     let walk_ms = start.elapsed().as_secs_f64() * 1000.0;
     let residuals = walk_ffn.take_residuals();
@@ -617,6 +626,13 @@ fn route_knn_override(
 /// same trace view without duplicating the loop or re-consuming WalkFfn's
 /// internal `take_trace` (which drains residuals and so can't coexist with
 /// the KNN-override residual capture above).
+///
+/// NOTE (2026-07-30 review, item 17): this is deliberately a POST-HOC KNN
+/// view — "what does the patched index associate with these residuals" —
+/// so its hits are built via `WalkHit::from_gate` with the execution
+/// fields `None`. For the features a walk actually executed, use
+/// `WalkFfn::take_trace` / `take_runtime_trace`, which emit from the
+/// executed path.
 pub fn walk_trace_from_residuals(
     residuals: &[(usize, Vec<f32>)],
     patched: &PatchedVindex,
@@ -629,12 +645,7 @@ pub fn walk_trace_from_residuals(
             .into_iter()
             .filter_map(|(feature, gate_score)| {
                 let meta = patched.feature_meta(*layer, feature)?;
-                Some(WalkHit {
-                    layer: *layer,
-                    feature,
-                    gate_score,
-                    meta,
-                })
+                Some(WalkHit::from_gate(*layer, feature, gate_score, meta))
             })
             .collect();
         out.push((*layer, walk_hits));

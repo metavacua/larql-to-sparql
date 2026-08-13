@@ -21,6 +21,9 @@ use crate::format::filenames::{layer_weights_filename, LAYERS_DIR};
 use crate::VindexError;
 use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Format tag written into the file header. Extend as new formats land.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,22 +43,54 @@ impl LayerWeightFormat {
     pub fn as_u32(self) -> u32 {
         self as u32
     }
+
+    /// Canonical registry tag, matching the vocabulary
+    /// `larql-compute`'s `QuantFormat::from_registry_tag` accepts. This is
+    /// how the per-layer store's format survives loading: the loader
+    /// records it on `ModelWeights::per_layer_ffn_format` and the MoE
+    /// forward resolves it instead of assuming Q4_K — the assumption that
+    /// would have decoded a Q6_K (MXFP4-transcoded) expert store as
+    /// Q4_K garbage.
+    pub fn registry_tag(self) -> &'static str {
+        match self {
+            Self::F32 => "F32",
+            Self::F16 => "F16",
+            Self::BF16 => "BF16",
+            Self::Q4_0 => "Q4_0",
+            Self::Q4_K => "Q4_K",
+            Self::Q6_K => "Q6_K",
+            Self::Q8_0 => "Q8_0",
+            Self::FP4 => "FP4",
+        }
+    }
 }
 
 const MAGIC: u32 = u32::from_le_bytes(*b"LYRW");
 const FORMAT_VERSION: u32 = 1;
-const U32_FIELD_BYTES: usize = std::mem::size_of::<u32>();
-const U64_FIELD_BYTES: usize = std::mem::size_of::<u64>();
+const U32_FIELD_BYTES: usize = core::mem::size_of::<u32>();
+const U64_FIELD_BYTES: usize = core::mem::size_of::<u64>();
 const HEADER_FIELDS: usize = 6;
 const OFFSET_FIELDS_PER_ENTRY: usize = 4;
 const HEADER_BYTES: usize = HEADER_FIELDS * U32_FIELD_BYTES;
 const OFFSET_ENTRY_BYTES: usize = OFFSET_FIELDS_PER_ENTRY * U64_FIELD_BYTES;
-const BF16_BYTES: usize = std::mem::size_of::<u16>();
+const BF16_BYTES: usize = core::mem::size_of::<u16>();
 
 /// One quantized entry: gate+up bytes and down bytes, both in the same format.
+///
+/// `Debug` prints byte counts rather than payloads — an expert is tens of MB,
+/// and a failing assertion that dumps it is unreadable.
 pub struct LayerEntry {
     pub gate_up: Vec<u8>, // Q4_K [2*inter, hidden]
     pub down: Vec<u8>,    // Q6_K [hidden, inter_padded]  (same format as gate_up)
+}
+
+impl core::fmt::Debug for LayerEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LayerEntry")
+            .field("gate_up_bytes", &self.gate_up.len())
+            .field("down_bytes", &self.down.len())
+            .finish()
+    }
 }
 
 pub type LayerWeightOffsets = Vec<(usize, usize, usize, usize)>;
@@ -176,10 +211,20 @@ pub fn pad_cols_to_256(data: &[f32], out_rows: usize, in_cols: usize) -> (Vec<f3
     (v, padded)
 }
 
-/// Build quantized entries for a dense FFN layer from f32 gate/up/down tensors.
+/// Build one quantized entry from separate f32 gate/up/down tensors.
+///
+/// Serves both a dense FFN layer (one entry) and a per-expert MoE model's
+/// individual expert (`experts.{id}.w1/w2/w3`) — the two cases are the same
+/// assembly, and the output is byte-identical to what [`quantize_moe_entries`]
+/// produces from packed input because the consumer is the same.
 ///
 /// `gate_f32`: [inter, hidden], `up_f32`: [inter, hidden], `down_f32`: [hidden, inter].
-/// All entries in the output use `format` uniformly.
+///
+/// `gate_up` is written **gate rows first, then up rows** — concatenated, not
+/// interleaved. `cpu/ops/moe/expert` splits the buffer at `inter * hidden`, so
+/// reversing the order silently swaps the two halves of every GLU: no crash,
+/// no size change, wrong numbers. The shape checks below exist for the same
+/// reason — a mis-shaped input would otherwise quantise happily.
 pub fn quantize_dense_entry(
     gate_f32: &[f32],
     up_f32: &[f32],
@@ -188,10 +233,37 @@ pub fn quantize_dense_entry(
     hidden: usize,
     format: LayerWeightFormat,
 ) -> Result<LayerEntry, VindexError> {
-    // gate+up interleaved: [gate rows, up rows] = [2*inter, hidden]
-    let mut gate_up_f32 = Vec::with_capacity(2 * inter * hidden);
-    gate_up_f32.extend_from_slice(gate_f32);
-    gate_up_f32.extend_from_slice(up_f32);
+    let expected_gate_up = inter * hidden;
+    if gate_f32.len() != expected_gate_up || up_f32.len() != expected_gate_up {
+        return Err(VindexError::Parse(format!(
+            "gate/up must each be [{inter}, {hidden}] = {expected_gate_up} elements; \
+             got gate {} and up {}",
+            gate_f32.len(),
+            up_f32.len()
+        )));
+    }
+    if down_f32.len() != hidden * inter {
+        return Err(VindexError::Parse(format!(
+            "down must be [{hidden}, {inter}] = {} elements; got {}",
+            hidden * inter,
+            down_f32.len()
+        )));
+    }
+
+    // gate_up rows are padded to the super-block boundary exactly as down's
+    // columns always were. Quantising them flat left each row spanning
+    // 11.25 blocks at GPT-OSS's hidden 2880, which made the store
+    // unreachable for every per-row integer kernel — the expert path fell
+    // back to scalar dequant of ~10 GB per token (~13 s/token). Padding is
+    // a no-op for block-multiple hidden sizes, so Gemma-class stores are
+    // byte-identical. Consumers derive the stored row width from the entry
+    // byte count; the header keeps the logical `hidden`.
+    let (gate_padded, padded_hidden) = pad_cols_to_256(gate_f32, inter, hidden);
+    let (up_padded, up_padded_hidden) = pad_cols_to_256(up_f32, inter, hidden);
+    debug_assert_eq!(padded_hidden, up_padded_hidden);
+    let mut gate_up_f32 = Vec::with_capacity(2 * inter * padded_hidden);
+    gate_up_f32.extend_from_slice(&gate_padded);
+    gate_up_f32.extend_from_slice(&up_padded);
     let gate_up = quantize_f32(&gate_up_f32, format)?;
 
     // down: [hidden, inter] padded to 256-element column boundary
@@ -221,7 +293,12 @@ pub fn quantize_moe_entries(
         .map(|e| {
             let gu_bytes = &gate_up_bf16[e * gate_up_stride..(e + 1) * gate_up_stride];
             let gate_up_f32 = bf16_bytes_to_f32(gu_bytes);
-            let gate_up = quantize_f32(&gate_up_f32, format)?;
+            // Same row-padding rule as `quantize_dense_entry` — a no-op for
+            // every block-multiple hidden size (all current packed-BF16
+            // models), kept identical so the two writers cannot diverge on
+            // the stored row width.
+            let (gate_up_padded, _) = pad_cols_to_256(&gate_up_f32, 2 * moe_inter, hidden);
+            let gate_up = quantize_f32(&gate_up_padded, format)?;
 
             let dn_bytes = &down_bf16[e * down_stride..(e + 1) * down_stride];
             let down_f32_src = bf16_bytes_to_f32(dn_bytes);
@@ -246,7 +323,16 @@ pub fn parse_layer_weights_header(data: &[u8]) -> Option<LayerWeightsHeader> {
     if magic != MAGIC {
         return None;
     }
-    // format_version at [4..8] — currently ignored, forward-compatible
+    // A newer `format_version` may change the offset-table stride. Parsing it
+    // with this version's stride would not bounds-fail — it would yield offsets
+    // that are still inside the file, and hand the caller a plausible byte range
+    // from the wrong place. Refuse instead: the one production caller
+    // (`format/weights/load/q4k.rs`) treats `None` as "skip this layer", so an
+    // unreadable file degrades to a clean miss rather than to wrong weights.
+    let version = u32::from_le_bytes(data[4..8].try_into().ok()?);
+    if version > FORMAT_VERSION {
+        return None;
+    }
     let quant_raw = u32::from_le_bytes(data[8..12].try_into().ok()?);
     let format = match quant_raw {
         0 => LayerWeightFormat::F32,

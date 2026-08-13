@@ -19,6 +19,11 @@
 
 use larql_models::TopKEntry;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+// References crate::index::storage::ffn_store::FFN_DOWN (native-only).
+#[cfg(not(target_arch = "wasm32"))]
 mod ffn_row;
 mod fp4_ffn;
 mod gate_lookup;
@@ -26,11 +31,12 @@ mod native_ffn;
 mod patch_overrides;
 mod quantized_ffn;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn_row::{FfnRowAccess, GateIndex};
 pub use fp4_ffn::Fp4FfnAccess;
 pub use gate_lookup::GateLookup;
 pub use native_ffn::NativeFfnAccess;
-pub use patch_overrides::PatchOverrides;
+pub use patch_overrides::{OverrideSlot, PatchOverrides};
 pub use quantized_ffn::QuantizedFfnAccess;
 
 /// Default `c_score` for a `FeatureMeta` synthesised without an explicit
@@ -51,11 +57,52 @@ pub struct FeatureMeta {
 }
 
 /// A single step in the walk trace — one feature that fired at one layer.
+///
+/// Two producers build these (2026-07-30 review, item 17):
+///
+/// - **Post-hoc KNN views** (`VectorIndex::walk`, `PatchedVindex::walk`,
+///   `walk_trace_from_residuals`) re-query the gate KNN for a residual;
+///   they know only `gate_score` + `meta` and construct via
+///   [`WalkHit::from_gate`], leaving the execution fields `None`.
+/// - **Runtime trace** (`WalkFfn::take_trace` in larql-inference)
+///   reports the features the walk actually EXECUTED, populating the
+///   execution fields from the kernels' own values.
 pub struct WalkHit {
     pub layer: usize,
     pub feature: usize,
+    /// Gate-position score. From the executed kernel on runtime traces
+    /// (0.0 when the executed path did not score the feature — see the
+    /// `Option` twin in the runtime record), from the KNN re-query on
+    /// post-hoc views.
     pub gate_score: f32,
     pub meta: FeatureMeta,
+    /// Up projection score `u·x` the executed kernel computed.
+    pub up_score: Option<f32>,
+    /// Scalar pre-down activation the executed kernel computed.
+    pub activation: Option<f32>,
+    /// `‖down_row‖` from the selector's lazy norm cache, when that
+    /// cache was already built — never computed just for tracing.
+    pub down_row_norm: Option<f32>,
+    /// Executed visit rank at this (position, layer): 0 = first
+    /// feature the kernel visited.
+    pub rank: Option<usize>,
+}
+
+impl WalkHit {
+    /// A hit known only by gate score + metadata — the post-hoc KNN
+    /// view shape. Execution fields stay honestly `None`.
+    pub fn from_gate(layer: usize, feature: usize, gate_score: f32, meta: FeatureMeta) -> Self {
+        Self {
+            layer,
+            feature,
+            gate_score,
+            meta,
+            up_score: None,
+            activation: None,
+            down_row_norm: None,
+            rank: None,
+        }
+    }
 }
 
 /// Result of a walk — per-layer feature activations with full metadata.
@@ -109,6 +156,8 @@ pub struct GateQ4Slice {
 }
 
 /// Mmap'd down_meta.bin — reads individual feature records on demand.
+/// memmap2/tokenizers-backed; no portable equivalent.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct DownMetaMmap {
     pub(crate) mmap: std::sync::Arc<memmap2::Mmap>,
@@ -118,6 +167,7 @@ pub struct DownMetaMmap {
     pub(crate) tokenizer: std::sync::Arc<tokenizers::Tokenizer>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl DownMetaMmap {
     fn record_size(&self) -> usize {
         8 + self.top_k_count * 8

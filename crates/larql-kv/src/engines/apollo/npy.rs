@@ -16,6 +16,9 @@
 //!   - `'<u4'` → u32
 //!   - structured dtypes are parsed by the `apollo::store` module directly.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Debug)]
 pub struct NpyHeader {
     pub descr: String,
@@ -32,7 +35,7 @@ pub enum NpyError {
     #[error("truncated .npy header")]
     TruncatedHeader,
     #[error("header is not valid UTF-8: {0}")]
-    InvalidUtf8(std::str::Utf8Error),
+    InvalidUtf8(core::str::Utf8Error),
     #[error("could not parse header field '{field}' from: {snippet}")]
     ParseField {
         field: &'static str,
@@ -73,7 +76,7 @@ pub fn parse_header(bytes: &[u8]) -> Result<(NpyHeader, usize), NpyError> {
     if bytes.len() < header_end {
         return Err(NpyError::TruncatedHeader);
     }
-    let header_str = std::str::from_utf8(&bytes[10..header_end]).map_err(NpyError::InvalidUtf8)?;
+    let header_str = core::str::from_utf8(&bytes[10..header_end]).map_err(NpyError::InvalidUtf8)?;
     // `descr` may be either a quoted string (simple dtype like '<f4') or a
     // Python list literal (structured dtype like `[('token_id', '<u4'), ...]`).
     // Extract as raw text so both cases succeed.
@@ -280,10 +283,17 @@ fn parse_bool_field(header: &str, name: &str) -> Option<bool> {
 
 fn parse_shape(header: &str) -> Option<Vec<usize>> {
     let start = header.find("'shape':")?;
-    let after = &header[start + "'shape':".len()..];
-    let open = after.find('(')?;
+    let after = header[start + "'shape':".len()..].trim_start();
+    // The value must be a tuple literal starting with '('. Searching for
+    // '(' and ')' independently panicked on malformed headers where a ')'
+    // preceded the '(' (reversed slice range); requiring the leading '('
+    // and searching for the close after it makes malformed headers return
+    // None, which the caller maps to NpyError::ParseField.
+    if !after.starts_with('(') {
+        return None;
+    }
     let close = after.find(')')?;
-    let inner = &after[open + 1..close];
+    let inner = &after[1..close];
     let mut out = Vec::new();
     for part in inner.split(',') {
         let trimmed = part.trim();
@@ -627,5 +637,33 @@ mod tests {
     fn parse_shape_zero_dim_ok() {
         let h = "{'shape': (0,)}";
         assert_eq!(parse_shape(h), Some(vec![0]));
+    }
+
+    /// A ')' before the '(' previously produced a reversed slice range and
+    /// panicked; malformed shape values must return None instead.
+    #[test]
+    fn parse_shape_reversed_parens_returns_none() {
+        let h = "{'shape': ), (2,)}";
+        assert_eq!(parse_shape(h), None);
+    }
+
+    /// Same malformation through the public entry point: parse_header maps
+    /// the None from parse_shape to ParseField{field: "shape"}.
+    #[test]
+    fn parse_header_reversed_shape_parens_is_parse_field_error() {
+        let header = "{'descr': '<f4', 'fortran_order': False, 'shape': ), (2,}".to_string();
+        let mut padded = header.into_bytes();
+        padded.push(b'\n');
+        let mut blob = Vec::new();
+        blob.extend_from_slice(b"\x93NUMPY");
+        blob.push(1);
+        blob.push(0);
+        blob.extend_from_slice(&(padded.len() as u16).to_le_bytes());
+        blob.extend_from_slice(&padded);
+        let err = parse_header(&blob).unwrap_err();
+        match err {
+            NpyError::ParseField { field, .. } => assert_eq!(field, "shape"),
+            other => panic!("expected ParseField on shape, got {other:?}"),
+        }
     }
 }

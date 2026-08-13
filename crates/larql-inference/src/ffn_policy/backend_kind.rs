@@ -1,7 +1,10 @@
 //! [`FfnBackendKind`] — the FFN-axis enum mirroring
 //! [`larql_kv::EngineKind`] for the KV axis.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// FFN backend selector. Parse with [`Self::from_name`].
 ///

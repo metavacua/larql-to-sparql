@@ -1,0 +1,51 @@
+[package]
+name = "larql-factory"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Vindex Factory recipe schema, build_id canonicaliser, and structural validator (docs/vindex-factory.md)"
+keywords = ["vindex", "factory", "recipe", "schema"]
+categories = ["data-structures", "encoding"]
+
+[dependencies]
+larql-models = { path = "../larql-models" }
+larql-vindex-spec = { path = "../larql-vindex-spec" }
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. reqwest and serde_yaml moved into this same
+# table: reqwest is inherently native (networking, no wasm32v1-none
+# support upstream at all); serde_yaml has no no_std/alloc mode either
+# (confirmed via its own source on docs.rs -- no #![no_std], no cfg
+# gating around std usage, not just undocumented). Both were also
+# unconditional [dependencies] before this, same transitive-poisoning
+# risk larql-models hit with safetensors/memmap2 (see its Cargo.toml).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde_yaml = "0.9"
+sha2 = "0.10"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+# sha2's own default feature set is std-only ("std" is in its default
+# list, per the same pattern-1 shape as serde/thiserror above); its
+# digest output is a fixed-size GenericArray, not heap-allocated, so
+# no_std alone (no alloc feature) is sufficient here.
+sha2 = { version = "0.10", default-features = false }
+# core's f64 has no transcendental math (.powi()) -- see
+# crates/larql-models/Cargo.toml for the pattern-6 rationale.
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+
+[dev-dependencies]
+larql-vindex-spec = { path = "../larql-vindex-spec", features = ["test-utils"] }
+tempfile = "3"
+# `serial_test` because hf_token()'s tests mutate the process-wide
+# HF_TOKEN env var — parallel test threads racing on it is a real,
+# observed flake (see #[serial] on those two tests in estimate/http.rs).
+serial_test = "3.2"

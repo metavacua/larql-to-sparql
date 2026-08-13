@@ -4,6 +4,8 @@
 //! between the CPU, Metal, and (eventually) HuggingFace reference paths
 //! when refactoring quantisation, activations, norms, or expert routing.
 //!
-//! See `crates/larql-cli/ROADMAP.md` P0 → "`larql parity`" for the design.
+//! What shipped is in `crates/larql-cli/CHANGELOG.md` (2026-05-10); the
+//! remaining open scoping work is `ROADMAP.md` → "P2: parity polish".
 
+pub mod moe_locality;
 pub mod parity;

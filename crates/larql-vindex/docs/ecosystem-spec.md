@@ -3,7 +3,7 @@
 **Version:** 0.3  
 **Date:** 2026-04-01  
 **Status:** Implemented (~85%)  
-**Companion specs:** [Format](vindex-format-spec.md), [Operations](vindex-operations-spec.md), [LQL](lql-spec.md)
+**Companion specs:** [Format](format-spec.md), [Operations](operations-spec.md), [LQL](../../larql-lql/docs/spec.md)
 
 **What's implemented:** Format comparisons (Section 1), distributed hosting with HTTP/gRPC server (Section 2/5), USE REMOTE in REPL (Section 2.3), HuggingFace publish/download (Section 4), remote serving API with all endpoints (Section 5), multi-tenant serving with per-session patches (Section 5.4), Vindexfile parsing and build (Section 6), browse-only and knowledge patching strategies (Section 3).  
 **What's planned:** GGUF output format, CI/CD templates.

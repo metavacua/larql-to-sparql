@@ -173,7 +173,7 @@ with parallel tests). 5 unit tests cover all four precedence outcomes.
 `RemoteExpertBackend` → `RemoteMoeBackend`, `RemoteExpertError` →
 `RemoteMoeError`, `generate_with_remote_experts` →
 `generate_with_remote_moe`, `examples/expert_grid_generate.rs` →
-`examples/moe_grid_generate.rs`. Module doc explicitly disambiguates from
+`chris-experiments/larql_probes/examples/misc/moe_grid_generate.rs`. Module doc explicitly disambiguates from
 `crate::experts`.
 
 Side-effect of running the rename: caught two pre-existing build breakages
@@ -655,7 +655,7 @@ crates/larql-inference/src/ffn/{moe_remote,mod}.rs     # rename + new fields
 crates/larql-inference/src/layer_graph/{generate,grid,mod}.rs # generate_constrained
 crates/larql-inference/src/lib.rs                      # re-exports
 crates/larql-inference/tests/{data/,test_generate_q4k_cpu,test_*_dispatch}.rs
-crates/larql-inference/examples/moe_grid_generate.rs   # renamed
+chris-experiments/larql_probes/examples/misc/moe_grid_generate.rs   # renamed
 crates/larql-cli/src/commands/primary/run_cmd.rs       # --experts + --constrained
 crates/larql-cli/src/main.rs                           # ChatArgs ↔ RunArgs
 crates/larql-cli/tests/test_run_experts.rs             # CLI integration tests

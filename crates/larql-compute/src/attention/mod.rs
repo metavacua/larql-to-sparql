@@ -6,11 +6,19 @@
 //! paths both live here; Metal-specific dispatch in the larql-compute-metal
 //! sibling crate hooks in via the `ComputeBackend` trait.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub mod block;
 pub mod decode;
 pub mod gpu;
 pub mod gqa;
 pub mod rope;
+pub mod sinks;
+pub mod softmax;
+
+#[cfg(test)]
+mod swa_tests;
 
 use ndarray::Array2;
 
@@ -38,8 +46,8 @@ pub struct AttentionAllWeights {
 pub type SharedKV = (Array2<f32>, Array2<f32>);
 
 pub use gqa::{
-    gqa_attention, gqa_attention_with_all_weights, gqa_attention_with_weights,
-    gqa_reduced_qk_all_weights,
+    gqa_attention, gqa_attention_windowed, gqa_attention_with_all_weights,
+    gqa_attention_with_weights, gqa_reduced_qk_all_weights,
 };
 pub use rope::{
     apply_llama3_inv_freq, apply_rope, apply_rope_partial, apply_rope_partial_at,
@@ -60,7 +68,7 @@ pub use block::{
     run_attention_block_zero_pre_o_heads,
 };
 pub use decode::{
-    gqa_attention_decode_step, run_attention_block_decode_step,
+    gqa_attention_decode_step, gqa_attention_decode_step_windowed, run_attention_block_decode_step,
     run_attention_block_decode_step_auto, run_attention_block_decode_step_auto_inplace,
     run_attention_block_decode_step_backend, run_attention_block_decode_step_q4k_direct,
     run_attention_block_decode_step_q4k_direct_inplace,

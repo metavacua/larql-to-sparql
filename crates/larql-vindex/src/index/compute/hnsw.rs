@@ -11,6 +11,9 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Max-heap element (best score first).
 #[derive(Clone, Copy)]
 struct MaxScored {
@@ -451,5 +454,343 @@ impl HnswLayer {
     }
     pub fn is_empty(&self) -> bool {
         self.num_vectors == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array2;
+
+    // Dataset geometry: small enough to brute-force, large enough that
+    // the graph has multiple levels and neighbor eviction happens.
+    const DIM: usize = 24;
+    const NUM_VECTORS: usize = 200;
+    /// Size at which the level-0 graph is still fully connected (see
+    /// `level0_graph_fully_connected_at_small_n` — beyond ~64 vectors
+    /// the naive neighbor eviction starts orphaning nodes).
+    const SMALL_N: usize = 50;
+    /// Size for the clustered recall benchmark (measured recall 0.97).
+    const RECALL_N: usize = 100;
+    const M: usize = 8;
+    const EF_CONSTRUCTION: usize = 64;
+    const EF_SEARCH: usize = 100;
+    const TOP_K: usize = 10;
+    /// Minimum acceptable recall@10 vs brute force on clustered data at
+    /// RECALL_N. Measured behavior is 0.97 (deterministic build +
+    /// dataset); the floor leaves headroom for benign re-tuning while
+    /// still catching a broken graph.
+    ///
+    /// Deliberately NOT asserted on uniform-random data at
+    /// NUM_VECTORS=200: the naive add_connection eviction fragments the
+    /// level-0 graph there (only ~33/200 nodes reachable from the entry
+    /// point, recall ~0.16 even with ef=n). That is a defect of the
+    /// current construction, documented by
+    /// `level0_graph_fully_connected_at_small_n`'s size bound rather
+    /// than papered over with a loose floor.
+    const RECALL_FLOOR: f64 = 0.8;
+    const NUM_RECALL_QUERIES: usize = 30;
+
+    /// Test-local RNG for dataset generation (xorshift64*; distinct
+    /// from the production LCGs on purpose).
+    const DATASET_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
+
+    // The production level-assignment LCG (lines ~122-126). Pinned
+    // here so a constant change breaks a test instead of silently
+    // reshaping every previously built graph.
+    const LEVEL_LCG_SEED: u64 = 42;
+    const LEVEL_LCG_MUL: u64 = 6364136223846793005;
+    const LEVEL_LCG_ADD: u64 = 1442695040888963407;
+    const LEVEL_CAP: usize = 12;
+
+    fn next_dataset_val(state: &mut u64) -> f32 {
+        *state ^= *state >> 12;
+        *state ^= *state << 25;
+        *state ^= *state >> 27;
+        let bits = state.wrapping_mul(0x2545_F491_4F6C_DD1D);
+        // Top 24 bits, mapped to [-1, 1)
+        (bits >> 40) as f32 / (1u64 << 24) as f32 * 2.0 - 1.0
+    }
+
+    /// `n` unit-norm random vectors, deterministic across runs.
+    fn unit_vectors(n: usize, dim: usize) -> Array2<f32> {
+        let mut state = DATASET_SEED;
+        let mut m = Array2::from_shape_fn((n, dim), |_| next_dataset_val(&mut state));
+        for mut row in m.rows_mut() {
+            let norm = row.dot(&row).sqrt().max(1e-12);
+            row.mapv_inplace(|v| v / norm);
+        }
+        m
+    }
+
+    /// Exact top-k feature ids by dot product, descending.
+    fn brute_force_top_k(vectors: &Array2<f32>, query: &Array1<f32>, k: usize) -> Vec<usize> {
+        let mut scored: Vec<(usize, f32)> = vectors
+            .rows()
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| (i, row.dot(&query.view())))
+            .collect();
+        scored.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        scored.into_iter().take(k).map(|(i, _)| i).collect()
+    }
+
+    #[test]
+    fn empty_index_reports_empty_and_searches_to_nothing() {
+        let vectors = Array2::<f32>::zeros((0, DIM));
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+        assert_eq!(index.len(), 0);
+        assert!(index.is_empty());
+        let query = Array1::from_vec(vec![1.0; DIM]);
+        assert!(index
+            .search(&vectors.view(), &query, TOP_K, EF_SEARCH)
+            .is_empty());
+    }
+
+    #[test]
+    fn single_element_index_returns_that_element() {
+        let vectors = unit_vectors(1, DIM);
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+        assert_eq!(index.len(), 1);
+        assert!(!index.is_empty());
+        let query = vectors.row(0).to_owned();
+        let results = index.search(&vectors.view(), &query, TOP_K, EF_SEARCH);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 0);
+        // Unit vector against itself: exact score is 1.
+        assert!((results[0].1 - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn top_k_larger_than_n_returns_all_elements() {
+        const SMALL_N: usize = 3;
+        let vectors = unit_vectors(SMALL_N, DIM);
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+        let query = vectors.row(0).to_owned();
+        let results = index.search(&vectors.view(), &query, TOP_K, EF_SEARCH);
+        assert_eq!(results.len(), SMALL_N);
+        let mut ids: Vec<usize> = results.iter().map(|r| r.0).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn search_returns_inserted_item_and_sorts_descending() {
+        let vectors = unit_vectors(SMALL_N, DIM);
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+        assert_eq!(index.len(), SMALL_N);
+
+        const PROBE_ID: usize = 17;
+        let query = vectors.row(PROBE_ID).to_owned();
+        let results = index.search(&vectors.view(), &query, TOP_K, EF_SEARCH);
+        assert!(!results.is_empty() && results.len() <= TOP_K);
+        assert!(
+            results.iter().any(|&(id, _)| id == PROBE_ID),
+            "query identical to vector {PROBE_ID} must surface it: {results:?}"
+        );
+        for pair in results.windows(2) {
+            assert!(pair[0].1 >= pair[1].1, "scores not descending: {results:?}");
+        }
+        // Scores are exact full-dim dot products, so self-match is ~1.
+        assert!((results[0].1 - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn planted_near_neighbour_is_found() {
+        // Plant a near-duplicate of vector 0 at a known slot and check
+        // both base and plant surface for a query at the base.
+        const BASE_ID: usize = 0;
+        const PLANTED_ID: usize = 40;
+        const PLANT_NOISE: f32 = 0.05;
+
+        let mut vectors = unit_vectors(SMALL_N, DIM);
+        let planted: Vec<f32> = {
+            let base = vectors.row(BASE_ID).to_owned();
+            let mut state = DATASET_SEED ^ 0xABCD;
+            let noisy: Vec<f32> = base
+                .iter()
+                .map(|v| v + PLANT_NOISE * next_dataset_val(&mut state))
+                .collect();
+            let norm = noisy.iter().map(|v| v * v).sum::<f32>().sqrt();
+            noisy.into_iter().map(|v| v / norm).collect()
+        };
+        for (j, v) in planted.iter().enumerate() {
+            vectors[[PLANTED_ID, j]] = *v;
+        }
+
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+        let query = vectors.row(BASE_ID).to_owned();
+        let results = index.search(&vectors.view(), &query, TOP_K, EF_SEARCH);
+        let ids: Vec<usize> = results.iter().map(|r| r.0).collect();
+        assert!(ids.contains(&BASE_ID), "base vector missing: {ids:?}");
+        assert!(
+            ids.contains(&PLANTED_ID),
+            "planted neighbour missing: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn recall_at_10_clears_floor_on_clustered_dataset() {
+        let vectors = clustered_vectors(RECALL_N, DIM);
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+
+        let mut hits = 0usize;
+        for q in 0..NUM_RECALL_QUERIES {
+            let query = vectors.row(q).to_owned();
+            let expected = brute_force_top_k(&vectors, &query, TOP_K);
+            let got: Vec<usize> = index
+                .search(&vectors.view(), &query, TOP_K, EF_SEARCH)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
+            hits += expected.iter().filter(|id| got.contains(id)).count();
+        }
+        let recall = hits as f64 / (NUM_RECALL_QUERIES * TOP_K) as f64;
+        assert!(
+            recall >= RECALL_FLOOR,
+            "recall@{TOP_K} = {recall:.3} below floor {RECALL_FLOOR}"
+        );
+    }
+
+    #[test]
+    fn duplicate_vectors_are_handled_without_panic() {
+        const NUM_DUPES: usize = 5;
+        let mut vectors = unit_vectors(50, DIM);
+        let first = vectors.row(0).to_owned();
+        for dup in 1..NUM_DUPES {
+            for j in 0..DIM {
+                vectors[[dup, j]] = first[j];
+            }
+        }
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+        let results = index.search(&vectors.view(), &first, NUM_DUPES, EF_SEARCH);
+        assert!(!results.is_empty());
+        // All returned copies of the duplicate score identically (~1).
+        for &(id, score) in &results {
+            if id < NUM_DUPES {
+                assert!((score - 1.0).abs() < 1e-5, "dup {id} scored {score}");
+            }
+        }
+    }
+
+    #[test]
+    fn ef_search_smaller_than_top_k_is_clamped() {
+        const TINY_EF: usize = 1;
+        let vectors = unit_vectors(SMALL_N, DIM);
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+        let query = vectors.row(3).to_owned();
+        let results = index.search(&vectors.view(), &query, TOP_K, TINY_EF);
+        // ef = max(ef_search, top_k), so we still get a full top-k.
+        assert_eq!(results.len(), TOP_K);
+    }
+
+    #[test]
+    fn build_is_deterministic_across_runs() {
+        let vectors = unit_vectors(NUM_VECTORS, DIM);
+        let a = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+        let b = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+        assert_eq!(a.node_levels, b.node_levels);
+        assert_eq!(a.entry_point, b.entry_point);
+        assert_eq!(a.max_level, b.max_level);
+        assert_eq!(a.level0, b.level0);
+        assert_eq!(a.upper, b.upper);
+        assert_eq!(a.projected, b.projected);
+        assert_eq!(a.proj_matrix, b.proj_matrix);
+    }
+
+    /// Pin the level-assignment LCG. The constants at build() are the
+    /// wire-format of every graph ever built with this code: replicate
+    /// the sequence independently and require identical levels, so a
+    /// "harmless" constant tweak fails here instead of silently
+    /// reshaping the graph.
+    #[test]
+    fn level_assignment_rng_matches_pinned_lcg_sequence() {
+        let vectors = unit_vectors(NUM_VECTORS, DIM);
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+
+        let ml = 1.0 / (M as f64).ln();
+        let mut rng = LEVEL_LCG_SEED;
+        let mut expected = Vec::with_capacity(NUM_VECTORS);
+        for _ in 0..NUM_VECTORS {
+            rng = rng.wrapping_mul(LEVEL_LCG_MUL).wrapping_add(LEVEL_LCG_ADD);
+            let u = (rng >> 33) as f64 / (1u64 << 31) as f64;
+            let level = ((-u.max(1e-12).ln() * ml).floor() as usize).min(LEVEL_CAP);
+            expected.push(level as u8);
+        }
+        assert_eq!(index.node_levels, expected);
+        // Entry point is (a) node with the maximal level.
+        let max = *expected.iter().max().unwrap();
+        assert_eq!(index.node_levels[index.entry_point], max);
+    }
+
+    /// Pin the connectivity regime: at SMALL_N every node is reachable
+    /// from the entry point over level-0 adjacency. This is the bound
+    /// that makes the exact-retrieval tests above sound. It does NOT
+    /// hold at NUM_VECTORS=200 on uniform data (only ~33/200 reachable
+    /// — naive eviction in add_connection orphans nodes as n grows);
+    /// if construction is ever fixed, extend this test upward.
+    #[test]
+    fn level0_graph_fully_connected_at_small_n() {
+        let vectors = unit_vectors(SMALL_N, DIM);
+        let index = HnswLayer::build(&vectors.view(), M, EF_CONSTRUCTION);
+
+        let mut seen = [false; SMALL_N];
+        let mut stack = vec![index.entry_point];
+        seen[index.entry_point] = true;
+        let mut reachable = 1;
+        while let Some(u) = stack.pop() {
+            for &nb in index.neighbors(u, 0) {
+                if nb == u32::MAX {
+                    break;
+                }
+                if !seen[nb as usize] {
+                    seen[nb as usize] = true;
+                    reachable += 1;
+                    stack.push(nb as usize);
+                }
+            }
+        }
+        assert_eq!(
+            reachable, SMALL_N,
+            "level-0 graph must be fully connected at n={SMALL_N}"
+        );
+    }
+
+    /// Clustered dataset: NUM_CLUSTERS well-separated directions, each
+    /// with members = normalize(center + noise).
+    fn clustered_vectors(n: usize, dim: usize) -> Array2<f32> {
+        const NUM_CLUSTERS: usize = 20;
+        const CLUSTER_NOISE: f32 = 0.15;
+        let centers = unit_vectors(NUM_CLUSTERS, dim);
+        let mut state = DATASET_SEED ^ 0x5A5A;
+        let mut m = Array2::zeros((n, dim));
+        for i in 0..n {
+            let c = i % NUM_CLUSTERS;
+            let mut row: Vec<f32> = centers
+                .row(c)
+                .iter()
+                .map(|v| v + CLUSTER_NOISE * next_dataset_val(&mut state))
+                .collect();
+            let norm = row.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-12);
+            row.iter_mut().for_each(|v| *v /= norm);
+            for (j, v) in row.into_iter().enumerate() {
+                m[[i, j]] = v;
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn projection_matrix_is_deterministic_and_scaled() {
+        const TEST_DIM: usize = 40;
+        let a = HnswLayer::random_projection_matrix(TEST_DIM, PROJ_DIM);
+        let b = HnswLayer::random_projection_matrix(TEST_DIM, PROJ_DIM);
+        assert_eq!(a.shape(), &[TEST_DIM, PROJ_DIM]);
+        assert_eq!(a, b);
+        // Values are bounded by the 1/sqrt(proj_dim) scale.
+        let bound = 1.0 / (PROJ_DIM as f32).sqrt() + 1e-6;
+        assert!(a.iter().all(|v| v.abs() <= bound));
+        // And are not degenerate (all zero).
+        assert!(a.iter().any(|v| v.abs() > 0.0));
     }
 }

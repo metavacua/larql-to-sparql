@@ -1,22 +1,43 @@
 //! Tokenizer-level generation policy shared by generation frontends.
 
-use std::collections::HashSet;
-
+// HashSet/ComputeBackend/EosConfig are only used inside the native-gated
+// functions below (build_special_suppress_set_with_policy,
+// pick_next_filtered_with_policy) and the #[cfg(test)] module.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::eos::EosConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use super::lm_head::{lm_head_topk_with_policy, LmHeadPolicy};
 
+// TokenSelectionPolicy/GenerationRuntimeConfig (and their const/from_env
+// machinery below) are native-only: their sole production caller is the
+// `grid` module (`layer_graph/mod.rs`'s `pub mod grid;` is
+// `#[cfg(not(target_arch = "wasm32"))]`-gated in full), and they embed
+// `LmHeadPolicy`, itself now native-only for the same reason.
+#[cfg(not(target_arch = "wasm32"))]
 const SUPPRESSED_TOKEN_CANDIDATE_TOPK: usize = 256;
+#[cfg(not(target_arch = "wasm32"))]
 const DEBUG_SUPPRESS_PROBE_IDS: &[u32] = &[5, 31, 4, 168, 184];
+#[cfg(not(target_arch = "wasm32"))]
 const ENV_DEBUG_TOKEN_IDS: &str = "LARQL_DEBUG_TOKEN_IDS";
+#[cfg(not(target_arch = "wasm32"))]
 const ENV_DEBUG_TOPK: &str = "LARQL_DEBUG_TOPK";
+#[cfg(not(target_arch = "wasm32"))]
 const ENV_METAL_COMPARE_CPU: &str = "LARQL_METAL_COMPARE_CPU";
+#[cfg(not(target_arch = "wasm32"))]
 const ENV_PROFILE_DECODE: &str = "LARQL_PROFILE_DECODE";
+#[cfg(not(target_arch = "wasm32"))]
 const ENV_PROFILE_SPLIT: &str = "LARQL_PROFILE_SPLIT";
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug)]
 pub(crate) struct TokenSelectionPolicy {
     pub debug_token_ids: bool,
@@ -25,6 +46,7 @@ pub(crate) struct TokenSelectionPolicy {
     pub lm_head: LmHeadPolicy,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for TokenSelectionPolicy {
     fn default() -> Self {
         Self {
@@ -36,17 +58,19 @@ impl Default for TokenSelectionPolicy {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TokenSelectionPolicy {
     pub(crate) fn from_env() -> Self {
         Self {
-            debug_token_ids: std::env::var(ENV_DEBUG_TOKEN_IDS).is_ok(),
-            debug_topk: std::env::var(ENV_DEBUG_TOPK).is_ok(),
+            debug_token_ids: larql_compute::options::env_flag(ENV_DEBUG_TOKEN_IDS),
+            debug_topk: larql_compute::options::env_flag(ENV_DEBUG_TOPK),
             suppress_candidate_topk: SUPPRESSED_TOKEN_CANDIDATE_TOPK,
             lm_head: LmHeadPolicy::from_env(),
         }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GenerationRuntimeConfig {
     pub compare_cpu: bool,
@@ -55,12 +79,13 @@ pub(crate) struct GenerationRuntimeConfig {
     pub lm_head: LmHeadPolicy,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GenerationRuntimeConfig {
     pub(crate) fn from_env() -> Self {
         Self {
-            compare_cpu: std::env::var(ENV_METAL_COMPARE_CPU).is_ok(),
-            profile_decode: std::env::var(ENV_PROFILE_DECODE).is_ok(),
-            profile_split: std::env::var(ENV_PROFILE_SPLIT).is_ok(),
+            compare_cpu: larql_compute::options::env_flag(ENV_METAL_COMPARE_CPU),
+            profile_decode: larql_compute::options::env_flag(ENV_PROFILE_DECODE),
+            profile_split: larql_compute::options::env_flag(ENV_PROFILE_SPLIT),
             lm_head: LmHeadPolicy::from_env(),
         }
     }
@@ -71,6 +96,7 @@ impl GenerationRuntimeConfig {
 /// Built from the tokenizer's `added_tokens` table (everything marked
 /// `special: true`) minus any IDs in the EOS set. Vocab-resident structural
 /// markers like `<unusedN>` and `[multimodal]` are also suppressed.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn build_special_suppress_set_with_policy(
     tokenizer: &tokenizers::Tokenizer,
     eos: &EosConfig,
@@ -125,6 +151,9 @@ pub(crate) fn build_special_suppress_set_with_policy(
     out
 }
 
+/// Native-only: its sole caller, `build_special_suppress_set_with_policy`
+/// above, is native-gated.
+#[cfg(not(target_arch = "wasm32"))]
 fn is_structural_marker(tok: &str) -> bool {
     if tok.is_empty() {
         return false;
@@ -145,6 +174,7 @@ fn is_structural_marker(tok: &str) -> bool {
 }
 
 /// Pick the top-1 vocabulary id from logits, skipping any id in `suppress`.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn pick_next_filtered_with_policy(
     index: &VectorIndex,
     weights: &ModelWeights,

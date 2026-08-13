@@ -37,6 +37,11 @@ pub enum QkvFormatRoute {
     /// Q4_K Q + Q4_K K + Q6_K V (Gemma 3 / Gemma 4 with Ollama-convention
     /// extracts) → `q4k_q6k_qkv_proj` shader.
     MixedQ4kQ6kV,
+    /// All three projections are Q8_0 → `q8_qkv_proj` shader against
+    /// pre-quantised Q8 input plus external weight scales. Previously a
+    /// hand-written triple-equality bypass at two call sites; a bucket
+    /// here so the route table owns it (capability audit, slice 1).
+    FusedQ8,
     /// Anything else: per-projection dispatch through `quant_matvec`.
     /// Slower but covers Q4_KF + Q6_K V, mixed legacy Q4_0, etc.
     PerProjection,
@@ -51,19 +56,82 @@ impl QkvFormatRoute {
     }
 }
 
+/// What the QKV kernels consume as their input vector for a given
+/// weight format: raw f32 activations, or the pre-quantised Q8
+/// (int8 + per-32-block scales) pair produced by `rms_norm_q8`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum QkvInputEncoding {
+    F32,
+    Q8,
+}
+
+/// The input encoding a single projection format requires, or `None`
+/// for formats no Metal QKV kernel serves (floats, BitNet ternary).
+fn input_encoding_of(f: QuantFormat) -> Option<QkvInputEncoding> {
+    match f {
+        QuantFormat::Q4_K | QuantFormat::Q4_KF | QuantFormat::Q6_K => Some(QkvInputEncoding::F32),
+        QuantFormat::Q4_0 | QuantFormat::Q8_0 => Some(QkvInputEncoding::Q8),
+        QuantFormat::BF16 | QuantFormat::F16 | QuantFormat::F32 | QuantFormat::I2S => None,
+    }
+}
+
+/// A validated QKV execution plan: which kernel arrangement runs the
+/// three projections, and which input encoding the norm stage must
+/// produce for them.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct QkvPlan {
+    pub route: QkvFormatRoute,
+    pub input: QkvInputEncoding,
+}
+
 /// Pick the fused-QKV route for a `(q, k, v)` format triple.
 ///
-/// This is the single source of truth for which Metal QKV pipeline
-/// handles which weight-format combination. Adding a new combo (e.g.
-/// Q4_KF Q/K + Q6_K V, or a future FP4 family) is a one-line addition
-/// here — encode_qkv.rs and decode_hybrid.rs read the route through
-/// this helper and route dispatch via `match` on the result.
+/// Prefer [`plan_qkv`], which also derives (and validates) the input
+/// encoding; this remains for callers that only need the route.
 pub fn pick_qkv_route(q: QuantFormat, k: QuantFormat, v: QuantFormat) -> QkvFormatRoute {
     match (q, k, v) {
         (QuantFormat::Q4_K, QuantFormat::Q4_K, QuantFormat::Q4_K) => QkvFormatRoute::UniformQ4K,
         (QuantFormat::Q4_KF, QuantFormat::Q4_KF, QuantFormat::Q4_KF) => QkvFormatRoute::UniformQ4Kf,
         (QuantFormat::Q4_K, QuantFormat::Q4_K, QuantFormat::Q6_K) => QkvFormatRoute::MixedQ4kQ6kV,
+        (QuantFormat::Q8_0, QuantFormat::Q8_0, QuantFormat::Q8_0) => QkvFormatRoute::FusedQ8,
         _ => QkvFormatRoute::PerProjection,
+    }
+}
+
+/// The single source of truth for how a `(q, k, v)` format triple
+/// executes: kernel route plus the input encoding the norm stage must
+/// produce. Every QKV dispatcher — decode, prefill, hybrid — consults
+/// this instead of testing one operand's format (the single-operand
+/// tests were audit findings F2 and the prefill `uses_f32_input` gate,
+/// both of which mis-served the other two operands).
+///
+/// # Panics
+/// - if any projection's format has no Metal QKV kernel (floats, I2S);
+/// - if the three formats disagree on input encoding — no kernel
+///   arrangement can serve one dispatch with two input encodings, and
+///   the previous behaviour was to prep one encoding and hand the
+///   other-formats' kernels an unpopulated buffer.
+pub fn plan_qkv(q: QuantFormat, k: QuantFormat, v: QuantFormat) -> QkvPlan {
+    let (eq, ek, ev) = match (
+        input_encoding_of(q),
+        input_encoding_of(k),
+        input_encoding_of(v),
+    ) {
+        (Some(a), Some(b), Some(c)) => (a, b, c),
+        _ => panic!(
+            "no Metal QKV kernel serves (wq={q:?}, wk={k:?}, wv={v:?}); \
+             supported formats: Q4_K, Q4_KF, Q6_K, Q4_0, Q8_0"
+        ),
+    };
+    assert!(
+        eq == ek && ek == ev,
+        "QKV formats (wq={q:?}, wk={k:?}, wv={v:?}) disagree on input \
+         encoding ({eq:?}/{ek:?}/{ev:?}); one dispatch cannot serve two \
+         input encodings"
+    );
+    QkvPlan {
+        route: pick_qkv_route(q, k, v),
+        input: eq,
     }
 }
 
@@ -95,6 +163,10 @@ pub enum FusedQkvKernel {
     Q4k,
     /// `shaders::q4kf_qkv_proj::Kernel` — Q4_KF llama.cpp-port (4 rows/TG, 64 threads).
     Q4kf,
+    /// `shaders::q4k_q6k_qkv_proj::Kernel` — mixed Q4_K Q/K + Q6_K V
+    /// (4 rows/TG, 128 threads). Same 0-10 binding table as the
+    /// uniform kernels.
+    Q4kQ6kV,
 }
 
 impl FusedQkvKernel {
@@ -102,12 +174,14 @@ impl FusedQkvKernel {
         match self {
             Self::Q4k => crate::shaders::q4k_qkv_proj::ROWS_PER_TG,
             Self::Q4kf => crate::shaders::q4kf_qkv_proj::ROWS_PER_TG,
+            Self::Q4kQ6kV => crate::shaders::q4k_q6k_qkv_proj::ROWS_PER_TG,
         }
     }
     fn threads_per_tg(self) -> u64 {
         match self {
             Self::Q4k => crate::shaders::q4k_qkv_proj::THREADS_PER_TG,
             Self::Q4kf => crate::shaders::q4kf_qkv_proj::THREADS_PER_TG,
+            Self::Q4kQ6kV => crate::shaders::q4k_q6k_qkv_proj::THREADS_PER_TG,
         }
     }
 }
@@ -138,6 +212,13 @@ pub fn encode_fused_f32(
     kv_rows: usize,
     hidden: usize,
 ) {
+    // Every fused f32-input QKV kernel derives its superblock count as
+    // `K / 256` (truncating); a misaligned K silently drops the tail
+    // and desynchronises the row stride (audit F17).
+    assert!(
+        hidden.is_multiple_of(256),
+        "fused QKV kernels require hidden % 256 == 0; got {hidden}"
+    );
     let total_rows = (q_rows + kv_rows + kv_rows) as u32;
     let q_rows_val = q_rows as u32;
     let k_rows_val = kv_rows as u32;
@@ -217,6 +298,12 @@ pub fn encode_fused_q8(
     kv_rows: usize,
     hidden: usize,
 ) {
+    assert!(
+        hidden <= crate::shaders::q8_attn_proj::MAX_K,
+        "q8_qkv_proj stages its input in threadgroup memory capped at K = {}; \
+         hidden {hidden} would corrupt threadgroup memory (audit F13)",
+        crate::shaders::q8_attn_proj::MAX_K,
+    );
     let q_rows_val = q_rows as u32;
     let k_rows_val = kv_rows as u32;
     let v_rows_val = kv_rows as u32;
@@ -238,13 +325,87 @@ pub fn encode_fused_q8(
     enc.set_bytes(12, 4, &k_rows_val as *const u32 as *const c_void);
     enc.set_bytes(13, 4, &v_rows_val as *const u32 as *const c_void);
     enc.set_bytes(14, 4, &k_val as *const u32 as *const c_void);
-    enc.dispatch_thread_groups(MTLSize::new(total_rows, 1, 1), MTLSize::new(256, 1, 1));
+    // One threadgroup covers ROWS_PER_TG rows (one per simdgroup); the
+    // previous `total_rows` grid over-dispatched 8x, with every excess
+    // TG re-staging the Q8 input into threadgroup memory before its
+    // simdgroups discovered they were all out of range (capability
+    // audit F19). Geometry from the shader module the pipeline was
+    // built from, not a literal.
+    use crate::shaders::q8_attn_proj as q8;
+    enc.dispatch_thread_groups(
+        MTLSize::new(total_rows.div_ceil(q8::ROWS_PER_TG), 1, 1),
+        MTLSize::new(q8::THREADS_PER_TG, 1, 1),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use larql_compute::QuantFormat;
+
+    /// The plan carries route + input encoding as one validated fact.
+    #[test]
+    fn plan_qkv_derives_route_and_input_encoding() {
+        use QuantFormat::*;
+        let cases = [
+            (
+                (Q4_K, Q4_K, Q4_K),
+                QkvFormatRoute::UniformQ4K,
+                QkvInputEncoding::F32,
+            ),
+            (
+                (Q4_KF, Q4_KF, Q4_KF),
+                QkvFormatRoute::UniformQ4Kf,
+                QkvInputEncoding::F32,
+            ),
+            (
+                (Q4_K, Q4_K, Q6_K),
+                QkvFormatRoute::MixedQ4kQ6kV,
+                QkvInputEncoding::F32,
+            ),
+            // Q8_0 was a hand-written triple check at two call sites;
+            // now a route bucket owned by the table.
+            (
+                (Q8_0, Q8_0, Q8_0),
+                QkvFormatRoute::FusedQ8,
+                QkvInputEncoding::Q8,
+            ),
+            // Per-projection with a coherent encoding on each side.
+            (
+                (Q6_K, Q6_K, Q6_K),
+                QkvFormatRoute::PerProjection,
+                QkvInputEncoding::F32,
+            ),
+            (
+                (Q4_0, Q4_0, Q4_0),
+                QkvFormatRoute::PerProjection,
+                QkvInputEncoding::Q8,
+            ),
+        ];
+        for ((q, k, v), route, input) in cases {
+            let plan = plan_qkv(q, k, v);
+            assert_eq!(plan.route, route, "{q:?}/{k:?}/{v:?}");
+            assert_eq!(plan.input, input, "{q:?}/{k:?}/{v:?}");
+        }
+    }
+
+    /// One dispatch cannot serve two input encodings: a triple mixing
+    /// an f32-input format with a Q8-input format previously had one
+    /// encoding prepped and handed the other formats' kernels an
+    /// unpopulated buffer. Now refused at planning time.
+    #[test]
+    #[should_panic(expected = "disagree on input encoding")]
+    fn plan_qkv_refuses_mixed_input_encodings() {
+        let _ = plan_qkv(QuantFormat::Q4_K, QuantFormat::Q4_K, QuantFormat::Q4_0);
+    }
+
+    /// Float attention weights have no Metal QKV kernel; the silent
+    /// alternative was quant kernels reading float bytes.
+    #[test]
+    #[should_panic(expected = "no Metal QKV kernel")]
+    fn plan_qkv_refuses_float_formats() {
+        let _ = plan_qkv(QuantFormat::F32, QuantFormat::F32, QuantFormat::F32);
+    }
 
     /// The four production triples must each map to a distinct fused
     /// route. Anything else falls through to per-projection.
@@ -339,16 +500,27 @@ mod tests {
         let q_rows = 16usize;
         let kv_rows = 8usize;
 
+        // The kernel indexes weight scales as `[rows * blocks]` (see
+        // `Wqs` in shaders/q8_attn_proj.rs), not `[rows]`. Allocating
+        // one scale per row left `row_scales[b]` reading past the end of
+        // the buffer for every row but the first — usually landing on
+        // zeroed memory, but occasionally on another test's leftovers,
+        // which is why this test failed non-finite roughly one run in
+        // three under a full suite and passed in isolation.
+        // `blocks = K / 32` in the kernel is the legacy (Q8_0) block size.
+        // Ask for it rather than spelling 32 here — re-spelling a layout
+        // constant locally is what produced the under-allocation below.
+        let blocks = hidden / larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
         let zero_q8 = vec![0i8; (q_rows + kv_rows + kv_rows) * hidden];
-        let zero_f32 = vec![0.0f32; q_rows + kv_rows + kv_rows];
+        let zero_f32 = vec![0.0f32; (q_rows + kv_rows + kv_rows) * blocks];
         let wq_buf = m.bufs.transient_from_i8(&zero_q8[..q_rows * hidden]);
         let wk_buf = m.bufs.transient_from_i8(&zero_q8[..kv_rows * hidden]);
         let wv_buf = m.bufs.transient_from_i8(&zero_q8[..kv_rows * hidden]);
-        let wq_scale = m.bufs.transient_from_f32(&zero_f32[..q_rows]);
-        let wk_scale = m.bufs.transient_from_f32(&zero_f32[..kv_rows]);
-        let wv_scale = m.bufs.transient_from_f32(&zero_f32[..kv_rows]);
+        let wq_scale = m.bufs.transient_from_f32(&zero_f32[..q_rows * blocks]);
+        let wk_scale = m.bufs.transient_from_f32(&zero_f32[..kv_rows * blocks]);
+        let wv_scale = m.bufs.transient_from_f32(&zero_f32[..kv_rows * blocks]);
         let q8_in = m.bufs.transient_from_i8(&vec![0i8; hidden]);
-        let q8s_in = m.bufs.transient_from_f32(&vec![0.0f32; hidden / 32]);
+        let q8s_in = m.bufs.transient_from_f32(&vec![0.0f32; blocks]);
         let q_out = m.bufs.output((q_rows * 4) as u64);
         let k_out = m.bufs.output((kv_rows * 4) as u64);
         let v_out = m.bufs.output((kv_rows * 4) as u64);

@@ -23,6 +23,9 @@ use ndarray::Array1;
 
 use crate::index::core::VectorIndex;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 mod dispatch;
 mod hnsw_lifecycle;
 mod scores_batch;

@@ -46,9 +46,14 @@ on:
       - 'Cargo.lock'
   workflow_dispatch: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 30
 
     env:
@@ -60,10 +65,10 @@ jobs:
       LARQL_VERIFY_THRESHOLD: '0.5'
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache cargo deps
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -74,7 +79,7 @@ jobs:
             ${{ runner.os }}-cargo-shannon-
 
       - name: Cache HF model snapshot
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface/hub
           key: ${{ runner.os }}-hf-smollm2-135m
@@ -88,7 +93,7 @@ jobs:
         run: cargo build --release -p larql-cli
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 

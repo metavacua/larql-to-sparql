@@ -17,6 +17,8 @@
 //! Phase 1c scope: weights + loader. Forward pass lives in
 //! `larql-compute::connectors::gemma3`.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
 

@@ -226,6 +226,15 @@ where
         return generate_via_cpu_q4k(weights, tokenizer, token_ids, max_tokens, index, eos);
     }
 
+    // Register each packed weight mmap for zero-copy GPU aliasing — the
+    // MoE decode binds per-expert byte offsets into these regions instead
+    // of memcpy-staging ~top_k × 22 MB per layer per token. Repeat
+    // registration is a cheap no-op (deduped by base address); the CPU
+    // backend's default impl does nothing.
+    for mmap in weights.packed_mmaps.values() {
+        backend.register_weight_region(&mmap[..]);
+    }
+
     let arch = &*weights.arch;
     let norm_offset = arch.norm_weight_offset();
     let setup = match build_gpu_decode_setup(weights, index, backend, layer_range, false) {
@@ -399,6 +408,9 @@ where
         stage_timings: StageTimings {
             embed_ms_total: outcome.t_embed,
             gpu_ms_total: outcome.t_gpu,
+            gpu_only_ms_total: outcome.t_gpu_only,
+            attn_ms_total: outcome.t_attn,
+            cmd_buffers_total: outcome.n_cmd_buffers,
             cpu_fwd_ms_total: 0.0,
             gate_up_ms_total: outcome.t_gate_up,
             down_ms_total: outcome.t_down,

@@ -13,14 +13,29 @@
 //! residuals, which is small but non-zero.
 
 pub mod codec;
-pub mod compute;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod dispatch;
+// `impl KvEngine for MarkovResidualCodecEngine` (upstream-gated); also
+// direct `larql_vindex::VectorIndex` params elsewhere in the file.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod engine;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod executor;
 pub(crate) mod helpers;
+// Internally per-item split, like the markov_residual twin: `pub mod
+// prefill;` stays ungated (RsPrefillResultCodec/roundtrip portable,
+// rs_prefill_codec native).
+pub mod prefill;
+// rs_decode_step_codec takes `index: Option<&VectorIndex>` directly.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod step;
+#[cfg(not(target_arch = "wasm32"))]
+mod step_attention;
 pub mod store;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod walk;
 
 pub use codec::ColdResidualCodec;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engine::MarkovResidualCodecEngine;
 pub use store::{EncodedColdLayer, RsStoreCodec};

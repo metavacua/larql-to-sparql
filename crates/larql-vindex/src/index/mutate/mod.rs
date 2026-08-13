@@ -4,7 +4,12 @@
 //! modified vindex back to disk. NDJSON heap loaders live in the
 //! sibling `loaders` module.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub mod loaders;
+#[cfg(test)]
+mod tests;
 
 use std::io::{BufWriter, Write};
 use std::path::Path;

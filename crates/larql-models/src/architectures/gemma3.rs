@@ -12,6 +12,9 @@
 
 use crate::config::{Activation, ModelArchitecture, ModelConfig};
 use crate::multimodal::{MultiModalProtocol, PlaceholderProtocol, PrecomputedScaling, TokenBudget};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+use crate::tensor_keys::qk_norm;
 
 /// Gemma 3 sliding window pattern: every 6th layer (0-indexed: 5, 11, 17, ...)
 /// uses full attention, the rest use sliding window.
@@ -94,17 +97,11 @@ impl ModelArchitecture for Gemma3Arch {
     // ── Gemma 3 has QK norm ──
 
     fn attn_q_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.q_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.k_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::k(&self.layer_prefix(layer))
     }
 
     // ── Gemma-specific behavior ──
@@ -164,7 +161,10 @@ impl ModelArchitecture for Gemma3Arch {
             Some(rs) => rs,
             None => return 1.0,
         };
-        if !rs.scaling_type.eq_ignore_ascii_case("linear") {
+        if !rs
+            .scaling_type
+            .eq_ignore_ascii_case(crate::ROPE_TYPE_LINEAR)
+        {
             return 1.0;
         }
         if self.is_sliding_window_layer(layer) {
@@ -211,6 +211,8 @@ mod tests {
             enable_moe_block: false,
             top_k_experts: None,
             moe_intermediate_size: None,
+            swiglu_limit: None,
+            norm_topk_prob: None,
             kv_lora_rank: None,
             q_lora_rank: None,
             qk_nope_head_dim: None,
@@ -233,6 +235,7 @@ mod tests {
             per_layer_embed_dim: None,
             num_kv_shared_layers: None,
             has_vision_config: false,
+            tie_word_embeddings: None,
         }
     }
 
@@ -260,6 +263,11 @@ mod tests {
             llama3_low_freq_factor: None,
             llama3_high_freq_factor: None,
             llama3_original_max_position_embeddings: None,
+            yarn_beta_fast: None,
+            yarn_beta_slow: None,
+            yarn_truncate: None,
+            yarn_mscale: None,
+            yarn_mscale_all_dim: None,
             gemma3_global_only: false,
         })));
         assert_eq!(arch.rope_position_divisor_for_layer(0), 1.0);
@@ -274,6 +282,11 @@ mod tests {
             llama3_low_freq_factor: None,
             llama3_high_freq_factor: None,
             llama3_original_max_position_embeddings: None,
+            yarn_beta_fast: None,
+            yarn_beta_slow: None,
+            yarn_truncate: None,
+            yarn_mscale: None,
+            yarn_mscale_all_dim: None,
             gemma3_global_only: true,
         })));
         // Layers 5, 11, 17, ... are full attention; everyone else sliding.

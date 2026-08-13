@@ -53,10 +53,21 @@
 //! replace [`capture::run_with_dump_dir`] without touching the public
 //! surface.
 
+// capture.rs/stages.rs builders take `&VectorIndex` and use
+// `std::env::set_var` for dir override -- native-only.
+#[cfg(not(target_arch = "wasm32"))]
 mod capture;
 mod compare;
+#[cfg(not(target_arch = "wasm32"))]
 mod stages;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use capture::ResidualCapture;
-pub use compare::{compare_captures, LayerStat, ParityReport, ParityThreshold};
+// `compare_captures` takes `&ResidualCapture` (native-only, see `capture`
+// above), so it can't be re-exported unconditionally; the rest of
+// `compare` is pure `&[f32]` arithmetic and stays portable.
+#[cfg(not(target_arch = "wasm32"))]
+pub use compare::compare_captures;
+pub use compare::{LayerStat, ParityReport, ParityThreshold};
+#[cfg(not(target_arch = "wasm32"))]
 pub use stages::{compare_stages, StageCapture, StagePair, StageReport};

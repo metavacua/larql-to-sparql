@@ -18,6 +18,9 @@
 //!   pure DLA; for the full lens (with norm/softcap/scale) use
 //!   [`super::lens::logit_lens_topk`].
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 use larql_models::ModelWeights;
 use ndarray::{ArrayView1, ArrayView2};
 
@@ -141,8 +144,10 @@ fn cosine_topk_against_matrix(
     scored.into_iter().map(|(i, s)| (i as u32, s)).collect()
 }
 
-fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
+// core::cmp::Ordering is the same type std re-exports -- portable
+// regardless of target, no cfg needed.
+fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> core::cmp::Ordering {
+    use core::cmp::Ordering;
     match (a.1.is_nan(), b.1.is_nan()) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,

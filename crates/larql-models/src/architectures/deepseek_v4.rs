@@ -20,6 +20,8 @@
 //! + down_meta. Inference (HCA forward pass) is out of scope for this impl.
 
 use crate::config::{ModelArchitecture, ModelConfig};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 pub struct DeepSeekV4Arch {
     config: ModelConfig,

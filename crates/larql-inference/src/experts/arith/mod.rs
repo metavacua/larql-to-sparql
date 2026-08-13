@@ -12,22 +12,29 @@
 //! only as a verification prior.
 
 pub mod alu;
+// force_decode_kquant/_streaming/_backend all take &Tokenizer/&VectorIndex
+// in every fn -- native-only.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod drive;
 pub mod extract;
 pub mod gate;
 pub mod verify;
 
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
 use serde::Serialize;
-use tokenizers::Tokenizer;
+#[cfg(not(target_arch = "wasm32"))]
+use {
+    crate::vindex::generate_kquant_cpu_cached, larql_models::ModelWeights,
+    larql_vindex::VectorIndex, tokenizers::Tokenizer,
+};
 
-use crate::vindex::generate_kquant_cpu_cached;
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 use super::virtual_expert::{
     DriveSchedule, ExtractMiss, Fire, ResidualTap, Verdict, VirtualExpert,
 };
 use alu::{BigInt, Expr};
+#[cfg(not(target_arch = "wasm32"))]
 use drive::TerminationCause;
 
 /// Compute result plus the operand width that scopes the verify prior.
@@ -177,6 +184,7 @@ pub struct AveOutcome {
 /// production a free read off the prompt pass; `None` runs tier-0 only).
 /// The verify leg runs only when a native answer happens to exist — the
 /// dispatch path never spends tokens producing one (`Verdict::Skipped`).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn ave_generate_kquant(
     expert: &ArithmeticExpert,
     weights: &mut ModelWeights,
@@ -284,6 +292,7 @@ pub fn ave_generate_kquant(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_native(
     weights: &mut ModelWeights,
     tokenizer: &Tokenizer,
@@ -302,6 +311,7 @@ fn run_native(
     (out.into_iter().map(|(t, _)| t).collect(), n)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn outcome_native(
     path: AvePath,
     fire: Fire,

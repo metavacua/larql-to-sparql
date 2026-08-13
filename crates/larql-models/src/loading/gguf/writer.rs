@@ -21,6 +21,8 @@
 //! Note: tensor data is held in RAM (`GgufTensor::data`); a streaming /
 //! lazy-source variant is a future optimization for >RAM exports.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::io::{self, Write};
 use std::path::Path;
 

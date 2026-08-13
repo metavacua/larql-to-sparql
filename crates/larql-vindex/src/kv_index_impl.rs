@@ -14,11 +14,17 @@ use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER as VINDEX_FFN_COM
 use crate::index::types::QuantizedFfnAccess;
 use crate::VectorIndex;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 const _: () = {
-    // Pin that the trait's component-count constant matches the wire
-    // format's. Mismatch would silently slice fewer/more components and
-    // corrupt FFN dispatch — fail at compile time instead.
+    // Pin that the trait's component constants match the wire format's.
+    // Mismatch would silently slice fewer/more components (or the wrong
+    // one) and corrupt FFN dispatch — fail at compile time instead.
     assert!(COMPUTE_FFN_COMPONENTS_PER_LAYER == VINDEX_FFN_COMPONENTS_PER_LAYER);
+    assert!(larql_compute::FFN_GATE == crate::index::storage::ffn_store::FFN_GATE);
+    assert!(larql_compute::FFN_UP == crate::index::storage::ffn_store::FFN_UP);
+    assert!(larql_compute::FFN_DOWN == crate::index::storage::ffn_store::FFN_DOWN);
 };
 
 impl KvIndex for VectorIndex {

@@ -272,7 +272,7 @@ fn resolve_attn_weights_returns_some_with_q4k_loaded() {
     eprintln!(
         "resolve_attn_weights layer 0: wq={} bytes, format={:?}",
         wq.data.len(),
-        wq.format
+        wq.format()
     );
 }
 

@@ -114,14 +114,10 @@ impl<'a> CapturingFfn<'a> {
 
 impl<'a> FfnBackend for CapturingFfn<'a> {
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
-        self.forward_with_activation(layer, x).0
-    }
-
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         if layer < self.num_layers {
             self.captured.borrow_mut()[layer] = x.clone();
         }
-        self.inner.forward_with_activation(layer, x)
+        self.inner.forward(layer, x)
     }
 
     fn name(&self) -> &str {

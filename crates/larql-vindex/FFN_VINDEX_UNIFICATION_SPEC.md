@@ -1,11 +1,66 @@
 # FFN-Vindex Unification Spec
 
-**Version:** 0.1 (2026-04-15)
-**Status (2026-04-25):** Not yet implemented. `patch/knn_store.rs` and the
-KNN override branch in `exec_infer` still exist; this spec describes the
-target state, not current code. Tracked in [ROADMAP.md](ROADMAP.md) under P2.
+**Version:** 0.2 (2026-07-31)
+**Status (2026-07-31): retrieval-kernel unification DONE; full arch-B
+retirement GATED (see §0).** The parallel *scoring implementation* is gone:
+`KnnStore` no longer owns `key_matrices`/`dirty` GEMM machinery — its keys
+live as rows in the shared `patch/gate_overlay.rs::GateOverlay`, the same
+structure that stores `PatchedVindex`'s gate overrides, so `gate_knn` and
+every KNN query score through one kernel. The parallel *data structure*
+(`KnnStore` as a separate keyspace with its own `.vlp` ops and post-logits
+override semantics) still exists, deliberately — §0 explains why §§3–9
+(the 2026-04 target state) must not be executed as written today.
 **Scope:** `larql-vindex`, `larql-lql`, `larql-inference`, `larql-python`
 **Goal:** Collapse arch-B's parallel `KnnStore` into the FFN vindex itself. One data structure, one INSERT path, one INFER path.
+
+---
+
+## 0. Status 2026-07-31 — what is unified, what is gated
+
+Done (review 2026-07-30 item 21, shipped 2026-07-31):
+
+- **One retrieval kernel.** `patch/gate_overlay.rs::GateOverlay` holds
+  `(layer, slot) → row` vectors with a lazily-built per-layer contiguous
+  snapshot. `PatchedVindex.overrides_gate` *is* a `GateOverlay`;
+  `KnnStore.keys` *is* a `GateOverlay` (rows index-aligned with its
+  entries). Both `gate_knn`'s override merge and `KnnStore::query_knn`
+  call `GateOverlay::score_layer` — the 2026-07-30 hardening (H3
+  zero-width-row guard, mixed-width slow-path fallback, per-layer cache
+  invalidation, now automatic on every mutator) covers both by
+  construction. `KnnStore`'s own `rebuild_layer`/`Mutex<key_matrices>`/
+  `dirty` machinery is deleted.
+- **Ranking stays per-consumer, deliberately.** `gate_knn` ranks by
+  `|score|` merged with oversampled base hits; the KNN override ranks by
+  raw cosine (an anti-aligned key must not fire an override). The shared
+  piece is storage + dot-product, not the statistic.
+- **No consumer churn.** `KnnStore`'s API, the `.vlp`
+  `InsertKnn`/`DeleteKnn` ops, and the `knn_store.bin` (`.lknn`) format
+  are unchanged; larql-inference / larql-lql / larql-server /
+  larql-python / the engine compile untouched.
+
+NOT done, and **gated** rather than pending:
+
+1. **The FR programme now ships on the post-logits override.** §§3, 5
+   of this spec (delete the `exec_infer` KNN branch, "the override
+   becomes install-time down-scaling") predate the FR1/FR2 routers
+   (`INFER ROUTE VERIFY [FALLBACK]`, two-tier routing, the FR
+   early-exit lever — `infer_patched.rs` `KnnRouteMode`, 2026-06/07).
+   Those are validated product features whose semantics are exactly the
+   explicit post-logits cosine override this spec proposed deleting.
+   Retiring arch-B is therefore no longer a refactor; it is a semantics
+   decision that must re-justify the FR results on the unified path.
+2. **α calibration (Q2) is unvalidated empirical work.** The
+   equivalence argument in §6 requires choosing α so the residual-stream
+   injection reproduces the `cos > 0.75` override margin; nobody has
+   measured it.
+3. **The 189-fact arch-B parity benchmark (§7) has not been run** on
+   any unified path.
+
+Also note reality drift in §2: the struct sketch predates the storage
+decomposition (`VindexStorage`), the tombstone/`deleted` resurrection
+contract (review M6), the base-KNN oversampling escalation (M11), and
+`overrides_gate` becoming a `GateOverlay`. §§3–9 remain the target-state
+design and are kept for when the gate above is lifted.
 
 ---
 
@@ -30,6 +85,8 @@ Unifying to a single "FFN = KNN index = vindex" abstraction:
 - Gives composition and chaining for free — inserted facts participate in the residual stream naturally, can be used by downstream layers.
 
 ## 2. Current State
+
+*(2026-04 snapshot — see §0 for what has drifted since.)*
 
 ### Storage (what exists now in `PatchedVindex`)
 
@@ -57,6 +114,9 @@ pub struct PatchedVindex {
 - **arch-B override check** (`larql_lql::executor::query::infer`): explicit cosine match against `patched.knn_store.query_top1(layer, residual)` at `cos > 0.75`, result presented as KNN override in INFER output. Runs in parallel with the dense FFN pass.
 
 ## 3. Target State
+
+*(§§3–9 are the gated full-retirement design — do not execute without
+resolving §0's three gates.)*
 
 ### Storage (unified)
 
@@ -274,8 +334,13 @@ Estimated total: **1.5 days of focused work**.
 
 ## References
 
-- `patch/core.rs` — PatchedVindex, PatchOp, VindexPatch (will be modified)
-- `patch/knn_store.rs` — KnnStore (will be deleted)
+- `patch/overlay.rs` / `patch/overlay_apply.rs` / `patch/format.rs` —
+  PatchedVindex, PatchOp, VindexPatch (will be modified; the spec's
+  `patch/core.rs` was decomposed into these)
+- `patch/gate_overlay.rs` — the shared retrieval kernel (2026-07-31);
+  the full unification would make its rows the ONLY key storage
+- `patch/knn_store.rs` — KnnStore (metadata + ranking policy over
+  `GateOverlay` rows since 2026-07-31; would be deleted)
 - `larql-lql/src/executor/mutation.rs` `exec_insert` (will be rewritten)
 - `larql-lql/src/executor/query.rs` `exec_infer` (KNN override branch deleted)
 - `~/chris-source/chris-experiments/compilation/15_v11_model/TWO_LEVEL_ARCHITECTURE_SPEC.md` — the architectural context that motivates this unification

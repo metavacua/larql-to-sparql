@@ -3,6 +3,9 @@ use serde_json::Value;
 
 use super::context::{fields, PositionContext};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Predicate {

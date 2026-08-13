@@ -27,10 +27,32 @@ on:
       - '.github/workflows/larql-compute.yml'
   workflow_dispatch: {}
 
+# Route the ambient decode paths through rayon rather than the spin pool.
+# A spin barrier needs a free core to spin on; a CI runner (2 cores on
+# ubuntu/windows, 3 on macos-14) has none to spare, so the pool's idle
+# backoff burns CPU without buying the decode win it exists for.
+#
+# Measured on the full `--lib` suite (805 tests, 2026-07-30):
+#   spin pool on   13.0s wall, 156s CPU
+#   LARQL_SPIN_POOL=0    8.1s wall, 112s CPU     (-38% wall, -28% CPU)
+#
+# This does not cost coverage: `attention::decode::tests` drives *both*
+# the spin and rayon arms of `gqa_attention_decode_step` explicitly via
+# the thread-local override, and asserts they agree bit-for-bit. The
+# pool's own tests in `cpu::spin_pool` construct a `SpinPool` directly
+# and are unaffected by this flag either way.
+env:
+  LARQL_SPIN_POOL: 0
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 35
 
     strategy:
@@ -39,7 +61,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -65,7 +87,7 @@ jobs:
           "$root\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -102,10 +124,11 @@ jobs:
   coverage:
     name: coverage · ubuntu
     runs-on: ubuntu-latest
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 25
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable

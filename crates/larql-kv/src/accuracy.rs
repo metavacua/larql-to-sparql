@@ -5,6 +5,11 @@
 
 use ndarray::Array2;
 
+// f64::sqrt/powi/ln (below) need `num_traits::Float` in scope under
+// wasm32v1-none (no libm link through core alone).
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Cosine similarity between two equal-length vectors. Returns 0.0 for zero vectors.
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     debug_assert_eq!(a.len(), b.len());

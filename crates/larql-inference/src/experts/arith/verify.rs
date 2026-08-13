@@ -12,6 +12,9 @@ use crate::experts::virtual_expert::Verdict;
 
 use super::alu::BigInt;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Operand width (decimal digits) past which the prior is void.
 pub const PRIOR_VOID_OPERAND_DIGITS: usize = 24;
 

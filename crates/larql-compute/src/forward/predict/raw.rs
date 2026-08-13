@@ -1,6 +1,8 @@
 //! Raw-logits forward passes used by target-delta optimisation and Apollo.
 
-use std::ops::Range;
+// core::ops::Range is the same type std::ops::Range re-exports --
+// portable regardless of target, no cfg needed.
+use core::ops::Range;
 
 use super::super::embed::embed_tokens_pub;
 use super::super::layer::run_layer_with_ffn;
@@ -9,6 +11,9 @@ use super::super::{apply_norm, dot_proj};
 use crate::attention::SharedKV;
 use larql_models::ModelWeights;
 use ndarray::Array2;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Return type for [`forward_raw_logits`]. `h_pre_norm` is the residual
 /// at the last transformer block's output (pre-final-norm), `h_final`
@@ -73,7 +78,7 @@ pub fn forward_raw_logits(
 /// position-0 token before layer 0.
 ///
 /// Mirrors the Python `prefill_to_layer(initial_residual=...)` API used by
-/// `UnlimitedContextEngine`/Apollo. The prefix flows through every layer
+/// `WindowedCheckpointEngine`/Apollo. The prefix flows through every layer
 /// along with the query tokens and participates in attention at each
 /// position — it's *not* a per-layer K/V injection, it's a residual
 /// prepend.
@@ -186,7 +191,8 @@ fn forward_layer_range(
     let ple_inputs = precompute_per_layer_inputs(&weights, &h, &ple_token_ids);
     let ffn = crate::ffn::ViewFfn { view: weights };
 
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: crate::collections::HashMap<usize, SharedKV> =
+        crate::collections::HashMap::default();
 
     for layer in layer_range {
         let shared_kv = weights

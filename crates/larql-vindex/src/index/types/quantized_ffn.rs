@@ -1,5 +1,12 @@
 //! `QuantizedFfnAccess` — Q4_0 / Q4_K / Q6_K FFN row access.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+#[cfg(target_arch = "wasm32")]
+use alloc::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 /// Q4_0/Q4_K/Q6_K FFN storage access.
 pub trait QuantizedFfnAccess: Send + Sync {
     fn has_interleaved_q4(&self) -> bool {
@@ -68,11 +75,7 @@ pub trait QuantizedFfnAccess: Send + Sync {
     /// Dequantised Q4K/Q6K FFN matrix for `(layer, component)` where
     /// `component` is 0=gate, 1=up, 2=down. Lazily decoded and cached.
     /// Returns `None` when the vindex has no Q4K interleaved data.
-    fn kquant_ffn_layer(
-        &self,
-        _layer: usize,
-        _component: usize,
-    ) -> Option<std::sync::Arc<Vec<f32>>> {
+    fn kquant_ffn_layer(&self, _layer: usize, _component: usize) -> Option<Arc<Vec<f32>>> {
         None
     }
 

@@ -76,20 +76,23 @@
 /// style; we want a stable type here because callers (eventually
 /// the larql-inference forward pass) will want to disambiguate
 /// shape errors from kernel-level invariant violations.
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComputeError {
     ShapeMismatch(String),
 }
 
-impl std::fmt::Display for ComputeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ComputeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ComputeError::ShapeMismatch(msg) => write!(f, "shape mismatch: {msg}"),
         }
     }
 }
 
-impl std::error::Error for ComputeError {}
+impl core::error::Error for ComputeError {}
 
 /// One BitLinear layer's weight tensor, ready to feed a matvec.
 ///

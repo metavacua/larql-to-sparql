@@ -1,4 +1,10 @@
-use std::collections::{HashSet, VecDeque};
+use crate::collections::HashSet;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::VecDeque;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::VecDeque;
 
 use crate::core::edge::Edge;
 use crate::core::enums::SourceType;
@@ -65,7 +71,7 @@ pub fn extract_bfs(
     graph: &mut Graph,
     callbacks: &mut dyn BfsCallbacks,
 ) -> BfsResult {
-    let mut visited: HashSet<String> = HashSet::new();
+    let mut visited: HashSet<String> = HashSet::default();
     let mut queue: VecDeque<(String, u32)> = seeds.iter().map(|s| (s.clone(), 0u32)).collect();
 
     let mut total_passes: usize = 0;

@@ -27,11 +27,14 @@ kernel void q4_f32_matvec(
         device const uchar* quants = block + 2;
         device const float* xb = x + b * 32;
         float block_sum = 0.0f;
+        // ggml planar Q4_0: byte j holds element j (low nibble) and element
+        // j+16 (high nibble) — the two halves of the block, not an adjacent
+        // pair. See `q4_matvec_v4` for the full note.
         for (uint j = 0; j < 16; j++) {
             uchar byte = quants[j];
             float lo = float(int(byte & 0x0F) - 8);
             float hi = float(int(byte >> 4) - 8);
-            block_sum += lo * xb[j * 2] + hi * xb[j * 2 + 1];
+            block_sum += lo * xb[j] + hi * xb[j + 16];
         }
         acc += block_sum * q4_scale;
     }

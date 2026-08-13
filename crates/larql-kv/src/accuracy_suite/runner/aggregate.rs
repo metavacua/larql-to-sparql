@@ -8,6 +8,9 @@
 use super::super::prompts::KnowledgeSource;
 use super::types::{ConflictScore, PromptScore, StrategySplit};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Aggregate per-prompt scores + conflict scores into one row per
 /// engine.
 ///

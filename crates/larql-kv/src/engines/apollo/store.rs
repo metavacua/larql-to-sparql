@@ -18,15 +18,30 @@
 //! for the `.npz` containers. No `ndarray-npy` dependency because its
 //! current release (0.10) pins ndarray 0.17 and our workspace is on 0.16.
 
+// `read_file`/`load_manifest`/`load_boundaries`/`load_boundary_residual`/
+// `load_window_tokens`/`load_entries`/`ApolloStore::load` all use
+// `std::fs`/`std::path::Path`/`zip::ZipArchive`; zip has no wasm32
+// Cargo.toml entry at all (same pattern as larql-compute's rayon), so
+// this is pure exclusion, not a reimplementation candidate.
+// `StoreLoadError` embeds `zip::result::ZipError`/`std::io::Error`
+// directly in its variants and cannot exist portably even as a type.
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use thiserror::Error;
 
 use super::entry::VecInjectEntry;
+#[cfg(not(target_arch = "wasm32"))]
 use super::npy;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Error)]
 pub enum StoreLoadError {
     #[error("i/o error reading {path}: {source}")]
@@ -55,6 +70,8 @@ pub enum StoreLoadError {
     ManifestMismatch(String),
     #[error("structured-dtype parse error in {path}: {reason}")]
     StructuredDtype { path: String, reason: String },
+    #[error("window_token_lists archive invalid: {0}")]
+    WindowArchive(String),
 }
 
 /// Contents of `manifest.json`.
@@ -110,6 +127,7 @@ pub struct ApolloStore {
 
 impl ApolloStore {
     /// Load an Apollo store from a directory.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &Path) -> Result<Self, StoreLoadError> {
         let manifest = load_manifest(path)?;
         let boundaries = load_boundaries(path, manifest.num_windows)?;
@@ -131,6 +149,16 @@ impl ApolloStore {
                 entries.len(),
             )));
         }
+        // window_tokens indexes by window_id, and boundaries/entries assume
+        // the same id space — a count mismatch means the archive and the
+        // manifest disagree about which windows exist.
+        if window_tokens.len() != manifest.num_windows {
+            return Err(StoreLoadError::ManifestMismatch(format!(
+                "manifest.num_windows={} but loaded {} window token lists",
+                manifest.num_windows,
+                window_tokens.len(),
+            )));
+        }
 
         Ok(Self {
             manifest,
@@ -149,7 +177,7 @@ impl ApolloStore {
             .map(|b| b.len() * 4)
             .unwrap_or(0);
         let token_bytes: usize = self.window_tokens.iter().map(|w| w.len() * 4).sum();
-        let entry_bytes = self.entries.len() * std::mem::size_of::<VecInjectEntry>();
+        let entry_bytes = self.entries.len() * core::mem::size_of::<VecInjectEntry>();
         boundary_bytes + boundary_residual_bytes + token_bytes + entry_bytes
     }
 
@@ -160,6 +188,7 @@ impl ApolloStore {
 
 // ── internals ────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read_file(path: &Path) -> Result<Vec<u8>, StoreLoadError> {
     std::fs::read(path).map_err(|source| StoreLoadError::Io {
         path: path.display().to_string(),
@@ -167,11 +196,13 @@ fn read_file(path: &Path) -> Result<Vec<u8>, StoreLoadError> {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_manifest(path: &Path) -> Result<StoreManifest, StoreLoadError> {
     let bytes = read_file(&path.join("manifest.json"))?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_boundaries(path: &Path, num_windows: usize) -> Result<Vec<Vec<f32>>, StoreLoadError> {
     let dir = path.join("boundaries");
     let mut out = Vec::with_capacity(num_windows);
@@ -187,6 +218,7 @@ fn load_boundaries(path: &Path, num_windows: usize) -> Result<Vec<Vec<f32>>, Sto
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_boundary_residual(path: &Path) -> Result<Vec<f32>, StoreLoadError> {
     let p = path.join("boundary_residual.npy");
     let bytes = read_file(&p)?;
@@ -197,6 +229,7 @@ fn load_boundary_residual(path: &Path) -> Result<Vec<f32>, StoreLoadError> {
     Ok(flat)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_window_tokens(path: &Path) -> Result<Vec<Vec<u32>>, StoreLoadError> {
     let p = path.join("window_token_lists.npz");
     let file = std::fs::File::open(&p).map_err(|source| StoreLoadError::Io {
@@ -227,6 +260,21 @@ fn load_window_tokens(path: &Path) -> Result<Vec<Vec<u32>>, StoreLoadError> {
     }
     numbered.sort_by_key(|(i, _)| *i);
 
+    // Invariant: the returned Vec is indexed by window_id, so member ids
+    // must be exactly 0..len after the sort — a gapped archive (0, 1, 3)
+    // or a duplicated id would otherwise be packed densely and silently
+    // misalign every later window against boundaries/entries.
+    for (expected_id, (id, name)) in numbered.iter().enumerate() {
+        if *id != expected_id {
+            return Err(StoreLoadError::WindowArchive(format!(
+                "{}: member ids must be contiguous from 0 — expected id {expected_id}, \
+                 found {id} ({name}); a gapped or duplicated archive would misalign \
+                 window ids against boundaries/entries",
+                p.display(),
+            )));
+        }
+    }
+
     let mut out = Vec::with_capacity(numbered.len());
     for (_id, name) in numbered {
         let mut entry = archive
@@ -251,6 +299,7 @@ fn load_window_tokens(path: &Path) -> Result<Vec<Vec<u32>>, StoreLoadError> {
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_entries(path: &Path) -> Result<Vec<VecInjectEntry>, StoreLoadError> {
     let p = path.join("entries.npz");
     let file = std::fs::File::open(&p).map_err(|source| StoreLoadError::Io {
@@ -303,30 +352,69 @@ fn load_entries(path: &Path) -> Result<Vec<VecInjectEntry>, StoreLoadError> {
     })
 }
 
+/// Exact structured-dtype layout the row decoder below assumes. Invariant:
+/// the decoder reads fields at fixed byte offsets in this order, so the
+/// archive's descr must match name-for-name AND dtype-for-dtype in this
+/// exact order — a reordered or retyped descr would otherwise decode into
+/// garbage coefficients/ids without any error.
+// This cluster (ENTRY_DESCR_FIELDS/descr_quoted_tokens/check_entry_descr/
+// parse_structured_entries_npy) is native-only: its sole non-test caller,
+// `load_entries` above, is native-gated.
+#[cfg(not(target_arch = "wasm32"))]
+const ENTRY_DESCR_FIELDS: [(&str, &str); 5] = [
+    ("token_id", "<u4"),
+    ("coefficient", "<f4"),
+    ("window_id", "<u2"),
+    ("position_in_window", "<u2"),
+    ("fact_id", "<u2"),
+];
+
+/// Extract every single-quoted token from a numpy structured descr, in
+/// order. For `[('token_id', '<u4'), ...]` this yields alternating
+/// field-name / dtype strings — numpy always emits single quotes here.
+#[cfg(not(target_arch = "wasm32"))]
+fn descr_quoted_tokens(descr: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = descr;
+    while let Some(start) = rest.find('\'') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('\'') else { break };
+        out.push(&after[..end]);
+        rest = &after[end + 1..];
+    }
+    out
+}
+
+/// Validate that `descr` declares exactly [`ENTRY_DESCR_FIELDS`] — same
+/// fields, same dtypes, same order. Presence-by-substring is not enough:
+/// the decoder reads fixed offsets.
+#[cfg(not(target_arch = "wasm32"))]
+fn check_entry_descr(descr: &str) -> Result<(), String> {
+    let tokens = descr_quoted_tokens(descr);
+    let got: Vec<(&str, &str)> = tokens
+        .chunks(2)
+        .filter(|c| c.len() == 2)
+        .map(|c| (c[0], c[1]))
+        .collect();
+    if got != ENTRY_DESCR_FIELDS {
+        return Err(format!(
+            "structured descr mismatch: got fields {got:?}, expected {ENTRY_DESCR_FIELDS:?} \
+             (decoder reads fixed offsets; field order and dtypes must match exactly)"
+        ));
+    }
+    Ok(())
+}
+
 /// Parse a .npy file containing a structured-dtype array of `VecInjectEntry`.
 ///
-/// Expected dtype (from the Python side):
-///   (token_id: u32, coefficient: f32, window_id: u16,
-///    position_in_window: u16, fact_id: u16)
+/// Expected dtype (from the Python side): see [`ENTRY_DESCR_FIELDS`].
 /// Row size: 14 bytes, no padding (numpy packs structured dtypes tightly
 /// when fields are already aligned).
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_structured_entries_npy(bytes: &[u8]) -> Result<Vec<VecInjectEntry>, String> {
     let (header, data_off) = npy::parse_header(bytes).map_err(|e| e.to_string())?;
 
-    for field in [
-        "token_id",
-        "coefficient",
-        "window_id",
-        "position_in_window",
-        "fact_id",
-    ] {
-        if !header.descr.contains(field) {
-            return Err(format!(
-                "missing field '{field}' in descr: {}",
-                header.descr
-            ));
-        }
-    }
+    check_entry_descr(&header.descr)?;
     if header.shape.len() != 1 {
         return Err(format!(
             "expected 1D structured array, got shape {:?}",
@@ -684,6 +772,94 @@ mod tests {
         );
     }
 
+    /// A gapped window archive (member ids 0, 1, 3) must be rejected: dense
+    /// packing after the numeric sort would place window 3's tokens at
+    /// index 2, misaligning every id-keyed lookup (boundaries, entries).
+    /// Before the contiguity check this loaded "successfully".
+    #[test]
+    fn load_window_tokens_gapped_archive_errors() {
+        let dir = TempDir::new().unwrap();
+        write_minimal_store(dir.path(), 3, 4, 3, &[]);
+        // Replace the archive with members 0, 1, 3 (id 2 missing).
+        let members: Vec<(String, Vec<u8>)> = [0u32, 1, 3]
+            .iter()
+            .map(|w| {
+                (
+                    format!("{w}.npy"),
+                    synth_u32_npy(&[*w * 1000, *w * 1000 + 1, *w * 1000 + 2]),
+                )
+            })
+            .collect();
+        std::fs::write(
+            dir.path().join("window_token_lists.npz"),
+            synth_npz(members),
+        )
+        .unwrap();
+        let err = ApolloStore::load(dir.path()).unwrap_err();
+        match err {
+            StoreLoadError::WindowArchive(msg) => {
+                assert!(
+                    msg.contains("expected id 2") && msg.contains("found 3"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected WindowArchive, got {other:?}"),
+        }
+    }
+
+    /// Duplicate member ids ("0.npy" and "0") collapse to the same window id
+    /// and must be rejected for the same misalignment reason as gaps.
+    #[test]
+    fn load_window_tokens_duplicate_id_errors() {
+        let dir = TempDir::new().unwrap();
+        write_minimal_store(dir.path(), 2, 4, 3, &[]);
+        let members = vec![
+            ("0.npy".to_string(), synth_u32_npy(&[1, 2, 3])),
+            ("0".to_string(), synth_u32_npy(&[4, 5, 6])),
+        ];
+        std::fs::write(
+            dir.path().join("window_token_lists.npz"),
+            synth_npz(members),
+        )
+        .unwrap();
+        let err = ApolloStore::load(dir.path()).unwrap_err();
+        match err {
+            StoreLoadError::WindowArchive(msg) => {
+                assert!(
+                    msg.contains("expected id 1") && msg.contains("found 0"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected WindowArchive, got {other:?}"),
+        }
+    }
+
+    /// The manifest's window count must match the archive: a contiguous but
+    /// short archive (window 1 of 2 missing) previously loaded fine and
+    /// out-of-range window ids surfaced only as routing misses.
+    #[test]
+    fn load_window_tokens_count_mismatch_vs_manifest_errors() {
+        let dir = TempDir::new().unwrap();
+        write_minimal_store(dir.path(), 2, 4, 3, &[]);
+        // Rewrite the archive with only window 0 (contiguous, wrong count).
+        let members = vec![("0.npy".to_string(), synth_u32_npy(&[1, 2, 3]))];
+        std::fs::write(
+            dir.path().join("window_token_lists.npz"),
+            synth_npz(members),
+        )
+        .unwrap();
+        let err = ApolloStore::load(dir.path()).unwrap_err();
+        match err {
+            StoreLoadError::ManifestMismatch(msg) => {
+                assert!(
+                    msg.contains("num_windows=2") && msg.contains("1 window token lists"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected ManifestMismatch, got {other:?}"),
+        }
+    }
+
     #[test]
     fn load_invalid_manifest_json_returns_json_error() {
         let dir = TempDir::new().unwrap();
@@ -819,6 +995,70 @@ mod tests {
         blob.extend_from_slice(&[0u8; 12]);
         let err = parse_structured_entries_npy(&blob).unwrap_err();
         assert!(err.contains("fact_id"));
+    }
+
+    /// Build a structured .npy blob with an arbitrary descr string and raw
+    /// row bytes — for exercising the exact-descr validation.
+    fn synth_structured_with_descr(descr: &str, rows: usize, row_bytes: &[u8]) -> Vec<u8> {
+        let header = format!("{{'descr': {descr}, 'fortran_order': False, 'shape': ({rows},), }}");
+        let mut padded = header.into_bytes();
+        let total = 10 + padded.len();
+        let pad_to = (total + 63) & !63;
+        while 10 + padded.len() + 1 < pad_to {
+            padded.push(b' ');
+        }
+        padded.push(b'\n');
+        let mut blob = Vec::new();
+        blob.extend_from_slice(b"\x93NUMPY");
+        blob.push(1);
+        blob.push(0);
+        blob.extend_from_slice(&(padded.len() as u16).to_le_bytes());
+        blob.extend_from_slice(&padded);
+        blob.extend_from_slice(row_bytes);
+        blob
+    }
+
+    /// A reordered descr passes a substring-presence check but decodes into
+    /// garbage at the decoder's fixed offsets — it must be rejected.
+    /// (Fail-before: the old check only tested `descr.contains(field)`.)
+    #[test]
+    fn structured_npy_reordered_descr_errors() {
+        // coefficient and token_id swapped; binary layout matches the
+        // reordered descr (f32 then u32), still 14 bytes/row.
+        let descr = "[('coefficient', '<f4'), ('token_id', '<u4'), \
+                     ('window_id', '<u2'), ('position_in_window', '<u2'), \
+                     ('fact_id', '<u2')]";
+        let mut row = Vec::new();
+        row.extend_from_slice(&1.5f32.to_le_bytes());
+        row.extend_from_slice(&7u32.to_le_bytes());
+        row.extend_from_slice(&0u16.to_le_bytes());
+        row.extend_from_slice(&0u16.to_le_bytes());
+        row.extend_from_slice(&0u16.to_le_bytes());
+        let blob = synth_structured_with_descr(descr, 1, &row);
+        let err = parse_structured_entries_npy(&blob).unwrap_err();
+        assert!(
+            err.contains("structured descr mismatch"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains(r#"("coefficient", "<f4"), ("token_id", "<u4")"#),
+            "error should report the offending field order, got: {err}"
+        );
+    }
+
+    /// Same fields and order but a retyped dtype (i4 vs u4) also decodes
+    /// wrongly and must be rejected.
+    #[test]
+    fn structured_npy_retyped_field_errors() {
+        let descr = "[('token_id', '<i4'), ('coefficient', '<f4'), \
+                     ('window_id', '<u2'), ('position_in_window', '<u2'), \
+                     ('fact_id', '<u2')]";
+        let blob = synth_structured_with_descr(descr, 1, &[0u8; 14]);
+        let err = parse_structured_entries_npy(&blob).unwrap_err();
+        assert!(
+            err.contains("structured descr mismatch") && err.contains("<i4"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

@@ -1,5 +1,7 @@
 //! f16/bf16 ↔ f32 conversion.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 /// Convert f16 bits to f32.
 ///
 /// Subnormals are reconstructed as `m * 2^-24` where `m` is the 10-bit

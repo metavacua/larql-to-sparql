@@ -6,9 +6,15 @@
 //! per-layer mixing once additional codecs gain calibration support.
 
 use larql_inference::attention::SharedKV;
-use ndarray::{s, Array2};
+use ndarray::Array2;
+// s! is only used inside clip_layer_overflow below, native-only.
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::s;
 
 use crate::engines::markov_residual_codec::codec::{decode_block, encode_block, ColdResidualCodec};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Per-layer encoded cold residuals. Carries its own codec so each layer
 /// can be decoded independently of the others.
@@ -109,6 +115,9 @@ impl RsStorePerLayer {
         self.stored.first().map_or(0, |s| s.shape()[0])
     }
 
+    // Callers (walk.rs, dispatch.rs, executor.rs) are all whole-module
+    // native-gated at their `mod` declarations in mod.rs.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn clip_layer_overflow(&mut self, layer: usize) -> Array2<f32> {
         let window = match self.max_window {
             Some(w) => w,

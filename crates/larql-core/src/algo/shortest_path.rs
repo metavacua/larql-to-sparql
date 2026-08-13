@@ -1,7 +1,13 @@
 //! Shortest path algorithms — Dijkstra and A*.
 
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use crate::collections::HashMap;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+use ::core::cmp::Ordering;
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::BinaryHeap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::BinaryHeap;
 
 use crate::core::edge::Edge;
 use crate::core::graph::Graph;
@@ -91,8 +97,8 @@ fn search_internal(
     weight_fn: fn(&Edge) -> f64,
     heuristic: fn(&str, &str) -> f64,
 ) -> PathResult {
-    let mut dist: HashMap<String, f64> = HashMap::new();
-    let mut prev: HashMap<String, Edge> = HashMap::new();
+    let mut dist: HashMap<String, f64> = HashMap::default();
+    let mut prev: HashMap<String, Edge> = HashMap::default();
     let mut heap = BinaryHeap::new();
     let mut nodes_explored = 0;
 

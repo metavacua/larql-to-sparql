@@ -26,8 +26,11 @@
 //! wrappers passing [`NoopHook`], so call-sites that don't care pay no cost.
 
 use crate::attention::AttentionWeights;
+use crate::collections::{HashMap, HashSet};
 use ndarray::{Array1, Array2};
-use std::collections::{HashMap, HashSet};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Mid-forward callbacks. All defaults are no-ops; impls override only the
 /// callbacks they need.
@@ -94,11 +97,11 @@ impl RecordHook {
     pub fn for_layers<I: IntoIterator<Item = usize>>(layers: I) -> Self {
         Self {
             layers: layers.into_iter().collect(),
-            pre_layer: HashMap::new(),
-            post_attention: HashMap::new(),
-            post_layer: HashMap::new(),
-            ffn_activation: HashMap::new(),
-            attention_weights: HashMap::new(),
+            pre_layer: HashMap::default(),
+            post_attention: HashMap::default(),
+            post_layer: HashMap::default(),
+            ffn_activation: HashMap::default(),
+            attention_weights: HashMap::default(),
         }
     }
 }
@@ -189,7 +192,7 @@ impl FFNZeroHook {
     pub fn for_layers<I: IntoIterator<Item = usize>>(layers: I) -> Self {
         Self {
             layers: layers.into_iter().collect(),
-            cache: HashMap::new(),
+            cache: HashMap::default(),
         }
     }
 }
@@ -221,7 +224,7 @@ impl AttnZeroHook {
     pub fn for_layers<I: IntoIterator<Item = usize>>(layers: I) -> Self {
         Self {
             layers: layers.into_iter().collect(),
-            cache: HashMap::new(),
+            cache: HashMap::default(),
         }
     }
 }
@@ -252,7 +255,7 @@ pub struct SteerHook {
 impl SteerHook {
     pub fn new() -> Self {
         Self {
-            steers: HashMap::new(),
+            steers: HashMap::default(),
         }
     }
 

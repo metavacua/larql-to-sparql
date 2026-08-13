@@ -17,6 +17,9 @@ use crate::index::{
 
 use super::overlay::PatchedVindex;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl GateLookup for PatchedVindex {
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)> {
         self.gate_knn(layer, residual, top_k)
@@ -47,6 +50,27 @@ impl GateLookup for PatchedVindex {
         self.base.gate_scores_batch_backend(layer, x, backend)
     }
 
+    fn gate_walk(
+        &self,
+        layer: usize,
+        residual: &Array1<f32>,
+        top_k: usize,
+    ) -> Option<Vec<(usize, f32)>> {
+        // Exact batched-gemv selection reads only the base gate matrix,
+        // so it is valid exactly when neither a gate override nor a
+        // tombstone could change the ranking at this layer — the same
+        // short-circuit guard `PatchedVindex::gate_knn` uses. On a
+        // patched layer, decline so the caller falls through to
+        // `gate_knn`, which this type overrides with the overlay-aware
+        // merge (2026-07-30 review, item #13).
+        let layer_is_patched =
+            self.overrides_gate.has_layer(layer) || self.deleted.iter().any(|&(l, _)| l == layer);
+        if layer_is_patched {
+            return None;
+        }
+        self.base.gate_walk(layer, residual, top_k)
+    }
+
     fn gate_knn_batch(&self, layer: usize, x: &ndarray::Array2<f32>, top_k: usize) -> Vec<usize> {
         // The base impl runs a BLAS gemm against the disk-side gate
         // matrix and ignores the patch overlay — so any feature with
@@ -55,7 +79,7 @@ impl GateLookup for PatchedVindex {
         // path, which `PatchedVindex::gate_knn` overrides correctly.
         // Returns the union of selected feature indices across all
         // rows, deduplicated.
-        if self.overrides_gate.iter().all(|((l, _), _)| *l != layer) {
+        if !self.overrides_gate.has_layer(layer) {
             // No overrides at this layer — base path is correct.
             return self.base.gate_knn_batch(layer, x, top_k);
         }
@@ -84,13 +108,44 @@ impl PatchOverrides for PatchedVindex {
         // Gate overrides live on the patch overlay (not the base
         // index). Surface them through the trait so the sparse
         // inference fallback can read the strong installed gate.
-        self.overrides_gate
-            .get(&(layer, feature))
-            .map(|v| v.as_slice())
+        self.overrides_gate.get(layer, feature)
     }
 
     fn has_overrides_at(&self, layer: usize) -> bool {
-        self.overrides_gate.keys().any(|(l, _)| *l == layer) || self.base.has_overrides_at(layer)
+        self.overrides_gate.has_layer(layer) || self.base.has_overrides_at(layer)
+    }
+
+    /// Union of the base's up/down override slots, the overlay's gate
+    /// override slots, and the overlay's tombstones at `layer`. A
+    /// tombstone wins over any lingering vector override on the same
+    /// slot (matching `gate_knn`, which filters deleted features out of
+    /// selection regardless of overrides).
+    fn override_slots_at(&self, layer: usize) -> Option<Vec<crate::index::OverrideSlot>> {
+        let mut slots: std::collections::BTreeMap<usize, bool> = self
+            .base
+            .override_slots_at(layer)?
+            .into_iter()
+            .map(|s| (s.feature, s.tombstoned))
+            .collect();
+        for (l, f, _) in self.overrides_gate.iter() {
+            if l == layer {
+                slots.entry(f).or_insert(false);
+            }
+        }
+        for &(l, f) in &self.deleted {
+            if l == layer {
+                slots.insert(f, true);
+            }
+        }
+        Some(
+            slots
+                .into_iter()
+                .map(|(feature, tombstoned)| crate::index::OverrideSlot {
+                    feature,
+                    tombstoned,
+                })
+                .collect(),
+        )
     }
 }
 
@@ -264,5 +319,113 @@ impl Fp4FfnAccess for PatchedVindex {
         out: &mut [f32],
     ) -> bool {
         self.base.fp4_ffn_row_into(layer, component, feat, out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Pins for the `gate_walk` trait override (2026-07-30 review,
+    //! item #13): exact selection may only serve layers the patch
+    //! overlay cannot have changed; patched layers must decline so
+    //! callers fall through to the overlay-aware `gate_knn`.
+    use super::*;
+    use crate::index::core::VectorIndex;
+    use larql_models::TopKEntry;
+    use ndarray::Array2;
+
+    /// 2-layer × 3-feature × 4-hidden base where feature `f` on each
+    /// layer has gate `[3 - f, 0, 0, 0]` — a query along e0 ranks
+    /// feature 0 highest, so `gate_walk` has real hits to return.
+    fn make_scored_patched() -> PatchedVindex {
+        let mut gate = Array2::<f32>::zeros((3, 4));
+        for f in 0..3 {
+            gate[[f, 0]] = (3 - f) as f32;
+        }
+        let down_meta = vec![Some(vec![None, None, None]); 2];
+        let index = VectorIndex::new(vec![Some(gate.clone()), Some(gate)], down_meta, 2, 4);
+        PatchedVindex::new(index)
+    }
+
+    fn make_meta(token: &str) -> crate::index::FeatureMeta {
+        crate::index::FeatureMeta {
+            top_token: token.into(),
+            top_token_id: 0,
+            c_score: 0.9,
+            top_k: vec![TopKEntry {
+                token: token.into(),
+                token_id: 0,
+                logit: 0.9,
+            }],
+        }
+    }
+
+    #[test]
+    fn gate_walk_delegates_to_base_on_unpatched_layer() {
+        let p = make_scored_patched();
+        let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+        let via_trait = <PatchedVindex as GateLookup>::gate_walk(&p, 0, &q, 2)
+            .expect("unpatched layer must reach the base exact path");
+        let via_base = p.base.gate_walk(0, &q, 2).expect("base has gate data");
+        assert_eq!(via_trait, via_base);
+        assert_eq!(via_trait[0].0, 0, "feature 0 has the largest gate dot");
+    }
+
+    #[test]
+    fn gate_walk_declines_on_gate_overridden_layer() {
+        let mut p = make_scored_patched();
+        p.insert_feature(0, 1, vec![0.0, 9.0, 0.0, 0.0], make_meta("ins"));
+        let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+        assert!(
+            <PatchedVindex as GateLookup>::gate_walk(&p, 0, &q, 2).is_none(),
+            "layer with a gate override must decline exact selection"
+        );
+        // The untouched layer still serves the exact path.
+        assert!(<PatchedVindex as GateLookup>::gate_walk(&p, 1, &q, 2).is_some());
+    }
+
+    #[test]
+    fn gate_walk_declines_on_tombstoned_layer() {
+        let mut p = make_scored_patched();
+        p.insert_feature(0, 1, vec![0.0, 9.0, 0.0, 0.0], make_meta("tmp"));
+        p.delete_feature(0, 1);
+        let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+        assert!(
+            <PatchedVindex as GateLookup>::gate_walk(&p, 0, &q, 2).is_none(),
+            "layer with a tombstone must decline exact selection"
+        );
+    }
+
+    /// `override_slots_at` merges three sources — base up/down override
+    /// maps, overlay gate overrides, overlay tombstones — sorted and
+    /// deduplicated, with a tombstone winning over a lingering vector
+    /// override on the same slot (matching `gate_knn`'s filtering).
+    #[test]
+    fn override_slots_at_merges_base_overlay_and_tombstones() {
+        use crate::index::{OverrideSlot, PatchOverrides as _};
+        let mut p = make_scored_patched();
+        // Base up/down overrides land on the inner VectorIndex.
+        p.base.set_up_vector(0, 2, vec![1.0; 4]);
+        p.base.set_down_vector(0, 2, vec![1.0; 4]);
+        // Overlay gate override (INSERT) on slot 1.
+        p.insert_feature(0, 1, vec![0.0, 9.0, 0.0, 0.0], make_meta("ins"));
+        // Tombstone slot 2 — must override the base's vector overrides.
+        p.delete_feature(0, 2);
+
+        let slots = p.override_slots_at(0).expect("overlay enumerates");
+        assert_eq!(
+            slots,
+            vec![
+                OverrideSlot {
+                    feature: 1,
+                    tombstoned: false
+                },
+                OverrideSlot {
+                    feature: 2,
+                    tombstoned: true
+                },
+            ]
+        );
+        // Unpatched layer → empty enumeration, not None.
+        assert_eq!(p.override_slots_at(1), Some(Vec::new()));
     }
 }

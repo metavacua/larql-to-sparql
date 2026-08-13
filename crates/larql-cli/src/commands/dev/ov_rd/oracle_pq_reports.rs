@@ -1,5 +1,3 @@
-use std::collections::{BTreeMap, HashMap};
-
 use super::metrics::{bool_rate, mean, percentile};
 use super::reports::{
     AddressCorruptionReport, AddressGroupImportanceReport, AddressProbePromptReport,
@@ -7,6 +5,15 @@ use super::reports::{
     OraclePqPromptReport,
 };
 use super::types::PqConfig;
+use crate::collections::{BTreeMap, HashMap};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+// `format!` isn't in `alloc_prelude` and this crate's `extern crate
+// alloc;` (main.rs) isn't `#[macro_use]` -- import explicitly (flagged
+// in the round-1 report as a crate-root gap out of this group's scope).
+#[cfg(target_arch = "wasm32")]
+use alloc::format;
 
 #[derive(Debug)]
 pub(super) struct OraclePqPointAccumulator {
@@ -20,9 +27,9 @@ impl OraclePqPointAccumulator {
     pub(super) fn new() -> Self {
         Self {
             prompts: Vec::new(),
-            address_probe_accumulators: HashMap::new(),
-            address_corruption_accumulators: HashMap::new(),
-            address_group_importance_accumulators: HashMap::new(),
+            address_probe_accumulators: HashMap::default(),
+            address_corruption_accumulators: HashMap::default(),
+            address_group_importance_accumulators: HashMap::default(),
         }
     }
 
@@ -94,7 +101,7 @@ impl OraclePqPointAccumulator {
             coefficient_codebook_bytes_f32: config.groups
                 * levels
                 * (config.k / config.groups)
-                * std::mem::size_of::<f32>(),
+                * core::mem::size_of::<f32>(),
             mode_d_residual_table_bytes_bf16: config.groups * levels * hidden_dim * 2,
             prompts: self.prompts.len(),
             mean_kl: mean(&kls),
@@ -275,8 +282,10 @@ impl AddressProbeAccumulator {
             .sum::<usize>()
             .max(1);
         let correct_groups = self.prompts.iter().map(|p| p.groups_correct).sum::<usize>();
-        self.prompts
-            .sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(std::cmp::Ordering::Equal));
+        self.prompts.sort_by(|a, b| {
+            b.kl.partial_cmp(&a.kl)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
         AddressProbeReport {
             name: self.name,
             selected_group_keys: self.selected_group_keys,
@@ -316,8 +325,10 @@ impl AddressProbeAccumulator {
             .sum::<usize>()
             .max(1);
         let correct_groups = self.prompts.iter().map(|p| p.groups_correct).sum::<usize>();
-        self.prompts
-            .sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(std::cmp::Ordering::Equal));
+        self.prompts.sort_by(|a, b| {
+            b.kl.partial_cmp(&a.kl)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
         AddressCorruptionReport {
             label: self.name,
             oracle_groups_kept,
@@ -348,8 +359,10 @@ impl AddressProbeAccumulator {
             .sum::<usize>()
             .max(1);
         let correct_groups = self.prompts.iter().map(|p| p.groups_correct).sum::<usize>();
-        self.prompts
-            .sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(std::cmp::Ordering::Equal));
+        self.prompts.sort_by(|a, b| {
+            b.kl.partial_cmp(&a.kl)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
         AddressGroupImportanceReport {
             replaced_group,
             prompts: self.prompts.len(),

@@ -61,7 +61,7 @@ impl StorageEngine {
     pub fn compact_status(&self) -> CompactStatus {
         let l0_entries = self.patched.knn_store.len();
         let l1_edges = self.patched.num_overrides();
-        let l1_layers: std::collections::HashSet<usize> = self
+        let l1_layers: crate::collections::HashSet<usize> = self
             .patched
             .overrides_gate_iter()
             .map(|(layer, _, _)| layer)

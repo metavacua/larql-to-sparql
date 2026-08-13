@@ -15,6 +15,9 @@ use ndarray::{Array1, Array2};
 
 use larql_compute::cpu::ops::linalg::ridge_decomposition_solve;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A single MEMIT compaction cycle's result.
 #[derive(Debug, Clone)]
 pub struct MemitCycle {

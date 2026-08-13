@@ -1,5 +1,8 @@
 // ── Public error type ─────────────────────────────────────────────────────────
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 #[derive(Debug, Clone)]
 pub enum RemoteMoeError {
     /// Could not reach the shard server (connection refused, DNS failure, etc.).
@@ -14,8 +17,8 @@ pub enum RemoteMoeError {
     Client(String),
 }
 
-impl std::fmt::Display for RemoteMoeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for RemoteMoeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Unreachable { url, cause } => {
                 write!(f, "expert shard unreachable: {url} ({cause})")
@@ -30,4 +33,4 @@ impl std::fmt::Display for RemoteMoeError {
     }
 }
 
-impl std::error::Error for RemoteMoeError {}
+impl core::error::Error for RemoteMoeError {}

@@ -10,6 +10,8 @@
 use super::check_block_input;
 use super::q4_k::unpack_q4k_scales;
 use crate::detect::ModelError;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::quant::half::f16_to_f32;
 
 pub const Q5_K_BLOCK_BYTES: usize = 176;

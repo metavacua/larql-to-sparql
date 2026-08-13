@@ -17,15 +17,28 @@
 //! `real-model` feature gate is gone because all deps (`larql-inference`,
 //! `larql-vindex`) are already unconditional in `larql-kv`.
 
-use std::collections::HashMap;
-
 use serde::Serialize;
 
+// forward_to_logits{,_traced}/compare_prompt/compare_many all take
+// `&VectorIndex` (or, transitively, weights/backends used only by
+// those) unconditionally; the pure-metrics half below
+// (metrics_from_logits/aggregate/argmax/etc.) has no dependency on any
+// of this and stays portable.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::{embed_tokens_pub, hidden_to_raw_logits, run_layer_with_ffn};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::vindex::WalkFfn;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Per-comparison knobs. Kept minimal; future options added as fields.
 #[derive(Debug, Clone)]
@@ -123,6 +136,7 @@ impl From<&ComparisonConfig> for ComparisonConfigSerde {
 /// uses the unified `GateIndex::ffn_row_*` dispatch we wired in the
 /// trait refactor, so whichever backend the vindex carries (FP4, Q4K,
 /// native f32) automatically fires.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn forward_to_logits(
     weights: &ModelWeights,
     index: &VectorIndex,
@@ -137,6 +151,7 @@ pub fn forward_to_logits(
 /// `--trace` flag and catches cases where a candidate vindex silently
 /// falls through to an unexpected backend — the bug class exp 26 Q2
 /// surfaced during development.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn forward_to_logits_traced(
     weights: &ModelWeights,
     index: &VectorIndex,
@@ -192,6 +207,7 @@ pub fn forward_to_logits_traced(
 
 /// Compare two vindexes on a single prompt. Computes logits via
 /// `forward_to_logits` on each and then the full set of metrics.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn compare_prompt(
     weights: &ModelWeights,
     reference: &VectorIndex,
@@ -215,6 +231,7 @@ pub fn compare_prompt(
 ///
 /// Tokenisation is the caller's job (pass `token_ids_per_prompt`
 /// alongside the prompts). Keeps this library tokenizer-free.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn compare_many(
     weights: &ModelWeights,
     reference: &VectorIndex,
@@ -289,6 +306,12 @@ pub fn metrics_from_logits(
     }
 }
 
+// Sole caller, compare_many above, is native-gated (unlike
+// metrics_from_logits below it, which is pub and ungated, keeping its
+// own private helpers -- argmax/top_k_ids/jaccard/cosine/softmax/
+// kl_divergence -- alive on wasm32 even though nothing calls
+// metrics_from_logits there either).
+#[cfg(not(target_arch = "wasm32"))]
 fn aggregate(
     prompts: Vec<PromptReport>,
     reference_label: &str,
@@ -317,7 +340,7 @@ fn aggregate(
     let cos_mean = prompts.iter().map(|p| p.logit_cos).sum::<f64>() / n as f64;
 
     let mut kls: Vec<f64> = prompts.iter().map(|p| p.kl_symmetric).collect();
-    kls.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    kls.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
     let kl_mean = kls.iter().sum::<f64>() / n as f64;
     let kl_p95 = percentile(&kls, 0.95);
     let kl_max = *kls.last().unwrap_or(&f64::NAN);
@@ -355,7 +378,7 @@ fn top_k_ids(xs: &[f32], k: usize) -> Vec<u32> {
     let k = k.min(xs.len());
     let mut indexed: Vec<(usize, f32)> = xs.iter().copied().enumerate().collect();
     indexed.select_nth_unstable_by(k - 1, |a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal)
     });
     let mut top: Vec<u32> = indexed[..k].iter().map(|(i, _)| *i as u32).collect();
     top.sort_unstable();
@@ -366,8 +389,8 @@ fn jaccard(a: &[u32], b: &[u32]) -> f64 {
     if a.is_empty() && b.is_empty() {
         return 1.0;
     }
-    let sa: std::collections::BTreeSet<u32> = a.iter().copied().collect();
-    let sb: std::collections::BTreeSet<u32> = b.iter().copied().collect();
+    let sa: crate::collections::BTreeSet<u32> = a.iter().copied().collect();
+    let sb: crate::collections::BTreeSet<u32> = b.iter().copied().collect();
     let intersect = sa.intersection(&sb).count() as f64;
     let union = sa.union(&sb).count() as f64;
     if union == 0.0 {
@@ -419,6 +442,8 @@ fn kl_divergence(p: &[f64], q: &[f64]) -> f64 {
     kl
 }
 
+// Sole non-test caller, aggregate above, is native-only.
+#[cfg(not(target_arch = "wasm32"))]
 fn percentile(sorted: &[f64], q: f64) -> f64 {
     if sorted.is_empty() {
         return f64::NAN;

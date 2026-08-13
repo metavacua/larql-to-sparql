@@ -11,6 +11,9 @@ use ndarray::{Array1, Array2};
 use super::VectorIndex;
 use crate::index::types::{FeatureMeta, GateLookup};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl GateLookup for VectorIndex {
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)> {
         self.gate_knn(layer, residual, top_k)
@@ -51,6 +54,26 @@ impl GateLookup for VectorIndex {
     ) -> Option<Array2<f32>> {
         self.gate_scores_batch_backend(layer, x, backend)
     }
+
+    fn gate_walk(
+        &self,
+        layer: usize,
+        residual: &Array1<f32>,
+        top_k: usize,
+    ) -> Option<Vec<(usize, f32)>> {
+        // Delegate to the inherent exact batched-gemv implementation.
+        // This shim was missing from day one (the trait default's
+        // "Override in VectorIndex" comment dates to 2026-04-04): every
+        // `&dyn GateIndex` caller — the sparse walk's whole selection
+        // chain — silently got the `None` default and fell through to
+        // `gate_knn`, which let the approximate HNSW serving path leak
+        // into walk numerics whenever `enable_hnsw()` was on
+        // (2026-07-30 review, item #13). Returns `None` only when no
+        // dense-resolvable gate exists (e.g. Q4K-interleaved-only
+        // storage), where the `gate_knn_q4`/`gate_knn` fallbacks are
+        // the right tools.
+        VectorIndex::gate_walk(self, layer, residual, top_k)
+    }
 }
 
 #[cfg(test)]
@@ -78,6 +101,37 @@ mod tests {
     fn feature_meta_delegates_to_inherent() {
         let v = fresh();
         assert!(<VectorIndex as GateLookup>::feature_meta(&v, 0, 0).is_none());
+    }
+
+    /// `gate_walk` must reach the inherent exact gemv, not the trait's
+    /// `None` default.
+    ///
+    /// This needs a **populated** index, and that is the whole point: on
+    /// `VectorIndex::empty()` the inherent method also returns `None`
+    /// (no features), so the delegating and non-delegating impls are
+    /// indistinguishable — which is exactly how the missing override
+    /// survived while every other shim here had a passing test. An
+    /// empty-index assertion pins that the line compiles, not that it
+    /// delegates.
+    #[test]
+    fn gate_walk_delegates_to_inherent_on_a_populated_index() {
+        const LAYERS: usize = 1;
+        const HIDDEN: usize = 4;
+        const FEATURES: usize = 3;
+
+        // Feature f is the f-th basis vector, so a one-hot residual has an
+        // unambiguous nearest feature and the result is easy to state.
+        let gate =
+            Array2::from_shape_fn((FEATURES, HIDDEN), |(f, h)| if f == h { 1.0 } else { 0.0 });
+        let v = VectorIndex::new(vec![Some(gate)], vec![None], LAYERS, HIDDEN);
+
+        let mut residual = Array1::<f32>::zeros(HIDDEN);
+        residual[1] = 1.0;
+
+        let hits = <VectorIndex as GateLookup>::gate_walk(&v, 0, &residual, 1)
+            .expect("trait gate_walk must delegate, not return the default None");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0, 1, "feature 1 is the nearest to a one-hot at 1");
     }
 
     #[test]

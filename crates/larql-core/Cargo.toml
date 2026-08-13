@@ -4,20 +4,58 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Core graph engine for LARQL — knowledge graphs extracted from neural network weights"
 keywords = ["knowledge-graph", "llm", "interpretability", "graph"]
 categories = ["data-structures", "science"]
 
 [dependencies]
+
+# serde/serde_json/thiserror default to their "std" feature, which doesn't
+# exist on wasm32v1-none (core+alloc only) -- E0463 "can't find crate for
+# `std`". For serde_core this cascaded into thousands of downstream errors;
+# thiserror's std usage is directly #[cfg(feature = "std")]-gated in its
+# own source (confirmed via docs.rs), so disabling it is the documented,
+# supported path -- not a workaround. thiserror's derive macro is
+# unconditional (its only Cargo feature is "std"), so no functionality is
+# lost. Native builds keep the workspace-inherited std-enabled
+# declarations; wasm32 builds get independent alloc-only/no-std ones. See
+# docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
+# Task 7, pattern: dependency-default-std-feature.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-
-# HTTP provider — optional so pure graph usage has zero network deps
+# reqwest/rmp-serde pull in std-only transitive deps (futures-core, etc.)
+# that don't declare #![no_std] themselves, breaking wasm32v1-none even
+# though these deps are optional -- Cargo features aren't target-conditional,
+# so an untargeted `optional = true` dep still gets its full std-enabled
+# graph resolved for wasm32 as soon as its feature is on (default leg).
+# Target-gating the dependency table entry, not just the Cargo feature,
+# keeps "http"/"msgpack" enabled-by-default while the crates themselves are
+# simply absent on wasm32; engine/mod.rs's `mod http_provider` gate excludes
+# the one call site. See Task 7, pattern 12: optional-dep-feature-not-target-gated.
 reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
-
-# Binary serialization via MessagePack
 rmp-serde = { version = "1", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+# std::collections::HashMap/HashSet have no core/alloc equivalent (need a
+# hasher; alloc provides no default one). hashbrown is no_std-capable, but
+# its own default hasher (foldhash) has the identical OS-randomness
+# requirement (confirmed via its Cargo.toml) -- default-features = false
+# avoids pulling that in; src/collections.rs supplies a fixed-seed FNV-1a
+# hasher instead. See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
+# Task 7, pattern 4: std-collection-needs-no-std-hasher.
+hashbrown = { version = "0.15", default-features = false, features = ["serde"] }
+# f64::ln() (mock_provider.rs) is a std-only inherent method -- core's f64
+# has no transcendental math, since that needs a libm implementation and
+# std links against the platform's. libm is the standard pure-Rust,
+# no_std-compatible replacement (free functions, e.g. libm::log(x) for
+# ln). Pattern 6: core-f64-lacks-transcendental-math.
+libm = { version = "0.2", default-features = false }
 
 [features]
 default = ["http", "msgpack"]
@@ -33,19 +71,5 @@ name = "graph"
 harness = false
 
 [[example]]
-name = "algorithm_demo"
-
-[[example]]
 name = "bench_graph"
 
-[[example]]
-name = "edge_demo"
-
-[[example]]
-name = "filter_demo"
-
-[[example]]
-name = "graph_demo"
-
-[[example]]
-name = "serialization_demo"

@@ -12,6 +12,9 @@
 //! they're encoded.
 
 // ── Top-level config / sidecars ─────────────────────────────────────────
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub const INDEX_JSON: &str = "index.json";
 pub const TOKENIZER_JSON: &str = "tokenizer.json";
 pub const TOKENIZER_CONFIG_JSON: &str = "tokenizer_config.json";
@@ -121,10 +124,16 @@ pub fn layer_weights_filename(layer: usize) -> String {
 // legacy fallback). When neither exists `path` points at the new name
 // so the downstream "not found" error mentions the canonical filename.
 
+// Path-based resolve_*/has_* helpers below need std::path (no core/alloc
+// equivalent -- path semantics need an OS). The surrounding filename
+// *constants* are plain &str and stay portable; config/{index,
+// quantization}.rs import those on wasm32 too.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 /// Resolved location for a k-quant file family: the (.bin, .json) pair
 /// where the manifest is optional (some families don't sidecar one).
+#[cfg(not(target_arch = "wasm32"))]
 pub struct ResolvedKquantPaths {
     pub bin: PathBuf,
     pub manifest: Option<PathBuf>,
@@ -133,6 +142,7 @@ pub struct ResolvedKquantPaths {
     pub is_legacy: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn pick_bin(dir: &Path, new: &str, legacy: &str) -> (PathBuf, bool) {
     let new_path = dir.join(new);
     if new_path.exists() {
@@ -149,6 +159,7 @@ fn pick_bin(dir: &Path, new: &str, legacy: &str) -> (PathBuf, bool) {
 
 /// Resolve `attn_weights_*.bin` + matching manifest. New `_kquant_`
 /// preferred over legacy `_q4k_`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn resolve_attn_weights_kquant(dir: &Path) -> ResolvedKquantPaths {
     let (bin, is_legacy) = pick_bin(dir, ATTN_WEIGHTS_KQUANT_BIN, LEGACY_ATTN_WEIGHTS_Q4K_BIN);
     let manifest_name = if is_legacy {
@@ -164,6 +175,7 @@ pub fn resolve_attn_weights_kquant(dir: &Path) -> ResolvedKquantPaths {
 }
 
 /// Resolve `interleaved_*.bin` + matching manifest.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn resolve_interleaved_kquant(dir: &Path) -> ResolvedKquantPaths {
     let (bin, is_legacy) = pick_bin(dir, INTERLEAVED_KQUANT_BIN, LEGACY_INTERLEAVED_Q4K_BIN);
     let manifest_name = if is_legacy {
@@ -180,6 +192,7 @@ pub fn resolve_interleaved_kquant(dir: &Path) -> ResolvedKquantPaths {
 
 /// Resolve `lm_head_*.bin`. No sidecar manifest — the kind tag lives
 /// in the top-level `weight_manifest.json`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn resolve_lm_head_kquant(dir: &Path) -> ResolvedKquantPaths {
     let (bin, is_legacy) = pick_bin(dir, LM_HEAD_KQUANT_BIN, LEGACY_LM_HEAD_Q4_BIN);
     ResolvedKquantPaths {
@@ -190,6 +203,7 @@ pub fn resolve_lm_head_kquant(dir: &Path) -> ResolvedKquantPaths {
 }
 
 /// Resolve `down_features_*.bin` + matching manifest.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn resolve_down_features_kquant(dir: &Path) -> ResolvedKquantPaths {
     let (bin, is_legacy) = pick_bin(dir, DOWN_FEATURES_KQUANT_BIN, LEGACY_DOWN_FEATURES_Q4K_BIN);
     let manifest_name = if is_legacy {
@@ -206,24 +220,28 @@ pub fn resolve_down_features_kquant(dir: &Path) -> ResolvedKquantPaths {
 
 /// Whether the directory contains a k-quant attention weights file
 /// under either the new or legacy name.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn has_kquant_attn_weights(dir: &Path) -> bool {
     dir.join(ATTN_WEIGHTS_KQUANT_BIN).is_file() || dir.join(LEGACY_ATTN_WEIGHTS_Q4K_BIN).is_file()
 }
 
 /// Whether the directory contains an interleaved k-quant FFN file
 /// under either the new or legacy name.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn has_kquant_interleaved(dir: &Path) -> bool {
     dir.join(INTERLEAVED_KQUANT_BIN).is_file() || dir.join(LEGACY_INTERLEAVED_Q4K_BIN).is_file()
 }
 
 /// Whether the directory contains an LM-head k-quant file under
 /// either the new or legacy name.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn has_kquant_lm_head(dir: &Path) -> bool {
     dir.join(LM_HEAD_KQUANT_BIN).is_file() || dir.join(LEGACY_LM_HEAD_Q4_BIN).is_file()
 }
 
 /// Whether the directory contains a feature-major down k-quant file
 /// under either the new or legacy name.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn has_kquant_down_features(dir: &Path) -> bool {
     dir.join(DOWN_FEATURES_KQUANT_BIN).is_file() || dir.join(LEGACY_DOWN_FEATURES_Q4K_BIN).is_file()
 }
@@ -364,7 +382,7 @@ mod tests {
             LM_HEAD_KQUANT_BIN,
             LEGACY_LM_HEAD_Q4_BIN,
         ];
-        let unique: std::collections::HashSet<_> = names.iter().collect();
+        let unique: crate::collections::HashSet<_> = names.iter().collect();
         assert_eq!(unique.len(), names.len(), "duplicate filename constant");
     }
 

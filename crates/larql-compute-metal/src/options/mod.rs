@@ -50,11 +50,16 @@ pub struct DecodeFlags {
     /// reading site doesn't have to re-invert.
     pub gate_up_use_4sg: bool,
     /// `LARQL_F16_ACC=1` — f16 accumulator on the legacy 4sg gate+up.
-    /// Opt-in (default false).
+    /// Opt-in (default false). **Requires `LARQL_GATE_UP_8SG=0` as
+    /// well**: the default 8sg branch discards this flag
+    /// (`encode_ffn.rs` selection chain), so `LARQL_F16_ACC=1` alone is
+    /// a no-op (capability audit F22).
     pub f16_acc: bool,
-    /// `LARQL_FUSED_Q6K_DOWN=1` — opt into the cached-activation Q6_K
-    /// fused down. Currently no-op pending kernel parity (see
-    /// `encode_ffn.rs` block doc).
+    /// `LARQL_FUSED_Q6K_DOWN=1` — opt into the fused Q6_K GELU-tanh
+    /// down. Dispatches `q6k_geglu_gelu_tanh_down` (the NON-cached
+    /// kernel — the `_cached` variant is never dispatched and its body
+    /// is a verbatim copy anyway; audit F22). Recorded broken on the
+    /// current interleaved layout (see `encode_ffn.rs` block doc).
     pub fused_q6k_down: bool,
     /// `LARQL_FUSED_DOWN` — fused Q4_K GEGLU+down on the decode hot
     /// path. Default true; opt out with `=0`. (The prefill path in

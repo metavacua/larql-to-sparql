@@ -1,9 +1,24 @@
 //! Model weight tensors — the loaded representation of a model's parameters.
 
+use crate::collections::HashMap;
+// HashSet's only use (below, the packed-mmap eviction block) is already
+// #[cfg(not(target_arch = "wasm32"))]-gated at the statement level.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::collections::HashSet;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::ModelArchitecture;
+// Mmap is inherently native (no filesystem/mmap on wasm32v1-none). Its
+// one field (ModelWeights::packed_mmaps) and every site that touches it
+// are gated below rather than excluding this whole file -- WeightArray
+// and ModelWeights are otherwise-portable types referenced from
+// architectures/gpt_oss.rs and config/architecture.rs (confirmed via
+// grep before making this call), so excluding the file wholesale would
+// have broken those. See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
+// Task 7.
+#[cfg(not(target_arch = "wasm32"))]
 use memmap2::Mmap;
 use ndarray::ArcArray2;
-use std::collections::{HashMap, HashSet};
 
 /// Type alias for weight tensors — ArcArray2 supports both owned and shared storage.
 /// Owned: from safetensors loading (heap). Shared: from mmap (zero-copy).
@@ -95,7 +110,7 @@ impl<'a> From<&'a ModelWeights> for WeightsView<'a> {
     }
 }
 
-impl std::ops::Deref for WeightsView<'_> {
+impl core::ops::Deref for WeightsView<'_> {
     type Target = ModelWeights;
     fn deref(&self) -> &ModelWeights {
         self.weights
@@ -147,6 +162,9 @@ pub struct ModelWeights {
     pub raw_bytes: HashMap<String, Vec<u8>>,
     /// Memory-mapped files for large packed-byte tensors (experts_packed.bin, etc.).
     /// Each entry maps a file name to its Mmap handle so the OS can page-in on demand.
+    /// Absent on wasm32 (no mmap there) -- `get_packed_bytes` falls back
+    /// to `raw_bytes` unconditionally on that target instead.
+    #[cfg(not(target_arch = "wasm32"))]
     pub packed_mmaps: HashMap<String, Mmap>,
     /// Tensors skipped during loading because their dtype is not convertible to f32.
     /// Each entry is `(tensor_key, dtype_name)`. Integer tensors (attention masks,
@@ -155,6 +173,14 @@ pub struct ModelWeights {
     pub skipped_tensors: Vec<(String, String)>,
     /// Byte ranges into `packed_mmaps`: maps tensor key → (file_name, offset, length).
     pub packed_byte_ranges: HashMap<String, (String, usize, usize)>,
+    /// Registry tag of each per-layer FFN store's weight format, keyed by
+    /// layer, recorded from the `layers/layer_XX.weights` header at load
+    /// time. The header is the format authority; a consumer that assumes
+    /// Q4_K decodes a Q6_K store (MXFP4-transcoded experts, GPT-OSS) as
+    /// garbage. Empty for legacy vindexes and non-per-layer layouts —
+    /// consumers fall back to Q4_K, which is the only format those ever
+    /// carried.
+    pub per_layer_ffn_format: HashMap<usize, String>,
     pub embed: WeightArray,
     /// Output projection matrix. Same as embed if tie_word_embeddings=true,
     /// separate lm_head.weight otherwise.
@@ -181,6 +207,7 @@ impl ModelWeights {
     /// Checks mmap ranges first (production: large packed files), then
     /// falls back to `raw_bytes` (tests and small in-memory tensors).
     pub fn get_packed_bytes(&self, key: &str) -> Option<&[u8]> {
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some((file, offset, length)) = self.packed_byte_ranges.get(key) {
             if let Some(mmap) = self.packed_mmaps.get(file) {
                 let end = offset.checked_add(*length)?;
@@ -198,6 +225,43 @@ impl ModelWeights {
         let gu = self.get_packed_bytes(&per_layer_ffn_key(layer, entry, PER_LAYER_FFN_GATE_UP))?;
         let dn = self.get_packed_bytes(&per_layer_ffn_key(layer, entry, PER_LAYER_FFN_DOWN))?;
         Some((gu, dn))
+    }
+
+    /// Return the gate+up and down byte slices for the lowest-numbered FFN
+    /// entry this process actually holds at `layer`, or `None` if the layer
+    /// has no per-layer entries.
+    ///
+    /// Use this (never a hard-coded entry 0) when probing "some expert's"
+    /// bytes: a shard started with a non-zero expert range (e.g.
+    /// `--experts 64-127`) has `layers/{layer}/64/gate_up` but not
+    /// `layers/{layer}/0/gate_up`, so an entry-0 probe reports `None` on a
+    /// perfectly healthy shard — same failure mode `has_per_layer_ffn`
+    /// was fixed for. Scans both `packed_byte_ranges` (production mmaps)
+    /// and `raw_bytes` (tests / in-memory tensors), mirroring the lookup
+    /// order of `get_packed_bytes`.
+    pub fn first_layer_entry_bytes(&self, layer: usize) -> Option<(&[u8], &[u8])> {
+        let prefix = format!("layers/{layer}/");
+        let suffix = format!("/{PER_LAYER_FFN_GATE_UP}");
+        let entry = self
+            .packed_byte_ranges
+            .keys()
+            .chain(self.raw_bytes.keys())
+            .filter_map(|k| {
+                k.strip_prefix(&prefix)?
+                    .strip_suffix(&suffix)?
+                    .parse::<usize>()
+                    .ok()
+            })
+            .min()?;
+        self.get_layer_entry_bytes(layer, entry)
+    }
+
+    /// Registry tag of the per-layer FFN store's format at `layer`, as
+    /// recorded from the store file's own header. `None` for legacy
+    /// vindexes loaded before the format was threaded through (Q4_K, the
+    /// only format they carried) and for non-per-layer layouts.
+    pub fn per_layer_ffn_format_tag(&self, layer: usize) -> Option<&str> {
+        self.per_layer_ffn_format.get(&layer).map(String::as_str)
     }
 
     /// Whether FFN weights are stored in the per-layer format (`layers/`).
@@ -229,7 +293,7 @@ impl ModelWeights {
             .collect();
         for key in &keys_to_remove {
             if let Some(arr) = self.tensors.remove(key) {
-                freed += arr.len() * std::mem::size_of::<f32>();
+                freed += arr.len() * core::mem::size_of::<f32>();
             }
         }
         // Also drop FFN bias vectors
@@ -241,7 +305,7 @@ impl ModelWeights {
             .collect();
         for key in &vec_keys {
             if let Some(v) = self.vectors.remove(key) {
-                freed += v.len() * std::mem::size_of::<f32>();
+                freed += v.len() * core::mem::size_of::<f32>();
             }
         }
         // Drop packed expert byte tensors (Gemma 4 A4B experts.gate_up_proj / experts.down_proj)
@@ -276,6 +340,7 @@ impl ModelWeights {
                 freed += length;
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
         if !packed_keys.is_empty() {
             let referenced_files: HashSet<&str> = self
                 .packed_byte_ranges
@@ -310,7 +375,7 @@ impl ModelWeights {
             .collect();
         for key in &keys_to_remove {
             if let Some(arr) = self.tensors.remove(key) {
-                freed += arr.len() * std::mem::size_of::<f32>();
+                freed += arr.len() * core::mem::size_of::<f32>();
             }
         }
         let vec_keys: Vec<String> = self
@@ -321,7 +386,7 @@ impl ModelWeights {
             .collect();
         for key in &vec_keys {
             if let Some(v) = self.vectors.remove(key) {
-                freed += v.len() * std::mem::size_of::<f32>();
+                freed += v.len() * core::mem::size_of::<f32>();
             }
         }
         freed
@@ -336,7 +401,7 @@ impl ModelWeights {
     /// Replaces `lm_head` with an empty array so the ModelWeights struct
     /// remains valid.
     pub fn drop_lm_head(&mut self) -> usize {
-        let freed = self.lm_head.len() * std::mem::size_of::<f32>();
+        let freed = self.lm_head.len() * core::mem::size_of::<f32>();
         self.lm_head = ndarray::ArcArray2::from_shape_vec((0, 0), Vec::new())
             .expect("empty 0x0 array is always valid");
         freed
@@ -349,7 +414,7 @@ impl ModelWeights {
     ///
     /// Typical savings: ~2.7 GB for 4B / ~5.6 GB for 31B.
     pub fn drop_embed(&mut self) -> usize {
-        let freed = self.embed.len() * std::mem::size_of::<f32>();
+        let freed = self.embed.len() * core::mem::size_of::<f32>();
         self.embed = ndarray::ArcArray2::from_shape_vec((0, 0), Vec::new())
             .expect("empty 0x0 array is always valid");
         freed
@@ -437,5 +502,38 @@ mod weights_view_tests {
 
         let via_from: WeightsView = (&weights).into();
         assert_eq!(via_from.tensor("k").unwrap(), &w);
+    }
+
+    /// A shard owning a non-zero expert range (e.g. `--experts 64-127`) has
+    /// no entry 0 — probing `get_layer_entry_bytes(l, 0)` returns `None` on
+    /// a healthy shard. `first_layer_entry_bytes` must find the first OWNED
+    /// entry instead (the /v1/stats `per_expert_bytes` probe regression).
+    #[test]
+    fn first_layer_entry_bytes_finds_first_owned_entry_on_nonzero_shard() {
+        let mut weights = make_test_weights();
+        // Shard owns experts 64 and 65 at layer 0; nothing at entry 0.
+        for entry in [64usize, 65] {
+            weights.raw_bytes.insert(
+                per_layer_ffn_key(0, entry, PER_LAYER_FFN_GATE_UP),
+                vec![entry as u8; 8],
+            );
+            weights.raw_bytes.insert(
+                per_layer_ffn_key(0, entry, PER_LAYER_FFN_DOWN),
+                vec![entry as u8; 4],
+            );
+        }
+
+        // Entry-0 probe: the pre-fix behaviour — None on a healthy shard.
+        assert!(weights.get_layer_entry_bytes(0, 0).is_none());
+
+        // Fixed probe: lowest owned entry (64), both components resolved.
+        let (gu, dn) = weights
+            .first_layer_entry_bytes(0)
+            .expect("shard owns entries at layer 0");
+        assert_eq!(gu, &[64u8; 8][..]);
+        assert_eq!(dn, &[64u8; 4][..]);
+
+        // A layer with no entries at all is still None.
+        assert!(weights.first_layer_entry_bytes(1).is_none());
     }
 }

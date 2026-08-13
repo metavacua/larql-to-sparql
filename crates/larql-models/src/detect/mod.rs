@@ -9,6 +9,16 @@
 //!   the family-routing dispatch that maps `model_type` → concrete
 //!   [`ModelArchitecture`].
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+// std::path::Path has no core/alloc equivalent at all (paths are
+// fundamentally OS-specific) -- unlike patterns 1-7, there is no wasm32
+// substitute to reach for. Every item that needs it (the config_io
+// submodule, detect_architecture/detect_architecture_validated, and the
+// PathBuf/io::Error-carrying ModelError variants) is individually gated
+// below rather than excluding this whole file, since ModelError and
+// detect_from_json*/registry are pure logic used from quant/ggml/*.rs.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use crate::architectures::bitnet::BitnetArch;
@@ -24,6 +34,8 @@ use crate::architectures::granite::GraniteArch;
 use crate::architectures::llama::LlamaArch;
 use crate::architectures::mistral::MistralArch;
 use crate::architectures::mixtral::MixtralArch;
+use crate::architectures::moss_tts_realtime::{MossTtsRealtimeArch, MOSS_TTS_REALTIME_MODEL_TYPE};
+use crate::architectures::olmoe::OlmoeArch;
 use crate::architectures::qwen::QwenArch;
 use crate::architectures::starcoder2::StarCoder2Arch;
 use crate::architectures::tinymodel::TinyModelArch;
@@ -32,15 +44,37 @@ use crate::validation::ConfigValidationError;
 
 mod config_io;
 mod parser;
+pub mod registry;
 
+#[cfg(not(target_arch = "wasm32"))]
 use config_io::{
     config_path, read_config_json, require_config_fields, CONFIG_FILE_NAME, CONFIG_KEY_TEXT_CONFIG,
 };
+// CONFIG_KEY_LANGUAGE_CONFIG (unlike its TEXT_CONFIG sibling) is also
+// read from portable code below (detect_from_json's MOSS-TTS-Realtime
+// arm), so it stays ungated -- CONFIG_KEY_TEXT_CONFIG's only use is the
+// ConfigFieldsMissing error message, already native-gated in config_io.rs.
+use config_io::CONFIG_KEY_LANGUAGE_CONFIG;
 use parser::parse_model_config;
 
+pub use registry::{
+    find_architecture, ArchitectureEntry, AttentionKind, ModelTypeMatch, ARCHITECTURE_REGISTRY,
+};
+
 /// Error from model detection/config parsing.
+///
+/// The `std::path::PathBuf`/`std::io::Error`-carrying variants below are
+/// wasm32-excluded individually rather than the whole enum: PathBuf has
+/// no core/alloc equivalent at all (paths are fundamentally OS-specific,
+/// unlike patterns 1-7 where *some* wasm32 substitute existed), but
+/// `ConfigValidation`/`Parse`/etc. are plain String/Vec payloads used
+/// from portable code (`validate_detected_architecture` below) and must
+/// stay available. Confirmed via grep that every gated variant is only
+/// ever constructed in already wasm32-excluded modules (config_io.rs,
+/// loading/, speech/) or #[cfg(test)] code.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON parse error: {0}")]
@@ -51,18 +85,22 @@ pub enum ModelError {
     UnsupportedDtype(String),
     #[error("missing tensor: {0}")]
     MissingTensor(String),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("not a directory: {0}")]
     NotADirectory(std::path::PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("no safetensors files in {0}")]
     NoSafetensors(std::path::PathBuf),
     #[error("config validation failed: {0:?}")]
     ConfigValidation(Vec<ConfigValidationError>),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error(
         "{CONFIG_FILE_NAME} not found at {0:?} — \
          architecture cannot be inferred from safetensors alone; \
          copy {CONFIG_FILE_NAME} from the source model into this directory"
     )]
     ConfigMissing(std::path::PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
     #[error(
         "{CONFIG_FILE_NAME} at {path:?} is missing required field(s): {missing:?} \
          (checked under top level and `{CONFIG_KEY_TEXT_CONFIG}`)"
@@ -81,6 +119,7 @@ pub enum ModelError {
 /// architecture-class default. This prevents the silent fallback-to-defaults
 /// path from inventing a wrong topology and then panicking deep inside the
 /// extract pipeline (issue #22).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn detect_architecture(model_dir: &Path) -> Result<Box<dyn ModelArchitecture>, ModelError> {
     let config_path = config_path(model_dir);
     let config_json = read_config_json(&config_path)?;
@@ -89,6 +128,7 @@ pub fn detect_architecture(model_dir: &Path) -> Result<Box<dyn ModelArchitecture
 }
 
 /// Read `config.json` from a model directory, detect the architecture, and validate it.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn detect_architecture_validated(
     model_dir: &Path,
 ) -> Result<Box<dyn ModelArchitecture>, ModelError> {
@@ -123,8 +163,24 @@ pub fn detect_from_json(config: &serde_json::Value) -> Box<dyn ModelArchitecture
         "gpt2" => Box::new(Gpt2Arch::from_config(model_config)),
         // GPT-OSS (MoE, MXFP4 packed experts)
         "gpt_oss" => Box::new(GptOssArch::from_config(model_config)),
+        // MOSS-TTS-Realtime — a stock Qwen3 backbone nested under
+        // `language_config`, whose output is a hidden state for a
+        // side-loaded audio depth transformer, never text. The nested
+        // object is a complete Qwen3 config carrying its own
+        // `model_type: "qwen3"`, so it is parsed directly and rebranded;
+        // the flat fallback keeps in-memory test configs terse.
+        t if t == MOSS_TTS_REALTIME_MODEL_TYPE => {
+            let nested = config.get(CONFIG_KEY_LANGUAGE_CONFIG).unwrap_or(config);
+            let mut nested_config = parse_model_config(nested);
+            nested_config.model_type = MOSS_TTS_REALTIME_MODEL_TYPE.to_string();
+            Box::new(MossTtsRealtimeArch::from_config(nested_config))
+        }
         // Qwen family (dense and MoE share same keys)
         t if t.starts_with("qwen") => Box::new(QwenArch::from_config(model_config)),
+        // OLMoE — Qwen3-MoE tensor layout, but sizes experts from
+        // `intermediate_size` (no `moe_intermediate_size` field) and does not
+        // renormalize top-k router probabilities.
+        "olmoe" => Box::new(OlmoeArch::from_config(model_config)),
         // DeepSeek-V4 (MoE + MLA + MXFP4 + HCA attention; new tensor naming)
         "deepseek_v4" => Box::new(DeepSeekV4Arch::from_config(model_config)),
         // DeepSeek V2/V3 family (MoE + MLA, model.* prefixed keys)

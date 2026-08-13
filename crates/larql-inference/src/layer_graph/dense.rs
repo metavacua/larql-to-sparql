@@ -1,6 +1,8 @@
 use ndarray::Array2;
 
 use super::{LayerGraph, LayerOutput};
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;

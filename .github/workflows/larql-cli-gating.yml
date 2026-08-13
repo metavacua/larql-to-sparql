@@ -1,0 +1,531 @@
+name: larql-cli-gating
+
+on:
+  # push: (not just pull_request:) is required so this -- the campaign's
+  # sole wasm32v1-none/forbid-unsafe oracle -- keeps running on every push
+  # to this branch independent of PR #290's own state. A push-triggered run
+  # needs nothing on origin/main to fire; workflow_dispatch below only
+  # registers once this file exists on the repo's default branch, and
+  # pull_request needs an open PR. Relying on pull_request: alone (as this
+  # file briefly did, commit 073f2b76, rationale "pull_request already
+  # covers every push while PR #290 is open") means: if PR #290 is ever
+  # closed without merging, pushes to this branch fire zero workflows of
+  # any kind, and the workflow_dispatch fallback is inert until the file
+  # lands on main -- a real failure mode, not a documentation nit; this is
+  # what actually happened. While the PR is open, a push fires BOTH events
+  # for the same commit -- concurrency: below is keyed on the actual head
+  # commit SHA (identical for both event types), not github.ref (which
+  # differs: refs/heads/gating/... for push vs refs/pull/290/merge for
+  # pull_request), specifically so cancel-in-progress dedupes ACROSS event
+  # types, not just within each -- confirmed empirically that keying on
+  # github.ref does not: two full runs executed concurrently to completion
+  # for the same commit (~60+ redundant jobs) before this was caught and
+  # fixed. Running the same commit through the same jobs twice for zero
+  # additional signal is waste, not the kind of cost this campaign's
+  # standing "runner cost is not a constraint" rule licenses -- that rule
+  # is about not trimming coverage breadth (OS/feature legs), not about
+  # tolerating pure duplication.
+  push:
+    branches: [gating/larql-cli-wasm-and-safe]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # github.event.pull_request.head.sha resolves on pull_request events;
+  # it's absent (null) on push/workflow_dispatch events, where the `||`
+  # falls through to github.sha -- either way this lands on the actual
+  # commit being tested, so a push-triggered and a pull_request-triggered
+  # run for the same commit land in the same group and cancel-in-progress
+  # cancels the earlier one instead of letting both run to completion.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # `cargo fmt --check` is target- and feature-independent -- formatting
+  # doesn't care what triple you're building for, so unlike everything
+  # below it needs no os:/features: axis and no wasm32 toolchain target
+  # at all, just the rustfmt component. Scoped to exactly the 14 crates
+  # in larql-cli's closure (not a bare workspace-wide `cargo fmt
+  # --check`), so it can't fail on formatting debt in an out-of-closure
+  # crate (larql-server/demos/router/python/experts) that this campaign
+  # has never touched. Runs first, gates everything else via
+  # wasm32v1-none-ubuntu's `needs:` below -- it's the cheapest possible
+  # check, so there's no reason to spend any build time before it runs.
+  fmt-check:
+    name: fmt-check / ${{ matrix.crate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - larql-cli
+          - larql-core
+          - larql-compute
+          - larql-compute-metal
+          - larql-inference
+          - larql-kv
+          - larql-models
+          - larql-lql
+          - larql-vindex
+          - larql-vindex-spec
+          - larql-factory
+          - larql-boundary
+          - larql-execution
+          - larql-router-protocol
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: cargo fmt --check
+        run: cargo fmt -p ${{ matrix.crate }} -- --check
+
+  # OS is the outer ordering axis, crate-dependency is the inner one --
+  # ubuntu + wasm32v1-none is the absolute first thing that runs, for
+  # everything. Only once the entire ubuntu wave clears does anything
+  # on windows/macos start; only once windows/macos clear for the
+  # dependencies does larql-cli (the root) get its turn; forbid-unsafe
+  # is last. Every hop below is a plain `needs:` -- GitHub's default
+  # skip-on-fail does all the pruning, no `if:` anywhere.
+  #
+  # `larql-compute-metal` has no ubuntu (or windows) leg at all -- Metal
+  # doesn't exist off macOS -- so it gets its own job (`wasm32v1-none-metal`)
+  # rather than a `crate:` entry here. It still `needs:` the ubuntu wave
+  # below rather than running concurrently with it: ubuntu+wasm32v1-none
+  # is meant to be a single global checkpoint everything else funnels
+  # through, not a per-crate-only gate.
+  #
+  # AUTO-FIX, folded in here (retiring the former standalone
+  # clippy-fix.yml -- its discover job, deps/roots two-tier split, and
+  # patch-plus-separate-native-verify-job design added ceremony this
+  # replaces): each leg's clippy step (`check`, continue-on-error) gates
+  # a best-effort `clippy --fix` + `cargo fmt`, and whatever changed gets
+  # uploaded as an artifact of the ACTUAL changed files (via `git diff
+  # --name-only`, fed straight into upload-artifact's path: input, which
+  # preserves the relative directory structure) -- download, unzip into
+  # the repo root, done. No patch, no `git apply`, no separate
+  # verify-native job: clippy re-runs for real immediately after (no
+  # continue-on-error this time), so the job's actual pass/fail reflects
+  # whether findings remain, not whether --fix ran or how far it got.
+  # The upload itself is unconditional on that final outcome (`if:
+  # always()`), so a still-red leg still surfaces whatever partial
+  # progress --fix made, not just an empty-handed failure. No native
+  # (fmt/check/clippy/test) re-verification gate before the fix is
+  # exposed -- deliberately dropped relative to the old design, which
+  # built that gate in direct response to a documented incident (a local
+  # `--fix` regression that silently broke 5 crates' native builds,
+  # invisible for a full session because only the wasm32 leg was ever
+  # re-checked). Accepted tradeoff: this campaign's own downstream
+  # native oracles (per-crate `larql-*.yml` workflows, dispatchable
+  # independent of this file) are the real backstop if that risk
+  # resurfaces here; construct minimal, push, let real signal decide
+  # whether a lighter check needs to come back, rather than pre-building
+  # ceremony against a hypothetical.
+  wasm32v1-none-ubuntu:
+    name: wasm32v1-none / ${{ matrix.crate }} / ubuntu-latest / ${{ matrix.features }}
+    needs: fmt-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - larql-core
+          - larql-compute
+          - larql-inference
+          - larql-kv
+          - larql-models
+          - larql-lql
+          - larql-vindex
+          - larql-vindex-spec
+          - larql-factory
+          # Discovered mid-campaign via pattern 8 (sibling-path-
+          # dependency-not-yet-gated): these are transitive deps of
+          # larql-kv/larql-vindex/larql-inference/larql-cli that weren't
+          # in the original matrix. Without a direct leg, a green
+          # larql-kv leg would be the only signal that these three are
+          # actually correct -- adding them here gives each an isolated
+          # result instead of an inferred one.
+          - larql-boundary
+          - larql-execution
+          - larql-router-protocol
+        features: [default, no-default-features]
+    env:
+      CRATE: ${{ matrix.crate }}
+      # Fixed literal (default|no-default-features), never free text --
+      # safe to leave unquoted at each call site below, since it needs
+      # to vanish entirely when empty (the "default" case), not become
+      # a stray empty-string argument.
+      FEATURE_FLAG: ${{ matrix.features == 'no-default-features' && '--no-default-features' || '' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: clippy, rustfmt
+
+      # No OpenBLAS install here (unlike forbid-unsafe below): every BLAS
+      # dependency in this workspace is gated behind
+      # cfg(target_os = "linux"/"macos"/"windows"), and wasm32v1-none's
+      # target_os is "none" -- confirmed via `cargo tree --target
+      # wasm32v1-none -e normal,build -p <crate>` showing no openblas-src
+      # in the graph for any of the matrixed crates. Installing it here
+      # would be pure dead time on every leg.
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32v1-none-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32v1-none-
+
+      # clippy runs before build: clippy-driver fully type-checks before
+      # it can lint (a strict superset of what `cargo build` alone
+      # checks), so running it first surfaces both compile errors and
+      # lint failures in one step instead of waiting on a separate build
+      # pass first. No --all-targets: that would pull in #[cfg(test)]
+      # modules, which this whole campaign has deliberately never gated
+      # for wasm32 (they're not compiled by a plain `cargo build`
+      # either -- same scope boundary, just enforced for lint as well as
+      # build now). This is the first time any of this crate's
+      # wasm32-cfg'd code has ever been linted by anything: native
+      # clippy runs on the disabled per-crate workflows never see it
+      # (cfg'd out entirely).
+      - name: cargo clippy --target wasm32v1-none (gates whether an auto-fix pass runs)
+        id: check
+        continue-on-error: true
+        shell: bash
+        run: cargo clippy --target wasm32v1-none -p "$CRATE" $FEATURE_FLAG -- -D warnings
+
+      - name: cargo clippy --fix --target wasm32v1-none
+        if: steps.check.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        run: cargo clippy --fix --target wasm32v1-none -p "$CRATE" $FEATURE_FLAG -- -D warnings
+
+      - name: cargo fmt (normalize whatever --fix produced)
+        if: steps.check.outcome == 'failure'
+        run: cargo fmt -p "$CRATE"
+
+      - name: List files --fix changed
+        id: changed
+        if: always() && steps.check.outcome == 'failure'
+        shell: bash
+        run: |
+          files=$(git diff --name-only -- crates/)
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$files" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Upload files --fix changed (real files, not a patch)
+        if: always() && steps.check.outcome == 'failure' && steps.changed.outputs.files != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: clippy-fix-${{ matrix.crate }}-wasm32v1-none-${{ matrix.features }}-${{ runner.os }}
+          path: ${{ steps.changed.outputs.files }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: cargo clippy --target wasm32v1-none (real gate -- fails if findings remain)
+        shell: bash
+        run: cargo clippy --target wasm32v1-none -p "$CRATE" $FEATURE_FLAG -- -D warnings
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: cargo build --target wasm32v1-none -p "$CRATE" $FEATURE_FLAG
+
+  # Same 12 crates, windows + macos -- gated on the ubuntu wave above
+  # clearing in full. Not yet given the wasm32v1-none-ubuntu auto-fix
+  # mechanism below -- per the leaves-first sequencing this campaign
+  # already follows (fix leaves, then root, then per-OS/forbid-unsafe
+  # clusters), this job can't even run until wasm32v1-none-ubuntu is
+  # fully green, so building the mechanism into it now is premature;
+  # it gets the identical treatment once this stage is actually active.
+  wasm32v1-none-others:
+    name: wasm32v1-none / ${{ matrix.crate }} / ${{ matrix.os }} / ${{ matrix.features }}
+    needs: wasm32v1-none-ubuntu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+        crate:
+          - larql-core
+          - larql-compute
+          - larql-inference
+          - larql-kv
+          - larql-models
+          - larql-lql
+          - larql-vindex
+          - larql-vindex-spec
+          - larql-factory
+          - larql-boundary
+          - larql-execution
+          - larql-router-protocol
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: clippy
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32v1-none-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32v1-none-
+
+      - name: cargo clippy --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features -- -D warnings
+          else
+            cargo clippy --target wasm32v1-none -p ${{ matrix.crate }} -- -D warnings
+          fi
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }} --no-default-features
+          else
+            cargo build --target wasm32v1-none -p ${{ matrix.crate }}
+          fi
+
+  # larql-compute-metal: macOS-only, no ubuntu/windows leg exists for
+  # it. Still gated on the ubuntu wave (see the top-level comment) even
+  # though it has no ubuntu leg of its own. Not yet given the auto-fix
+  # mechanism -- same reasoning as wasm32v1-none-others above.
+  wasm32v1-none-metal:
+    name: wasm32v1-none / larql-compute-metal / macos-14 / ${{ matrix.features }}
+    needs: wasm32v1-none-ubuntu
+    runs-on: macos-14
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: clippy
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32v1-none-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32v1-none-
+
+      - name: cargo clippy --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p larql-compute-metal --no-default-features -- -D warnings
+          else
+            cargo clippy --target wasm32v1-none -p larql-compute-metal -- -D warnings
+          fi
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p larql-compute-metal --no-default-features
+          else
+            cargo build --target wasm32v1-none -p larql-compute-metal
+          fi
+
+  # larql-cli (the root) on ubuntu -- gated on every dependency's
+  # windows/macos legs AND the metal leg, since larql-cli's default
+  # feature set (`gpu`) pulls in larql-compute-metal. Not yet given the
+  # auto-fix mechanism -- same reasoning as wasm32v1-none-others above;
+  # this is the root stage, sequenced after every dependency leg above
+  # it is green.
+  wasm32v1-none-cli-ubuntu:
+    name: wasm32v1-none / larql-cli / ubuntu-latest / ${{ matrix.features }}
+    needs: [wasm32v1-none-others, wasm32v1-none-metal]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: clippy
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32v1-none-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32v1-none-
+
+      - name: cargo clippy --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p larql-cli --no-default-features -- -D warnings
+          else
+            cargo clippy --target wasm32v1-none -p larql-cli -- -D warnings
+          fi
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p larql-cli --no-default-features
+          else
+            cargo build --target wasm32v1-none -p larql-cli
+          fi
+
+  # larql-cli on windows + macos -- gated on its own ubuntu leg above.
+  # Not yet given the auto-fix mechanism -- same reasoning as
+  # wasm32v1-none-others above.
+  wasm32v1-none-cli-others:
+    name: wasm32v1-none / larql-cli / ${{ matrix.os }} / ${{ matrix.features }}
+    needs: wasm32v1-none-cli-ubuntu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: clippy
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm32v1-none-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-wasm32v1-none-
+
+      - name: cargo clippy --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo clippy --target wasm32v1-none -p larql-cli --no-default-features -- -D warnings
+          else
+            cargo clippy --target wasm32v1-none -p larql-cli -- -D warnings
+          fi
+
+      - name: cargo build --target wasm32v1-none
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build --target wasm32v1-none -p larql-cli --no-default-features
+          else
+            cargo build --target wasm32v1-none -p larql-cli
+          fi
+
+  forbid-unsafe:
+    name: forbid-unsafe / larql-cli / ${{ matrix.os }} / ${{ matrix.features }}
+    needs: wasm32v1-none-cli-others
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+        features: [default, no-default-features]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install OpenBLAS (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-forbid-unsafe-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-forbid-unsafe-
+
+      - name: cargo build (forbid unsafe_code)
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "no-default-features" ]; then
+            cargo build -p larql-cli --no-default-features
+          else
+            cargo build -p larql-cli
+          fi

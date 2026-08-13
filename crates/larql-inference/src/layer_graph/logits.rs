@@ -1,11 +1,18 @@
 //! Logits computation — final norm + vindex KNN + softmax.
 
+// No alloc_prelude import: both functions in this file
+// (finalize_logits, softmax_prob) are native-only -- nothing in the
+// portable subset needs Vec/String/Box/ToOwned. Array2/ModelWeights/
+// ComputeBackend below are needed only by finalize_logits, same reason.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
-
 /// Shared logits computation: final norm + vindex KNN + softmax.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn finalize_logits(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -63,6 +70,10 @@ pub fn finalize_logits(
 }
 
 /// Softmax probability of a single score within a set of hits.
+/// Native-only: its only caller, `generate::gpu::sampling_step`, lives in
+/// the native-only `gpu` module (pure f32/f64 arithmetic, but currently
+/// uncalled from anywhere portable).
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn softmax_prob(
     score: f32,
     hits: &[(u32, f32)],

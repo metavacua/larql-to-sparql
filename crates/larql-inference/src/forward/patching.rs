@@ -27,10 +27,13 @@
 use super::hooks::{LayerHook, RecordHook};
 use super::trace::trace_forward_full_hooked;
 use super::TraceResult;
+use crate::collections::{HashMap, HashSet};
 use crate::ffn::{FfnBackend, WeightFfn};
 use crate::model::ModelWeights;
 use ndarray::Array2;
-use std::collections::HashMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Donor-side state: the residual row at each requested `(layer, position)`
 /// coord, captured during the donor forward pass.
@@ -76,11 +79,11 @@ pub fn capture_donor_state_with_ffn(
 ) -> DonorState {
     if coords.is_empty() {
         return DonorState {
-            records: HashMap::new(),
+            records: HashMap::default(),
         };
     }
 
-    let layers: std::collections::HashSet<usize> = coords.iter().map(|(l, _)| *l).collect();
+    let layers: HashSet<usize> = coords.iter().map(|(l, _)| *l).collect();
     let max_layer = *layers.iter().max().unwrap();
     let layer_vec: Vec<usize> = layers.iter().copied().collect();
 
@@ -96,7 +99,7 @@ pub fn capture_donor_state_with_ffn(
         &mut record,
     );
 
-    let mut records = HashMap::with_capacity(coords.len());
+    let mut records = HashMap::with_capacity_and_hasher(coords.len(), Default::default());
     for &(layer, pos) in coords {
         if layer > max_layer {
             continue;
@@ -234,7 +237,7 @@ mod tests {
     fn empty_donor_state_is_noop_patch() {
         let weights = shared_weights();
         let donor = DonorState {
-            records: HashMap::new(),
+            records: HashMap::default(),
         };
         let recipient = vec![3u32, 4, 5];
         let baseline = baseline_residual(weights, &recipient, 1);
@@ -347,7 +350,7 @@ mod tests {
         // hidden_size. The hook's `row.len() != hidden` guard must short-
         // circuit so the recipient passes through untouched.
         let weights = shared_weights();
-        let mut records = HashMap::new();
+        let mut records = HashMap::default();
         records.insert((0usize, 0usize), vec![0.0f32; weights.hidden_size + 1]); // wrong len
         let donor = DonorState { records };
 

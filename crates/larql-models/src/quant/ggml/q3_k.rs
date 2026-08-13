@@ -8,6 +8,8 @@
 
 use super::check_block_input;
 use crate::detect::ModelError;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use crate::quant::half::f16_to_f32;
 
 pub const Q3_K_BLOCK_BYTES: usize = 110;

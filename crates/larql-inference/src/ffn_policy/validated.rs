@@ -5,6 +5,9 @@ use super::backend_kind::FfnBackendKind;
 use super::policy::FfnLayerPolicy;
 use super::routing::RoutingPredicate;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A policy that has been validated against a known model's layer
 /// count.
 ///

@@ -1,5 +1,11 @@
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet, VecDeque};
+use crate::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+use ::core::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::VecDeque;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::VecDeque;
 
 use super::edge::{CompactEdge, Edge, Triple};
 use super::enums::{MergeStrategy, SourceType};
@@ -56,12 +62,12 @@ impl Graph {
     pub fn new() -> Self {
         Self {
             edges: Vec::new(),
-            edge_set: HashSet::new(),
-            adjacency: HashMap::new(),
-            reverse: HashMap::new(),
-            keyword_index: HashMap::new(),
+            edge_set: HashSet::default(),
+            adjacency: HashMap::default(),
+            reverse: HashMap::default(),
+            keyword_index: HashMap::default(),
             schema: Schema::new(),
-            metadata: HashMap::new(),
+            metadata: HashMap::default(),
             nodes: RefCell::new(None),
         }
     }
@@ -124,7 +130,7 @@ impl Graph {
     /// Remove duplicate (s,r,o) triples. Returns count removed.
     pub fn deduplicate(&mut self, strategy: MergeStrategy) -> usize {
         let original = self.edges.len();
-        let mut seen: HashMap<Triple, Edge> = HashMap::new();
+        let mut seen: HashMap<Triple, Edge> = HashMap::default();
 
         for edge in &self.edges {
             let triple = edge.triple();
@@ -287,7 +293,7 @@ impl Graph {
     pub fn search(&self, query: &str, max_results: usize) -> Vec<&Edge> {
         let query_lower = query.to_lowercase();
         let tokens: Vec<&str> = query_lower.split_whitespace().collect();
-        let mut scores: HashMap<usize, usize> = HashMap::new();
+        let mut scores: HashMap<usize, usize> = HashMap::default();
 
         for token in &tokens {
             if let Some(indices) = self.keyword_index.get(*token) {
@@ -308,7 +314,7 @@ impl Graph {
         let mut sub = Graph::new();
         sub.schema = self.schema.clone();
 
-        let mut visited: HashSet<String> = HashSet::new();
+        let mut visited: HashSet<String> = HashSet::default();
         let mut queue: VecDeque<(String, u32)> = VecDeque::new();
         queue.push_back((entity.to_string(), 0));
 
@@ -404,7 +410,7 @@ impl Graph {
         let nodes_ref = self.nodes.borrow();
         let nodes = nodes_ref.as_ref();
 
-        let mut source_counts: HashMap<String, usize> = HashMap::new();
+        let mut source_counts: HashMap<String, usize> = HashMap::default();
         let mut conf_sum = 0.0f64;
         for edge in &self.edges {
             *source_counts
@@ -492,7 +498,7 @@ impl Graph {
     // ── Private ──
 
     fn index_keywords(&mut self, edge: &Edge, idx: usize) {
-        let mut tokens: HashSet<String> = HashSet::new();
+        let mut tokens: HashSet<String> = HashSet::default();
         for text in [&edge.subject, &edge.relation, &edge.object] {
             for token in text.to_lowercase().replace('-', " ").split_whitespace() {
                 tokens.insert(token.to_string());
@@ -549,10 +555,10 @@ impl Graph {
             return;
         }
 
-        let mut out_rels: HashMap<&str, HashSet<String>> = HashMap::new();
-        let mut in_rels: HashMap<&str, HashSet<String>> = HashMap::new();
-        let mut out_deg: HashMap<&str, usize> = HashMap::new();
-        let mut in_deg: HashMap<&str, usize> = HashMap::new();
+        let mut out_rels: HashMap<&str, HashSet<String>> = HashMap::default();
+        let mut in_rels: HashMap<&str, HashSet<String>> = HashMap::default();
+        let mut out_deg: HashMap<&str, usize> = HashMap::default();
+        let mut in_deg: HashMap<&str, usize> = HashMap::default();
 
         for edge in &self.edges {
             out_rels
@@ -569,7 +575,7 @@ impl Graph {
 
         let all_entities: HashSet<&str> = out_deg.keys().chain(in_deg.keys()).copied().collect();
 
-        let mut nodes = HashMap::new();
+        let mut nodes = HashMap::default();
         for name in all_entities {
             let out = out_deg.get(name).copied().unwrap_or(0);
             let inp = in_deg.get(name).copied().unwrap_or(0);
@@ -591,10 +597,10 @@ impl Graph {
     }
 
     fn count_components(&self) -> usize {
-        let mut visited: HashSet<&str> = HashSet::new();
+        let mut visited: HashSet<&str> = HashSet::default();
         let mut components = 0;
 
-        let mut adj: HashMap<&str, HashSet<&str>> = HashMap::new();
+        let mut adj: HashMap<&str, HashSet<&str>> = HashMap::default();
         for edge in &self.edges {
             adj.entry(&edge.subject).or_default().insert(&edge.object);
             adj.entry(&edge.object).or_default().insert(&edge.subject);
@@ -640,8 +646,8 @@ impl Default for Graph {
     }
 }
 
-impl std::fmt::Debug for Graph {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl ::core::fmt::Debug for Graph {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         write!(
             f,
             "Graph(edges={}, nodes={})",
@@ -663,6 +669,12 @@ pub struct DescribeResult {
 pub enum GraphError {
     #[error("deserialization failed: {0}")]
     Deserialize(String),
+    // std::io::Error has no core/alloc equivalent (it's fundamentally an
+    // OS error type). Only ever constructed by io/packed.rs via
+    // `map_err(GraphError::Io)` -- that whole module is already excluded
+    // on wasm32 (lib.rs), so this variant can be too. Confirmed via grep
+    // that nothing outside io/ references GraphError::Io.
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

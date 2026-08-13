@@ -520,7 +520,7 @@ Not blocking the spec, but worth tracking:
 | `BoundaryPerLayerEngine` *(future)* | per-layer codec policy | per-layer contract | per-layer per-frame |
 | `ApolloEngine` | retrieval-augmented compiled facts via residual injection | task accuracy | n/a |
 | `UnlimitedContextEngine` | live KV with per-window checkpoints | exact within window | not in scope |
-| `TurboQuantEngine` | live KV with WHT+Lloyd-Max codec | cos ≈ 0.991 | not in scope |
+| `TurboQuantEngine` | live KV with WHT+Lloyd-Max codec | per-row cos ≈ 0.9954 (4-bit, 2026-07-30) | not in scope |
 
 `BoundaryKvEngine` is the only engine whose primary value lives at the
 cross-session boundary rather than in-session. The other two planned

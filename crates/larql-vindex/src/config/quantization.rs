@@ -12,6 +12,9 @@ use crate::format::filenames::{DOWN_FEATURES_FP8_BIN, GATE_VECTORS_FP4_BIN, UP_F
 
 use super::compliance::ComplianceGate;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Per-vindex quant scheme. Mirrors the `quant` enum in the v1 wire
 /// schema (`crates/larql-vindex-spec/schema/vindex-v1.schema.json`):
 /// readers accept `"none"`, `"q4k"`, and `"kquant"`; writers continue
@@ -29,8 +32,8 @@ pub enum QuantFormat {
     Q4K,
 }
 
-impl std::fmt::Display for QuantFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for QuantFormat {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::None => write!(f, "none"),
             Self::Q4K => write!(f, "q4k"),
@@ -58,8 +61,8 @@ pub enum Precision {
     F32,
 }
 
-impl std::fmt::Display for Precision {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Precision {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Fp4 => write!(f, "fp4"),
             Self::Fp8 => write!(f, "fp8"),

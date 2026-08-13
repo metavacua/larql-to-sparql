@@ -5,6 +5,9 @@
 use super::super::prompts::KnowledgeSource;
 use larql_inference::kv_engine::EngineError;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Outcome of attempting to score a prompt against an engine.
 ///
 /// Mirrors the [`larql_inference::EngineError`] taxonomy: each error
@@ -47,6 +50,28 @@ pub enum ScoreOutcome {
     /// backend or compute kernel returned a runtime failure (corrupt
     /// weights, OOM, GPU driver error).
     SkippedBackendFailure,
+    /// Engine reported [`EngineError::Execution`] with a refusal that
+    /// more residency or another capable executor could rescue. The
+    /// row is genuinely unserved and belongs in the `served_rate`
+    /// deficit — nothing is broken.
+    SkippedExecutionRefused,
+    /// Engine reported [`EngineError::Execution`] with a
+    /// [`RefusalKind::BindingDefect`](larql_execution::RefusalKind::BindingDefect)
+    /// — the bound artifact violates its own contract.
+    ///
+    /// Split from [`Self::SkippedExecutionRefused`] on purpose. Both are
+    /// unserved rows, but only this one indicts the index, and folding
+    /// it into a coverage deficit is how a broken artifact gets read as
+    /// a slice that merely wasn't resident.
+    FailedBindingDefect,
+    /// Engine reported [`EngineError::StateInvalidated`] — a failure left
+    /// K/V that could not be rewound, so the engine instance is no longer
+    /// describing any token sequence.
+    ///
+    /// Every row after this one on the same engine is suspect, which is why
+    /// it is a `Failed*` rather than a `Skipped*`: a run containing one is
+    /// not a run with a gap, it is a run that should be re-driven.
+    FailedStateInvalidated,
 }
 
 impl From<&EngineError> for ScoreOutcome {
@@ -57,6 +82,18 @@ impl From<&EngineError> for ScoreOutcome {
             EngineError::BackendUnavailable => Self::SkippedBackendUnavailable,
             EngineError::InvariantViolation { .. } => Self::SkippedInvariantViolation,
             EngineError::BackendFailure { .. } => Self::SkippedBackendFailure,
+            EngineError::Execution(refusal) => {
+                if refusal.kind().indicts_the_artifact() {
+                    Self::FailedBindingDefect
+                } else {
+                    Self::SkippedExecutionRefused
+                }
+            }
+            // Deliberately not delegated to the wrapped cause: what the cause
+            // *was* stops being the actionable fact once the engine can no
+            // longer be driven, and reporting the cause's outcome would file
+            // a dead engine under a coverage deficit.
+            EngineError::StateInvalidated { .. } => Self::FailedStateInvalidated,
         }
     }
 }
@@ -382,6 +419,73 @@ mod tests {
         assert!(!ScoreOutcome::SkippedBackendUnavailable.is_served());
         assert!(!ScoreOutcome::SkippedInvariantViolation.is_served());
         assert!(!ScoreOutcome::SkippedBackendFailure.is_served());
+        assert!(!ScoreOutcome::SkippedExecutionRefused.is_served());
+        assert!(!ScoreOutcome::FailedBindingDefect.is_served());
+        assert!(!ScoreOutcome::FailedStateInvalidated.is_served());
+    }
+
+    // ── EngineError::Execution → outcome ─────────────────────────────────────
+
+    fn execution_error(kind: larql_execution::RefusalKind) -> EngineError {
+        EngineError::Execution(Box::new(larql_inference::ffn::RecordedRefusal {
+            layer: 0,
+            kind,
+            message: "route refused".into(),
+        }))
+    }
+
+    #[test]
+    fn a_refusal_maps_to_an_outcome_that_keeps_the_artifact_distinction() {
+        // The split this enum exists to preserve: a shard that does not hold
+        // an expert, and an index whose router addresses one that cannot
+        // exist, are both unserved rows and must not share a status — one is
+        // a coverage number, the other is a bug report.
+        use larql_execution::RefusalKind;
+        assert_eq!(
+            ScoreOutcome::from(&execution_error(RefusalKind::Residency)),
+            ScoreOutcome::SkippedExecutionRefused
+        );
+        assert_eq!(
+            ScoreOutcome::from(&execution_error(RefusalKind::Unsupported)),
+            ScoreOutcome::SkippedExecutionRefused
+        );
+        assert_eq!(
+            ScoreOutcome::from(&execution_error(RefusalKind::BindingDefect)),
+            ScoreOutcome::FailedBindingDefect
+        );
+    }
+
+    #[test]
+    fn an_invalidated_engine_outranks_whatever_caused_it() {
+        // The wrapped cause is a Residency refusal, which on its own is an
+        // ordinary coverage skip. Once the engine cannot be driven, that
+        // reading is wrong: the run is not missing a row, it is untrustworthy
+        // from here on.
+        let err =
+            execution_error(larql_execution::RefusalKind::Residency).invalidating_engine_state();
+        assert_eq!(
+            ScoreOutcome::from(&err),
+            ScoreOutcome::FailedStateInvalidated,
+            "delegating to the cause would file a dead engine as a residency gap"
+        );
+    }
+
+    #[test]
+    fn every_refusal_kind_maps_to_some_outcome() {
+        // Sweeps the vocabulary rather than the three cases above, so a new
+        // `RefusalKind` cannot be added without this file being considered.
+        for kind in larql_execution::RefusalKind::ALL {
+            let outcome = ScoreOutcome::from(&execution_error(kind));
+            assert!(
+                !outcome.is_served(),
+                "{kind}: a refused row is never a served one"
+            );
+            assert_eq!(
+                outcome == ScoreOutcome::FailedBindingDefect,
+                kind.indicts_the_artifact(),
+                "{kind}: the outcome must follow indicts_the_artifact()"
+            );
+        }
     }
 
     #[test]
@@ -411,6 +515,18 @@ mod tests {
             (
                 ScoreOutcome::SkippedBackendFailure,
                 r#"{"status":"skipped_backend_failure"}"#,
+            ),
+            (
+                ScoreOutcome::SkippedExecutionRefused,
+                r#"{"status":"skipped_execution_refused"}"#,
+            ),
+            (
+                ScoreOutcome::FailedBindingDefect,
+                r#"{"status":"failed_binding_defect"}"#,
+            ),
+            (
+                ScoreOutcome::FailedStateInvalidated,
+                r#"{"status":"failed_state_invalidated"}"#,
             ),
         ];
         for (outcome, expected_json) in &cases {

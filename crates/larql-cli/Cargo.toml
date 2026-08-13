@@ -4,14 +4,30 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "CLI for LARQL knowledge graph extraction and querying"
+
+[lints]
+workspace = true
 
 [[bin]]
 name = "larql"
 path = "src/main.rs"
 
 [dependencies]
-larql-core = { path = "../larql-core" }
+# default-features = false + explicit features = ["http"]: larql-core's
+# "msgpack" default feature pulls in rmp-serde, unneeded here, but
+# commands/extraction/bfs_cmd.rs genuinely calls
+# larql_core::engine::http_provider::HttpProvider -- the "no source
+# references http/msgpack-gated APIs" claim in an earlier round's grep
+# was wrong (pattern 11: a documented gap needs re-verification, not
+# assumed permanent -- this instance only surfaced now because native
+# compilation was disabled all session, invisible to wasm32-only CI
+# since bfs_cmd.rs was masked behind other cascades until this round).
+# Safe regardless of target: larql-core's reqwest (which "http" pulls
+# in) is already under its own native-only target table (pattern 12),
+# so enabling this feature has zero effect on the wasm32 build.
+larql-core = { path = "../larql-core", default-features = false, features = ["http"] }
 larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-inference = { path = "../larql-inference" }
@@ -19,7 +35,23 @@ larql-kv = { path = "../larql-kv" }
 larql-models = { path = "../larql-models" }
 larql-lql = { path = "../larql-lql" }
 larql-vindex = { path = "../larql-vindex" }
-clap = { version = "4", features = ["derive", "env"] }
+larql-vindex-spec = { path = "../larql-vindex-spec" }
+larql-factory = { path = "../larql-factory" }
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. Note: this crate is a [[bin]] target whose
+# main.rs itself implicitly requires std (no #![no_std]), so this alone
+# will not get larql-cli itself compiling on wasm32v1-none -- it only
+# clears the dependency-level std wall so the *next* boundary (the bin's
+# own use of std) becomes visible instead of being masked by it.
+# base64/ndarray have a genuine no_std mode; everything else below is
+# inherently native (terminal progress bars, networking, native
+# tokenizer bindings, mmap-based file loading, OS threads, filesystem)
+# -- pattern 9, no wasm32 entry at all.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 indicatif = "0.17"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 base64 = "0.22"
@@ -27,9 +59,6 @@ tokenizers = "0.21"
 safetensors = "0.7"
 memmap2 = "0.9"
 ndarray = "0.16"
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
 minijinja = "2"
 libc = "0.2"
 rayon = "1.10"
@@ -37,6 +66,28 @@ rayon = "1.10"
 # Pruned features — we only need JPEG/PNG/WebP. Skipping TIFF/AVIF/HDR/etc
 # avoids dragging in libavif, libtiff, openexr, and a 2 MB binary tax.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+# Default scratch directory for `larql recipe build` when --scratch-dir
+# is omitted — not test-only, the CLI needs this at runtime.
+tempfile = "3"
+# clap has zero no_std support at any feature combination -- clap_builder's
+# mandatory (non-optional, no-feature-gate) dependency on clap_lex uses
+# `std::ffi::OsStr` unconditionally and clap_lex itself declares no
+# features at all (confirmed via cargo metadata). Not a tunable-feature
+# case like the "color"/is_terminal_polyfill wall this replaced -- pattern
+# 9, no wasm32 entry at all.
+clap = { version = "4", features = ["derive", "env"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+base64 = { version = "0.22", default-features = false }
+ndarray = { version = "0.16", default-features = false }
+# Portable HashMap/HashSet (crate::collections) and Float trait
+# (crate::alloc_prelude) backing -- same pattern as every other crate
+# gated this session.
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+hashbrown = { version = "0.15", default-features = false }
 
 [features]
 default = ["gpu"]
@@ -48,8 +99,11 @@ gpu = [
 ]
 
 [dev-dependencies]
-tempfile = "3"
 # `test-utils` exposes `larql_models::test_fixtures::make_test_weights`,
 # used by run_cmd_image tests to borrow a real ModelConfig without
 # enumerating every field by hand. Production builds don't compile it.
 larql-models = { path = "../larql-models", features = ["test-utils"] }
+# `test-utils` exposes `larql_vindex_spec::test_fixtures::sample_manifest`,
+# used by card_cmd tests to build a real VindexManifest without
+# enumerating every field by hand.
+larql-vindex-spec = { path = "../larql-vindex-spec", features = ["test-utils"] }

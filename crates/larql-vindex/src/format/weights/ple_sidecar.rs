@@ -26,6 +26,9 @@ use crate::format::filenames::*;
 
 use super::write_f32::{kind, WeightEntry, WeightSource};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Write `ple_weights.bin` and append `tensor_f16` manifest entries
 /// for every Gemma-4 PLE tensor. No-op when the architecture has no
 /// PLE (i.e. `!arch.has_per_layer_embeddings()`).

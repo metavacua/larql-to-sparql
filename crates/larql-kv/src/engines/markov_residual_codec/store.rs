@@ -1,9 +1,15 @@
 //! `RsStoreCodec` — `RsStore` with a codec-encoded cold tier.
 
 use larql_inference::attention::SharedKV;
-use ndarray::{s, Array2};
+use ndarray::Array2;
+// s! is only used inside clip_layer_overflow below, native-only.
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::s;
 
 use crate::engines::markov_residual_codec::codec::{decode_block, encode_block, ColdResidualCodec};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Per-layer encoded cold residuals.
 #[derive(Debug, Clone)]
@@ -125,6 +131,7 @@ impl RsStoreCodec {
     /// onto the cold tier). Also clips `hot_kv` consistently when
     /// present so the K/V cache stays aligned with the (smaller)
     /// hot residual buffer.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn clip_layer_overflow(&mut self, layer: usize) -> Array2<f32> {
         let window = match self.max_window {
             Some(w) => w,
@@ -161,6 +168,7 @@ impl RsStoreCodec {
 
     /// Reset the logical row count after a window-clip loop. Call once
     /// after `clip_layer_overflow` has been invoked for every layer.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn finalise_hot_len_after_clip(&mut self) {
         if let Some(w) = self.max_window {
             self.hot_len = self.hot_len.min(w);

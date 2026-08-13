@@ -1,0 +1,136 @@
+# Tagged release binaries (ADR-0026). Cross-builds `larql` (CLI) +
+# `larql-server` for the platforms larql-cli.yml already validates on
+# every push, and attaches one archive per platform to a GitHub Release.
+#
+# Deliberately NOT crates.io publishing — see ADR-0026 for why. These are
+# build artifacts, versioned by tag, with no semver/API-stability
+# commitment attached.
+#
+# Feature flags mirror larql-cli.yml exactly: default features (Metal) on
+# macOS, --no-default-features (CPU-only) on Linux/Windows — a release
+# build should exercise the same configuration CI already proves green.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: build - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            features: ""
+          # Pinned to 22.04, NOT ubuntu-latest: the runner's glibc sets the
+          # binary's minimum. 24.04 (glibc 2.39) emitted a GLIBC_2.38
+          # requirement, which will not load on Colab or any 22.04-class rented
+          # box — i.e. exactly the hosts ADR-0026 exists to serve. Raise this
+          # only when every DEC target host has moved past it.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            features: "--no-default-features"
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: "--no-default-features"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install OpenBLAS (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      # protoc on PATH satisfies the `cfg(not(windows))` skip in
+      # `larql-router-protocol` / `larql-server`. See those build.rs
+      # files for the rationale.
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Build (release-dist profile)
+        run: cargo build --profile release-dist --target ${{ matrix.target }} -p larql-cli -p larql-server ${{ matrix.features }}
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          out="larql-${{ matrix.target }}"
+          mkdir -p "$out"
+          cp target/${{ matrix.target }}/release-dist/larql "$out/"
+          cp target/${{ matrix.target }}/release-dist/larql-server "$out/"
+          tar czf "${out}.tar.gz" "$out"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "larql-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path $out
+          Copy-Item "target\${{ matrix.target }}\release-dist\larql.exe" "$out\"
+          Copy-Item "target\${{ matrix.target }}\release-dist\larql-server.exe" "$out\"
+          Compress-Archive -Path $out -DestinationPath "$out.zip"
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@v7
+        with:
+          name: larql-${{ matrix.target }}
+          path: |
+            larql-${{ matrix.target }}.tar.gz
+            larql-${{ matrix.target }}.zip
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release:
+    name: publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true

@@ -5,7 +5,9 @@
 //! here; sub-trait impls are in their own files.
 
 mod decode;
+pub mod grouped_experts;
 mod matmul;
+pub mod mxfp4;
 mod quant_matvec;
 
 use super::*;
@@ -22,6 +24,12 @@ impl ComputeBackend for MetalBackend {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn register_weight_region(&self, region: &[u8]) {
+        // Non-page-aligned bases can't alias zero-copy; resolution simply
+        // misses and the MoE dispatch keeps its staged-copy path.
+        let _ = self.bufs.register_region(region);
     }
 
     fn supports(&self, cap: Capability) -> bool {
@@ -106,6 +114,21 @@ mod tests {
         let m = backend();
         let any: &dyn std::any::Any = m.as_any();
         assert!(any.downcast_ref::<MetalBackend>().is_some());
+    }
+
+    /// `register_weight_region` is a thin delegator to
+    /// `BufferCache::register_region` — pin that the trait method
+    /// actually reaches it (a page-aligned anon mmap registers) rather
+    /// than silently no-op-ing.
+    #[test]
+    fn register_weight_region_delegates_to_buffer_cache() {
+        let m = backend();
+        let mut region = memmap2::MmapMut::map_anon(8192).expect("anon mmap");
+        region.fill(0);
+        let region = region.make_read_only().expect("read-only mmap");
+        let before = m.bufs.region_count();
+        m.register_weight_region(&region[..]);
+        assert_eq!(m.bufs.region_count(), before + 1);
     }
 
     /// `supports` accepts every capability MetalBackend claims —
@@ -197,6 +220,7 @@ mod tests {
             attn_ms: 3.0,
             gate_up_ms: 1.5,
             down_ms: 0.5,
+            ..Default::default()
         };
         crate::decode::profile::store_last_split_timings(written);
         let read = ComputeBackend::take_split_timings(&m).expect("must surface stored timing");

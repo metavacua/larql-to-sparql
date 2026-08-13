@@ -11,6 +11,8 @@
 //! live at `<tiny-model>/model/<version>/artifacts/`.
 
 use crate::config::{ModelArchitecture, ModelConfig};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 pub struct TinyModelArch {
     config: ModelConfig,

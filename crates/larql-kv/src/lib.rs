@@ -8,6 +8,15 @@
 //! hidden state (shape `[1, hidden_dim]`). The caller applies `final_norm +
 //! lm_head` to get logits — see `larql_inference::forward::hidden_to_raw_logits`.
 
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale. Applying
+// only the confirmed-safe crate-level attribute here and letting the
+// next real CI round show which modules need pattern-3 whole-module
+// exclusion, rather than guessing.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
+
 #[cfg(any(
     target_os = "linux",
     target_os = "freebsd",
@@ -16,11 +25,25 @@
 ))]
 extern crate blas_src;
 
+mod alloc_prelude;
+mod collections;
+
+// `EngineKind` (String/Box fields), `from_name` (`.to_string()`/`.into()`),
+// and `split_specs` (`Vec<String>`) all stay portable but name
+// String/Vec/Box in type position -- `#[macro_use] extern crate alloc`
+// above provides only the `vec!`/`format!` macros, not these names.
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub mod accuracy;
 pub mod accuracy_suite;
 pub mod cache;
 pub mod engines;
 pub mod generation;
+pub mod model_walk;
+// `StageAccumulator::record` takes `std::time::Instant`, which has no
+// core/alloc equivalent under wasm32v1-none — whole-module exclusion.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod profiler;
 pub mod vindex_compare;
 
@@ -31,15 +54,26 @@ pub use engines::boundary_kv;
 pub use engines::boundary_per_layer;
 pub use engines::markov_residual;
 pub use engines::markov_residual_codec;
+// `no_cache.rs`/`standard.rs` are WHOLESALE_NATIVE (`impl KvEngine for
+// ...`, and `KvEngine` itself is not(wasm32)-gated upstream in
+// larql-inference) so their `pub mod` declarations in `engines/mod.rs`
+// are gated; these re-exports must match.
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::no_cache;
+pub use engines::semantic_promotion;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::standard;
 pub use engines::turbo_quant;
-pub use engines::unlimited_context;
+pub use engines::windowed_checkpoint;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::markov_residual::MarkovResidualEngine;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::no_cache::NoCacheEngine;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::standard::StandardEngine;
-pub use engines::unlimited_context::UnlimitedContextEngine;
+#[cfg(not(target_arch = "wasm32"))]
+pub use engines::windowed_checkpoint::WindowedCheckpointEngine;
 
 // ─── Trait surface re-exported from larql-inference ──────────────────────────
 //
@@ -50,9 +84,14 @@ pub use engines::unlimited_context::UnlimitedContextEngine;
 // `larql_kv::KvEngine` continues to resolve to the same trait.
 //
 // See `crates/larql-inference/docs/specs/kv-engine-unification.md` §10.4.
-pub use larql_inference::kv_engine::{
-    AnyEngine, DecodeStageSummary, EngineError, EngineInfo, KvEngine, RetrievalEngine,
-};
+//
+// `AnyEngine`/`KvEngine`/`RetrievalEngine` are `#[cfg(not(target_arch =
+// "wasm32"))]`-gated upstream (kv.rs/any.rs/retrieval.rs put &VectorIndex
+// in every trait method signature); `DecodeStageSummary`/`EngineError`/
+// `EngineInfo` are not gated there and stay portable.
+#[cfg(not(target_arch = "wasm32"))]
+pub use larql_inference::kv_engine::{AnyEngine, KvEngine, RetrievalEngine};
+pub use larql_inference::kv_engine::{DecodeStageSummary, EngineError, EngineInfo};
 
 // ─── EngineKind ───────────────────────────────────────────────────────────────
 
@@ -72,7 +111,7 @@ pub enum EngineKind {
     MarkovResidual {
         window_size: Option<usize>,
     },
-    UnlimitedContext {
+    WindowedCheckpoint {
         window_size: usize,
     },
     TurboQuant {
@@ -82,6 +121,12 @@ pub enum EngineKind {
         injection_layer: usize,
         inject_coefficient: f32,
         top_k: usize,
+        /// BOS token id to strip from the front of the query when
+        /// assembling the injection context (`bos=N` in the spec).
+        /// `None` = strip nothing / defer to the architecture's
+        /// structural `bos_token_id()`; there is no hardcoded model
+        /// default.
+        bos_token_id: Option<u32>,
     },
     /// `BoundaryKvEngine`: Standard semantics + per-chunk
     /// `larql-boundary` frame emission. See
@@ -107,6 +152,19 @@ pub enum EngineKind {
         window_size: Option<usize>,
         num_layers: usize,
     },
+    /// `SemanticPromotionEngine`: a semantic-authority policy wrapper
+    /// over another engine. `base` is the wrapped engine's own spec, so
+    /// `semantic-promotion:base=standard:window=512` composes. See
+    /// `crates/larql-kv/docs/specs/semantic-promotion-engine.md`.
+    ///
+    /// Only `PromotionMode::Observe` is constructible today, and it is
+    /// bit-identical to `base` — no engine yet implements the masking
+    /// and snapshot hooks the enforcing modes require, and construction
+    /// refuses those modes rather than downgrading.
+    SemanticPromotion {
+        base: Box<EngineKind>,
+        mode: semantic_promotion::PromotionMode,
+    },
 }
 
 impl EngineKind {
@@ -119,15 +177,15 @@ impl EngineKind {
     /// no-cache
     /// markov-rs
     /// markov-rs:window=1024
-    /// unlimited-context:window=256
+    /// windowed-checkpoint:window=256
     /// turbo-quant:bits=3
     /// tq4
-    /// apollo:layer=25,coef=8.0,top_k=12
+    /// apollo:layer=25,coef=8.0,top_k=12,bos=2
     /// ```
     pub fn from_name(spec: &str) -> Option<Self> {
         // Split "name:key=val,key=val" into name + param pairs.
         let (name, params_str) = spec.split_once(':').unwrap_or((spec, ""));
-        let params: std::collections::HashMap<&str, &str> = params_str
+        let params: crate::collections::HashMap<&str, &str> = params_str
             .split(',')
             .filter(|s| !s.is_empty())
             .filter_map(|kv| kv.split_once('='))
@@ -163,11 +221,20 @@ impl EngineKind {
                 let window_size = params.get("window").and_then(|v| v.parse().ok());
                 Some(EngineKind::MarkovResidual { window_size })
             }
-            "unlimited" | "unlimited-context" | "unlimited_context" => {
-                Some(EngineKind::UnlimitedContext {
-                    window_size: get_usize("window", 512),
-                })
-            }
+            // `unlimited-context` and friends are the pre-2026-08-03 names,
+            // kept so existing scripts and baselines keep parsing. The engine
+            // was renamed because the old name described a capability
+            // (arbitrarily long streams via archive + replay) while reading as
+            // a claim about attention — which is exactly the confusion that
+            // let issue #200 hide: it reported `window=N` and attended over
+            // everything.
+            "windowed-checkpoint"
+            | "windowed_checkpoint"
+            | "unlimited"
+            | "unlimited-context"
+            | "unlimited_context" => Some(EngineKind::WindowedCheckpoint {
+                window_size: get_usize("window", 512),
+            }),
             "turbo-quant" | "turbo_quant" | "turboquant" | "tq4" => Some(EngineKind::TurboQuant {
                 bits: get_usize("bits", 4) as u8,
             }),
@@ -178,6 +245,9 @@ impl EngineKind {
                     injection_layer: get_usize("layer", cfg.injection_layer),
                     inject_coefficient: get_f32("coef", cfg.inject_coefficient),
                     top_k: get_usize("top_k", cfg.top_k),
+                    // No hardcoded model-specific BOS default (cfg default
+                    // is None): callers name it explicitly via `bos=N`.
+                    bos_token_id: params.get("bos").and_then(|v| v.parse().ok()),
                 })
             }
             "boundary-kv" | "boundary_kv" | "boundary" => Some(EngineKind::BoundaryKv {
@@ -205,6 +275,25 @@ impl EngineKind {
                 Some(EngineKind::BoundaryPerLayer {
                     window_size: params.get("window").and_then(|v| v.parse().ok()),
                     num_layers: get_usize("layers", 34),
+                })
+            }
+            "semantic-promotion" | "semantic_promotion" | "promotion" => {
+                // `base=<spec>` may itself carry `:key=value` params —
+                // the split above takes only the FIRST colon, so
+                // `semantic-promotion:base=standard:window=512` parses.
+                // A base spec containing commas cannot be nested this
+                // way; name such a base without params.
+                let base = params
+                    .get("base")
+                    .map(|s| EngineKind::from_name(s))
+                    .unwrap_or(Some(EngineKind::Standard { window_size: None }))?;
+                let mode = params
+                    .get("mode")
+                    .map(|s| semantic_promotion::PromotionMode::from_name(s))
+                    .unwrap_or(Some(semantic_promotion::PromotionMode::default()))?;
+                Some(EngineKind::SemanticPromotion {
+                    base: Box::new(base),
+                    mode,
                 })
             }
             _ => None,
@@ -269,12 +358,13 @@ impl EngineKind {
             EngineKind::Standard { .. } => "standard",
             EngineKind::NoCache => "no-cache",
             EngineKind::MarkovResidual { .. } => "markov-rs",
-            EngineKind::UnlimitedContext { .. } => "unlimited-context",
+            EngineKind::WindowedCheckpoint { .. } => "windowed-checkpoint",
             EngineKind::TurboQuant { .. } => "turbo-quant",
             EngineKind::Apollo { .. } => "apollo",
             EngineKind::BoundaryKv { .. } => "boundary-kv",
             EngineKind::MarkovResidualCodec { .. } => "markov-rs-codec",
             EngineKind::BoundaryPerLayer { .. } => "boundary-per-layer",
+            EngineKind::SemanticPromotion { .. } => "semantic-promotion",
         }
     }
 
@@ -298,15 +388,73 @@ impl EngineKind {
             "no-cache",
             "markov-rs",
             "markov-rs-codec",
-            "unlimited-context",
+            "windowed-checkpoint",
             "turbo-quant",
             "apollo",
             "boundary-kv",
             "boundary-per-layer",
+            "semantic-promotion",
+        ]
+    }
+
+    /// Specs the criterion microbenchmark (`benches/engine_decode.rs`)
+    /// runs, parameterised where a bare name would not build something
+    /// meaningful. Single source of truth so the bench cannot silently
+    /// drift behind the engine roster — pinned by
+    /// `bench_specs_cover_every_benchable_engine`.
+    ///
+    /// **Apollo is deliberately absent.** It is a [`RetrievalEngine`]
+    /// whose `prefill` fails closed with `RetrievalMiss` unless a
+    /// boundary store is attached, and the synthetic fixture has none.
+    /// Benching it there timed the error return, not the engine: it
+    /// reported ~65 ns against ~16 µs for `standard`, reading as a 250x
+    /// win in the criterion report. A meaningful Apollo number needs a
+    /// real store, which belongs in the CLI bench, not here.
+    pub fn bench_specs() -> &'static [&'static str] {
+        &[
+            "standard",
+            "standard:window=4",
+            "no-cache",
+            "markov-rs",
+            "markov-rs:window=4",
+            "markov-rs-codec",
+            "windowed-checkpoint:window=4",
+            "turbo-quant:bits=4",
+            "turbo-quant:bits=3",
+            "boundary-kv:chunk_tokens=4",
+            "boundary-per-layer:layers=2",
+        ]
+    }
+
+    /// Engines that [`Self::bench_specs`] intentionally omits, with the
+    /// reason. Keeping the exclusion explicit means a new engine can't
+    /// be dropped from the bench by simply never being added.
+    pub fn bench_excluded_names() -> &'static [(&'static str, &'static str)] {
+        &[
+            (
+                "apollo",
+                "needs an attached boundary store; without one prefill returns \
+                 RetrievalMiss and the bench would time the error path",
+            ),
+            (
+                "semantic-promotion",
+                "a policy wrapper, not an engine: it decides what an inner exact \
+                 engine retains, so a standalone number would time the wrapper's \
+                 bookkeeping against no policy and read as if it were a decode cost",
+            ),
         ]
     }
 
     /// Build a boxed engine, dispatching compute through `backend`.
+    ///
+    /// Native only: returns `AnyEngine` (not(wasm32)-gated upstream) and
+    /// constructs every engine struct, all of which are themselves
+    /// WHOLESALE_NATIVE or NEEDS_SURGICAL_SPLIT with a native
+    /// constructor. The rest of `EngineKind` (the enum, `from_name`,
+    /// `display_name`, `supported_names`, `split_specs`, `bench_specs`,
+    /// `bench_excluded_names`) is pure string/enum logic and stays
+    /// portable.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build(self, backend: Box<dyn larql_inference::EngineBackend>) -> AnyEngine {
         self.build_with_profiling(backend, false)
     }
@@ -315,7 +463,7 @@ impl EngineKind {
     ///
     /// Returns [`AnyEngine`] — the dispatch enum that wraps either a
     /// [`KvEngine`] (per-token K/V cache engines: standard, no_cache,
-    /// markov_residual, markov_residual_codec, unlimited_context,
+    /// markov_residual, markov_residual_codec, windowed_checkpoint,
     /// turbo_quant, boundary_kv, boundary_per_layer) or a
     /// [`RetrievalEngine`] (Apollo, future Mode 5). Callers branch
     /// once on the enum variant and stay in the variant-specific code
@@ -326,6 +474,7 @@ impl EngineKind {
     /// of the ComputeBackend redesign) can dispatch through the
     /// trait. Construct via `larql_inference::cpu_engine_backend()` /
     /// `larql_inference::default_engine_backend()`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build_with_profiling(
         self,
         backend: Box<dyn larql_inference::EngineBackend>,
@@ -346,8 +495,8 @@ impl EngineKind {
                 markov_residual::MarkovResidualEngine::with_backend(window_size, backend)
                     .with_profiling(profiling),
             )),
-            EngineKind::UnlimitedContext { window_size } => AnyEngine::Kv(Box::new(
-                unlimited_context::UnlimitedContextEngine::with_backend(window_size, backend)
+            EngineKind::WindowedCheckpoint { window_size } => AnyEngine::Kv(Box::new(
+                windowed_checkpoint::WindowedCheckpointEngine::with_backend(window_size, backend)
                     .with_profiling(profiling),
             )),
             EngineKind::TurboQuant { bits } => AnyEngine::Kv(Box::new(
@@ -358,11 +507,15 @@ impl EngineKind {
                 injection_layer,
                 inject_coefficient,
                 top_k,
+                bos_token_id,
             } => AnyEngine::Retrieval(Box::new(apollo::ApolloEngine::new(
                 apollo::InjectionConfig {
                     injection_layer,
                     inject_coefficient,
                     top_k,
+                    // `bos=N` spec param; `None` (unset) defers to the
+                    // structural `weights.arch.bos_token_id()` at prefill.
+                    bos_token_id,
                 },
             ))),
             EngineKind::BoundaryKv {
@@ -415,6 +568,25 @@ impl EngineKind {
                     .expect("boundary-per-layer construction failed"),
                 ))
             }
+            EngineKind::SemanticPromotion { base, mode } => {
+                let inner = match base.build_with_profiling(backend, profiling) {
+                    AnyEngine::Kv(engine) => engine,
+                    AnyEngine::Retrieval(engine) => panic!(
+                        "semantic-promotion cannot wrap the retrieval engine {:?}: \
+                         the promotion protocol appends records through a KV decode path",
+                        engine.name()
+                    ),
+                };
+                let config = semantic_promotion::SemanticPromotionConfig::default().with_mode(mode);
+                AnyEngine::Kv(Box::new(
+                    semantic_promotion::SemanticPromotionEngine::new(inner, config)
+                        // Construction refuses any mode the base cannot
+                        // back. Surfacing that as a panic here matches
+                        // the other build arms; the CLI's own validation
+                        // should reject the spec before reaching this.
+                        .expect("semantic-promotion construction failed"),
+                ))
+            }
         }
     }
 }
@@ -439,11 +611,17 @@ mod tests {
                 "failed to parse {name:?}"
             );
         }
-        for name in &["unlimited", "unlimited-context", "unlimited_context"] {
+        for name in &[
+            "windowed-checkpoint",
+            "windowed_checkpoint",
+            "unlimited",
+            "unlimited-context",
+            "unlimited_context",
+        ] {
             assert!(
                 matches!(
                     EngineKind::from_name(name),
-                    Some(EngineKind::UnlimitedContext { .. })
+                    Some(EngineKind::WindowedCheckpoint { .. })
                 ),
                 "failed to parse {name:?}"
             );
@@ -487,8 +665,8 @@ mod tests {
             other => panic!("expected MarkovResidual{{window=1024}}, got {other:?}"),
         }
         match EngineKind::from_name("unlimited-context:window=256") {
-            Some(EngineKind::UnlimitedContext { window_size: 256 }) => {}
-            other => panic!("expected UnlimitedContext{{window=256}}, got {other:?}"),
+            Some(EngineKind::WindowedCheckpoint { window_size: 256 }) => {}
+            other => panic!("expected WindowedCheckpoint{{window=256}}, got {other:?}"),
         }
         match EngineKind::from_name("turbo-quant:bits=3") {
             Some(EngineKind::TurboQuant { bits: 3 }) => {}
@@ -498,9 +676,19 @@ mod tests {
             Some(EngineKind::Apollo {
                 injection_layer: 25,
                 top_k: 12,
+                // No `bos=` param → None: never a hardcoded model default.
+                bos_token_id: None,
                 ..
             }) => {}
-            other => panic!("expected Apollo{{layer=25,top_k=12}}, got {other:?}"),
+            other => panic!("expected Apollo{{layer=25,top_k=12,bos=None}}, got {other:?}"),
+        }
+        match EngineKind::from_name("apollo:layer=25,bos=2") {
+            Some(EngineKind::Apollo {
+                injection_layer: 25,
+                bos_token_id: Some(2),
+                ..
+            }) => {}
+            other => panic!("expected Apollo{{layer=25,bos=Some(2)}}, got {other:?}"),
         }
         match EngineKind::from_name("markov-rs:unknown=999") {
             Some(EngineKind::MarkovResidual {
@@ -740,13 +928,14 @@ mod compliance_tests {
             EngineKind::MarkovResidual {
                 window_size: Some(32),
             },
-            EngineKind::UnlimitedContext { window_size: 64 },
+            EngineKind::WindowedCheckpoint { window_size: 64 },
             EngineKind::TurboQuant { bits: 4 },
             EngineKind::TurboQuant { bits: 3 },
             EngineKind::Apollo {
                 injection_layer: 30,
                 inject_coefficient: 10.0,
                 top_k: 8,
+                bos_token_id: None,
             },
         ]
     }
@@ -772,7 +961,7 @@ mod compliance_tests {
             "no-cache",
             "markov-rs",
             "markov-rs",
-            "unlimited-context",
+            "windowed-checkpoint",
             "turbo-quant",
             "turbo-quant",
             "apollo",
@@ -837,7 +1026,7 @@ mod compliance_tests {
     #[test]
     fn from_name_unknown_param_ignored_defaults_apply() {
         match EngineKind::from_name("unlimited-context:unknown=42") {
-            Some(EngineKind::UnlimitedContext { window_size: 512 }) => {}
+            Some(EngineKind::WindowedCheckpoint { window_size: 512 }) => {}
             other => panic!("unknown param should use default, got {other:?}"),
         }
     }
@@ -876,6 +1065,7 @@ mod compliance_tests {
             "apollo",
             "boundary-kv",
             "boundary-per-layer",
+            "semantic-promotion",
         ]
         .iter()
         .map(|s| {
@@ -897,6 +1087,60 @@ mod compliance_tests {
         );
     }
 
+    /// The criterion bench must cover every engine that can be benched
+    /// on the synthetic fixture. It previously listed 7 of 9 — the three
+    /// engines this PR touches most (`markov-rs-codec`, `boundary-kv`,
+    /// `boundary-per-layer`) had no microbenchmark at all, and nothing
+    /// failed when they were added. Now an engine is either in
+    /// `bench_specs` or explicitly in `bench_excluded_names` with a
+    /// reason; there is no third, silent option.
+    #[test]
+    fn bench_specs_cover_every_benchable_engine() {
+        let excluded: Vec<&str> = EngineKind::bench_excluded_names()
+            .iter()
+            .map(|(n, _)| *n)
+            .collect();
+
+        let benched: Vec<&'static str> = EngineKind::bench_specs()
+            .iter()
+            .map(|s| {
+                EngineKind::from_name(s)
+                    .unwrap_or_else(|| panic!("bench_specs entry {s:?} no longer parses"))
+                    .display_name()
+            })
+            .collect();
+
+        for name in EngineKind::supported_names() {
+            if excluded.contains(name) {
+                assert!(
+                    !benched.contains(name),
+                    "{name:?} is listed as excluded but also appears in bench_specs"
+                );
+                continue;
+            }
+            assert!(
+                benched.contains(name),
+                "engine {name:?} has no criterion bench arm — add a spec to \
+                 EngineKind::bench_specs, or name it in bench_excluded_names \
+                 with the reason it cannot be benched"
+            );
+        }
+    }
+
+    #[test]
+    fn bench_excluded_names_carry_a_reason_and_are_real_engines() {
+        for (name, reason) in EngineKind::bench_excluded_names() {
+            assert!(
+                EngineKind::supported_names().contains(name),
+                "bench_excluded_names lists {name:?}, which is not a supported engine"
+            );
+            assert!(
+                reason.len() > 20,
+                "exclusion of {name:?} needs a real reason, got {reason:?}"
+            );
+        }
+    }
+
     #[test]
     fn from_name_all_engines_parseable() {
         let specs = [
@@ -906,10 +1150,16 @@ mod compliance_tests {
             ("no-cache", "no-cache"),
             ("none", "no-cache"),
             ("markov-rs", "markov-rs"),
-            ("unlimited-context", "unlimited-context"),
+            ("windowed-checkpoint", "windowed-checkpoint"),
+            // Pre-rename spellings still parse, and normalise to the new
+            // canonical name rather than echoing themselves back.
+            ("unlimited-context", "windowed-checkpoint"),
+            ("unlimited", "windowed-checkpoint"),
             ("turbo-quant", "turbo-quant"),
             ("tq3", "turbo-quant"),
             ("apollo", "apollo"),
+            ("semantic-promotion", "semantic-promotion"),
+            ("semantic-promotion:base=markov-rs", "semantic-promotion"),
         ];
         for (spec, expected_display) in specs {
             let kind =
@@ -920,6 +1170,59 @@ mod compliance_tests {
                 "{spec} parsed to wrong display_name"
             );
         }
+    }
+
+    #[test]
+    fn semantic_promotion_defaults_to_an_unbounded_standard_base_in_observe_mode() {
+        let kind = EngineKind::from_name("semantic-promotion").unwrap();
+        let EngineKind::SemanticPromotion { base, mode } = kind else {
+            panic!("expected a SemanticPromotion variant");
+        };
+        assert!(matches!(*base, EngineKind::Standard { window_size: None }));
+        assert_eq!(mode, semantic_promotion::PromotionMode::Observe);
+    }
+
+    #[test]
+    fn semantic_promotion_nests_a_parameterised_base_spec() {
+        // The outer split takes only the first colon, so the base spec
+        // keeps its own `:key=value` tail.
+        let kind = EngineKind::from_name("semantic-promotion:base=standard:window=512").unwrap();
+        let EngineKind::SemanticPromotion { base, .. } = kind else {
+            panic!("expected a SemanticPromotion variant");
+        };
+        assert!(matches!(
+            *base,
+            EngineKind::Standard {
+                window_size: Some(512)
+            }
+        ));
+    }
+
+    #[test]
+    fn semantic_promotion_rejects_an_unknown_base_or_mode() {
+        assert!(EngineKind::from_name("semantic-promotion:base=nonsuch").is_none());
+        assert!(EngineKind::from_name("semantic-promotion:mode=delete-everything").is_none());
+    }
+
+    #[test]
+    fn semantic_promotion_builds_and_wraps_its_base() {
+        let engine = EngineKind::from_name("semantic-promotion")
+            .unwrap()
+            .build(larql_inference::cpu_engine_backend());
+        assert_eq!(engine.name(), "semantic-promotion(standard)");
+        assert!(engine.is_kv());
+    }
+
+    #[test]
+    fn semantic_promotion_refuses_to_build_an_enforcing_mode() {
+        // No base engine implements the masking or snapshot hooks yet,
+        // so the enforcing modes must not construct — the build arm
+        // surfaces that as a panic rather than downgrading to Observe.
+        let kind = EngineKind::from_name("semantic-promotion:mode=enforce").unwrap();
+        let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            kind.build(larql_inference::cpu_engine_backend())
+        }));
+        assert!(built.is_err(), "enforcing mode must not construct today");
     }
 
     /// Synthetic engine that does not override `prefill_quant` /

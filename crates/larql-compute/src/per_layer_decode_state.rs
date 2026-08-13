@@ -15,6 +15,9 @@
 use crate::state_handle::StateHandle;
 use crate::StateDumpMask;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Captured per-layer state at a single decode step (or per-position
 /// state across a prefill).
 ///
@@ -40,8 +43,8 @@ impl Default for PerLayerDecodeState {
     }
 }
 
-impl std::fmt::Debug for PerLayerDecodeState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for PerLayerDecodeState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("PerLayerDecodeState")
             .field("h_in_per_layer.len", &self.h_in_per_layer.len())
             .field("k_new_per_layer.len", &self.k_new_per_layer.len())

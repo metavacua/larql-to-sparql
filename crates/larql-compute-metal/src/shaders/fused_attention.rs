@@ -29,11 +29,15 @@ kernel void fused_attention(
     constant uint&      num_q   [[buffer(6)]],
     constant uint&      num_kv  [[buffer(7)]],
     constant float&     scale   [[buffer(8)]],
-    constant float&     rope_base [[buffer(9)]],
+    device const float* inv_freq  [[buffer(9)]],   // [rotary_dim/2], host-computed
     constant uint&      use_qk_norm [[buffer(10)]],  // 0 or 1
     constant float&     softcap     [[buffer(11)]],  // 0.0 = disabled
     constant uint&      skip_rope   [[buffer(12)]],  // 0 = apply RoPE, 1 = skip (caller pre-applied)
     constant uint&      rotary_dim  [[buffer(13)]],  // 0 = full head_dim, else partial rotation
+    constant float*     sinks       [[buffer(14)]],  // per-Q-head attention sink logits
+    constant uint&      has_sinks   [[buffer(15)]],
+    constant float&     amplitude   [[buffer(16)]],  // cos/sin scalar (YaRN); 1.0 otherwise  // 0 = no sinks (buffer is a dummy)
+    constant uint&      window_size [[buffer(17)]],  // sliding window; 0 = attend the whole causal prefix
     uint2 tg_id [[threadgroup_position_in_grid]],    // (head, query_pos)
     uint tid    [[thread_index_in_threadgroup]])
 {
@@ -61,10 +65,9 @@ kernel void fused_attention(
 
         if (skip_rope == 0 && d < rdim) {
             // RoPE: split-half rotation within rotary dims
-            float freq = 1.0f / pow(rope_base, float(2 * (d % hdim)) / float(rdim));
-            float angle = float(qi) * freq;
-            float cos_a = cos(angle);
-            float sin_a = sin(angle);
+            float angle = float(qi) * inv_freq[d % hdim];
+            float cos_a = cos(angle) * amplitude;
+            float sin_a = sin(angle) * amplitude;
 
             uint pair_d = (d < hdim) ? d + hdim : d - hdim;
             uint pair_idx = qi * num_q * head_dim + head * head_dim + pair_d;
@@ -106,8 +109,18 @@ kernel void fused_attention(
 
     float local_max = -1e30f;
     uint causal_len = qi + 1;
+    // First key this query may attend. Mirrors the CPU rule in
+    // `attention::gqa::window_start` (causal_len.saturating_sub(w)); a
+    // window at least as wide as the prefix leaves k_start = 0, so the
+    // windowed path is bit-identical to the unwindowed one until the
+    // window actually binds.
+    uint k_start = (window_size > 0u && causal_len > window_size)
+                 ? (causal_len - window_size)
+                 : 0u;
+    // Number of keys in range, i.e. how many threads did work below.
+    uint active_len = causal_len - k_start;
 
-    for (uint k = tid; k < causal_len; k += tg_sz) {
+    for (uint k = k_start + tid; k < causal_len; k += tg_sz) {
         // Load K[k] for this KV head, optionally apply partial RoPE
         float dot = 0.0f;
         for (uint d = 0; d < head_dim; d++) {
@@ -117,10 +130,9 @@ kernel void fused_attention(
             float k_final;
             if (skip_rope == 0 && d < rdim) {
                 // RoPE on K (only within rotary dims)
-                float freq = 1.0f / pow(rope_base, float(2 * (d % hdim)) / float(rdim));
-                float angle = float(k) * freq;
-                float cos_a = cos(angle);
-                float sin_a = sin(angle);
+                float angle = float(k) * inv_freq[d % hdim];
+                float cos_a = cos(angle) * amplitude;
+                float sin_a = sin(angle) * amplitude;
 
                 uint pair_d = (d < hdim) ? d + hdim : d - hdim;
                 uint pair_idx = k * num_kv * head_dim + kv_head * head_dim + pair_d;
@@ -142,7 +154,9 @@ kernel void fused_attention(
 
         // Optional softcap
         if (softcap > 0.0f) {
-            dot = tanh(dot / softcap) * softcap;
+            // Clamped like every other tanh in this crate: Apple's tanh
+            // is (exp(2y)-1)/(exp(2y)+1) and NaNs past |y| ~ 44.
+            dot = tanh(clamp(dot / softcap, -15.0f, 15.0f)) * softcap;
         }
 
         tg_scores[k] = dot;
@@ -156,16 +170,19 @@ kernel void fused_attention(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (tid == 0) {
         float m = -1e30f;
-        for (uint i = 0; i < min(tg_sz, causal_len); i++) {
+        for (uint i = 0; i < min(tg_sz, active_len); i++) {
             if (tg_maxes[i] > m) m = tg_maxes[i];
         }
+        // The sink competes in the softmax, so it must join the max or
+        // exp(sink - max) overflows when the sink dominates.
+        if (has_sinks != 0u && sinks[head] > m) m = sinks[head];
         tg_max = m;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     // Softmax: exp and sum
     float local_sum = 0.0f;
-    for (uint k = tid; k < causal_len; k += tg_sz) {
+    for (uint k = k_start + tid; k < causal_len; k += tg_sz) {
         float w = exp(tg_scores[k] - tg_max);
         tg_scores[k] = w;
         local_sum += w;
@@ -177,7 +194,10 @@ kernel void fused_attention(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (tid == 0) {
         float s = 0.0f;
-        for (uint i = 0; i < min(tg_sz, causal_len); i++) s += tg_sums[i];
+        for (uint i = 0; i < min(tg_sz, active_len); i++) s += tg_sums[i];
+        // Denominator only: the sink has no output slot, so the emitted
+        // weights deliberately sum to less than one.
+        if (has_sinks != 0u) s += exp(sinks[head] - tg_max);
         tg_sum = s;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -187,7 +207,7 @@ kernel void fused_attention(
     // ── Weighted sum of V ──
     for (uint d = tid; d < head_dim; d += tg_sz) {
         float acc = 0.0f;
-        for (uint k = 0; k < causal_len; k++) {
+        for (uint k = k_start; k < causal_len; k++) {
             uint v_idx = k * num_kv * head_dim + kv_head * head_dim + d;
             acc += tg_scores[k] * inv_sum * V[v_idx];
         }
@@ -195,6 +215,14 @@ kernel void fused_attention(
     }
 }
 "#;
+
+/// Rust mirror of the MSL `MAX_FUSED_ATTENTION_SEQ_LEN` constant in
+/// [`SHADER`] — the `tg_scores` threadgroup scratch bound. The scratch
+/// is indexed by ABSOLUTE key position (not window-relative), so a
+/// sliding window does not reduce the requirement; seq_len past this
+/// writes out of bounds. Host dispatch asserts against it
+/// (`stages/attention.rs`).
+pub const MAX_FUSED_ATTENTION_SEQ_LEN: usize = 4096;
 
 pub struct Kernel;
 impl crate::kernels::ShaderKernel for Kernel {

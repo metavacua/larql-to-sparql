@@ -1,6 +1,40 @@
+// wasm32v1-none is core+alloc only (E0463 "can't find crate for `std`" on
+// the implicit prelude import otherwise). Native builds are unaffected.
+// See docs/superpowers/plans/2026-08-10-larql-cli-wasm-and-safe-gating.md,
+// Task 7, pattern 2: own-crate-missing-no_std.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+// #[macro_use] brings alloc's vec!/format!/etc. macros into scope crate-
+// wide, mirroring how std's own macros are ambiently available -- unlike
+// the Vec/String *types*, which still need per-file imports (see
+// src/prelude.rs, pattern 5).
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
+
 pub mod algo;
+mod collections;
+// Several `pub` struct fields across this crate (e.g. `PageRankResult::
+// ranks`, `Graph::sources`) resolve to this crate's own portable
+// `HashMap` -- a public field can't have a type built from a private
+// component (rustc: "type is private" once a downstream crate's code
+// needs to resolve a trait bound through it, e.g. calling `.get()`), so
+// these items must be reachable even though the module itself stays
+// private. See crates/larql-models/src/lib.rs for the confirmed instance
+// of this landmine and the same fix.
+// `FnvHasher` only exists on wasm32 (native uses std's HashMap/HashSet
+// with their own default hasher) -- re-exporting it unconditionally
+// broke native compilation (E0432, caught by the native test oracle,
+// invisible in wasm32-only CI since FnvHasher genuinely exists there).
+#[cfg(target_arch = "wasm32")]
+pub use collections::FnvHasher;
+pub use collections::{HashMap, HashSet};
 pub mod core;
 pub mod engine;
+mod prelude;
+// std::fs-based; no filesystem exists on wasm32v1-none. Pattern 3:
+// native-only-io-module. Whole module excluded rather than patched --
+// there is no alloc/core equivalent for file I/O to fall back to.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod io;
 
 // Re-export the essential types at crate root.
@@ -14,10 +48,20 @@ pub use engine::chain::{chain_tokens, ChainResult};
 pub use engine::provider::{ModelProvider, PredictionResult, TokenPrediction};
 pub use engine::templates::TemplateRegistry;
 
-pub use io::checkpoint::CheckpointLog;
-pub use io::format::Format;
-pub use io::json::{load_json, save_json};
-pub use io::{from_bytes, load, load_with_format, save, save_with_format, to_bytes};
+// One cfg over one grouped use-tree instead of six repeated attributes --
+// same set of re-exports, same public paths (larql_core::CheckpointLog,
+// etc.), just one place to remember the gate when adding the next one.
+#[cfg(not(target_arch = "wasm32"))]
+pub use io::{
+    checkpoint::CheckpointLog,
+    csv::{load_csv, save_csv},
+    format::Format,
+    from_bytes,
+    json::{load_json, save_json},
+    load, load_with_format,
+    packed::{from_packed_bytes, load_packed, save_packed, to_packed_bytes},
+    save, save_with_format, to_bytes,
+};
 
 pub use algo::components::{are_connected, connected_components};
 pub use algo::diff::{diff, ChangedEdge, GraphDiff};
@@ -30,5 +74,3 @@ pub use algo::pagerank::{pagerank, PageRankResult};
 pub use algo::shortest_path::{astar, shortest_path, shortest_path_with_weight, PathResult};
 pub use algo::traversal::{bfs as bfs_traversal, dfs, TraversalResult};
 pub use algo::walk::{walk_all_paths, WalkResult};
-pub use io::csv::{load_csv, save_csv};
-pub use io::packed::{from_packed_bytes, load_packed, save_packed, to_packed_bytes};

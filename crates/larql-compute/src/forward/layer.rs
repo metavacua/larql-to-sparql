@@ -12,6 +12,11 @@ use crate::residual::rms_norm_for_arch;
 use larql_models::{ModelWeights, WeightsView};
 use ndarray::Array2;
 
+// No alloc_prelude import: this file's only `Vec` uses (the two stage-dump
+// closures' `bytes: Vec<u8>` collect) are both inside
+// `#[cfg(not(target_arch = "wasm32"))]` blocks -- nothing in the portable
+// subset needs Vec/String/Box/ToOwned.
+
 /// Public wrapper for run_attention — used by diagnostic/capture tooling.
 pub fn run_attention_public(
     weights: WeightsView,
@@ -72,7 +77,15 @@ pub fn run_ffn(
     // `LARQL_METAL_DUMP_LAYERS` convention. Lets us diff per-stage
     // intermediates between CPU and Metal.
     let dump_cfg = super::dump_config::DumpConfig::get();
+    // std::fs has no core/alloc equivalent; wasm32v1-none has no filesystem
+    // and stage_dump_dir is unconditionally None there, so the whole dump
+    // path is dead code on that target (see attention/block.rs's identical
+    // dump_f32 pattern for the fuller rationale) -- hence the wasm32-only
+    // allow rather than renaming to `_stage_dump_dir` (which broke the
+    // native closure below referencing it by name).
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
     let stage_dump_dir = dump_cfg.stage_dir(layer);
+    #[cfg(not(target_arch = "wasm32"))]
     let dump_f32 = |name: &str, arr: &Array2<f32>| {
         if let Some(dir) = stage_dump_dir {
             let slice = arr.as_slice().unwrap_or(&[]);
@@ -80,6 +93,8 @@ pub fn run_ffn(
             let _ = std::fs::write(super::dump_config::cpu_stage_path(dir, name), &bytes);
         }
     };
+    #[cfg(target_arch = "wasm32")]
+    let dump_f32 = |_name: &str, _arr: &Array2<f32>| {};
     dump_f32("h_post_attn", h_post_attn);
 
     let pre_ffn_key = if arch.has_post_norms() {
@@ -93,9 +108,14 @@ pub fn run_ffn(
     };
     dump_f32("ffn_norm_out", &h_ffn);
 
+    // Observation is opt-in: the uncaptured arm runs the hot `forward`,
+    // which never allocates an activation buffer. The captured arm
+    // densifies whatever the executed path honestly observed; an Absent
+    // observation (cache hit, remote, unobserving backend) yields `None`
+    // rather than fabricated zeros.
     let (ffn_out, activation) = if capture_activation {
-        let (out, act) = ffn.forward_with_activation(layer, &h_ffn);
-        (out, Some(act))
+        let (out, obs) = ffn.forward_observed(layer, &h_ffn);
+        (out, obs.into_dense())
     } else {
         (ffn.forward(layer, &h_ffn), None)
     };
@@ -169,6 +189,7 @@ pub fn run_layer_with_ffn(
     // bisect any layer's drift into attention (compare h_post_attn) vs
     // FFN+PLE+scalar (compare h_out minus h_post_attn). Gated on the
     // same env var as the end-of-layer dump; no overhead when unset.
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(dir) = crate::forward::dump_config::DumpConfig::get().layer_dir() {
         let slice = h_post_attn.as_slice().unwrap_or(&[]);
         let bytes: Vec<u8> = slice.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -295,14 +316,17 @@ mod tests {
             // residual) can be exercised in isolation.
             x.clone()
         }
-        fn forward_with_activation(
+        fn forward_observed(
             &self,
             layer: usize,
             x: &Array2<f32>,
-        ) -> (Array2<f32>, Array2<f32>) {
+        ) -> (Array2<f32>, crate::ffn::FfnActivations) {
             (
                 self.forward(layer, x),
-                Array2::zeros((x.shape()[0], self.weights.intermediate_size)),
+                crate::ffn::FfnActivations::Dense(Array2::zeros((
+                    x.shape()[0],
+                    self.weights.intermediate_size,
+                ))),
             )
         }
         fn name(&self) -> &str {

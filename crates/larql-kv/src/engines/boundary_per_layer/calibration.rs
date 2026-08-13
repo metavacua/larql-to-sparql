@@ -8,8 +8,17 @@
 //! the calibration store offers only insert + lookup APIs and an in-memory
 //! implementation.
 
+// `InMemoryCalibrationStore` (Mutex-backed) is the only native item
+// here; `BoundaryCalibrationRecord`/`CalibrationError` and the
+// `BoundaryCalibrationStore` trait definition itself are pure data /
+// method signatures and stay portable.
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Mutex;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Per-policy calibration record. The `kl_bound_nats` is the maximum
 /// end-to-end KL divergence measured for this policy on the corpus
@@ -65,11 +74,13 @@ pub trait BoundaryCalibrationStore: Send + Sync {
 }
 
 /// Default v0.1 implementation: keeps records in process memory.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 pub struct InMemoryCalibrationStore {
     inner: Mutex<HashMap<String, BoundaryCalibrationRecord>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl InMemoryCalibrationStore {
     pub fn new() -> Self {
         Self::default()
@@ -80,6 +91,7 @@ impl InMemoryCalibrationStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl BoundaryCalibrationStore for InMemoryCalibrationStore {
     fn put(&self, record: BoundaryCalibrationRecord) -> Result<(), CalibrationError> {
         let mut map = self

@@ -30,6 +30,13 @@ pub struct FfnKernels {
     // Gated FFN activations (`act(gate) * up`).
     pub geglu_pipeline: ComputePipelineState,
     pub geglu_gelu_tanh_pipeline: ComputePipelineState,
+    /// GPT-OSS's clamped GLU with fused gate/up bias adds — the MoE
+    /// expert activation for `MoeGateRule::ClampedGlu` layers.
+    pub clamped_glu_bias_pipeline: ComputePipelineState,
+    /// GPU weighted MoE combine (`new_h = h_post_attn + Σ w·(out+bias)`)
+    /// for identity-combine policies — lets experts + next-layer
+    /// attention share one command buffer.
+    pub moe_weighted_combine_pipeline: ComputePipelineState,
 
     // Standard (non-gated) FFN activations.
     pub silu_pipeline: ComputePipelineState,
@@ -37,8 +44,9 @@ pub struct FfnKernels {
 
     // Q4_K gate+up (production + three opt-in variants).
     pub q4k_ffn_gate_up_pipeline: KernelHandle,
-    /// `LARQL_F16_ACC=1` opt-in. f16 inner accumulator on the legacy
-    /// 4sg gate+up.
+    /// `LARQL_F16_ACC=1` opt-in (requires `LARQL_GATE_UP_8SG=0` too —
+    /// the 8sg default discards it). f16 inner accumulator on the
+    /// legacy 4sg gate+up.
     pub q4k_ffn_gate_up_f16acc_pipeline: KernelHandle,
     /// `LARQL_GATE_UP_8SG=0` opts back to 4sg; this is the 8sg variant
     /// that the production alias resolves to today.
@@ -54,8 +62,11 @@ pub struct FfnKernels {
     pub q4k_geglu_gelu_tanh_down_pipeline: KernelHandle,
     pub q6k_geglu_silu_down_pipeline: KernelHandle,
     pub q6k_geglu_gelu_tanh_down_pipeline: KernelHandle,
-    /// Cached-activation Q6_K + GELU-tanh — `LARQL_FUSED_Q6K_DOWN=1`
-    /// opt-in. Currently no-op until kernel-level parity work lands.
+    /// "Cached-activation" Q6_K + GELU-tanh — **never dispatched**:
+    /// `LARQL_FUSED_Q6K_DOWN=1` binds the non-cached pipeline above,
+    /// and this kernel's body is a verbatim copy of it (it caches
+    /// nothing, contradicting its module doc; audit F21/F22).
+    /// Retire-or-implement is tracked on the larql-compute roadmap.
     pub q6k_geglu_gelu_tanh_down_cached_pipeline: KernelHandle,
 
     /// Per-Layer Embeddings gate-apply (Gemma 4 E2B): fused
@@ -73,6 +84,10 @@ impl FfnKernels {
         Self {
             geglu_pipeline: r::<shaders::geglu::SiluKernel>(device, library),
             geglu_gelu_tanh_pipeline: r::<shaders::geglu::GeluTanhKernel>(device, library),
+            clamped_glu_bias_pipeline: r::<shaders::geglu::ClampedGluBiasKernel>(device, library),
+            moe_weighted_combine_pipeline: r::<shaders::moe_weighted_combine::Kernel>(
+                device, library,
+            ),
 
             silu_pipeline: r::<shaders::activation::SiluKernel>(device, library),
             gelu_tanh_pipeline: r::<shaders::activation::GeluTanhKernel>(device, library),

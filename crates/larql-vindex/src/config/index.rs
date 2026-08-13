@@ -5,13 +5,16 @@
 //! round-2 cleanup. Aggregates types from sibling modules
 //! (`quantization`, `compliance`, `model`).
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
 use super::compliance::LayerBands;
 use super::model::VindexModelConfig;
 use super::quantization::{Fp4Config, QuantFormat};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct VindexConfig {
@@ -200,7 +203,7 @@ pub struct VindexSource {
     /// repo, keyed by filename. Catches upstream force-pushes that
     /// mutate bytes under a stable commit hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_safetensors_sha256: Option<std::collections::BTreeMap<String, String>>,
+    pub base_safetensors_sha256: Option<crate::collections::BTreeMap<String, String>>,
 }
 
 /// What components are included in the vindex. Strictly increasing —
@@ -254,8 +257,8 @@ impl ExtractLevel {
     }
 }
 
-impl std::fmt::Display for ExtractLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ExtractLevel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Browse => write!(f, "browse"),
             Self::Attention => write!(f, "attention"),
@@ -545,7 +548,7 @@ mod fp4_schema_tests {
 
     #[test]
     fn vindex_source_v1_provenance_fields_round_trip() {
-        let mut digests = std::collections::BTreeMap::new();
+        let mut digests = crate::collections::BTreeMap::new();
         digests.insert("model-00001-of-00002.safetensors".into(), "a".repeat(64));
         digests.insert("model-00002-of-00002.safetensors".into(), "b".repeat(64));
         let src = VindexSource {

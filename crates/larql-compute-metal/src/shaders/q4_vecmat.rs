@@ -20,8 +20,10 @@ kernel void q4_vecmat(
     uint bytes_per_row = blocks_per_row * 18;
     uint block_idx = tid / 32;
     uint elem_in_block = tid % 32;
-    uint nibble_idx = elem_in_block / 2;
-    bool is_high = (elem_in_block & 1) != 0;
+    // ggml planar Q4_0: byte j holds element j (low nibble) and element j+16
+    // (high nibble). See `q4_matvec_v4` for the full note.
+    uint nibble_idx = elem_in_block % 16u;
+    bool is_high = elem_in_block >= 16u;
     float acc = 0.0f;
     for (uint row = 0; row < N; row++) {
         float act = activation[row];

@@ -15,8 +15,26 @@
 //! Reproducibility: when [`SamplingConfig::seed`] is set, the same logit
 //! vector produces the same token id every call. Useful for evals.
 
+// StdRng needs rand's "std_rng" feature, which is disabled on wasm32
+// (Cargo.toml: `rand = { default-features = false }` under the wasm32
+// target section) -- no OS entropy source to seed a std RNG from anyway.
+// `Sampler` (owns the RNG) and `multinomial` (takes `&mut StdRng`) are
+// gated native-only below. The pure filter functions (`argmax`,
+// `apply_filters`, `keep_top_k`, `keep_top_p`, `token_counts`,
+// `apply_repetition_penalty`) need no RNG themselves, but every actual
+// call site lives inside `impl Sampler`, so they're gated native-only
+// too -- CI-confirmed via a wasm32 clippy dead-code pass, not left
+// "portable but uncalled".
+#[cfg(not(target_arch = "wasm32"))]
 use rand::rngs::StdRng;
+#[cfg(not(target_arch = "wasm32"))]
 use rand::{Rng, SeedableRng};
+
+// No alloc_prelude import: `SamplingConfig` (the only portable item in
+// this file) has no Vec/String/Box/ToOwned fields -- every function that
+// touches alloc collections is native-gated below.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::collections::{HashMap, HashSet};
 
 /// Numeric guard: `temperature <= EPS` is treated as greedy (avoids
 /// dividing by zero in the temperature step).
@@ -120,11 +138,16 @@ impl SamplingConfig {
 /// Stateful sampler. Owns RNG state when sampling is non-greedy; for
 /// greedy configs `Sampler::new` skips RNG construction entirely so a
 /// single sampler instance can be cloned across no-cost greedy decoders.
+///
+/// Native-only: holds a `StdRng`, which needs an OS entropy source that
+/// doesn't exist on wasm32v1-none (see the `rand` import note above).
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Sampler {
     cfg: SamplingConfig,
     rng: Option<StdRng>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Sampler {
     pub fn new(cfg: SamplingConfig) -> Self {
         let rng = if cfg.is_greedy() {
@@ -215,7 +238,7 @@ impl Sampler {
                 .iter()
                 .enumerate()
                 .filter(|(_, v)| v.is_finite())
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))?;
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))?;
             return Some(hits[idx].0);
         }
         let probs = apply_filters(&scored, self.cfg);
@@ -230,8 +253,9 @@ impl Sampler {
 
 /// Build a `token_id → count` map. Tiny helper used by both penalty
 /// paths; allocations dominate here only for very long histories.
-fn token_counts(generated: &[u32]) -> std::collections::HashMap<u32, usize> {
-    let mut counts: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+#[cfg(not(target_arch = "wasm32"))]
+fn token_counts(generated: &[u32]) -> HashMap<u32, usize> {
+    let mut counts: HashMap<u32, usize> = HashMap::default();
     for &id in generated {
         *counts.entry(id).or_insert(0) += 1;
     }
@@ -241,6 +265,7 @@ fn token_counts(generated: &[u32]) -> std::collections::HashMap<u32, usize> {
 /// Apply OpenAI-style repetition penalties to a full-vocab logit slice.
 /// Returns a fresh `Vec<f32>` with the modified logits — leaves the
 /// original intact for callers that want to compare or fall back.
+#[cfg(not(target_arch = "wasm32"))]
 fn apply_repetition_penalty(logits: &[f32], generated: &[u32], cfg: SamplingConfig) -> Vec<f32> {
     let counts = token_counts(generated);
     let freq = cfg.frequency_penalty;
@@ -261,17 +286,19 @@ fn apply_repetition_penalty(logits: &[f32], generated: &[u32], cfg: SamplingConf
 
 // ── Internals ────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn argmax(logits: &[f32]) -> Option<u32> {
     logits
         .iter()
         .enumerate()
         .filter(|(_, v)| v.is_finite())
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(i, _)| i as u32)
 }
 
 /// Apply temperature → top-k → top-p → softmax. Returns a probability
 /// vector the same length as `logits` with filtered entries set to 0.
+#[cfg(not(target_arch = "wasm32"))]
 fn apply_filters(logits: &[f32], cfg: SamplingConfig) -> Vec<f32> {
     let temp = if cfg.temperature > TEMPERATURE_GREEDY_EPS {
         cfg.temperature
@@ -318,6 +345,7 @@ fn apply_filters(logits: &[f32], cfg: SamplingConfig) -> Vec<f32> {
 /// Mask all but the top-k entries to `-inf` in place. Cheap when k is
 /// small relative to vocab — a single `select_nth_unstable`-equivalent
 /// sort would also work but allocates more.
+#[cfg(not(target_arch = "wasm32"))]
 fn keep_top_k(scaled: &mut [f32], k: usize) {
     if k == 0 || k >= scaled.len() {
         return;
@@ -329,7 +357,7 @@ fn keep_top_k(scaled: &mut [f32], k: usize) {
     }
     // Descending nth-element: place the k-th largest at index k-1.
     copy.select_nth_unstable_by(k - 1, |a, b| {
-        b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
+        b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal)
     });
     let thr = copy[k - 1];
     for v in scaled.iter_mut() {
@@ -340,6 +368,7 @@ fn keep_top_k(scaled: &mut [f32], k: usize) {
 }
 
 /// Keep the smallest set of indices whose cumulative probability ≥ p.
+#[cfg(not(target_arch = "wasm32"))]
 fn keep_top_p(probs: &mut [f32], p_thr: f32) {
     if !(0.0..1.0).contains(&p_thr) {
         return;
@@ -349,7 +378,7 @@ fn keep_top_p(probs: &mut [f32], p_thr: f32) {
     order.sort_unstable_by(|&i, &j| {
         probs[j]
             .partial_cmp(&probs[i])
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .unwrap_or(core::cmp::Ordering::Equal)
     });
     let mut cum = 0.0f32;
     let mut last_kept = 0usize;
@@ -360,8 +389,7 @@ fn keep_top_p(probs: &mut [f32], p_thr: f32) {
             break;
         }
     }
-    let kept: std::collections::HashSet<usize> =
-        order.iter().take(last_kept + 1).copied().collect();
+    let kept: HashSet<usize> = order.iter().take(last_kept + 1).copied().collect();
     for (i, p) in probs.iter_mut().enumerate() {
         if !kept.contains(&i) {
             *p = 0.0;
@@ -376,6 +404,8 @@ fn keep_top_p(probs: &mut [f32], p_thr: f32) {
 }
 
 /// Multinomial draw via inverse-CDF on a normalised probability vector.
+/// Native-only: takes `&mut StdRng` (see the `rand` import note above).
+#[cfg(not(target_arch = "wasm32"))]
 fn multinomial(probs: &[f32], rng: &mut StdRng) -> usize {
     let r: f32 = rng.gen_range(0.0..1.0);
     let mut cum = 0.0f32;

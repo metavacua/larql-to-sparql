@@ -21,8 +21,6 @@
 
 use std::path::Path;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 use crate::config::{FfnLayout, VindexConfig, VindexModelConfig};
 use crate::error::VindexError;
 use crate::extract::callbacks::IndexBuildCallbacks;
@@ -36,75 +34,16 @@ mod attn;
 mod ffn;
 mod lm_head;
 mod moe_layers;
+mod moe_layers_per_expert;
 mod norms;
+#[cfg(test)]
+mod tests;
 
 pub mod feature_major_down;
 
-/// Per-block quantisation format tag carried by Q4_K pipeline manifests.
-///
-/// Serialises / deserialises as the literal on-disk tag string
-/// (`"Q4_K"`, `"Q6_K"`, …) to match llama.cpp / Ollama conventions. The
-/// `Other` variant accepts tags that future binaries can decode but
-/// this one can't — readers see the format string and route through
-/// [`crate::quant::registry`]; if the registry returns `None` the
-/// caller surfaces a clear "unknown format" error rather than the
-/// previous serde panic on an unknown variant.
-///
-/// Adding a new format the registry can decode (e.g., Q5_K) is a
-/// single entry in `QUANT_FORMATS` — no edit to this enum is required.
-/// Add an explicit variant here only when the writer pipeline also
-/// supports emitting the format (the writer dispatches typed because
-/// emitting a new format is a deliberate act that needs an encode
-/// function + user-config option).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum QuantBlockFormat {
-    Q4K,
-    Q6K,
-    /// Tag the writer pipeline cannot emit but the reader can identify.
-    /// Carries the on-disk string so dispatch can consult the registry.
-    Other(String),
-}
-
-impl QuantBlockFormat {
-    /// On-disk tag string. Routes through [`crate::quant::registry::lookup`].
-    pub fn tag(&self) -> &str {
-        match self {
-            Self::Q4K => "Q4_K",
-            Self::Q6K => "Q6_K",
-            Self::Other(s) => s.as_str(),
-        }
-    }
-
-    /// Construct from a tag string, succeeding only when the format is
-    /// known to [`crate::quant::registry`]. Use at vindex-load seams to
-    /// reject unknown formats once, instead of letting the dispatch
-    /// kernels report `None` per-row.
-    pub fn from_registry_tag(tag: &str) -> Option<Self> {
-        crate::quant::registry::lookup(tag)?;
-        Some(match tag {
-            "Q4_K" => Self::Q4K,
-            "Q6_K" => Self::Q6K,
-            other => Self::Other(other.to_string()),
-        })
-    }
-}
-
-impl Serialize for QuantBlockFormat {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.tag())
-    }
-}
-
-impl<'de> Deserialize<'de> for QuantBlockFormat {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        Ok(match s.as_str() {
-            "Q4_K" => Self::Q4K,
-            "Q6_K" => Self::Q6K,
-            _ => Self::Other(s),
-        })
-    }
-}
+// QuantBlockFormat moved to `super::manifest` (pure data, no I/O) so it
+// stays portable even though this writer pipeline is native-only.
+pub use super::manifest::QuantBlockFormat;
 
 /// Pad a row-major f32 buffer to the next multiple of 256 with zeros
 /// (Q4_K/Q6_K super-blocks require length % 256 == 0).
@@ -140,8 +79,9 @@ fn pad_to_block(data: &[f32]) -> Vec<f32> {
 /// zero-pads the input vector to `padded_cols`).
 pub(super) fn pad_rows_to_block(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, usize) {
     debug_assert_eq!(data.len(), rows * cols);
-    let block = larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
-    let padded_cols = cols.div_ceil(block) * block;
+    // One formula, shared with the readers (`kquant_decode`,
+    // `dequantize_matrix`): writer and decoders must agree on the stride.
+    let padded_cols = larql_models::quant::ggml::k_quant_padded_cols(cols);
     if padded_cols == cols {
         return (data.to_vec(), cols);
     }
@@ -256,6 +196,10 @@ pub fn write_model_weights_kquant_with_opts(
     attn::write_attn_weights_kquant(source, dir, num_layers, callbacks)?;
     ffn::write_interleaved_ffn_kquant(source, dir, num_layers, opts, callbacks)?;
     moe_layers::write_per_layer_moe_kquant(source, dir, num_layers)?;
+    // Separate-tensor MoE models fall through the packed writer above; without
+    // this they produce an index that verifies and slices cleanly and then
+    // panics on the first decoded token with no expert store.
+    moe_layers_per_expert::write_per_layer_moe_per_expert(source, dir, num_layers)?;
     let mut entries = norms::write_norms_and_router(source, dir, num_layers)?;
     super::ple_sidecar::write_ple_weights(source, dir, num_layers, &mut entries)?;
     lm_head::write_lm_head_kquant(source, dir, &mut entries)?;
@@ -287,7 +231,12 @@ fn update_index_json(
 
     config.has_model_weights = true;
     config.quant = crate::QuantFormat::Q4K;
-    if arch.is_hybrid_moe() {
+    // Any MoE model whose experts landed in the per-layer store must declare
+    // the layout, pure or hybrid — the loader only registers
+    // `layers/{L}/{e}/…` byte ranges when it sees this flag. Writing the
+    // layer files without setting it produced a vindex that looked complete
+    // on disk and loaded zero experts.
+    if arch.is_moe() || arch.is_hybrid_moe() {
         config.ffn_layout = Some(FfnLayout::PerLayer);
     }
     config.model_config = Some(VindexModelConfig::from_arch(arch));

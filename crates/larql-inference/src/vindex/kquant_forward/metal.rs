@@ -39,21 +39,21 @@ pub fn predict_kquant_metal(
                     ),
                 }
             }
-            let gate = larql_compute::QuantWeight {
-                data: gate_bytes,
-                scales: None,
-                format: to_format(gate_fmt),
-            };
-            let up = larql_compute::QuantWeight {
-                data: up_bytes,
-                scales: None,
-                format: to_format(up_fmt),
-            };
-            let down = larql_compute::QuantWeight {
-                data: down_bytes,
-                scales: None,
-                format: to_format(down_fmt),
-            };
+            let gate = larql_compute::QuantWeight::new(
+                to_format(gate_fmt),
+                gate_bytes,
+                larql_compute::QuantAux::None,
+            );
+            let up = larql_compute::QuantWeight::new(
+                to_format(up_fmt),
+                up_bytes,
+                larql_compute::QuantAux::None,
+            );
+            let down = larql_compute::QuantWeight::new(
+                to_format(down_fmt),
+                down_bytes,
+                larql_compute::QuantAux::None,
+            );
             build_arch_params(weights, layer, wq, wk, wv, wo, gate, up, down)
         })
         .collect();
@@ -133,21 +133,21 @@ pub fn predict_kquant_metal_with_replaced_head_residual_delta(
                 wk,
                 wv,
                 wo,
-                larql_compute::QuantWeight {
-                    data: gate_bytes,
-                    scales: None,
-                    format: to_fmt(gate_fmt),
-                },
-                larql_compute::QuantWeight {
-                    data: up_bytes,
-                    scales: None,
-                    format: to_fmt(up_fmt),
-                },
-                larql_compute::QuantWeight {
-                    data: down_bytes,
-                    scales: None,
-                    format: to_fmt(down_fmt),
-                },
+                larql_compute::QuantWeight::new(
+                    to_fmt(gate_fmt),
+                    gate_bytes,
+                    larql_compute::QuantAux::None,
+                ),
+                larql_compute::QuantWeight::new(
+                    to_fmt(up_fmt),
+                    up_bytes,
+                    larql_compute::QuantAux::None,
+                ),
+                larql_compute::QuantWeight::new(
+                    to_fmt(down_fmt),
+                    down_bytes,
+                    larql_compute::QuantAux::None,
+                ),
             )
         })
         .collect();
@@ -230,21 +230,21 @@ pub fn predict_kquant_metal_hidden(
                 wk,
                 wv,
                 wo,
-                larql_compute::QuantWeight {
-                    data: gate_bytes,
-                    scales: None,
-                    format: to_fmt(gate_fmt),
-                },
-                larql_compute::QuantWeight {
-                    data: up_bytes,
-                    scales: None,
-                    format: to_fmt(up_fmt),
-                },
-                larql_compute::QuantWeight {
-                    data: down_bytes,
-                    scales: None,
-                    format: to_fmt(down_fmt),
-                },
+                larql_compute::QuantWeight::new(
+                    to_fmt(gate_fmt),
+                    gate_bytes,
+                    larql_compute::QuantAux::None,
+                ),
+                larql_compute::QuantWeight::new(
+                    to_fmt(up_fmt),
+                    up_bytes,
+                    larql_compute::QuantAux::None,
+                ),
+                larql_compute::QuantWeight::new(
+                    to_fmt(down_fmt),
+                    down_bytes,
+                    larql_compute::QuantAux::None,
+                ),
             )
         })
         .collect();
@@ -326,21 +326,21 @@ pub fn predict_kquant_metal_capture_pre_wo(
                 wk,
                 wv,
                 wo,
-                larql_compute::QuantWeight {
-                    data: gate_bytes,
-                    scales: None,
-                    format: to_fmt(gate_fmt),
-                },
-                larql_compute::QuantWeight {
-                    data: up_bytes,
-                    scales: None,
-                    format: to_fmt(up_fmt),
-                },
-                larql_compute::QuantWeight {
-                    data: down_bytes,
-                    scales: None,
-                    format: to_fmt(down_fmt),
-                },
+                larql_compute::QuantWeight::new(
+                    to_fmt(gate_fmt),
+                    gate_bytes,
+                    larql_compute::QuantAux::None,
+                ),
+                larql_compute::QuantWeight::new(
+                    to_fmt(up_fmt),
+                    up_bytes,
+                    larql_compute::QuantAux::None,
+                ),
+                larql_compute::QuantWeight::new(
+                    to_fmt(down_fmt),
+                    down_bytes,
+                    larql_compute::QuantAux::None,
+                ),
             )
         })
         .collect();

@@ -7,6 +7,8 @@
 //! - Attention is identical to Llama
 
 use crate::config::{ModelArchitecture, ModelConfig};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 pub struct MixtralArch {
     config: ModelConfig,

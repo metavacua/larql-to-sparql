@@ -98,9 +98,21 @@ fn run_rope_at_pos(
     enc.set_compute_pipeline_state(&metal.attention.rope_at_pos_pipeline);
     enc.set_buffer(0, Some(&buf), 0);
     enc.set_bytes(1, 4, &hd as *const u32 as *const std::ffi::c_void);
-    enc.set_bytes(2, 4, &base as *const f32 as *const std::ffi::c_void);
     enc.set_bytes(3, 4, &pos_val as *const u32 as *const std::ffi::c_void);
     enc.set_bytes(4, 4, &rd_val as *const u32 as *const std::ffi::c_void);
+    // Buffer 2 is the frequency table, not `base` — the kernels stopped
+    // deriving frequencies in-shader so they could not silently ignore a
+    // model's scaling family (docs/k3-funnel.md §4.10).
+    let plan =
+        larql_compute::attention::rope::RopeFreqPlan::unscaled(head_dim, rotary_dim, base as f64);
+    let inv_freq = plan.inv_freq_f32();
+    enc.set_bytes(
+        2,
+        std::mem::size_of_val(&inv_freq[..]) as u64,
+        inv_freq.as_ptr() as *const std::ffi::c_void,
+    );
+    let amplitude = plan.amplitude as f32;
+    enc.set_bytes(5, 4, &amplitude as *const f32 as *const std::ffi::c_void);
     enc.dispatch_threads(
         metal::MTLSize::new(pairs, 1, 1),
         metal::MTLSize::new(pairs.min(256), 1, 1),
@@ -250,10 +262,20 @@ fn rope_at_pos_matches_rope_at_pos_batched_one_head() {
     enc.set_compute_pipeline_state(&metal.attention.rope_at_pos_batched_pipeline);
     enc.set_buffer(0, Some(&buf), 0);
     enc.set_bytes(1, 4, &hd as *const u32 as *const std::ffi::c_void);
-    enc.set_bytes(2, 4, &base as *const f32 as *const std::ffi::c_void);
     enc.set_bytes(3, 4, &pos_val as *const u32 as *const std::ffi::c_void);
     enc.set_bytes(4, 4, &rd_val as *const u32 as *const std::ffi::c_void);
     enc.set_bytes(5, 4, &nh as *const u32 as *const std::ffi::c_void);
+    // Buffer 2 is the frequency table; amplitude at 6. See §4.10.
+    let plan =
+        larql_compute::attention::rope::RopeFreqPlan::unscaled(head_dim, rotary_dim, base as f64);
+    let inv_freq = plan.inv_freq_f32();
+    enc.set_bytes(
+        2,
+        std::mem::size_of_val(&inv_freq[..]) as u64,
+        inv_freq.as_ptr() as *const std::ffi::c_void,
+    );
+    let amplitude = plan.amplitude as f32;
+    enc.set_bytes(6, 4, &amplitude as *const f32 as *const std::ffi::c_void);
     enc.dispatch_threads(
         metal::MTLSize::new(pairs, 1, 1),
         metal::MTLSize::new(pairs.min(256), 1, 1),

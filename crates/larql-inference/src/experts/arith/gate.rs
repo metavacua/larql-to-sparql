@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::experts::virtual_expert::{Fire, ResidualTap};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 use super::extract::find_expression;
 
 /// Tier-0 symbolic scan: does the prompt surface carry an explicit integer
@@ -43,6 +46,7 @@ pub struct RidgeProbe {
 
 impl RidgeProbe {
     /// Load a probe artifact (JSON) from disk.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
         serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))

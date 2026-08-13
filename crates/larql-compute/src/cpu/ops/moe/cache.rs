@@ -39,9 +39,26 @@
 //! lengths, so the key includes pointer, length, format, and expected float
 //! count.
 
+// RwLock has no core/alloc equivalent at all (needs real OS
+// synchronization) -- native-only, along with the rest of the LRU
+// caching wrapper (Inner, cell()). wasm32v1-none is single-threaded
+// with no OS at all, so the cache -- a pure performance optimization,
+// "Set to 0 to disable caching entirely" is already a supported
+// configuration per the module doc above -- is simply always disabled
+// there, always taking the miss path. dequant() below is the shared,
+// portable, pure-computation core both targets call; only the caching
+// wrapper around it differs.
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::VecDeque;
-use std::sync::{Arc, OnceLock, RwLock};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{OnceLock, RwLock};
 
+#[cfg(target_arch = "wasm32")]
+use alloc::{sync::Arc, vec::Vec};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
 use crate::options;
 
 /// LRU cache entry: dequantised expert weights.
@@ -52,8 +69,10 @@ pub(super) enum DequantError {
     UnsupportedFormat(crate::QuantFormat),
 }
 
-impl std::fmt::Display for DequantError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+// core::fmt::Display / core::error::Error are the same items std
+// re-exports -- portable regardless of target, no cfg needed.
+impl core::fmt::Display for DequantError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::UnsupportedFormat(format) => {
                 write!(f, "CPU MoE dequant does not support {format:?}")
@@ -62,7 +81,7 @@ impl std::fmt::Display for DequantError {
     }
 }
 
-impl std::error::Error for DequantError {}
+impl core::error::Error for DequantError {}
 
 /// Cache key — in production the byte slice's start pointer is stable across
 /// the lifetime of the mmap, so different experts in the same packed tensor get
@@ -70,13 +89,13 @@ impl std::error::Error for DequantError {}
 /// included so reused addresses or differently interpreted byte slices cannot
 /// return a stale decode. Tests use short heap Vecs whose addresses can be
 /// recycled between cases, so include a content fingerprint under `cfg(test)`.
-#[cfg(not(test))]
+#[cfg(all(not(test), not(target_arch = "wasm32")))]
 type Key = (usize, usize, crate::QuantFormat, usize);
 
 #[cfg(test)]
 type Key = (usize, usize, crate::QuantFormat, usize, u64);
 
-#[cfg(not(test))]
+#[cfg(all(not(test), not(target_arch = "wasm32")))]
 fn cache_key(bytes: &[u8], format: crate::QuantFormat, expected_floats: usize) -> Key {
     (
         bytes.as_ptr() as usize,
@@ -101,6 +120,7 @@ fn cache_key(bytes: &[u8], format: crate::QuantFormat, expected_floats: usize) -
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct Inner {
     map: std::collections::HashMap<Key, ExpertF32>,
     /// Insertion order — used for FIFO eviction when `map.len() > cap`.
@@ -113,6 +133,7 @@ struct Inner {
     cap: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Inner {
     fn new(cap: usize) -> Self {
         Self {
@@ -149,6 +170,7 @@ impl Inner {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn cell() -> &'static RwLock<Inner> {
     static CELL: OnceLock<RwLock<Inner>> = OnceLock::new();
     CELL.get_or_init(|| {
@@ -160,6 +182,44 @@ fn cell() -> &'static RwLock<Inner> {
     })
 }
 
+/// Pure dequantisation core, shared by both targets: the caching wrapper
+/// around this (below) is a performance optimization only -- the result
+/// is identical whether it comes from cache or a fresh call.
+fn dequant(bytes: &[u8], format: crate::QuantFormat, expected_floats: usize) -> Vec<f32> {
+    match format {
+        crate::QuantFormat::BF16 => super::math::bf16_to_f32(bytes),
+        crate::QuantFormat::Q4_K => {
+            crate::cpu::ops::q4_common::dequantize_q4_k(bytes, expected_floats)
+        }
+        // Q6_K expert stores exist since the MXFP4→Q6_K lossless transcode
+        // (GPT-OSS); the ggml planar decoder is the same one the rest of
+        // the engine uses.
+        crate::QuantFormat::Q6_K => {
+            larql_models::quant::ggml::q6_k::dequantize_q6_k(bytes, expected_floats)
+                .unwrap_or_else(|e| panic!("Q6_K expert dequant failed: {e}"))
+        }
+        crate::QuantFormat::F32 => bytes
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect(),
+        _ => unreachable!("unsupported formats return before cache lookup"),
+    }
+}
+
+fn check_supported(format: crate::QuantFormat) -> Result<(), DequantError> {
+    if matches!(
+        format,
+        crate::QuantFormat::BF16
+            | crate::QuantFormat::Q4_K
+            | crate::QuantFormat::Q6_K
+            | crate::QuantFormat::F32
+    ) {
+        Ok(())
+    } else {
+        Err(DequantError::UnsupportedFormat(format))
+    }
+}
+
 /// Return a cached Arc<Vec<f32>> for `bytes`, dequantising under `format` on
 /// miss. `expected_floats` is required for block formats (Q4_K) where the
 /// output length is not derivable from the input length without padding info;
@@ -168,17 +228,13 @@ fn cell() -> &'static RwLock<Inner> {
 /// Concurrency: the hot path (cache hit) takes a *read* lock so any number of
 /// rayon threads can clone their Arcs in parallel.  Misses take a brief write
 /// lock only at insert time; the dequant itself runs lock-free.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn try_cached_dequant(
     bytes: &[u8],
     format: crate::QuantFormat,
     expected_floats: usize,
 ) -> Result<ExpertF32, DequantError> {
-    if !matches!(
-        format,
-        crate::QuantFormat::BF16 | crate::QuantFormat::Q4_K | crate::QuantFormat::F32
-    ) {
-        return Err(DequantError::UnsupportedFormat(format));
-    }
+    check_supported(format)?;
 
     let key = cache_key(bytes, format, expected_floats);
     // Fast path: shared read lock — concurrent hits don't contend.
@@ -188,22 +244,28 @@ pub(super) fn try_cached_dequant(
         }
     }
     // Miss: dequantise OUTSIDE any lock, then take the write lock to insert.
-    let decoded = match format {
-        crate::QuantFormat::BF16 => super::math::bf16_to_f32(bytes),
-        crate::QuantFormat::Q4_K => {
-            crate::cpu::ops::q4_common::dequantize_q4_k(bytes, expected_floats)
-        }
-        crate::QuantFormat::F32 => bytes
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-            .collect(),
-        _ => unreachable!("unsupported formats return before cache lookup"),
-    };
-    let arc = Arc::new(decoded);
+    let arc = Arc::new(dequant(bytes, format, expected_floats));
     if let Ok(mut inner) = cell().write() {
         inner.insert(key, arc.clone());
     }
     Ok(arc)
+}
+
+/// wasm32v1-none is single-threaded with no OS synchronization
+/// primitives at all -- the LRU cache above (a pure performance
+/// optimization for concurrent rayon hits; "Set to 0 to disable
+/// caching entirely" is already a supported configuration, see the
+/// module doc) is simply always disabled here, unconditionally taking
+/// the same miss path `try_cached_dequant` takes on a native cache
+/// miss.
+#[cfg(target_arch = "wasm32")]
+pub(super) fn try_cached_dequant(
+    bytes: &[u8],
+    format: crate::QuantFormat,
+    expected_floats: usize,
+) -> Result<ExpertF32, DequantError> {
+    check_supported(format)?;
+    Ok(Arc::new(dequant(bytes, format, expected_floats)))
 }
 
 #[cfg(test)]

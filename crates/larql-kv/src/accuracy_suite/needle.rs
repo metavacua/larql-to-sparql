@@ -7,6 +7,9 @@
 //! "At long context, Standard KV and TurboQuant FAIL because of softmax dilution.
 //!  Markov RS PASSES because it routes to the relevant window."
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A needle-in-haystack test case.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct NeedleTest {

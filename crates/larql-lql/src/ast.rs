@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// LQL Abstract Syntax Tree
 ///
 /// Every LQL statement parses into one `Statement` variant.

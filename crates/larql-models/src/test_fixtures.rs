@@ -13,9 +13,12 @@
 //! backends). Only the generic `TinyModel` builder lives here — it's
 //! the one the moved-down forward-pass tests in `larql-compute` need.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
+use crate::collections::HashMap;
 use crate::{detect_from_json, ModelWeights, WeightArray};
 use ndarray::Array2;
-use std::collections::HashMap;
 
 /// Build a synthetic `ModelWeights` with all tensors populated.
 ///
@@ -44,8 +47,8 @@ pub fn make_test_weights() -> ModelWeights {
     });
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
     let mut rng_state = 0xdeadbeef_u64;
 
     // LCG giving values in [-scale, +scale]
@@ -92,10 +95,12 @@ pub fn make_test_weights() -> ModelWeights {
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,
@@ -203,6 +208,44 @@ pub fn make_gemma3_rope_scaled_test_weights() -> ModelWeights {
     )
 }
 
+/// Gemma-3 shaped with a **narrow** sliding window (4 tokens) over 6
+/// layers, so layers 0–4 slide and layer 5 is global.
+///
+/// The narrow window is the point: with a realistic 1024-token window a
+/// short test prompt keeps every position inside every sliding layer's
+/// view, so a global-only exclusion is correctly *refused* and the
+/// heterogeneous-row-count case never arises. Four tokens puts a planted
+/// span outside the sliding layers while keeping the fixture small
+/// enough to prefill in a unit test.
+pub fn make_gemma3_narrow_window_test_weights() -> ModelWeights {
+    const HIDDEN: usize = 16;
+    const INTER: usize = 32;
+    const NUM_Q: usize = 2;
+    const NUM_KV: usize = 1;
+    const HEAD_DIM: usize = 8;
+    const VOCAB: usize = 32;
+    const NUM_LAYERS: usize = 6;
+    gemma3_test_weights_inner(
+        serde_json::json!({
+            "model_type": "gemma3",
+            "text_config": {
+                "model_type": "gemma3_text",
+                "hidden_size": HIDDEN,
+                "num_hidden_layers": NUM_LAYERS,
+                "intermediate_size": INTER,
+                "head_dim": HEAD_DIM,
+                "num_attention_heads": NUM_Q,
+                "num_key_value_heads": NUM_KV,
+                "vocab_size": VOCAB,
+                "rope_theta": 10000.0,
+                "residual_multiplier": 0.5,
+                "sliding_window": 4,
+            },
+        }),
+        NUM_LAYERS,
+    )
+}
+
 fn gemma3_test_weights_inner(arch_json: serde_json::Value, num_layers: usize) -> ModelWeights {
     const VOCAB: usize = 32;
     const HIDDEN: usize = 16;
@@ -212,8 +255,8 @@ fn gemma3_test_weights_inner(arch_json: serde_json::Value, num_layers: usize) ->
     const HEAD_DIM: usize = 8;
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
     let q_dim = NUM_Q * HEAD_DIM;
     let kv_dim = NUM_KV * HEAD_DIM;
@@ -285,10 +328,12 @@ fn gemma3_test_weights_inner(arch_json: serde_json::Value, num_layers: usize) ->
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,
@@ -335,8 +380,8 @@ pub fn make_starcoder2_test_weights() -> ModelWeights {
     });
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
     let q_dim = NUM_Q * HEAD_DIM;
     let kv_dim = NUM_KV * HEAD_DIM;
@@ -411,10 +456,12 @@ pub fn make_starcoder2_test_weights() -> ModelWeights {
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,
@@ -472,9 +519,19 @@ pub fn synthetic_e2b_like_arch_json() -> serde_json::Value {
     })
 }
 
+/// Weight amplitude for the synthetic E2B-like fixture's LCG-seeded tensors.
+pub const E2B_TEST_WEIGHT_SCALE: f32 = 0.05;
+/// Per-layer `layer_scalar` value for the synthetic E2B-like fixture.
+/// Deliberately neither 0.0 (skipped as absent) nor 1.0 (skipped as
+/// identity) so `apply_layer_scalar` visibly changes the hidden state —
+/// a forward path that drops the scalar diverges instead of matching.
+pub const E2B_TEST_LAYER_SCALAR: f32 = 0.75;
+
 /// Build minimal `ModelWeights` matching the synthetic E2B-like arch.
-/// Tensors zero-filled — fixture's job is to satisfy presence checks
-/// (PLE keys, KV-shared sources) so per-layer-embedding code paths fire.
+/// Tensors carry deterministic non-zero LCG values (not zeros) so the
+/// PLE and `layer_scalar` contributions are non-trivial: parity tests
+/// between forward paths fail if either step is dropped, not just when
+/// the tensor keys are missing.
 pub fn make_synthetic_e2b_like_weights() -> ModelWeights {
     let arch = detect_from_json(&synthetic_e2b_like_arch_json());
     let num_layers = 4;
@@ -487,24 +544,34 @@ pub fn make_synthetic_e2b_like_weights() -> ModelWeights {
     let vocab_size = 32;
     let ple_dim = 4;
 
-    let mut tensors: std::collections::HashMap<String, WeightArray> =
-        std::collections::HashMap::new();
-    let mut vectors: std::collections::HashMap<String, Vec<f32>> = std::collections::HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
-    let zeros = |rows: usize, cols: usize| -> WeightArray {
-        Array2::<f32>::zeros((rows, cols)).into_shared()
+    let mut seed = 0xe2b_0000_u64;
+    let mut next_seed = || {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        seed
     };
+    let scale = E2B_TEST_WEIGHT_SCALE;
 
-    let embed = zeros(vocab_size, hidden);
-    let lm_head = zeros(vocab_size, hidden);
+    let embed = rand_mat_seeded(vocab_size, hidden, scale, next_seed());
+    let lm_head = embed.clone();
     tensors.insert(arch.embed_key().to_string(), embed.clone());
     vectors.insert(arch.final_norm_key().to_string(), vec![1.0; hidden]);
 
     if let Some(k) = arch.per_layer_model_projection_key() {
-        tensors.insert(k, zeros(num_layers * ple_dim, hidden));
+        tensors.insert(
+            k,
+            rand_mat_seeded(num_layers * ple_dim, hidden, scale, next_seed()),
+        );
     }
     if let Some(k) = arch.per_layer_embed_key() {
-        tensors.insert(k, zeros(vocab_size, num_layers * ple_dim));
+        tensors.insert(
+            k,
+            rand_mat_seeded(vocab_size, num_layers * ple_dim, scale, next_seed()),
+        );
     }
     if let Some(k) = arch.per_layer_projection_norm_key() {
         vectors.insert(k, vec![1.0; ple_dim]);
@@ -518,33 +585,59 @@ pub fn make_synthetic_e2b_like_weights() -> ModelWeights {
         };
         let q_dim = num_q_heads * layer_head_dim;
         let kv_dim = num_kv_heads * layer_head_dim;
-        tensors.insert(arch.attn_q_key(layer), zeros(q_dim, hidden));
-        tensors.insert(arch.attn_k_key(layer), zeros(kv_dim, hidden));
-        tensors.insert(arch.attn_v_key(layer), zeros(kv_dim, hidden));
-        tensors.insert(arch.attn_o_key(layer), zeros(hidden, q_dim));
-        tensors.insert(arch.ffn_gate_key(layer), zeros(intermediate, hidden));
-        tensors.insert(arch.ffn_up_key(layer), zeros(intermediate, hidden));
-        tensors.insert(arch.ffn_down_key(layer), zeros(hidden, intermediate));
+        tensors.insert(
+            arch.attn_q_key(layer),
+            rand_mat_seeded(q_dim, hidden, scale, next_seed()),
+        );
+        tensors.insert(
+            arch.attn_k_key(layer),
+            rand_mat_seeded(kv_dim, hidden, scale, next_seed()),
+        );
+        tensors.insert(
+            arch.attn_v_key(layer),
+            rand_mat_seeded(kv_dim, hidden, scale, next_seed()),
+        );
+        tensors.insert(
+            arch.attn_o_key(layer),
+            rand_mat_seeded(hidden, q_dim, scale, next_seed()),
+        );
+        tensors.insert(
+            arch.ffn_gate_key(layer),
+            rand_mat_seeded(intermediate, hidden, scale, next_seed()),
+        );
+        tensors.insert(
+            arch.ffn_up_key(layer),
+            rand_mat_seeded(intermediate, hidden, scale, next_seed()),
+        );
+        tensors.insert(
+            arch.ffn_down_key(layer),
+            rand_mat_seeded(hidden, intermediate, scale, next_seed()),
+        );
         vectors.insert(arch.input_layernorm_key(layer), vec![1.0; hidden]);
         vectors.insert(arch.post_attention_layernorm_key(layer), vec![1.0; hidden]);
         if let Some(k) = arch.per_layer_input_gate_key(layer) {
-            tensors.insert(k, zeros(ple_dim, hidden));
+            tensors.insert(k, rand_mat_seeded(ple_dim, hidden, scale, next_seed()));
         }
         if let Some(k) = arch.per_layer_projection_key(layer) {
-            tensors.insert(k, zeros(hidden, ple_dim));
+            tensors.insert(k, rand_mat_seeded(hidden, ple_dim, scale, next_seed()));
         }
         if let Some(k) = arch.post_per_layer_input_norm_key(layer) {
             vectors.insert(k, vec![1.0; hidden]);
+        }
+        if let Some(k) = arch.layer_scalar_key(layer) {
+            vectors.insert(k, vec![E2B_TEST_LAYER_SCALAR]);
         }
     }
 
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: std::collections::HashMap::new(),
-        packed_mmaps: std::collections::HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: std::collections::HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,
@@ -582,6 +675,16 @@ pub const Q4K_TEST_INTER: usize = 256;
 pub const Q4K_TEST_VOCAB: usize = 256;
 /// Layer count for the Q4_K test fixture.
 pub const Q4K_TEST_NUM_LAYERS: usize = 2;
+/// Query-head count for the Q4_K test fixtures.
+pub const Q4K_TEST_NUM_Q: usize = 4;
+/// K/V-head count for the Q4_K test fixtures (GQA reps = 2).
+pub const Q4K_TEST_NUM_KV: usize = 2;
+/// Wide FFN width for the Q4_K fixture: threshold tests that route the
+/// walk's parallel Q4K-down branch need `hits ≥ 512` while staying
+/// below the full-K gemv rewrite at 80% density — so
+/// `intermediate > 512 / 0.8 = 640`; 768 is the next 256-multiple
+/// (Q4_K super-block constraint).
+pub const Q4K_TEST_INTER_WIDE: usize = 768;
 
 /// Build a synthetic `ModelWeights` sized to satisfy Q4_K's 256-element
 /// super-block constraint. Uses Gemma 3 architecture so the
@@ -613,7 +716,47 @@ pub fn make_test_q4k_weights_layers(num_layers: usize) -> ModelWeights {
         "hidden_activation": "gelu_pytorch_tanh",
         "rope_theta": 10000.0,
     });
-    q4k_test_weights_from_json(arch_json, num_layers)
+    q4k_test_weights_from_json(
+        arch_json,
+        num_layers,
+        Q4K_TEST_INTER,
+        Q4K_TEST_HIDDEN,
+        Q4K_TEST_NUM_Q,
+        Q4K_TEST_NUM_KV,
+    )
+}
+
+/// Wide-FFN sibling of [`make_test_q4k_weights`]: same Gemma 3 arch and
+/// hidden size, but `intermediate_size = Q4K_TEST_INTER_WIDE` (768) and a
+/// single layer (the wide FFN triples quantisation cost per layer). Built
+/// for walk-engine threshold tests that need a route of ≥ 512 features
+/// without triggering the 80%-density full-K gemv rewrite.
+pub fn make_test_q4k_weights_wide() -> ModelWeights {
+    let num_q = 4usize;
+    let num_kv = 2usize;
+    let head_dim = Q4K_TEST_HIDDEN / num_q;
+    let num_layers = 1usize;
+
+    let arch_json = serde_json::json!({
+        "model_type": "gemma3_text",
+        "hidden_size": Q4K_TEST_HIDDEN,
+        "num_hidden_layers": num_layers,
+        "intermediate_size": Q4K_TEST_INTER_WIDE,
+        "head_dim": head_dim,
+        "num_attention_heads": num_q,
+        "num_key_value_heads": num_kv,
+        "vocab_size": Q4K_TEST_VOCAB,
+        "hidden_activation": "gelu_pytorch_tanh",
+        "rope_theta": 10000.0,
+    });
+    q4k_test_weights_from_json(
+        arch_json,
+        num_layers,
+        Q4K_TEST_INTER_WIDE,
+        Q4K_TEST_HIDDEN,
+        Q4K_TEST_NUM_Q,
+        Q4K_TEST_NUM_KV,
+    )
 }
 
 /// Rope-scaled sibling of [`make_test_q4k_weights`]: Gemma-3 arch at the
@@ -644,17 +787,29 @@ pub fn make_test_q4k_weights_rope_scaled() -> ModelWeights {
         "sliding_window": 512,
         "rope_scaling": {"rope_type": "linear", "factor": 8.0},
     });
-    q4k_test_weights_from_json(arch_json, num_layers)
+    q4k_test_weights_from_json(
+        arch_json,
+        num_layers,
+        Q4K_TEST_INTER,
+        Q4K_TEST_HIDDEN,
+        Q4K_TEST_NUM_Q,
+        Q4K_TEST_NUM_KV,
+    )
 }
 
-fn q4k_test_weights_from_json(arch_json: serde_json::Value, num_layers: usize) -> ModelWeights {
-    let num_q = 4usize;
-    let num_kv = 2usize;
-    let head_dim = Q4K_TEST_HIDDEN / num_q;
+fn q4k_test_weights_from_json(
+    arch_json: serde_json::Value,
+    num_layers: usize,
+    intermediate: usize,
+    hidden: usize,
+    num_q: usize,
+    num_kv: usize,
+) -> ModelWeights {
+    let head_dim = hidden / num_q;
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
     let mut seed = 0xc0ffee_u64;
     let mut next_seed = || {
@@ -664,14 +819,11 @@ fn q4k_test_weights_from_json(arch_json: serde_json::Value, num_layers: usize) -
         seed
     };
 
-    let embed = rand_mat_seeded(Q4K_TEST_VOCAB, Q4K_TEST_HIDDEN, 0.05, next_seed());
+    let embed = rand_mat_seeded(Q4K_TEST_VOCAB, hidden, 0.05, next_seed());
     let lm_head = embed.clone();
     tensors.insert(arch.embed_key().to_string(), embed.clone());
 
-    vectors.insert(
-        arch.final_norm_key().to_string(),
-        vec![1.0; Q4K_TEST_HIDDEN],
-    );
+    vectors.insert(arch.final_norm_key().to_string(), vec![1.0; hidden]);
 
     let q_dim = num_q * head_dim;
     let kv_dim = num_kv * head_dim;
@@ -679,60 +831,72 @@ fn q4k_test_weights_from_json(arch_json: serde_json::Value, num_layers: usize) -
     for layer in 0..num_layers {
         tensors.insert(
             arch.attn_q_key(layer),
-            rand_mat_seeded(q_dim, Q4K_TEST_HIDDEN, 0.05, next_seed()),
+            rand_mat_seeded(q_dim, hidden, 0.05, next_seed()),
         );
         tensors.insert(
             arch.attn_k_key(layer),
-            rand_mat_seeded(kv_dim, Q4K_TEST_HIDDEN, 0.05, next_seed()),
+            rand_mat_seeded(kv_dim, hidden, 0.05, next_seed()),
         );
         tensors.insert(
             arch.attn_v_key(layer),
-            rand_mat_seeded(kv_dim, Q4K_TEST_HIDDEN, 0.05, next_seed()),
+            rand_mat_seeded(kv_dim, hidden, 0.05, next_seed()),
         );
         tensors.insert(
             arch.attn_o_key(layer),
-            rand_mat_seeded(Q4K_TEST_HIDDEN, q_dim, 0.05, next_seed()),
+            rand_mat_seeded(hidden, q_dim, 0.05, next_seed()),
         );
         tensors.insert(
             arch.ffn_gate_key(layer),
-            rand_mat_seeded(Q4K_TEST_INTER, Q4K_TEST_HIDDEN, 0.05, next_seed()),
+            rand_mat_seeded(intermediate, hidden, 0.05, next_seed()),
         );
         tensors.insert(
             arch.ffn_up_key(layer),
-            rand_mat_seeded(Q4K_TEST_INTER, Q4K_TEST_HIDDEN, 0.05, next_seed()),
+            rand_mat_seeded(intermediate, hidden, 0.05, next_seed()),
         );
         tensors.insert(
             arch.ffn_down_key(layer),
-            rand_mat_seeded(Q4K_TEST_HIDDEN, Q4K_TEST_INTER, 0.05, next_seed()),
+            rand_mat_seeded(hidden, intermediate, 0.05, next_seed()),
         );
 
-        vectors.insert(arch.input_layernorm_key(layer), vec![0.5; Q4K_TEST_HIDDEN]);
-        vectors.insert(
-            arch.post_attention_layernorm_key(layer),
-            vec![0.5; Q4K_TEST_HIDDEN],
-        );
+        vectors.insert(arch.input_layernorm_key(layer), vec![0.5; hidden]);
+        vectors.insert(arch.post_attention_layernorm_key(layer), vec![0.5; hidden]);
         if let Some(k) = arch.pre_feedforward_layernorm_key(layer) {
-            vectors.insert(k, vec![0.5; Q4K_TEST_HIDDEN]);
+            vectors.insert(k, vec![0.5; hidden]);
         }
         if let Some(k) = arch.post_feedforward_layernorm_key(layer) {
-            vectors.insert(k, vec![0.5; Q4K_TEST_HIDDEN]);
+            vectors.insert(k, vec![0.5; hidden]);
+        }
+        // QK-norm, on the architectures that declare it (Gemma 3 / 4).
+        // These were declared-but-absent until 2026-08, which made the
+        // fixture claim an architecture it did not actually carry: every
+        // consumer that resolves the weight got `None` and silently
+        // skipped the stage, so a backend disagreeing about what to do
+        // with a missing QK-norm weight had nothing pinning it. Sized per
+        // head_dim, not hidden — QK-norm normalises within a head.
+        if let Some(k) = arch.attn_q_norm_key(layer) {
+            vectors.insert(k, vec![0.5; head_dim]);
+        }
+        if let Some(k) = arch.attn_k_norm_key(layer) {
+            vectors.insert(k, vec![0.5; head_dim]);
         }
     }
 
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,
         arch,
         num_layers,
-        hidden_size: Q4K_TEST_HIDDEN,
-        intermediate_size: Q4K_TEST_INTER,
+        hidden_size: hidden,
+        intermediate_size: intermediate,
         vocab_size: Q4K_TEST_VOCAB,
         head_dim,
         num_q_heads: num_q,
@@ -766,8 +930,8 @@ pub fn make_test_q4k_weights_silu() -> ModelWeights {
     });
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
 
     let mut seed = 0xdeadc0de_u64;
     let mut next_seed = || {
@@ -829,10 +993,12 @@ pub fn make_test_q4k_weights_silu() -> ModelWeights {
     ModelWeights {
         tensors,
         vectors,
-        raw_bytes: HashMap::new(),
-        packed_mmaps: HashMap::new(),
+        raw_bytes: HashMap::default(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,
@@ -853,6 +1019,11 @@ pub fn make_test_q4k_weights_silu() -> ModelWeights {
 ///
 /// Public so inference-side fixtures (`make_test_q4k_vindex` etc.)
 /// that stay in `larql-inference/src/test_utils.rs` can reuse it.
+///
+/// memmap2 has zero wasm32 support at all (no filesystem/anonymous-
+/// mapping concept on wasm32v1-none) -- native-only, matching
+/// weights.rs's own packed_mmaps field gating.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn arc_mmap_from_bytes(payload: &[u8]) -> std::sync::Arc<memmap2::Mmap> {
     let mut anon = memmap2::MmapMut::map_anon(payload.len().max(1)).expect("anon mmap");
     if !payload.is_empty() {
@@ -918,9 +1089,9 @@ pub fn make_test_gemma4_moe_weights() -> ModelWeights {
     });
     let arch = detect_from_json(&arch_json);
 
-    let mut tensors: HashMap<String, WeightArray> = HashMap::new();
-    let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
-    let mut raw_bytes: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut tensors: HashMap<String, WeightArray> = HashMap::default();
+    let mut vectors: HashMap<String, Vec<f32>> = HashMap::default();
+    let mut raw_bytes: HashMap<String, Vec<u8>> = HashMap::default();
 
     let mut seed = 0xb000_1eef_u64;
     let mut next_seed = || {
@@ -1033,9 +1204,11 @@ pub fn make_test_gemma4_moe_weights() -> ModelWeights {
         tensors,
         vectors,
         raw_bytes,
-        packed_mmaps: HashMap::new(),
+        #[cfg(not(target_arch = "wasm32"))]
+        packed_mmaps: HashMap::default(),
         skipped_tensors: Vec::new(),
-        packed_byte_ranges: HashMap::new(),
+        packed_byte_ranges: HashMap::default(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,
@@ -1049,6 +1222,54 @@ pub fn make_test_gemma4_moe_weights() -> ModelWeights {
         num_kv_heads: num_kv,
         rope_base: 10_000.0,
     }
+}
+
+/// Gemma-3 Q4_K fixture at **caller-chosen attention dimensions**.
+///
+/// Every other Q4_K fixture is pinned to `hidden = 256, num_q = 4`, i.e.
+/// `head_dim = 64`. That made shape sensitivity untestable: a kernel with
+/// a `head_dim` assumption would be wrong on every fixture and right on
+/// every real model, which is exactly the signature of the Metal
+/// batched-prefill divergence (see `larql-kv`'s
+/// `gpu_engine_parity::gemma3_prefill_gap`). This builder is the knob for
+/// bisecting that axis, and for any future "does this kernel assume a
+/// shape?" question.
+///
+/// `hidden` must be a multiple of 256 (Q4_K super-block) and divisible by
+/// `num_q`; `num_q` must be divisible by `num_kv`.
+pub fn make_test_q4k_weights_with_dims(
+    hidden: usize,
+    num_q: usize,
+    num_kv: usize,
+    num_layers: usize,
+) -> ModelWeights {
+    assert!(
+        hidden.is_multiple_of(256),
+        "Q4_K needs a hidden size that is a multiple of its 256-element super-block, got {hidden}"
+    );
+    assert!(
+        num_q != 0 && hidden.is_multiple_of(num_q),
+        "hidden {hidden} must divide evenly into {num_q} query heads"
+    );
+    assert!(
+        num_kv != 0 && num_q.is_multiple_of(num_kv),
+        "{num_q} query heads must group evenly onto {num_kv} K/V heads"
+    );
+    let head_dim = hidden / num_q;
+
+    let arch_json = serde_json::json!({
+        "model_type": "gemma3_text",
+        "hidden_size": hidden,
+        "num_hidden_layers": num_layers,
+        "intermediate_size": hidden,
+        "head_dim": head_dim,
+        "num_attention_heads": num_q,
+        "num_key_value_heads": num_kv,
+        "vocab_size": Q4K_TEST_VOCAB,
+        "hidden_activation": "gelu_pytorch_tanh",
+        "rope_theta": 10000.0,
+    });
+    q4k_test_weights_from_json(arch_json, num_layers, hidden, hidden, num_q, num_kv)
 }
 
 #[cfg(test)]

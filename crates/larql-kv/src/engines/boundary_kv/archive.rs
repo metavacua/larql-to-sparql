@@ -6,8 +6,16 @@
 //! ships [`InMemoryArchive`] which keeps everything in process memory.
 
 use larql_boundary::BoundaryFrame;
+// `InMemoryArchive` (Mutex-backed) is the only native item here;
+// `ArchiveError` and the `BoundaryArchive` trait definition itself are
+// pure data / method signatures and stay portable.
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Mutex;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Errors a [`BoundaryArchive`] may surface.
 #[derive(Debug, thiserror::Error)]
@@ -46,11 +54,13 @@ pub trait BoundaryArchive: Send + Sync {
 /// Suitable for tests, single-process sessions, and any use case where
 /// durability across process restarts is provided externally (e.g. the
 /// caller serialises the chain through its own persistence layer).
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 pub struct InMemoryArchive {
     inner: Mutex<HashMap<String, Vec<BoundaryFrame>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl InMemoryArchive {
     pub fn new() -> Self {
         Self::default()
@@ -62,6 +72,7 @@ impl InMemoryArchive {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl BoundaryArchive for InMemoryArchive {
     fn append(&self, frame: BoundaryFrame) -> Result<(), ArchiveError> {
         let mut map = self

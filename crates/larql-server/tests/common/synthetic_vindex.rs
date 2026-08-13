@@ -135,6 +135,7 @@ fn make_weights() -> larql_models::ModelWeights {
         skipped_tensors: Vec::new(),
         packed_mmaps: HashMap::new(),
         packed_byte_ranges: HashMap::new(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,

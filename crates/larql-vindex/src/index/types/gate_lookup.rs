@@ -4,6 +4,9 @@ use ndarray::{Array1, Array2};
 
 use super::FeatureMeta;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Gate KNN and feature metadata lookup.
 ///
 /// This is the minimal read-only surface needed by graph browsing and
@@ -58,7 +61,7 @@ pub trait GateLookup: Send + Sync {
 
     fn gate_knn_batch(&self, layer: usize, x: &Array2<f32>, top_k: usize) -> Vec<usize> {
         let seq_len = x.shape()[0];
-        let mut all = std::collections::BTreeSet::new();
+        let mut all = crate::collections::BTreeSet::new();
         for s in 0..seq_len {
             let row = x.row(s).to_owned();
             for (feat, _) in self.gate_knn(layer, &row, top_k) {

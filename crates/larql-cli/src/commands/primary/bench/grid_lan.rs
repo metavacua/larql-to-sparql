@@ -12,9 +12,12 @@
 //! writes live in `grid_lan_runtime.rs` (excluded from coverage like the
 //! other `*_runtime.rs` files).
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
+
+use crate::collections::BTreeMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 // ── Config schema (matches run.py / config.example.json) ─────────────────────
 
@@ -497,7 +500,7 @@ pub fn selected_runs<'a>(
     only: Option<&[String]>,
     include_disabled: bool,
 ) -> Vec<&'a RunSpec> {
-    let only_set: Option<std::collections::HashSet<&str>> =
+    let only_set: Option<crate::collections::HashSet<&str>> =
         only.map(|v| v.iter().map(String::as_str).collect());
     config
         .runs

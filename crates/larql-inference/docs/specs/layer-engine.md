@@ -24,7 +24,7 @@ engine.
   points; LayerEngine is what serves a WALK zone. Read ZoneEngine
   first for the top-level structure; this spec for the per-layer
   details of WALK.
-- [`state-policy.md`](./state-policy.md) — engine identity as
+- [`state-policy.md`](../../../larql-kv/docs/state-policy.md) — engine identity as
   `(canonical_state, derivative_state, correctness_contract)`. This
   spec inherits that vocabulary.
 - [`engine-state-vs-execution.md`](./engine-state-vs-execution.md) —
@@ -313,7 +313,7 @@ these are different engines from their standalone counterparts; see
 | `NoCacheEngine`          | `uniform(NoCache, Dense, DenseGraph)`           | `exact_logits`                 |
 | `MarkovResidualEngine`   | `uniform(MarkovResidual, Dense, DenseGraph)`    | `exact_logits` (cond.)         |
 | `UnlimitedContextEngine` | `uniform(Unlimited, Dense, DenseGraph)`         | `exact_logits` (in-window)     |
-| `TurboQuantEngine`       | `uniform(TurboQuant, Dense, DenseGraph)`        | `bounded_KL`                   |
+| `TurboQuantEngine`       | `uniform(TurboQuant, Dense, DenseGraph)`        | `codec_bounded_state`          |
 | `Apollo`                 | `uniform(Apollo, Dense, DenseGraph)`            | `task_level_retrieval`         |
 
 Per-layer compositions previously inexpressible:
@@ -568,7 +568,7 @@ its scope as "the top-level engine" was wrong.
 
 ## 13. Cross-references
 
-- [`state-policy.md`](./state-policy.md) — engine identity taxonomy.
+- [`state-policy.md`](../../../larql-kv/docs/state-policy.md) — engine identity taxonomy.
   §3.1 has the W10 worked-example table that LayerEngine §4 builds on.
 - [`engine-state-vs-execution.md`](./engine-state-vs-execution.md) —
   the orthogonal cut. §11 (W10's mask cascade as a §2 worked example)
@@ -578,7 +578,7 @@ its scope as "the top-level engine" was wrong.
   per-layer.
 - [`markov-residual-engine.md` §14](./markov-residual-engine.md),
   [`markov-residual-codec-engine.md` §14](./markov-residual-codec-engine.md),
-  [`unlimited-context-engine.md` §8](./unlimited-context-engine.md) —
+  [`windowed-checkpoint-engine.md` §8](./windowed-checkpoint-engine.md) —
   per-engine W10 opt-in tables; the mask cascade these refer to is the
   same mechanism LayerEngine reuses per layer.
 - `crates/larql-kv/examples/contract_classify_cached_ffn.rs` — the

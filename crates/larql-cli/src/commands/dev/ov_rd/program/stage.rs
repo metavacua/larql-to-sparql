@@ -1,9 +1,11 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
 use super::context::PositionContext;
 use super::rule::ProgramRule;
+use crate::collections::BTreeMap;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 pub const MAX_FIXED_POINT_ITERS: usize = 64;
 

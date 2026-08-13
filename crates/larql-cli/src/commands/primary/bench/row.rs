@@ -5,6 +5,9 @@
 //! JSON shape committed to `bench/baselines/*.json`. They live here together
 //! so that any change to the row layout is one file's review surface.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub(crate) struct BenchRow {
     pub backend: String,
     pub prefill_ms: f64,
@@ -61,10 +64,24 @@ pub(crate) struct BenchJsonLatency {
     pub p99: f64,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Default)]
 pub(crate) struct BenchJsonStages {
     pub embed_ms: f64,
     pub gpu_fwd_ms: f64,
+    /// Of `gpu_fwd_ms`, the part the GPU was actually executing. `gpu_fwd_ms`
+    /// alone is wall time *around* the GPU call, so a consumer that reads it
+    /// as GPU time overstates the GPU on any hybrid path. Emitted only when
+    /// the profile measured it (`LARQL_PROFILE_SPLIT=1`) — a fabricated zero
+    /// would read as "no GPU time", which is the opposite error.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub gpu_only_ms: f64,
+    /// Attention share of the GPU split. Same gating as `gpu_only_ms`.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub attn_ms: f64,
+    /// Command buffers submitted per token — dispatch overhead the per-stage
+    /// durations do not show.
+    #[serde(skip_serializing_if = "is_zero_count")]
+    pub cmd_buffers: u64,
     pub cpu_fwd_ms: f64,
     pub gate_up_ms: f64,
     pub down_ms: f64,
@@ -79,11 +96,18 @@ fn is_zero(v: &f64) -> bool {
     *v == 0.0
 }
 
+fn is_zero_count(v: &u64) -> bool {
+    *v == 0
+}
+
 impl From<larql_inference::layer_graph::generate::StageTimings> for BenchJsonStages {
     fn from(s: larql_inference::layer_graph::generate::StageTimings) -> Self {
         Self {
             embed_ms: s.embed_ms_total,
             gpu_fwd_ms: s.gpu_ms_total,
+            gpu_only_ms: s.gpu_only_ms_total,
+            attn_ms: s.attn_ms_total,
+            cmd_buffers: s.cmd_buffers_total,
             cpu_fwd_ms: s.cpu_fwd_ms_total,
             gate_up_ms: s.gate_up_ms_total,
             down_ms: s.down_ms_total,
@@ -113,7 +137,7 @@ pub(crate) fn compute_percentiles(values: &[f64]) -> (f64, f64, f64) {
         return (0.0, 0.0, 0.0);
     }
     let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
     let mean = sorted.iter().sum::<f64>() / sorted.len() as f64;
     let p50 = percentile(&sorted, 50.0);
     let p99 = percentile(&sorted, 99.0);
@@ -164,6 +188,7 @@ mod tests {
             lm_head_ms_total: 1.75,
             detok_ms_total: 0.012,
             dequant_ms_total: 0.0,
+            ..Default::default()
         };
         let j: BenchJsonStages = s.into();
         assert!((j.embed_ms - 1.0).abs() < 1e-9);
@@ -187,6 +212,7 @@ mod tests {
             lm_head_ms: 1.75,
             detok_ms: 0.012,
             dequant_ms: 0.0,
+            ..Default::default()
         };
         let json = serde_json::to_string(&j).unwrap();
         assert!(!json.contains("dequant_ms"));
@@ -194,21 +220,58 @@ mod tests {
 
     #[test]
     fn bench_json_stages_serialisation_emits_nonzero_dequant() {
-        let mut j = BenchJsonStages {
-            embed_ms: 0.0,
-            gpu_fwd_ms: 0.0,
-            cpu_fwd_ms: 0.0,
-            gate_up_ms: 0.0,
-            down_ms: 0.0,
-            final_norm_ms: 0.0,
-            lm_head_ms: 0.0,
-            detok_ms: 0.0,
-            dequant_ms: 0.0,
+        let j = BenchJsonStages {
+            dequant_ms: 2.5,
+            ..Default::default()
         };
-        j.dequant_ms = 2.5;
         let json = serde_json::to_string(&j).unwrap();
         assert!(json.contains("dequant_ms"));
         assert!(json.contains("2.5"));
+    }
+
+    #[test]
+    fn is_zero_count_matches_only_exact_zero() {
+        assert!(is_zero_count(&0));
+        assert!(!is_zero_count(&1));
+    }
+
+    #[test]
+    fn bench_json_stages_carries_the_gpu_split() {
+        // The whole point of the split: a JSON consumer must be able to tell
+        // GPU time from wall time around the GPU call. `gpu_fwd_ms` alone
+        // cannot, so the split fields have to survive the conversion.
+        let s = larql_inference::layer_graph::generate::StageTimings {
+            gpu_ms_total: 11.6,
+            gpu_only_ms_total: 1.9,
+            attn_ms_total: 0.7,
+            cmd_buffers_total: 34,
+            ..Default::default()
+        };
+        let j: BenchJsonStages = s.into();
+        assert!((j.gpu_only_ms - 1.9).abs() < 1e-9);
+        assert!((j.attn_ms - 0.7).abs() < 1e-9);
+        assert_eq!(j.cmd_buffers, 34);
+
+        let json = serde_json::to_string(&j).unwrap();
+        assert!(json.contains("gpu_only_ms"), "{json}");
+        assert!(json.contains("attn_ms"), "{json}");
+        assert!(json.contains("cmd_buffers"), "{json}");
+    }
+
+    #[test]
+    fn bench_json_stages_omits_the_split_when_unprofiled() {
+        // Without `LARQL_PROFILE_SPLIT=1` nothing measured the GPU window.
+        // Emitting `gpu_only_ms: 0` would assert the GPU did no work, which
+        // is a stronger and wronger claim than saying nothing.
+        let s = larql_inference::layer_graph::generate::StageTimings {
+            gpu_ms_total: 11.6,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&BenchJsonStages::from(s)).unwrap();
+        assert!(json.contains("gpu_fwd_ms"), "{json}");
+        assert!(!json.contains("gpu_only_ms"), "{json}");
+        assert!(!json.contains("attn_ms"), "{json}");
+        assert!(!json.contains("cmd_buffers"), "{json}");
     }
 
     #[test]

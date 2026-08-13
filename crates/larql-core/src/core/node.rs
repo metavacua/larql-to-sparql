@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 /// An entity node — always derived from edges, never stored directly.
 /// Node type is an optional free-form string, inferred from schema rules at runtime.
 #[derive(Debug, Clone)]

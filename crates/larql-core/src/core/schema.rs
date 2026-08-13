@@ -1,5 +1,7 @@
+use crate::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Metadata for a relation type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,8 +75,8 @@ impl Schema {
     /// using the loaded type rules. Returns None if no rule matches.
     pub fn infer_type(
         &self,
-        outgoing: &std::collections::HashSet<String>,
-        incoming: &std::collections::HashSet<String>,
+        outgoing: &HashSet<String>,
+        incoming: &HashSet<String>,
     ) -> Option<String> {
         for rule in &self.type_rules {
             let out_match =

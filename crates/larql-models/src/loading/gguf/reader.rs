@@ -1,5 +1,7 @@
 //! Binary read helpers for the GGUF format.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::io::Read;
 
 use crate::detect::ModelError;

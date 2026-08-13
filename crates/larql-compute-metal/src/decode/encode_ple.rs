@@ -117,6 +117,19 @@ impl MetalBackend {
         // residual buffer. The shader is single-TG with each thread doing
         // `read h[i]` → `write h[i]` at one index per iteration, so the
         // aliasing has no race.
+        //
+        // The reused kernel has no `b_scale` slot; this reuse bypasses the
+        // `residual_multiplier == 1.0` guard its primary dispatch site in
+        // `encode_post_ffn.rs` applies. No PLE-bearing architecture
+        // carries a residual multiplier today — assert so one arriving
+        // later fails loudly instead of silently dropping the scaling
+        // (capability audit F18).
+        assert!(
+            layer.residual_multiplier == 1.0,
+            "PLE reuses post_ffn_norm_residual_add, which has no b_scale slot; \
+             residual_multiplier {} would be silently dropped",
+            layer.residual_multiplier
+        );
         let post_norm_buf = self.bufs.get_f32(ple.post_norm);
         let hidden_val = hidden as u32;
         let eps = layer.eps;

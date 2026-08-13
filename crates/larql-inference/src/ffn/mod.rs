@@ -13,9 +13,22 @@
 //! All trait impls (`WeightFfn`, `SparseFfn`, `RemoteWalkBackend`, MoE
 //! backends) stay here because they pull in inference-side topology.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub mod graph_backend;
+// Option<&VectorIndex> field.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod local_moe;
+pub mod moe_backend;
+pub mod moe_bound;
+// Vindex3Container::open(root) -- real filesystem container open.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod moe_container;
+// Splits internally (backend/shard/stream/runtime native; config/error/
+// ffn_adapter/metrics/multi_layer_wire/router/wire portable).
 pub mod moe_remote;
+// Splits internally (http/sharded native; codec/q8k_wire/timing portable).
 pub mod remote;
 pub mod sparse;
 pub mod sparse_compute;
@@ -24,22 +37,44 @@ mod tests;
 pub mod weight;
 
 pub use larql_compute::ffn::{
-    gelu_tanh, gelu_tanh_gate_up, sigmoid, silu_gate_up, FfnBackend, Q4K_Q8K_SUPERBLOCK_ELEMS,
+    expert_weight::resolvable as expert_weights_resolvable, gelu_tanh, gelu_tanh_gate_up, sigmoid,
+    silu_gate_up, ExpertWeightFfn, FfnActivations, FfnBackend, SparseActivations,
+    Q4K_Q8K_SUPERBLOCK_ELEMS,
 };
 
 // ── Re-exports ──
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use local_moe::LocalMoeFfn;
-pub use moe_remote::{
-    MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, RemoteMoeFfn, ShardConfig,
+pub use moe_backend::{
+    InProcessMoeBackend, MoeBackendError, MoeExpertBackend, MoeFailurePolicy, MoeRoute,
 };
+pub use moe_bound::BoundMoeBackend;
+#[cfg(not(target_arch = "wasm32"))]
+pub use moe_container::{CompositionError, ContainerRoutedBackend};
+#[cfg(not(target_arch = "wasm32"))]
+pub use moe_remote::RemoteMoeBackend;
+pub use moe_remote::{
+    MoeRouterWeights, RecordedRefusal, RefusalPolicy, RemoteMoeError, ShardConfig,
+};
+// `MoeFfn`/`RemoteMoeFfn` are native-only (moe_remote::ffn_adapter --
+// `MoeFfn::forward_moe_full_layer` calls `vindex::moe_ffn_block_cpu`, and
+// `RemoteMoeFfn` wraps the tokio/tonic `RemoteMoeBackend` transport).
+#[cfg(not(target_arch = "wasm32"))]
+pub use moe_remote::{MoeFfn, RemoteMoeFfn};
 pub use remote::{
-    LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteLatencyStats, RemoteWalkBackend,
-    WirePreference,
+    decode_q8k_batch_response_entries, decode_single_response, encode_binary_request,
+    encode_binary_request_as, encode_q8k_batch_request, RemoteLatencyStats, WireFormat, BINARY_CT,
+    F16_CT, I8_CT, Q8K_BATCH_CT,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use remote::{
+    LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference,
 };
 pub use sparse::SparseFfn;
 pub use sparse_compute::{
-    sparse_ffn_forward, sparse_ffn_forward_with_full_overrides, sparse_ffn_forward_with_overrides,
+    sparse_ffn_forward, sparse_ffn_forward_observed, sparse_ffn_forward_with_full_overrides,
+    sparse_ffn_forward_with_full_overrides_observed, sparse_ffn_forward_with_overrides,
     FeatureSlotOverride,
 };
 pub use weight::{dense_ffn_forward_backend, BackendFfn, NullFfn, ViewFfn, WeightFfn};
@@ -95,7 +130,7 @@ mod router_tests {
         let weights = make_test_weights();
         let ffn = WeightFfn { weights: &weights };
         let h = larql_vindex::ndarray::Array2::<f32>::zeros((1, weights.hidden_size));
-        assert!(ffn.forward_moe_full_layer(0, &h).is_none());
+        assert!(ffn.forward_moe_full_layer(0, &h).is_ok_and(|o| o.is_none()));
     }
 
     #[test]

@@ -2,12 +2,25 @@
 //! [`score_one`] is the entry point called by the public drivers in
 //! [`super::drivers`]; the Shannon-bits math lives here too.
 
+// `Tokenizer` (not(wasm32)-gated upstream) and `AnyEngine` (re-exported
+// from larql-inference::kv_engine only on native) make every consumer of
+// this block native: score_one, shannon_bits_for_expected,
+// first_in_vocab_id, and the ScoreResult enum they produce.
+// `shannon_bits_at_id` below (pure &[f32] math, no Tokenizer param) has no
+// dependency on any of this, but its only caller is native-gated too, so
+// it's gated for the same dead-code reason, not this one.
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::hidden_to_raw_logits;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::tokenizers::Tokenizer;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::types::ScoreOutcome;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::AnyEngine;
 
 /// Outcome of a single [`score_one`] attempt: either `Served` with the
@@ -15,6 +28,7 @@ use crate::AnyEngine;
 /// public score types ([`super::types::PromptScore`],
 /// [`super::types::ConflictScore`]) are what `evaluate_*` callers
 /// receive.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) enum ScoreResult {
     Served {
         predicted: String,
@@ -31,6 +45,7 @@ pub(super) enum ScoreResult {
 /// caller is responsible for building the appropriate `PromptScore` or
 /// `ConflictScore` variant; today's drivers build a row in both cases
 /// (replacing the historical `filter_map` silent-drop behaviour).
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn score_one(
     engine: &mut AnyEngine,
     weights: &ModelWeights,
@@ -89,6 +104,7 @@ pub(super) fn score_one(
 /// Tries the leading-space form first (`" Paris"` — what greedy decode
 /// typically emits on BPE tokenisers), then the bare form. Whichever
 /// encodes to a non-empty in-range id wins; if both miss, returns NaN.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn shannon_bits_for_expected(
     logits: &[f32],
     tokenizer: &Tokenizer,
@@ -105,6 +121,7 @@ pub(super) fn shannon_bits_for_expected(
 /// the first id < `vocab`). Tries the leading-space variant first;
 /// falls back to the bare form. Returns `None` if neither tokenises
 /// into a non-empty in-range id.
+#[cfg(not(target_arch = "wasm32"))]
 fn first_in_vocab_id(tokenizer: &Tokenizer, expected: &str, vocab: usize) -> Option<usize> {
     let first_in_vocab = |s: &str| -> Option<usize> {
         let enc = tokenizer.encode(s, false).ok()?;
@@ -122,6 +139,10 @@ fn first_in_vocab_id(tokenizer: &Tokenizer, expected: &str, vocab: usize) -> Opt
 /// Compute `-log2(P(target_id | logits))` via numerically-stable softmax.
 /// Returns `NaN` if `target_id` is out of range or the logits don't sum
 /// to a positive value; `INFINITY` if the target's probability is zero.
+///
+/// Native-only: its sole caller, `shannon_bits_for_expected` above, is
+/// native-gated.
+#[cfg(not(target_arch = "wasm32"))]
 fn shannon_bits_at_id(logits: &[f32], target_id: usize) -> f64 {
     if target_id >= logits.len() {
         return f64::NAN;

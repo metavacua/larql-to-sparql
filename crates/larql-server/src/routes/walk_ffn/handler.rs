@@ -1,9 +1,11 @@
 //! Axum HTTP handler for `POST /v1/walk-ffn`. Negotiates binary vs
-//! JSON request shape; the binary branch goes through
-//! [`super::binary::decode_binary_request`] →
+//! JSON request shape; the binary branch decodes the INBOUND residual
+//! per the request `Content-Type` (f32/f16/i8 via
+//! [`super::binary::decode_request`]) →
 //! [`super::core::run_full_output_core`] → one of the three binary
-//! encoders (f32/f16/i8) per `Accept` (ADR-0009). The JSON branch
-//! goes through [`super::dispatch::run_walk_ffn`].
+//! encoders (f32/f16/i8) per `Accept` (ADR-0009). The two directions
+//! are independent (asymmetric direction codecs, DEC funnel §3 DEC-1A).
+//! The JSON branch goes through [`super::dispatch::run_walk_ffn`].
 
 use std::sync::Arc;
 
@@ -15,11 +17,11 @@ use crate::error::ServerError;
 use crate::state::AppState;
 
 use super::binary::{
-    decode_binary_request, encode_binary_output, encode_binary_output_f16, encode_binary_output_i8,
+    decode_request, encode_binary_output, encode_binary_output_f16, encode_binary_output_i8,
 };
 use super::core::run_full_output_core;
 use super::dispatch::run_walk_ffn;
-use super::types::{RifGuard, WalkFfnRequest, BINARY_CT};
+use super::types::{track_model_request, WalkFfnRequest};
 use super::validate::{collect_scan_layers, validate_owned, validate_residual};
 
 #[utoipa::path(
@@ -29,7 +31,9 @@ use super::validate::{collect_scan_layers, validate_owned, validate_residual};
     request_body(
         content_type = "application/x-larql-ffn",
         description = "Dense-FFN walk. Accepts JSON `WalkFfnRequest` (Content-Type `application/json`) \
-                       OR the packed binary `application/x-larql-ffn` wire (requires `full_output = true`). \
+                       OR the packed binary wire (requires `full_output = true`): Content-Type \
+                       `application/x-larql-ffn[-f16|-i8]` declares the INBOUND residual encoding, \
+                       independently of the `Accept`-negotiated response format. \
                        See `docs/server-spec.md` for the full wire layout.",
     ),
     responses(
@@ -50,23 +54,22 @@ pub async fn handle_walk_ffn(
     // Track active requests for GT6 drain, and bump the per-shard
     // cumulative counter that the grid announce loop diffs to emit
     // HeartbeatMsg.req_per_sec.
-    let _rif_guard = state.models.first().map(|m| {
-        use std::sync::atomic::Ordering;
-        m.requests_in_flight.fetch_add(1, Ordering::Relaxed);
-        m.requests_total.fetch_add(1, Ordering::Relaxed);
-        RifGuard(m.requests_in_flight.clone())
-    });
+    let _rif_guard = track_model_request(&state);
 
     let headers = request.headers();
-    let is_binary = crate::wire::has_content_type(headers, BINARY_CT);
+    // Inbound and return formats are independent (DEC funnel §3 DEC-1A):
+    // the request Content-Type declares how the residual body is encoded
+    // (f32/f16/i8 — ordered detection, since the f32 CT is a substring of
+    // the compressed CTs); Accept alone drives the response encoding below.
+    let in_format = crate::wire::request_wire_format(headers);
     let accept = crate::wire::accept_header(headers).map(str::to_owned);
 
     let body = axum::body::to_bytes(request.into_body(), 64 * 1024 * 1024)
         .await
         .map_err(|e| ServerError::BadRequest(format!("read body: {e}")))?;
 
-    if is_binary {
-        let req = decode_binary_request(&body)?;
+    if let Some(in_format) = in_format {
+        let req = decode_request(in_format, &body)?;
         if !req.full_output {
             return Err(ServerError::BadRequest(
                 "binary wire format requires full_output = true".into(),

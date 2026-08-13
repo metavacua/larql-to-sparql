@@ -30,6 +30,9 @@
 
 use larql_models::quant::ggml;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Function-pointer signatures that mirror `larql_models::quant::ggml`.
 type DequantizeFn = fn(&[u8], usize) -> Result<Vec<f32>, larql_models::ModelError>;
 type RowDotFn = fn(&[u8], &[f32]) -> Result<f32, larql_models::ModelError>;

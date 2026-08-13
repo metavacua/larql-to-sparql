@@ -185,7 +185,7 @@ reconnect, TLS 1.3, and BBRv2 congestion control. Real HTTP/3
 Run `larql-router --help` for the full set, including the QUIC
 transport (`--quic-port` / `--quic-cert` / `--quic-key`) and admin
 subcommands (`larql-router status / gaps / drain / assign`). See
-[`ROADMAP.md`](./ROADMAP.md) for the per-feature shipping notes.
+[`CHANGELOG.md`](./CHANGELOG.md) for the per-feature shipping notes.
 
 ## Live perf snapshot (2026-05-16, M3 Max)
 
@@ -412,5 +412,8 @@ cargo run -p larql-router --example admin_client           # needs a router on :
   setups, the `--join` / `--public-url` / `--grid-key` flags.
 - `crates/larql-server/docs/router-spec.md` — protocol-level spec
   for the gRPC schema, endpoint contracts, and binary wire format.
-- [`ROADMAP.md`](./ROADMAP.md) — per-feature shipping notes and
-  what's still on P1 / P2.
+- [`ROADMAP.md`](./ROADMAP.md) — current state and what's still on
+  P1 / P2.
+- [`CHANGELOG.md`](./CHANGELOG.md) — per-feature shipping notes
+  (GT3/GT5/GT6/GT7/GT9, Phase 5, Exp 41/53) and the 2026-05-16 perf
+  and coverage baselines.

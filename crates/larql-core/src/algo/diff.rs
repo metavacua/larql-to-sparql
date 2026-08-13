@@ -2,6 +2,8 @@
 
 use crate::core::edge::Edge;
 use crate::core::graph::Graph;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 /// Result of diffing two graphs.
 #[derive(Debug)]

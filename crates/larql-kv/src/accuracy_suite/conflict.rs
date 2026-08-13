@@ -15,6 +15,9 @@
 
 use super::prompts::KnowledgeSource;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One conflict prompt. `prompt` contains an in-context premise that
 /// contradicts pretraining; `override_answer` is what a steered model
 /// should produce; `parametric_answer` is the pretraining fallback.
@@ -192,7 +195,7 @@ pub fn conflict_20() -> Vec<ConflictPrompt> {
 /// Short conflict set for quick validation (5 prompts, one per category).
 pub fn conflict_quick() -> Vec<ConflictPrompt> {
     let full = conflict_20();
-    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut seen: crate::collections::HashSet<&str> = crate::collections::HashSet::default();
     full.into_iter()
         .filter(|p| seen.insert(p.category))
         .collect()

@@ -1,26 +1,50 @@
-//! Core residual-stream compute: prefill, decode step, K/V recomputation.
+//! Recomputing K/V from stored pre-layer residuals — the operation the
+//! residual-stream engines exist to make cheap, plus the walk-KV selection
+//! gates and diagnostics around it.
+//!
+//! Prefill and the decode step live in [`super::prefill`] and [`super::step`].
 
+// DISCREPANCY vs the round-1 survey (which classified this file
+// WHOLESALE_NATIVE and gated `pub mod compute;` at mod.rs): the mod.rs
+// re-export split explicitly wants `kv_memory_bytes_for_seq` portable,
+// which has zero native markers — pure arithmetic over `WeightsView`.
+// Doing the real per-item split here instead of gating the whole file:
+// `recompute_kv` and every private helper feeding it (VectorIndex
+// param, `std::env`/`thread_local!`, and `eprintln!` in the diag path,
+// which also has no core/alloc equivalent) are native.
+// `last_row` is pure arithmetic too, but unlike `kv_memory_bytes_for_seq`
+// both its callers (prefill.rs::rs_prefill, walk.rs) are native-gated, so
+// it is dead code on wasm32 and gated accordingly below (Algorithm A
+// dead-code classification, not a native marker on `last_row` itself).
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::{dot_proj_gpu, ComputeBackend, QuantFormat};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
+// s!/ArrayBase/ArrayView1/Ix2 are only used inside native-gated
+// functions (recompute_kv and its helpers, plus last_row); Array2/Data
+// likewise have no remaining portable use now that last_row is native-only.
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::{s, Array2, ArrayBase, ArrayView1, Data, Ix2};
+#[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
+#[cfg(not(target_arch = "wasm32"))]
 use std::cmp::Ordering;
 
-use super::helpers::append_row;
-use super::store::RsStore;
-use crate::profiler::EngineProfiler;
-use larql_inference::attention::SharedKV;
-use larql_inference::attention::{apply_rope_partial_at, run_attention_with_kv_backend};
-use larql_inference::ffn::BackendFfn;
-use larql_inference::forward::{add_bias, apply_norm, embed_tokens_pub};
-use larql_inference::residual::{rms_norm_heads, rms_norm_heads_no_weight};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::apply_rope_partial_at;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::{add_bias, apply_norm};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::residual::{rms_norm_heads_no_weight, rms_norm_qk_for_arch};
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy)]
 enum KvProjection {
     K,
     V,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 struct WalkKvSelection {
     select_layer: usize,
@@ -30,6 +54,7 @@ struct WalkKvSelection {
     v_indices: Vec<Vec<usize>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static WALK_KV_SELECTION: RefCell<Option<WalkKvSelection>> = const { RefCell::new(None) };
     /// Per-thread override for `LARQL_MARKOV_*` env vars consulted by
@@ -48,6 +73,7 @@ thread_local! {
 /// behaves like the env var being set to that value; `None` behaves
 /// like the var being unset. With no override the helper delegates to
 /// the real process env, so production callers see no change.
+#[cfg(not(target_arch = "wasm32"))]
 fn read_markov_env(key: &'static str) -> Option<String> {
     let overridden = MARKOV_ENV_OVERRIDE.with(|o| {
         o.borrow()
@@ -74,457 +100,6 @@ pub(crate) fn clear_markov_env_overrides() {
     MARKOV_ENV_OVERRIDE.with(|o| o.borrow_mut().clear());
 }
 
-pub struct RsPrefillResult {
-    pub hidden: Array2<f32>,
-    pub store: RsStore,
-    pub memory_bytes: usize,
-    pub window_tokens: usize,
-}
-
-pub fn rs_prefill(
-    weights: larql_inference::WeightsView,
-    token_ids: &[u32],
-    max_window: Option<usize>,
-    backend: &dyn ComputeBackend,
-    moe_ffn: Option<&dyn larql_inference::ffn::FfnBackend>,
-) -> RsPrefillResult {
-    let num_layers = weights.num_layers;
-    let seq_len = token_ids.len();
-    let mut h = embed_tokens_pub(&weights, token_ids);
-    let mut stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
-    let be = Some(backend);
-
-    for layer in 0..num_layers {
-        stored.push(h.clone());
-        let (h_post_attn, _k, _v) = run_attention_with_kv_backend(weights, &h, layer, be, None)
-            .expect("attention failed during MarkovRS prefill");
-        let bffn = BackendFfn {
-            weights: weights.canonical(),
-            backend,
-        };
-        let h_out = crate::engines::layer_ffn_or_moe(
-            weights.canonical(),
-            &h_post_attn,
-            layer,
-            &bffn,
-            moe_ffn,
-        );
-        h = h_out;
-    }
-
-    let mut rs = RsStore {
-        hot_len: stored.first().map_or(0, |s| s.shape()[0]),
-        stored,
-        cold_residuals: None,
-        cold_kv: None,
-        cold_len: 0,
-        hot_kv: None,
-        cold_abs_start: 0,
-        next_position: seq_len,
-        max_window,
-    };
-
-    let mut cold: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
-    for layer in 0..num_layers {
-        rs.clip_layer(layer, &mut cold);
-    }
-    rs.finalise_hot_len_after_clip();
-    if cold.first().map_or(0, |c| c.shape()[0]) > 0 {
-        let cold_kv: Vec<SharedKV> = (0..num_layers)
-            .map(|layer| {
-                recompute_kv(weights, &cold[layer], layer, 0, backend, None)
-                    .expect("cold K/V pre-computation failed")
-            })
-            .collect();
-        // 2026-05-19 audit fix: route through the doubling-capacity
-        // helper so cold_len is initialised correctly. Subsequent
-        // decode-step overflows then append in amortised O(1).
-        rs.append_cold_overflow(cold, Some(cold_kv));
-        rs.cold_abs_start = 0;
-    }
-
-    let window_tokens = rs.window_tokens();
-    let memory_bytes = rs.memory_bytes();
-    RsPrefillResult {
-        hidden: last_row(&h),
-        store: rs,
-        memory_bytes,
-        window_tokens,
-    }
-}
-
-pub fn rs_decode_step(
-    weights: larql_inference::WeightsView,
-    new_token_id: u32,
-    rs: RsStore,
-    backend: &dyn ComputeBackend,
-    moe_ffn: Option<&dyn larql_inference::ffn::FfnBackend>,
-    index: Option<&larql_vindex::VectorIndex>,
-) -> Option<(Array2<f32>, RsStore)> {
-    rs_decode_step_inner(weights, new_token_id, rs, backend, None, moe_ffn, index)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn rs_decode_step_profiled(
-    weights: larql_inference::WeightsView,
-    new_token_id: u32,
-    rs: RsStore,
-    backend: &dyn ComputeBackend,
-    profiler: &mut EngineProfiler,
-    moe_ffn: Option<&dyn larql_inference::ffn::FfnBackend>,
-    index: Option<&larql_vindex::VectorIndex>,
-) -> Option<(Array2<f32>, RsStore)> {
-    rs_decode_step_inner(
-        weights,
-        new_token_id,
-        rs,
-        backend,
-        Some(profiler),
-        moe_ffn,
-        index,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn rs_decode_step_inner(
-    weights: larql_inference::WeightsView,
-    new_token_id: u32,
-    rs: RsStore,
-    backend: &dyn ComputeBackend,
-    mut profiler: Option<&mut EngineProfiler>,
-    moe_ffn: Option<&dyn larql_inference::ffn::FfnBackend>,
-    index: Option<&larql_vindex::VectorIndex>,
-) -> Option<(Array2<f32>, RsStore)> {
-    use std::time::Instant;
-
-    let num_layers = weights.num_layers;
-    let abs_position = rs.next_position;
-    let t_step = if profiler.is_some() {
-        Some(Instant::now())
-    } else {
-        None
-    };
-    let mut h_new = embed_tokens_pub(&weights, &[new_token_id]);
-    let mut new_stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
-    let mut recompute_cold_us = 0.0f64;
-    let mut recompute_hot_us = 0.0f64;
-    let mut attention_us = 0.0f64;
-    let mut ffn_us = 0.0f64;
-
-    // W2 hot-K/V cache on the resident walk (2026-06-13). When there is no cold
-    // tier (the common unbounded-window case), `hot_kv` holds the FULL K/V and
-    // we read it instead of re-deriving every position via `recompute_kv` (a
-    // per-step O(N) matmul — the engine's bottleneck). The residual `stored` is
-    // still the canonical, re-derivable state (the engine's point); `hot_kv` is
-    // a droppable derivative. With a cold tier (windowed/evicted) we fall back
-    // to the recompute path. `step_new_kv` collects each layer's updated full
-    // K/V returned by the attention step (it concatenates prior cache + the new
-    // RoPE'd row), which IS next step's cache — no recompute, no concat here.
-    // Only for unbounded windows (the default): then `clip_layer` is a no-op,
-    // so the cache never has to track a window-eviction transition. Windowed
-    // configs keep the existing recompute path unchanged.
-    let cache_eligible =
-        rs.max_window.is_none() && rs.cold_residuals.is_none() && rs.cold_kv.is_none();
-    let mut step_new_kv: Vec<larql_inference::attention::SharedKV> = Vec::with_capacity(num_layers);
-    // Move the hot K/V cache out so the cache_eligible steady state (step 2+)
-    // can append into it IN PLACE — borrowing `hot_kv_store` mutably while
-    // reading `rs.stored` (a disjoint field) immutably. `had_hot_kv` marks the
-    // seeded-cache case (step 2+); the first decode step has `hot_kv = None`
-    // and seeds it from `step_new_kv` below.
-    let mut hot_kv_store = rs.hot_kv;
-    let had_hot_kv = hot_kv_store.is_some();
-    let idx_kv: Option<&dyn larql_compute::KvIndex> =
-        index.map(|v| v as &dyn larql_compute::KvIndex);
-
-    for layer in 0..num_layers {
-        // `stored` is a doubling-capacity buffer (W8.2): the logical row count
-        // is `hot_len`, not `shape()[0]` (see RsStore docs).
-        let s_hot = rs.hot_len;
-        let hot_abs_start = abs_position.saturating_sub(s_hot);
-
-        new_stored.push(h_new.clone());
-
-        let h_post_attn = if cache_eligible && had_hot_kv {
-            // STEADY STATE (step 2+): `hot_kv` holds the full prior K/V in a
-            // doubling-capacity buffer. Append this token's projected+RoPE'd row
-            // IN PLACE and attend over the `[..s_hot+1]` views — no per-step
-            // O(ctx) owned concat (the previous `_auto` path rebuilt the whole
-            // K/V every layer every step, i.e. O(L²) copy over a generation; this
-            // is O(L), matching `standard`'s in-place handle). The residual
-            // `stored` stays the canonical re-derivable state; the K/V is a
-            // droppable derivative. Debug builds assert the cached prior matches
-            // a fresh recompute (the parity gate) before appending.
-            let bufs = hot_kv_store.as_mut().expect("had_hot_kv");
-            #[cfg(debug_assertions)]
-            {
-                // Parity gate for the f32 path: the cached prior K/V must match a
-                // fresh f32 `recompute_kv`. Only meaningful when attention is NOT
-                // on the Q4K-direct route — that route's projections differ from
-                // `recompute_kv` by more than the 1e-2 bound even in f32-activation
-                // (different kernels/byte sources), so it has its own oracles: the
-                // compute-level bit-identity test (`run_..._inplace` ≡ the concat
-                // form) and the engine-level in-place-vs-owned-concat A/B test.
-                let q4k_on = larql_compute::options::q4k_direct_attn_enabled();
-                if !q4k_on {
-                    let (k_buf, v_buf) = &bufs[layer];
-                    let h_logical = rs.stored[layer].slice(s![..s_hot, ..]).to_owned();
-                    if let Some((rk, rv)) =
-                        recompute_kv(weights, &h_logical, layer, hot_abs_start, backend, None)
-                    {
-                        let kd = k_buf
-                            .slice(s![..s_hot, ..])
-                            .iter()
-                            .zip(rk.iter())
-                            .map(|(a, b)| (a - b).abs())
-                            .fold(0.0f32, f32::max);
-                        let vd = v_buf
-                            .slice(s![..s_hot, ..])
-                            .iter()
-                            .zip(rv.iter())
-                            .map(|(a, b)| (a - b).abs())
-                            .fold(0.0f32, f32::max);
-                        debug_assert!(kd < 1e-2, "markov hot_kv K cache diverged: {kd}");
-                        debug_assert!(vd < 1e-2, "markov hot_kv V cache diverged: {vd}");
-                    }
-                }
-            }
-            let (k_buf, v_buf) = &mut bufs[layer];
-            let t_attn = if profiler.is_some() {
-                Some(Instant::now())
-            } else {
-                None
-            };
-            let inplace = if markov_inplace_kv_enabled() {
-                larql_inference::attention::run_attention_block_decode_step_auto_inplace(
-                    weights,
-                    &h_new,
-                    layer,
-                    k_buf,
-                    v_buf,
-                    s_hot,
-                    abs_position,
-                    Some(backend),
-                    idx_kv,
-                )
-            } else {
-                None
-            };
-            let h = match inplace {
-                Some(h) => h,
-                None => {
-                    // Q4K-direct disabled (the flags-off parity baseline) or no
-                    // attn bytes for this layer: fall back to the owned concat
-                    // over the buffer's logical view, then replace the buffer with
-                    // the exact-length result. Bit-identical to the legacy borrow
-                    // path; only the non-default flags-off case pays this copy.
-                    let prior: SharedKV = (
-                        k_buf.slice(s![..s_hot, ..]).to_owned(),
-                        v_buf.slice(s![..s_hot, ..]).to_owned(),
-                    );
-                    let (h, new_kv) =
-                        larql_inference::attention::run_attention_block_decode_step_auto(
-                            weights,
-                            &h_new,
-                            layer,
-                            Some(&prior),
-                            abs_position,
-                            Some(backend),
-                            idx_kv,
-                        )?;
-                    *k_buf = new_kv.0;
-                    *v_buf = new_kv.1;
-                    h
-                }
-            };
-            if let Some(t) = t_attn {
-                attention_us += t.elapsed().as_secs_f64() * 1e6;
-            }
-            h
-        } else {
-            // FIRST STEP (cache None → seed) or windowed/cold tier: recompute the
-            // prior K/V, let attention concat the new row, and (when
-            // cache_eligible) collect the result to seed `hot_kv`.
-            let h_hot = &rs.stored[layer];
-            let kv_arg: SharedKV = if let Some(cold_kv) = &rs.cold_kv {
-                let (k_cold_buf, v_cold_buf) = &cold_kv[layer];
-                // 2026-05-19 audit fix: slice to cold_len, not shape()[0].
-                // cold_kv now uses doubling-capacity (see append_cold_overflow).
-                let c = rs.cold_len;
-                let k_cold = k_cold_buf.slice(s![..c, ..]);
-                let v_cold = v_cold_buf.slice(s![..c, ..]);
-                let t_hot = if profiler.is_some() {
-                    Some(Instant::now())
-                } else {
-                    None
-                };
-                let (k_hot, v_hot) =
-                    recompute_kv(weights, h_hot, layer, hot_abs_start, backend, None)?;
-                if let Some(t) = t_hot {
-                    recompute_hot_us += t.elapsed().as_secs_f64() * 1e6;
-                }
-                let kv_dim = k_cold_buf.shape()[1];
-                let mut k_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
-                k_combined.slice_mut(s![..c, ..]).assign(&k_cold);
-                k_combined.slice_mut(s![c.., ..]).assign(&k_hot);
-                let mut v_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
-                v_combined.slice_mut(s![..c, ..]).assign(&v_cold);
-                v_combined.slice_mut(s![c.., ..]).assign(&v_hot);
-                (k_combined, v_combined)
-            } else {
-                let (h_full, full_abs_start) = if let Some(cold) = &rs.cold_residuals {
-                    // 2026-05-19 audit fix: slice to cold_len, not shape()[0].
-                    let s_cold = rs.cold_len;
-                    if s_cold > 0 {
-                        let h_cold = cold[layer].slice(s![..s_cold, ..]);
-                        let hidden = h_hot.shape()[1];
-                        let mut combined = Array2::<f32>::zeros((s_cold + s_hot, hidden));
-                        combined.slice_mut(s![..s_cold, ..]).assign(&h_cold);
-                        combined.slice_mut(s![s_cold.., ..]).assign(h_hot);
-                        (combined, rs.cold_abs_start)
-                    } else {
-                        (h_hot.clone(), hot_abs_start)
-                    }
-                } else {
-                    (h_hot.clone(), hot_abs_start)
-                };
-                let t_cold = if profiler.is_some() {
-                    Some(Instant::now())
-                } else {
-                    None
-                };
-                let (k, v) = recompute_kv(weights, &h_full, layer, full_abs_start, backend, None)?;
-                if let Some(t) = t_cold {
-                    recompute_cold_us += t.elapsed().as_secs_f64() * 1e6;
-                }
-                (k, v)
-            };
-
-            let t_attn = if profiler.is_some() {
-                Some(Instant::now())
-            } else {
-                None
-            };
-            let (h_post_attn, new_kv) =
-                larql_inference::attention::run_attention_block_decode_step_auto(
-                    weights,
-                    &h_new,
-                    layer,
-                    Some(&kv_arg),
-                    abs_position,
-                    Some(backend),
-                    idx_kv,
-                )?;
-            if let Some(t) = t_attn {
-                attention_us += t.elapsed().as_secs_f64() * 1e6;
-            }
-            // The attention step already projected the new token's K/V (RoPE'd) —
-            // free; collect it to seed `hot_kv` for the in-place steady state.
-            if cache_eligible {
-                step_new_kv.push(new_kv);
-            }
-            h_post_attn
-        };
-
-        let t_ffn = if profiler.is_some() {
-            Some(Instant::now())
-        } else {
-            None
-        };
-        let bffn = BackendFfn {
-            weights: weights.canonical(),
-            backend,
-        };
-        let h_out = crate::engines::layer_ffn_or_moe(
-            weights.canonical(),
-            &h_post_attn,
-            layer,
-            &bffn,
-            moe_ffn,
-        );
-        if let Some(t) = t_ffn {
-            ffn_us += t.elapsed().as_secs_f64() * 1e6;
-        }
-        h_new = h_out;
-    }
-
-    if let (Some(prof), Some(t_step)) = (profiler.as_mut(), t_step) {
-        prof.recompute_cold.total_us += recompute_cold_us;
-        prof.recompute_cold.count += 1;
-        prof.recompute_hot.total_us += recompute_hot_us;
-        prof.recompute_hot.count += 1;
-        prof.attention.total_us += attention_us;
-        prof.attention.count += 1;
-        prof.ffn.total_us += ffn_us;
-        prof.ffn.count += 1;
-        prof.decode_total.record(t_step);
-    }
-
-    // W8.2: in the cache_eligible path `stored` is a doubling-capacity buffer
-    // (no window → never clips), so append the new row in place rather than
-    // allocating + bzeroing a fresh `[s_old+1, hidden]` array every step. That
-    // rebuild was the resident walk's dominant per-step malloc — `__bzero` +
-    // `szone_malloc` were ~32% of the driver's serial work, idling the worker
-    // pool (see helpers::append_row, mirrors the dispatch path). The
-    // windowed/cold path keeps the rebuild: it clips and is not cache_eligible.
-    let (updated_stored, new_hot_len) = if cache_eligible {
-        let mut buf = rs.stored;
-        for (layer, new_row) in new_stored.iter().enumerate() {
-            append_row(&mut buf[layer], new_row, rs.hot_len);
-        }
-        (buf, rs.hot_len + 1)
-    } else {
-        let mut rebuilt: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
-        for (stored, new_row) in rs.stored.iter().zip(new_stored.iter()) {
-            let s_old = stored.shape()[0];
-            let hidden_dim = stored.shape()[1];
-            let mut combined = Array2::<f32>::zeros((s_old + 1, hidden_dim));
-            combined.slice_mut(s![..s_old, ..]).assign(stored);
-            combined.slice_mut(s![s_old.., ..]).assign(new_row);
-            rebuilt.push(combined);
-        }
-        let len = rebuilt.first().map_or(0, |s| s.shape()[0]);
-        (rebuilt, len)
-    };
-
-    let mut updated_rs = RsStore {
-        hot_len: new_hot_len,
-        stored: updated_stored,
-        cold_residuals: rs.cold_residuals,
-        cold_kv: rs.cold_kv,
-        cold_len: rs.cold_len,
-        // Cache the full K/V (returned by attention) for next step when there's
-        // no cold tier; else None (the cold/windowed path recomputes). The clip
-        // loop below clips `hot_kv` in lockstep with `stored` when a window is set.
-        // Step 2+ mutated `hot_kv_store` in place (the in-place fast path); the
-        // first step seeds it from the freshly-collected `step_new_kv`.
-        hot_kv: if cache_eligible {
-            if had_hot_kv {
-                hot_kv_store
-            } else {
-                Some(step_new_kv)
-            }
-        } else {
-            None
-        },
-        cold_abs_start: rs.cold_abs_start,
-        next_position: abs_position + 1,
-        max_window: rs.max_window,
-    };
-
-    let mut overflow: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
-    for layer in 0..num_layers {
-        updated_rs.clip_layer(layer, &mut overflow);
-    }
-    updated_rs.finalise_hot_len_after_clip();
-    // 2026-05-19 audit fix: geometric-capacity cold append.
-    // CPU walk path passes `evicted_kv = None` (cold_kv is rebuilt
-    // from residuals on the next step), mirroring the prior behaviour
-    // that invalidated cold_kv. See RsStore::append_cold_overflow.
-    updated_rs.append_cold_overflow(overflow, None);
-
-    Some((last_row(&h_new), updated_rs))
-}
-
 /// Recompute K/V from stored pre-layer residuals using `backend` for projection matmuls.
 ///
 /// `index: Some(idx)` enables the Q4K-native fast path: per-row Q4K matvec
@@ -533,6 +108,7 @@ fn rs_decode_step_inner(
 /// backend's `quant_matvec` inspects the format byte and dispatches to
 /// the right kernel (Q4K today; Q6K / future formats slot in
 /// automatically). `None` keeps the f32 fallback for legacy callers.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn recompute_kv(
     weights: larql_inference::WeightsView,
     h_stored: &Array2<f32>,
@@ -693,7 +269,7 @@ pub fn recompute_kv(
         .attn_k_norm_key(layer)
         .and_then(|k| weights.vectors.get(&k))
     {
-        Some(norm_w) => rms_norm_heads(&k, norm_w, num_kv, head_dim, qk_norm_off),
+        Some(norm_w) => rms_norm_qk_for_arch(&k, norm_w, num_kv, head_dim, qk_norm_off, arch),
         None => k,
     };
     let k_rope = apply_rope_partial_at(
@@ -711,11 +287,13 @@ pub fn recompute_kv(
 /// `weights.tensors` (Arc-shared, `Ix2`). Used by `attn_kv_projection_weights`
 /// to keep its signature readable; the clippy `type_complexity` lint
 /// triggers on the inline tuple form.
+#[cfg(not(target_arch = "wasm32"))]
 type AttnKvWeightPair<'a> = (
     &'a ArrayBase<ndarray::OwnedArcRepr<f32>, Ix2>,
     &'a ArrayBase<ndarray::OwnedArcRepr<f32>, Ix2>,
 );
 
+#[cfg(not(target_arch = "wasm32"))]
 fn attn_kv_projection_weights<'a>(
     weights: larql_inference::WeightsView<'a>,
     layer: usize,
@@ -736,6 +314,7 @@ fn attn_kv_projection_weights<'a>(
 /// Set `LARQL_MARKOV_WALK_KV_TOPK=N` to replace the K/V projection
 /// matmul with row-wise top-K projection. By default it applies to all
 /// layers; restrict it with `LARQL_MARKOV_WALK_KV_LAYERS=5-20,26`.
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_top_k(layer: usize, kv_dim: usize) -> Option<usize> {
     let top_k = markov_walk_kv_requested_top_k(kv_dim)?;
     if let Some(select_layer) = markov_walk_kv_select_at() {
@@ -751,6 +330,7 @@ fn markov_walk_kv_top_k(layer: usize, kv_dim: usize) -> Option<usize> {
     Some(top_k)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_requested_top_k(kv_dim: usize) -> Option<usize> {
     let raw = read_markov_env("LARQL_MARKOV_WALK_KV_TOPK")?;
     let top_k = raw.trim().parse::<usize>().ok()?;
@@ -760,6 +340,7 @@ fn markov_walk_kv_requested_top_k(kv_dim: usize) -> Option<usize> {
     Some(top_k.min(kv_dim))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_select_at() -> Option<usize> {
     read_markov_env("LARQL_MARKOV_WALK_KV_SELECT_AT")?
         .trim()
@@ -767,11 +348,13 @@ fn markov_walk_kv_select_at() -> Option<usize> {
         .ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_diag_enabled() -> bool {
     read_markov_env("LARQL_MARKOV_WALK_KV_DIAG")
         .is_some_and(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "yes" | "on"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_kv_force_f32_projection() -> bool {
     read_markov_env("LARQL_MARKOV_KV_FORCE_F32")
         .is_some_and(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "yes" | "on"))
@@ -786,6 +369,7 @@ fn markov_kv_force_f32_projection() -> bool {
 /// `run_..._inplace ≡ run_..._q4k_direct` at the compute level and the
 /// engine-level A/B test). Shared with the codec twin (same mechanism, one
 /// toggle for both residual engines).
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn markov_inplace_kv_enabled() -> bool {
     !matches!(
         read_markov_env("LARQL_MARKOV_INPLACE_KV").as_deref(),
@@ -793,13 +377,16 @@ pub(crate) fn markov_inplace_kv_enabled() -> bool {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn markov_walk_kv_diag_layer(layer: usize) -> bool {
-    // `is_none_or` is MSRV 1.82; project pins MSRV 1.80. Equivalent
-    // semantics: env-var absent → true (diag applies to all layers),
-    // env-var present → check the comma-list.
-    read_markov_env("LARQL_MARKOV_WALK_KV_LAYERS").map_or(true, |spec| layer_in_spec(&spec, layer))
+    // Env-var absent → true (diag applies to all layers); present → check
+    // the comma-list. This was a `map_or(true, ..)` while the workspace
+    // pinned MSRV 1.80, since `is_none_or` stabilised in 1.82; the MSRV is
+    // 1.88 now, so it says what it means.
+    read_markov_env("LARQL_MARKOV_WALK_KV_LAYERS").is_none_or(|spec| layer_in_spec(&spec, layer))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn layer_in_spec(spec: &str, layer: usize) -> bool {
     spec.split(',').any(|part| {
         let part = part.trim();
@@ -819,6 +406,7 @@ fn layer_in_spec(spec: &str, layer: usize) -> bool {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn cache_walk_kv_selection<SK, SV>(
     select_layer: usize,
     top_k: usize,
@@ -843,6 +431,7 @@ fn cache_walk_kv_selection<SK, SV>(
     });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_select_topk_indices<S>(
     x: &Array2<f32>,
     weights: &ArrayBase<S, Ix2>,
@@ -859,6 +448,7 @@ where
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_project_topk<S>(
     x: &Array2<f32>,
     weights: &ArrayBase<S, Ix2>,
@@ -883,6 +473,7 @@ where
     Some(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_select_topk_scores<S>(
     x_row: ArrayView1<'_, f32>,
     weights: &ArrayBase<S, Ix2>,
@@ -903,6 +494,7 @@ where
     scores
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_project_cached_topk<S>(
     x: &Array2<f32>,
     weights: &ArrayBase<S, Ix2>,
@@ -948,14 +540,19 @@ where
     Some(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn compare_abs_desc(a: &(usize, f32), b: &(usize, f32)) -> Ordering {
     b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(Ordering::Equal)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dot_rows(a: ArrayView1<'_, f32>, b: ArrayView1<'_, f32>) -> f32 {
     a.iter().zip(b.iter()).map(|(x, w)| x * w).sum()
 }
 
+// `eprintln!` has no core/alloc equivalent under wasm32v1-none (no
+// stderr without std) — native regardless of the VectorIndex question.
+#[cfg(not(target_arch = "wasm32"))]
 fn print_walk_kv_diag(
     layer: usize,
     path: &str,
@@ -970,6 +567,7 @@ fn print_walk_kv_diag(
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn array_diff_stats(a: &Array2<f32>, b: &Array2<f32>) -> (f64, f64, f64) {
     if a.shape() != b.shape() {
         return (f64::NAN, f64::NAN, f64::NAN);
@@ -1001,6 +599,7 @@ fn array_diff_stats(a: &Array2<f32>, b: &Array2<f32>) -> (f64, f64, f64) {
     (max_abs, rms, cos)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_quant_format(fmt: &str) -> Option<QuantFormat> {
     match fmt {
         "Q4_K" => Some(QuantFormat::Q4_K),
@@ -1021,6 +620,9 @@ pub fn kv_memory_bytes_for_seq(weights: larql_inference::WeightsView, seq_len: u
         .sum()
 }
 
+// Native-only: its callers (prefill.rs::rs_prefill, walk.rs) are both
+// native-gated -- rs_prefill directly, walk.rs as a whole module.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
     let last = h.shape()[0] - 1;
     h.slice(s![last..=last, ..]).to_owned()
@@ -1209,228 +811,6 @@ mod tests {
         assert!(!layer_in_spec("x-y, 30", 29));
     }
 
-    // ── rs_prefill ────────────────────────────────────────────────────────────
-
-    #[test]
-    fn rs_prefill_returns_correct_shape() {
-        let weights = make_test_weights();
-        let result = rs_prefill(
-            larql_inference::WeightsView::dense(&weights),
-            &[0u32, 1, 2],
-            None,
-            &CpuBackend,
-            None,
-        );
-        assert_eq!(result.hidden.shape(), &[1, weights.hidden_size]);
-        assert!(result.hidden.iter().all(|v| v.is_finite()));
-    }
-
-    #[test]
-    fn rs_prefill_stores_all_layers() {
-        let weights = make_test_weights();
-        let result = rs_prefill(
-            larql_inference::WeightsView::dense(&weights),
-            &[0u32],
-            None,
-            &CpuBackend,
-            None,
-        );
-        assert_eq!(result.store.stored.len(), weights.num_layers);
-        assert_eq!(result.store.next_position, 1);
-    }
-
-    #[test]
-    fn rs_prefill_with_window_clips_hot_store() {
-        let weights = make_test_weights();
-        let result = rs_prefill(
-            larql_inference::WeightsView::dense(&weights),
-            &[0u32, 1, 2, 3, 4],
-            Some(2),
-            &CpuBackend,
-            None,
-        );
-        assert!(
-            result.window_tokens <= 2,
-            "window_tokens={} > 2",
-            result.window_tokens
-        );
-    }
-
-    // ── rs_decode_step ────────────────────────────────────────────────────────
-
-    #[test]
-    fn rs_decode_step_produces_finite_hidden() {
-        let weights = make_test_weights();
-        let prefill = rs_prefill(
-            larql_inference::WeightsView::dense(&weights),
-            &[0u32],
-            None,
-            &CpuBackend,
-            None,
-        );
-        let (h, _) = rs_decode_step(
-            larql_inference::WeightsView::dense(&weights),
-            1,
-            prefill.store,
-            &CpuBackend,
-            None,
-            None,
-        )
-        .expect("decode step");
-        assert_eq!(h.shape(), &[1, weights.hidden_size]);
-        assert!(h.iter().all(|v| v.is_finite()));
-    }
-
-    #[test]
-    fn rs_decode_step_advances_position() {
-        let weights = make_test_weights();
-        let prefill = rs_prefill(
-            larql_inference::WeightsView::dense(&weights),
-            &[0u32, 1],
-            None,
-            &CpuBackend,
-            None,
-        );
-        assert_eq!(prefill.store.next_position, 2);
-        let (_, rs2) = rs_decode_step(
-            larql_inference::WeightsView::dense(&weights),
-            2,
-            prefill.store,
-            &CpuBackend,
-            None,
-            None,
-        )
-        .unwrap();
-        assert_eq!(rs2.next_position, 3);
-        let (_, rs3) = rs_decode_step(
-            larql_inference::WeightsView::dense(&weights),
-            3,
-            rs2,
-            &CpuBackend,
-            None,
-            None,
-        )
-        .unwrap();
-        assert_eq!(rs3.next_position, 4);
-    }
-
-    #[test]
-    fn rs_decode_step_with_cold_kv_branch_produces_finite_output() {
-        // Windowed prefill with prompt longer than window forces cold_kv
-        // population (compute.rs lines 60-68), then decode hits the
-        // `Some(cold_kv)` branch (lines 128-147) instead of the
-        // cold-residual recomputation path.
-        let weights = make_test_weights();
-        let prefill = rs_prefill(
-            larql_inference::WeightsView::dense(&weights),
-            &[0u32, 1, 2, 3],
-            Some(2),
-            &CpuBackend,
-            None,
-        );
-        assert!(
-            prefill.store.cold_kv.is_some(),
-            "expected cold_kv to be set"
-        );
-        let (h, rs2) = rs_decode_step(
-            larql_inference::WeightsView::dense(&weights),
-            4,
-            prefill.store,
-            &CpuBackend,
-            None,
-            None,
-        )
-        .expect("decode_step over cold_kv");
-        assert_eq!(h.shape(), &[1, weights.hidden_size]);
-        assert!(h.iter().all(|v| v.is_finite()));
-        // After overflow merges into cold_residuals, cold_kv is cleared
-        // (compute.rs line 260) so a second decode exercises the
-        // cold_residuals-only branch (lines 149-160).
-        let (h2, _) = rs_decode_step(
-            larql_inference::WeightsView::dense(&weights),
-            5,
-            rs2,
-            &CpuBackend,
-            None,
-            None,
-        )
-        .expect("decode_step over cold_residuals");
-        assert_eq!(h2.shape(), &[1, weights.hidden_size]);
-        assert!(h2.iter().all(|v| v.is_finite()));
-    }
-
-    /// Flags-ON parity gate for the in-place hot-K/V fast path: an A/B of the
-    /// in-place steady state against the owned-concat reference, both with the
-    /// Q4K-direct attention path live (int8 OFF so the per-step debug cache
-    /// assert's 1e-2 bound holds against the q4k `recompute_kv` oracle). The two
-    /// paths must produce **bit-identical** hidden states at every step — the
-    /// in-place append only changes the cache *representation* (doubling buffer +
-    /// views vs fresh owned concat), never the data attended. Runs past a
-    /// capacity doubling so the grow path is exercised. The `LARQL_MARKOV_INPLACE_KV`
-    /// override (thread-local; no process-env race) selects the path.
-    #[test]
-    fn rs_decode_step_inplace_matches_owned_concat_flags_on() {
-        use larql_inference::test_utils::{make_test_q4k_vindex, make_test_q4k_weights};
-
-        // Drive the Q4K flags via the thread-local override (no process-env
-        // mutation → no segfault race with parallel decode tests). Q4K-direct on,
-        // int8 off (so the debug cache assert's f32 oracle stays valid).
-        let _q4k = crate::engines::Q4kFlagGuard::set(&[
-            (larql_compute::options::ENV_Q4K_DIRECT_ATTN, true),
-            (larql_compute::options::ENV_Q4K_ATTN_INT8, false),
-        ]);
-
-        let weights = make_test_q4k_weights();
-        let index = make_test_q4k_vindex(&weights);
-
-        // Run a 10-step decode and collect per-step hidden states.
-        let run = |inplace: bool| -> (Vec<Vec<u32>>, usize, usize) {
-            set_markov_env_override(
-                "LARQL_MARKOV_INPLACE_KV",
-                Some(if inplace { "1" } else { "0" }),
-            );
-            let prefill = rs_prefill(
-                larql_inference::WeightsView::dense(&weights),
-                &[0u32, 1, 2],
-                None,
-                &CpuBackend,
-                None,
-            );
-            let mut rs = prefill.store;
-            let mut hiddens = Vec::new();
-            for tok in 3u32..=12 {
-                let (h, rs2) = rs_decode_step(
-                    larql_inference::WeightsView::dense(&weights),
-                    tok,
-                    rs,
-                    &CpuBackend,
-                    None,
-                    Some(&index),
-                )
-                .expect("decode");
-                assert!(h.iter().all(|v| v.is_finite()));
-                hiddens.push(h.iter().map(|v| v.to_bits()).collect());
-                rs = rs2;
-            }
-            let cap = rs.hot_kv.as_ref().expect("hot_kv populated")[0].0.shape()[0];
-            (hiddens, rs.hot_len, cap)
-        };
-
-        let (a_hiddens, a_len, a_cap) = run(true);
-        let (b_hiddens, b_len, _b_cap) = run(false);
-
-        assert_eq!(a_len, 13, "3 prompt + 10 decode rows");
-        assert_eq!(a_len, b_len, "hot_len must agree across paths");
-        assert!(
-            a_cap >= a_len,
-            "in-place buffer cap {a_cap} < len {a_len} (no doubling?)"
-        );
-        assert_eq!(
-            a_hiddens, b_hiddens,
-            "in-place and owned-concat hidden states diverged (q4k-direct on)"
-        );
-    }
-
     #[test]
     fn kv_memory_bytes_for_seq_scales_linearly() {
         let weights = make_test_weights();
@@ -1465,87 +845,6 @@ mod tests {
         assert!(parse_quant_format("").is_none());
         assert!(parse_quant_format("Q4").is_none());
         assert!(parse_quant_format("nonsense").is_none());
-    }
-
-    // ── Profiler branches (lines 131, 137, 159, 164, 171, 178, 190, 195) ──
-    //
-    // Each timing branch fires only when `profiler.is_some()`. The existing
-    // `with_profiling_enables_profiling_branch` test exercises one path;
-    // these add coverage for the cold/hot/attn/ffn timing branches plus the
-    // overflow-into-existing-cold-residuals merge path.
-
-    #[test]
-    fn profiled_decode_step_exercises_all_timing_branches() {
-        use crate::profiler::EngineProfiler;
-        let weights = make_test_weights();
-        let prefill = rs_prefill(
-            larql_inference::WeightsView::dense(&weights),
-            &[0u32, 1, 2, 3],
-            Some(2),
-            &CpuBackend,
-            None,
-        );
-        // Has cold_kv populated → exercises lines 130-147 (cold_kv branch
-        // with profiler timing recompute_hot).
-        assert!(prefill.store.cold_kv.is_some());
-        let mut profiler = EngineProfiler::default();
-        let result = rs_decode_step_profiled(
-            larql_inference::WeightsView::dense(&weights),
-            4,
-            prefill.store,
-            &CpuBackend,
-            &mut profiler,
-            None,
-            None,
-        );
-        assert!(result.is_some());
-        // Profiler must record positive durations across all stages.
-        assert!(profiler.recompute_hot.count > 0);
-        assert!(profiler.attention.count > 0);
-        assert!(profiler.ffn.count > 0);
-        assert!(profiler.decode_total.count > 0);
-    }
-
-    #[test]
-    fn profiled_decode_step_with_cold_residuals_only_path() {
-        use crate::profiler::EngineProfiler;
-        let weights = make_test_weights();
-        // Two decodes from windowed prefill: first overflows + clears
-        // cold_kv (compute.rs line 260); second hits the cold_residuals
-        // branch (lines 149-160) under profiling.
-        let prefill = rs_prefill(
-            larql_inference::WeightsView::dense(&weights),
-            &[0u32, 1, 2, 3],
-            Some(2),
-            &CpuBackend,
-            None,
-        );
-        let (_, rs2) = rs_decode_step(
-            larql_inference::WeightsView::dense(&weights),
-            4,
-            prefill.store,
-            &CpuBackend,
-            None,
-            None,
-        )
-        .unwrap();
-        assert!(
-            rs2.cold_kv.is_none(),
-            "cold_kv should be cleared after overflow"
-        );
-        let mut profiler = EngineProfiler::default();
-        let result = rs_decode_step_profiled(
-            larql_inference::WeightsView::dense(&weights),
-            5,
-            rs2,
-            &CpuBackend,
-            &mut profiler,
-            None,
-            None,
-        );
-        assert!(result.is_some());
-        // cold_residuals branch exercises recompute_cold counter (line 171).
-        assert!(profiler.recompute_cold.count > 0);
     }
 
     // ── Pure helpers ────────────────────────────────────────────────────────
@@ -1817,50 +1116,5 @@ mod tests {
         );
         assert!(result.is_some());
         clear_markov_env_overrides();
-    }
-
-    #[test]
-    fn decode_step_with_empty_cold_residuals_falls_through() {
-        // Line 159: `(h_hot.clone(), hot_abs_start)` when cold tier exists
-        // but s_cold == 0 (rare; happens if the engine ever clips out the
-        // last cold row). Build the state by hand.
-        use larql_inference::attention::SharedKV;
-        use ndarray::Array2;
-        let weights = make_test_weights();
-        // Construct a store with cold_residuals = Some(vec![empty]) per
-        // layer and cold_kv = None. The decode loop must take the "empty
-        // cold" else branch (line 159).
-        let num_layers = weights.num_layers;
-        let hidden = weights.hidden_size;
-        let kv_dim = weights.num_kv_heads * weights.head_dim;
-        let stored: Vec<Array2<f32>> = (0..num_layers)
-            .map(|_| Array2::<f32>::zeros((1, hidden)))
-            .collect();
-        let cold_residuals: Vec<Array2<f32>> = (0..num_layers)
-            .map(|_| Array2::<f32>::zeros((0, hidden)))
-            .collect();
-        let _ = (kv_dim, SharedKV::default()); // silence unused warnings if any
-        let store = RsStore {
-            hot_len: 1,
-            stored,
-            cold_residuals: Some(cold_residuals),
-            cold_kv: None,
-            hot_kv: None,
-            cold_abs_start: 0,
-            next_position: 1,
-            max_window: None,
-            cold_len: 0,
-        };
-        let result = rs_decode_step(
-            larql_inference::WeightsView::dense(&weights),
-            0,
-            store,
-            &CpuBackend,
-            None,
-            None,
-        );
-        assert!(result.is_some());
-        let (h, _) = result.unwrap();
-        assert_eq!(h.shape(), &[1, weights.hidden_size]);
     }
 }

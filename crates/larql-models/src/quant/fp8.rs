@@ -8,19 +8,35 @@
 //! Used by the LARQL FP4 vindex format (exp 26) as both the
 //! per-sub-block scale format and the per-block scale format.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 /// Convert one E4M3 byte to f32.
 ///
-/// Uses a 256-entry precomputed lookup table for speed; the table is
-/// materialised once at program start via `Lazy`.
+/// Native: uses a 256-entry precomputed lookup table for speed, cached
+/// per-thread via `thread_local!`. wasm32: `thread_local!` is std-only
+/// (and pointless on a target with no OS threads at all) -- computes
+/// the value directly instead. `e4m3_bits_to_f32_compute` is a handful
+/// of float ops, cheap enough that skipping the cache is a reasonable
+/// trade for a target where correctness, not throughput, is the point
+/// of this whole exercise.
+#[cfg(not(target_arch = "wasm32"))]
 #[inline]
 pub fn e4m3_to_f32(byte: u8) -> f32 {
     E4M3_TABLE.with(|t| t[byte as usize])
 }
 
+#[cfg(target_arch = "wasm32")]
+#[inline]
+pub fn e4m3_to_f32(byte: u8) -> f32 {
+    e4m3_bits_to_f32_compute(byte)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static E4M3_TABLE: [f32; 256] = build_e4m3_table();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn build_e4m3_table() -> [f32; 256] {
     let mut t = [0.0f32; 256];
     for i in 0..256u32 {

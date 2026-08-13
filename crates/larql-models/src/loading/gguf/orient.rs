@@ -1,6 +1,8 @@
 //! Tensor orientation helpers — orient_in_place, orient_ffn_tensors,
 //! orient_attention_tensors, split_fused_qkv, orient_embedding.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 use std::collections::HashMap;
 
 pub(super) fn orient_embedding(
@@ -285,6 +287,8 @@ fn synth_gpt2_config(
         enable_moe_block: false,
         top_k_experts: None,
         moe_intermediate_size: None,
+        swiglu_limit: None,
+        norm_topk_prob: None,
         kv_lora_rank: None,
         q_lora_rank: None,
         qk_nope_head_dim: None,
@@ -307,6 +311,7 @@ fn synth_gpt2_config(
         per_layer_embed_dim: None,
         num_kv_shared_layers: None,
         has_vision_config: false,
+        tie_word_embeddings: None,
     }
 }
 
@@ -495,6 +500,8 @@ mod tests {
             enable_moe_block: false,
             top_k_experts: None,
             moe_intermediate_size: None,
+            swiglu_limit: None,
+            norm_topk_prob: None,
             kv_lora_rank: None,
             q_lora_rank: None,
             qk_nope_head_dim: None,
@@ -517,6 +524,7 @@ mod tests {
             per_layer_embed_dim: None,
             num_kv_shared_layers: None,
             has_vision_config: false,
+            tie_word_embeddings: None,
         };
         let arch = crate::architectures::gpt2::Gpt2Arch::from_config(cfg);
 

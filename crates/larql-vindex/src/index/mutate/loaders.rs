@@ -16,6 +16,9 @@ use crate::error::VindexError;
 use crate::index::core::VectorIndex;
 use crate::index::types::*;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl VectorIndex {
     pub fn load_gates(
         path: &Path,

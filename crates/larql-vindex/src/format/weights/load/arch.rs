@@ -72,6 +72,25 @@ pub(super) fn build_arch_json(
     if let Some(v) = model_cfg.final_logit_softcapping {
         obj.insert("final_logit_softcapping".into(), v.into());
     }
+    if let Some(v) = model_cfg.attn_logit_softcapping {
+        obj.insert("attn_logit_softcapping".into(), v.into());
+    }
+    if let Some(v) = model_cfg.swiglu_limit {
+        obj.insert("swiglu_limit".into(), v.into());
+    }
+    if let Some(v) = model_cfg.norm_topk_prob {
+        obj.insert("norm_topk_prob".into(), v.into());
+    }
+    if let Some(v) = model_cfg.tie_word_embeddings {
+        obj.insert("tie_word_embeddings".into(), v.into());
+    }
+    // RoPE scaling, re-emitted in the `config.json` shape the parser
+    // reads. Absent from this struct until 2026-08-06, which is why
+    // `gemma-3-4b-it` was served with a position divisor of 1.0 on its
+    // global layers where the checkpoint asks for 8.0.
+    if let Some(ref v) = model_cfg.rope_scaling {
+        obj.insert("rope_scaling".into(), v.clone());
+    }
 
     // Granite-family scaling multipliers. Re-emit the same field names
     // the safetensors detect path reads (`detect/parser.rs`) so
@@ -132,6 +151,78 @@ mod tests {
     use super::*;
     use crate::config::types::QuantFormat;
 
+    /// End-to-end: a Gemma 3 architecture must come back out of a vindex
+    /// round-trip with its global-layer position divisor intact.
+    ///
+    /// This is the assertion that was missing. `gemma-3-4b-it` declares
+    /// `rope_scaling = {"factor": 8.0, "rope_type": "linear"}`, which
+    /// `Gemma3Arch::rope_position_divisor_for_layer` turns into a divisor
+    /// of 8.0 on full-attention layers and 1.0 on sliding ones. Before
+    /// `rope_scaling` was persisted, the reconstructed arch answered 1.0
+    /// everywhere, so the served model rotated global-layer positions
+    /// eight times faster than the checkpoint asks for — on both CPU and
+    /// Metal, which is why the parity suite stayed green.
+    #[test]
+    fn gemma3_global_rope_divisor_survives_the_vindex_round_trip() {
+        let source = larql_models::detect_from_json(&serde_json::json!({
+            "model_type": "gemma3",
+            "text_config": {
+                "model_type": "gemma3_text",
+                "hidden_size": 2560,
+                "num_hidden_layers": 34,
+                "intermediate_size": 10240,
+                "head_dim": 256,
+                "num_attention_heads": 8,
+                "num_key_value_heads": 4,
+                "vocab_size": 262208,
+                "rope_theta": 1_000_000.0,
+                "sliding_window": 1024,
+                "rope_scaling": {"factor": 8.0, "rope_type": "linear"},
+            },
+        }));
+        // Precondition: the source arch really does carry the divisor.
+        // Without this the test could pass on an arch that never had one.
+        assert_eq!(source.rope_position_divisor_for_layer(5), 8.0);
+        assert_eq!(source.rope_position_divisor_for_layer(0), 1.0);
+
+        let model_cfg = VindexModelConfig::from_arch(&*source);
+        let mut config = minimal_config(model_cfg.clone());
+        config.num_layers = 34;
+        config.hidden_size = 2560;
+        config.intermediate_size = 10240;
+        let rebuilt = larql_models::detect_from_json(&build_arch_json(&config, &model_cfg));
+
+        for layer in 0..34 {
+            assert_eq!(
+                rebuilt.rope_position_divisor_for_layer(layer),
+                source.rope_position_divisor_for_layer(layer),
+                "layer {layer} divisor changed across the vindex round-trip"
+            );
+        }
+        // Named explicitly: the global layers are the whole point.
+        assert_eq!(rebuilt.rope_position_divisor_for_layer(5), 8.0);
+    }
+
+    /// A model with no `rope_scaling` must not acquire one. The emitter
+    /// only writes the key when the source had it.
+    #[test]
+    fn absent_rope_scaling_stays_absent_across_the_round_trip() {
+        let source = larql_models::detect_from_json(&serde_json::json!({
+            "model_type": "llama",
+            "hidden_size": 512,
+            "num_hidden_layers": 4,
+            "intermediate_size": 2048,
+            "num_attention_heads": 8,
+            "num_key_value_heads": 8,
+        }));
+        let model_cfg = VindexModelConfig::from_arch(&*source);
+        assert!(model_cfg.rope_scaling.is_none());
+        let json = build_arch_json(&minimal_config(model_cfg.clone()), &model_cfg);
+        assert!(json.get("rope_scaling").is_none());
+        let rebuilt = larql_models::detect_from_json(&json);
+        assert!(rebuilt.config().rope_scaling.is_none());
+    }
+
     fn minimal_model_cfg() -> VindexModelConfig {
         VindexModelConfig {
             model_type: "test_arch".into(),
@@ -156,6 +247,7 @@ mod tests {
             residual_multiplier: None,
             logits_scaling: None,
             norm_eps: None,
+            ..Default::default()
         }
     }
 

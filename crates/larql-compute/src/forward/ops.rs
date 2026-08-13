@@ -10,6 +10,9 @@ use crate::residual::{layer_norm_for_arch, rms_norm_for_arch};
 use larql_models::{ModelWeights, NormType};
 use ndarray::Array2;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Apply the appropriate norm (RMSNorm or LayerNorm) based on
 /// architecture. Looks up the weight (and bias for LayerNorm) by key
 /// in `weights.vectors`; passes through to the env-aware `*_for_arch`

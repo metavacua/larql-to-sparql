@@ -17,6 +17,9 @@
 //! Reporting one number without splitting hides whichever signal you
 //! care about.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Origin of the answer a prompt is testing for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]

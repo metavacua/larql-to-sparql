@@ -59,11 +59,33 @@
 //!
 //! ## Adding a quant format
 //!
-//! Adding e.g. FP4 = one [`QuantFormat`] variant + one match arm in
+//! Adding e.g. FP4 = one [`QuantFormat`] variant + one arm in
+//! [`QuantFormat::route`] (the [`FormatRoute`] registry — dequant +
+//! matvec + matmul kernel pointers in one place) + one match arm in
 //! [`QuantMatVec::quant_matvec`]'s default impl + one CPU kernel +
 //! one shader per GPU-backend crate.  The shader-side wiring is
 //! local to each backend crate, so a new format doesn't require
-//! touching every consumer.
+//! touching every consumer.  Formats whose weights carry side
+//! metadata (I2S trit scales, MXFP4 E8M0 scales) follow the
+//! `ternary_matvec` parallel-path template instead — see the
+//! unknown-format contract in [`quant_route`].
+
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale. Unlike
+// larql-models/larql-factory, this crate's rayon dependency has zero
+// no_std support at all (no libm-style feature swap exists) -- unlike
+// patterns 1/6, there is no substitute to reach for, so this is likely
+// to need much more aggressive pattern-3 whole-module exclusion once a
+// real CI round shows which modules are rayon/ndarray-BLAS-bound
+// throughout vs. pure data-shape definitions. Applying only the
+// confirmed-safe crate-level attribute here rather than guessing which
+// ~20 modules survive by inspection alone.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
 
 #[cfg(any(
     target_os = "linux",
@@ -73,11 +95,35 @@
 ))]
 extern crate blas_src;
 
+mod alloc_prelude;
 pub mod async_compute_backend;
 pub mod attention;
 pub mod backend;
+mod collections;
+// `forward::hooks`' capture structs (e.g. `HookState::pre_layer`) have
+// `pub` fields typed with this crate's own portable `HashMap`/`HashSet` --
+// a public field can't have a type built from a private component
+// (rustc: "type is private" once a downstream crate needs to resolve a
+// trait bound through it, e.g. `.get()`), so these items must be
+// reachable even though the module itself stays private. See
+// crates/larql-models/src/lib.rs for the confirmed instance of this
+// landmine and the same fix.
+// `FnvHasher` only exists on wasm32 (native uses std's HashMap/HashSet
+// with their own default hasher) -- re-exporting it unconditionally
+// broke native compilation (E0432, caught by the native test oracle,
+// invisible in wasm32-only CI since FnvHasher genuinely exists there).
+#[cfg(target_arch = "wasm32")]
+pub use collections::FnvHasher;
+pub use collections::{HashMap, HashSet};
+// Both directly depend on larql_models::{connectors,encoders}, which
+// are themselves wholesale wasm32-excluded (mmap/file-loading
+// pipelines, see crates/larql-models/src/lib.rs) -- confirmed via grep
+// no other module in this crate references either, so the exclusion
+// carries through cleanly.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod connectors;
 pub mod cpu;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod encoders;
 pub mod ffn;
 pub mod forward;
@@ -86,9 +132,12 @@ pub mod kquant_forward;
 pub mod kv_dispatch;
 pub mod kv_index;
 pub mod options;
+pub mod packed_attn_index;
 pub mod per_layer_decode_state;
+pub mod phase_timing;
 pub mod pipeline;
 pub mod pipeline_layer;
+pub mod quant_route;
 pub mod residual;
 pub mod state_handle;
 
@@ -97,24 +146,26 @@ pub mod state_handle;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_fixtures;
 
-pub use kv_index::{KvIndex, FFN_COMPONENTS_PER_LAYER};
+pub use kv_index::{KvIndex, FFN_COMPONENTS_PER_LAYER, FFN_DOWN, FFN_GATE, FFN_UP};
 pub use per_layer_decode_state::PerLayerDecodeState;
 
 // ── Re-exports: pipeline types ──
 
 pub use pipeline::{
-    Activation, AttentionSpec, AttentionWeights, FfnSpec, FfnType, FfnWeights, FullPipelineLayer,
-    LayerNorms, LayerWeights, MoeDownPaddingPolicy, MoeExpertScalePolicy, MoeInputSource,
-    MoeLayerWeights, MoePostExpertNormPolicy, MoeRouterNormPolicy, MoeRoutingPolicy, MoeSpec,
-    MoeTopKWeightPolicy, MoeWeightLayout, NormType, PositionEncodingType, QuantFormat, QuantWeight,
-    RemoteFfnSpec, RMSNORM_EPSILON_DEFAULT, ROPE_BASE_DEFAULT, ROPE_BASE_GLOBAL,
+    stored_gate_up_cols, Activation, AttentionSpec, AttentionWeights, ExpertMlp, ExternalScaleKind,
+    FfnSpec, FfnType, FfnWeights, FullPipelineLayer, LayerNorms, LayerWeights,
+    MoeDownPaddingPolicy, MoeExpertScalePolicy, MoeGateRule, MoeInputSource, MoeLayerWeights,
+    MoePostExpertNormPolicy, MoeRouterNormPolicy, MoeRoutingPolicy, MoeSpec, MoeTopKWeightPolicy,
+    MoeWeightLayout, NormType, PositionEncodingType, QuantAux, QuantFormat, QuantWeight,
+    RemoteFfnSpec, ScaleStorage, RMSNORM_EPSILON_DEFAULT, ROPE_BASE_DEFAULT, ROPE_BASE_GLOBAL,
 };
 
 // ── Re-exports: backend ──
 
 pub use backend::{
-    dot_proj_gpu, matmul_gpu, Capability, ComputeBackend, DecodeBackend, DecodeStateDump, MatMul,
-    MatMulOp, ProfileTimings, QuantMatVec, StateDumpMask,
+    backend_from_spec, dot_proj_gpu, matmul_gpu, BackendCtor, BackendKind, BackendSelectError,
+    Capability, ComputeBackend, DecodeBackend, DecodeStateDump, MatMul, MatMulOp, ProfileTimings,
+    QuantMatVec, StateDumpMask,
 };
 
 /// Bring every backend sub-trait into scope at once.
@@ -129,10 +180,14 @@ pub mod prelude {
     };
 }
 
+pub use quant_route::FormatRoute;
+
 pub use cpu::ops::linalg::{cholesky, cholesky_inverse, cholesky_solve, ridge_decomposition_solve};
 pub use cpu::ops::moe::{quantize_x_to_q8k, Q8KActivation};
+pub use cpu::ops::q4k_matvec::f16_to_f32;
 pub use cpu::ops::vector::{cosine, dot, norm};
 pub use cpu::CpuBackend;
+pub use packed_attn_index::PackedAttnIndex;
 
 /// Build a CPU backend.  Always returns a usable backend (BLAS on
 /// macOS via Accelerate, OpenBLAS on Linux/Windows).

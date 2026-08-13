@@ -8,6 +8,9 @@
 //! - query_pre_attn_scalar may differ from head_dim
 
 use crate::config::{Activation, ModelArchitecture, ModelConfig};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+use crate::tensor_keys::qk_norm;
 
 pub struct Gemma2Arch {
     config: ModelConfig,
@@ -29,17 +32,11 @@ impl ModelArchitecture for Gemma2Arch {
     }
 
     fn attn_q_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.q_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.k_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::k(&self.layer_prefix(layer))
     }
 
     fn norm_weight_offset(&self) -> f32 {

@@ -12,7 +12,11 @@
 //! - compute is **never** the model's — the model supplies I/O (extraction,
 //!   readout, a magnitude prior), the expert supplies the algorithm.
 
+#[cfg(not(target_arch = "wasm32"))]
 use tokenizers::Tokenizer;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Read-only residual capture, last prompt token, at one or more layers.
 /// In production this is a free read off the prompt forward pass; harnesses
@@ -121,6 +125,7 @@ pub struct DriveSchedule {
 impl DriveSchedule {
     /// Tokenize the schedule text into the forced token sequence (no special
     /// tokens — the schedule rides the decode the model was emitting anyway).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn forced_ids(&self, tokenizer: &Tokenizer) -> Vec<u32> {
         tokenizer
             .encode(self.text.as_str(), false)

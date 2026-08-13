@@ -10,6 +10,12 @@
 //! delegation; no behaviour changes vs. the pre-ADR direct-VectorIndex
 //! call sites.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+use alloc::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 /// Number of FFN components per layer (gate / up / down).
@@ -19,6 +25,17 @@ use std::sync::Arc;
 /// reach up to `larql-vindex`. A `const _: () = { assert!(...) };`
 /// pin in larql-vindex's `kv_index_impl.rs` keeps the two in sync.
 pub const FFN_COMPONENTS_PER_LAYER: usize = 3;
+
+/// Component index of the gate projection inside per-layer FFN
+/// manifests / caches (`layer * FFN_COMPONENTS_PER_LAYER + component`).
+pub const FFN_GATE: usize = 0;
+/// Component index of the up projection.
+pub const FFN_UP: usize = 1;
+/// Component index of the down projection. Special-cased throughout the
+/// codebase because down is stored row-major `[hidden, intermediate]`
+/// (the native `nn.Linear(intermediate, hidden)` orientation) and needs
+/// a transpose to become feature-major like gate / up.
+pub const FFN_DOWN: usize = 2;
 
 /// Abstract surface that the kv-dispatch + Q4_K direct-decode paths
 /// need from a vindex. Implemented by `larql_vindex::VectorIndex`.

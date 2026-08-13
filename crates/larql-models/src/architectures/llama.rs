@@ -37,7 +37,10 @@ impl ModelArchitecture for LlamaArch {
     /// silently degrade to no scaling.
     fn llama3_rope_scaling(&self) -> Option<Llama3RopeScaling> {
         let rs = self.config.rope_scaling.as_ref()?;
-        if !rs.scaling_type.eq_ignore_ascii_case("llama3") {
+        if !rs
+            .scaling_type
+            .eq_ignore_ascii_case(crate::ROPE_TYPE_LLAMA3)
+        {
             return None;
         }
         Some(Llama3RopeScaling {

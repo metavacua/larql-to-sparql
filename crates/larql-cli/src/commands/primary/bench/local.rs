@@ -7,6 +7,9 @@
 //!
 //! All exercised by tests in this file.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Returns the table-row backend label for the local bench.
 pub(super) fn backend_name_for(metal: bool) -> &'static str {
     if metal {

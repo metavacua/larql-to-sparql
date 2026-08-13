@@ -6,6 +6,9 @@
 //! For the LARQL pipeline, this handles seq=1-6 where the
 //! attention matrix is tiny and flash attention is overkill.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Causal attention for one head.
 ///
 /// - `q`: [seq_len, head_dim] query vectors

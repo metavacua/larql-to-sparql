@@ -4,9 +4,13 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "gRPC protocol types for the larql-router self-assembling grid"
 
-[dependencies]
+# This whole crate is wholesale-excluded on wasm32 (see src/lib.rs) --
+# every dependency below is native-only for the same reason, so there
+# is nothing to declare in a wasm32 target table at all.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tonic = "0.13"
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }

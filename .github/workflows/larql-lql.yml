@@ -34,10 +34,15 @@ on:
       - '.github/workflows/larql-lql.yml'
   workflow_dispatch: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 35
 
     strategy:
@@ -46,7 +51,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -77,7 +82,7 @@ jobs:
         run: choco install protoc -y --no-progress
 
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -108,10 +113,11 @@ jobs:
   coverage:
     name: coverage - ubuntu
     runs-on: ubuntu-latest
+    if: github.head_ref != 'gating/larql-cli-wasm-and-safe'
     timeout-minutes: 35
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable

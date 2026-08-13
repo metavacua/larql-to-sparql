@@ -1,6 +1,8 @@
 //! PageRank — iterative importance ranking for graph entities.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 use crate::core::graph::Graph;
 
@@ -37,7 +39,7 @@ pub fn pagerank(
     let n = entities.len();
     if n == 0 {
         return PageRankResult {
-            ranks: HashMap::new(),
+            ranks: HashMap::default(),
             iterations: 0,
             converged: true,
         };

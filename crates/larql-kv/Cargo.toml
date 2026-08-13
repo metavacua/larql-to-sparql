@@ -10,20 +10,37 @@ description = "Pluggable KV-cache engines for larql-inference (markov-rs, unlimi
 
 [dependencies]
 larql-inference = { path = "../larql-inference" }
+larql-execution = { path = "../larql-execution" }
 larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-vindex = { path = "../larql-vindex" }
 larql-boundary = { path = "../larql-boundary" }
 
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. Orthogonal to the target_os tables below:
+# wasm32v1-none's target_os is "none", so this never overlaps with them.
+# sha2 has a genuine no_std mode (default-features = false); zip does
+# not (its whole API is std::io::{Read,Write,Seek}-based, pattern 9 --
+# no wasm32 entry at all, same as larql-compute's rayon).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-
+sha2 = "0.10"
 ndarray = "0.16"
 zip = { version = "2", default-features = false }
 
-rand = "0.8"
-rand_distr = "0.4"
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+ndarray = { version = "0.16", default-features = false }
+# Portable HashMap/HashSet (crate::collections) and Float trait
+# (crate::alloc_prelude) backing -- same pattern as every other crate
+# gated this session.
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+hashbrown = { version = "0.15", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
@@ -50,10 +67,11 @@ gpu = ["dep:larql-compute-metal", "larql-inference/gpu"]
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"
+# Test-only: Lloyd-Max codebook regeneration pins (turbo_quant/codebooks.rs).
+rand = "0.8"
+rand_distr = "0.4"
 
 [[bench]]
 name = "engine_decode"
 harness = false
 
-[[example]]
-name = "engine_ladder"

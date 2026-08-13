@@ -43,7 +43,7 @@ pub(super) fn apply_outer_combine(
     // Diagnostic bypass: leave `new_h` as `h_post_attn + _1(dense) + _2(moe)`
     // without outer norm OR layer_scalar — useful for isolating whether
     // this combine step is the broken piece.
-    if larql_compute::options::env_flag(larql_compute::options::ENV_SKIP_OUTER_NORM) {
+    if larql_compute::options::skip_outer_norm_enabled() {
         return;
     }
 
@@ -109,12 +109,14 @@ mod tests {
         moe_combined_output_norm: bool,
         layer_scalar: f32,
     ) -> FullPipelineLayer<'a> {
-        let empty_q4 = QuantWeight {
-            data: &[],
-            scales: None,
-            format: QuantFormat::Q4_K,
-        };
+        let empty_q4 = QuantWeight::new(QuantFormat::Q4_K, &[], larql_compute::QuantAux::None);
         FullPipelineLayer {
+            attn_sinks: None,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
+            attn_o_bias: None,
+            attn_softcap: 0.0,
             wq: empty_q4,
             wk: empty_q4,
             wv: empty_q4,
@@ -141,6 +143,11 @@ mod tests {
             num_kv_heads: 4,
             rope_base: 10000.0,
             rotary_dim: 0,
+            rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+                64_usize,
+                0_usize,
+                10000.0_f64,
+            ),
             sliding_window: 0,
             has_v_norm: false,
             layer_scalar,
@@ -176,15 +183,15 @@ mod tests {
         let new_h = m.bufs.transient_from_f32(&new_h_data);
         let h_post = m.bufs.transient_from_f32(&h_post_attn_data);
 
-        let saved = std::env::var_os("SKIP_OUTER_NORM");
+        let saved = std::env::var_os("LARQL_SKIP_OUTER_NORM");
         unsafe {
-            std::env::set_var("SKIP_OUTER_NORM", "1");
+            std::env::set_var("LARQL_SKIP_OUTER_NORM", "1");
         }
         apply_outer_combine(&layer, &new_h, &h_post, hidden);
         unsafe {
             match saved {
-                Some(v) => std::env::set_var("SKIP_OUTER_NORM", v),
-                None => std::env::remove_var("SKIP_OUTER_NORM"),
+                Some(v) => std::env::set_var("LARQL_SKIP_OUTER_NORM", v),
+                None => std::env::remove_var("LARQL_SKIP_OUTER_NORM"),
             }
         }
 

@@ -1,3 +1,35 @@
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale on
+// treating every crate the same way and letting the compiler reveal
+// the boundary rather than assume it in advance -- applied here too
+// even though this is a [[bin]] target expected to remain permanently
+// native (its whole point is CLI file/network/GPU I/O).
+//
+// `forbid(unsafe_code)` is NOT declared crate-wide here (pattern 18):
+// `ndarray::s![...]` (used throughout commands/dev/ov_rd and a handful
+// of commands/extraction and commands/primary::shannon_cmd call sites)
+// expands to its own internal `#[allow(unsafe_code)] unsafe {...}`,
+// which `forbid` cannot locally override even through a macro
+// expansion. Re-verified live, not just inherited from pattern 18's
+// original claim: a fresh crate-root #![forbid(unsafe_code)] probe
+// (run 31604654148, 2026-08-12, dispatched larql-cli.yml directly)
+// reproduces exactly 38 E0453 "allow(unsafe_code) incompatible with
+// previous forbid" errors across 22 files, all attributed to
+// "this error originates in the macro `ndarray::s`" -- a genuine,
+// structural conflict, not assumed. The same probe also caught 2
+// PLAIN "usage of an `unsafe` block" errors (no E0453, no macro) in
+// walk_cmd.rs:10 and trajectory_trace_cmd.rs:707 -- these were
+// previously, incorrectly grouped under this same ndarray::s!
+// rationale (grep shows neither file references it), so both now
+// correctly carry their own #[forbid(unsafe_code)] instead of being
+// exempted; that's forbid catching real, hand-written unsafe exactly
+// as intended, not a wall to route around. Every module and top-level
+// item in this crate that does NOT reach `ndarray::s!` carries its own
+// `#[forbid(unsafe_code)]`, applied at the exact boundary the
+// compiler's own error list established -- this file's own top-level
+// items below, and see commands/mod.rs, commands/dev/ov_rd/mod.rs,
+// commands/extraction/mod.rs, and commands/primary/mod.rs for the
+// per-submodule scoping.
+#![cfg_attr(target_arch = "wasm32", no_std)]
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::type_complexity)]
 // Architectural lints suppressed crate-wide:
@@ -16,20 +48,44 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::large_enum_variant)]
 
+#[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, Subcommand};
 
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
+
+#[forbid(unsafe_code)]
+mod alloc_prelude;
+#[forbid(unsafe_code)]
+mod collections;
+
+#[forbid(unsafe_code)]
 mod anyres_tiler;
+#[forbid(unsafe_code)]
+mod backend_select;
 mod commands;
+#[forbid(unsafe_code)]
 mod formatting;
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 mod image_input;
+#[forbid(unsafe_code)]
 mod utils;
 
+#[cfg(not(target_arch = "wasm32"))]
 use commands::dev::*;
+#[cfg(not(target_arch = "wasm32"))]
 use commands::diagnostics::*;
+#[cfg(not(target_arch = "wasm32"))]
 use commands::extraction::*;
+#[cfg(not(target_arch = "wasm32"))]
 use commands::primary::*;
+#[cfg(not(target_arch = "wasm32"))]
 use commands::query::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 #[derive(Parser)]
 #[command(
     name = "larql",
@@ -53,6 +109,8 @@ struct Cli {
 //   * "Research"      — `larql dev <subcmd>`
 // ══════════════════════════════════════════════════════════════════════
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 #[derive(Subcommand)]
 enum Commands {
     // ── Primary user-facing ─────────────────────────────────────────
@@ -91,6 +149,16 @@ enum Commands {
 
     /// Benchmark decode throughput on a real vindex (Metal / CPU / Ollama).
     Bench(bench::BenchArgs),
+
+    /// DEC residual-replay loadgen — capture real per-layer residuals, then
+    /// replay batch × wire × dispatch sweeps against an expert server
+    /// (docs/dec-funnel.md).
+    DecBench(dec_bench::DecBenchArgs),
+
+    /// K3 serving ledger — miss budget, weight touch, dense-precision
+    /// frontier and speculative block economics, derived from the
+    /// checkpoint's own tensor table (docs/dec-funnel.md).
+    K3Ledger(k3_ledger::K3LedgerArgs),
 
     /// Split-axis accuracy suite — parametric vs in-context vs conflict,
     /// scored with top-1 match and Shannon bits-per-token.
@@ -151,6 +219,27 @@ enum Commands {
     /// Cross-backend numerical parity diff (CPU vs Metal vs reference).
     Parity(parity::ParityArgs),
 
+    #[command(next_help_heading = "Build")]
+    /// Expert-selection locality over a routing trace: does speculative
+    /// decoding amortise the expert bank, and can a hot cache work?
+    /// Collect the trace with `LARQL_MOE_ROUTE_TRACE=<path> larql shannon score`.
+    MoeLocality(moe_locality::MoeLocalityArgs),
+
+    // ── Factory (docs/vindex-factory.md) ─────────────────────────────
+    #[command(next_help_heading = "Factory", subcommand)]
+    /// Vindex Factory recipe tooling — validate a recipe, compute its
+    /// build_id (docs/vindex-factory.md).
+    Recipe(recipe_cmd::RecipeCommand),
+
+    #[command(next_help_heading = "Factory")]
+    /// Print this release's capability manifest as JSON — which
+    /// architectures it recognises and what each one supports.
+    Capabilities,
+
+    #[command(next_help_heading = "Factory", subcommand)]
+    /// Render a Hub model card for a build (docs/vindex-factory.md §9).
+    Card(card_cmd::CardCommand),
+
     // ── Query (legacy, pre-LQL graph-file surface) ──────────────────
     #[command(next_help_heading = "Query")]
     /// Query a graph file for facts.
@@ -191,6 +280,8 @@ enum Commands {
 // continue to work without a breaking change.
 // ══════════════════════════════════════════════════════════════════════
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 #[derive(Subcommand)]
 enum DevCommand {
     /// Extract edges from FFN weights. Zero forward passes.
@@ -273,6 +364,8 @@ enum DevCommand {
 // Minor glue types
 // ══════════════════════════════════════════════════════════════════════
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 #[derive(clap::Args)]
 struct ChatArgs {
     /// Vindex directory, `hf://owner/name`, or cache shorthand.
@@ -285,6 +378,7 @@ struct ChatArgs {
     /// Route FFN to a remote larql-server.
     #[arg(long, value_name = "URL")]
     ffn: Option<String>,
+    routed_from: Option<String>,
 
     /// HTTP timeout in seconds for --ffn.
     #[arg(long, default_value = "60")]
@@ -295,6 +389,8 @@ struct ChatArgs {
     verbose: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 impl From<ChatArgs> for run_cmd::RunArgs {
     fn from(c: ChatArgs) -> Self {
         run_cmd::RunArgs {
@@ -306,6 +402,7 @@ impl From<ChatArgs> for run_cmd::RunArgs {
             context_window: 0,
             engine: None,
             ffn: c.ffn,
+            routed_from: c.routed_from,
             ffn_timeout_secs: c.ffn_timeout_secs,
             metal: false,
             verbose: c.verbose,
@@ -324,16 +421,31 @@ impl From<ChatArgs> for run_cmd::RunArgs {
             // ChatArgs struct will grow its own --image flag.
             image: Vec::new(),
             mm_weights: None,
+            // Chat is text-only today; speech arrives via `run --speak`
+            // (and later a chat session feeding the speech stream).
+            speak: false,
+            voice: None,
+            codec_cmd: None,
+            speech_out: None,
+            play: false,
+            max_frames: 0,
+            greedy: false,
+            seed: 0,
+            q4: false,
         }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 #[derive(clap::Args)]
 struct LqlArgs {
     /// LQL statement (e.g. `WALK "The capital of France is" TOP 5;`).
     statement: String,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 #[derive(clap::Args)]
 struct ServeArgs {
     /// Path to a .vindex directory (or `hf://` path).
@@ -480,6 +592,7 @@ struct ServeArgs {
 /// Research subcommands previously lived at the top level. Rewrite
 /// `larql <legacy-name> …` → `larql dev <legacy-name> …` before clap
 /// parses so existing scripts keep working.
+#[cfg(not(target_arch = "wasm32"))]
 const LEGACY_DEV_NAMES: &[&str] = &[
     "weight-extract",
     "attention-extract",
@@ -510,6 +623,8 @@ const LEGACY_DEV_NAMES: &[&str] = &[
     "ffn-latency",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
     if args.len() >= 2 && LEGACY_DEV_NAMES.contains(&args[1].as_str()) {
         let mut rewritten = Vec::with_capacity(args.len() + 1);
@@ -521,6 +636,8 @@ fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
     args
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 fn main() {
     // Windows defaults the main thread to a 1 MiB stack, which our large
     // clap-derived `Commands` enum overflows during parse_from in debug
@@ -534,9 +651,17 @@ fn main() {
         .expect("spawn larql-main thread")
         .join()
         .expect("larql-main thread panicked");
+    // Flush the latent-mask channel survival counts, if that probe was
+    // collecting them. No-op unless `LARQL_MOE_LATENT_STATS` is set.
+    larql_compute::cpu::ops::moe::latent_mask::dump_stats();
     std::process::exit(code);
 }
 
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 fn real_main() -> i32 {
     let raw_args: Vec<String> = std::env::args().collect();
     let args = rewrite_legacy_argv(raw_args);
@@ -547,6 +672,8 @@ fn real_main() -> i32 {
         Commands::Run(args) => run_cmd::run(args),
         Commands::Chat(args) => run_cmd::run(args.into()),
         Commands::Bench(args) => bench::run(args),
+        Commands::DecBench(args) => dec_bench::run(args),
+        Commands::K3Ledger(args) => k3_ledger::run(args),
         Commands::Accuracy(args) => accuracy_cmd::run(args),
         Commands::Shannon(cmd) => shannon_cmd::run(cmd),
         Commands::Pull(args) => pull_cmd::run(args),
@@ -568,6 +695,7 @@ fn real_main() -> i32 {
         Commands::Verify(args) => verify_cmd::run(args),
         Commands::Diag(args) => diag_cmd::run(args),
         Commands::Parity(args) => parity::run(args),
+        Commands::MoeLocality(args) => moe_locality::run(args),
 
         // ── Query (legacy graph-file surface) ──
         Commands::Query(args) => query_cmd::run(args),
@@ -592,6 +720,11 @@ fn real_main() -> i32 {
             Err(e) => Err(e),
         },
 
+        // ── Factory ──
+        Commands::Recipe(cmd) => recipe_cmd::run(cmd),
+        Commands::Capabilities => capabilities_cmd::run(),
+        Commands::Card(cmd) => card_cmd::run(cmd),
+
         // ── Serve (exec into larql-server) ──
         Commands::Serve(args) => run_serve(args),
 
@@ -606,6 +739,8 @@ fn real_main() -> i32 {
     0
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
         DevCommand::WeightExtract(a) => weight_walk_cmd::run(a),
@@ -636,6 +771,8 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[forbid(unsafe_code)]
 fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd_args = Vec::new();
     if let Some(ref path) = args.vindex_path {

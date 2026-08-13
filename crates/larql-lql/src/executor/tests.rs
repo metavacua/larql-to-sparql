@@ -509,6 +509,7 @@ fn make_test_weights() -> larql_inference::ModelWeights {
         skipped_tensors: Vec::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,
@@ -1040,6 +1041,7 @@ fn make_full_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     };
 
     let mut config = VindexConfig {
@@ -1200,6 +1202,7 @@ fn make_large_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         packed_mmaps: HashMap::new(),
         skipped_tensors: Vec::new(),
         packed_byte_ranges: HashMap::new(),
+        per_layer_ffn_format: Default::default(),
         embed: embed.clone(),
         lm_head,
         position_embed: None,
@@ -1270,6 +1273,7 @@ fn make_large_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     };
 
     let mut config = VindexConfig {
@@ -1425,6 +1429,7 @@ fn make_moe_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     };
 
     let mut config = VindexConfig {

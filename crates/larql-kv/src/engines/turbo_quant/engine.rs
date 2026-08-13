@@ -8,41 +8,63 @@
 //!   5. Decode: unpack → centroids → inverse WHT → rescale
 //!
 //! The `TurboQuantEngine` wraps this codec around the K/V cache.
-//! Two decode-time paths:
+//! Every decode path (W1-GPU dispatch, CPU walk, executor-routed,
+//! legacy `decode_step`) is **append-only**: each step decompresses
+//! the prior cache for attention (O(N)), then encodes ONLY the newly
+//! produced K/V row head-by-head and appends its packed bytes
+//! (`CompressedLayer::append_row`). Old rows' bytes are never
+//! re-encoded — the codec's reconstruction norm is slightly below the
+//! stored norm, so a decompress→re-encode cycle would multiply every
+//! stored norm by that ratio and compound it across steps.
 //!
-//! - **W1-GPU dispatch path** (Metal + Q4K vindex; see
-//!   `super::dispatch`): per-step state-dump gives us just the new
-//!   K/V row, which is encoded head-by-head and **appended** onto
-//!   the existing compressed buffer. O(1) compress + O(N)
-//!   decompress per step → O(N) total compress + O(N²) decompress.
-//! - **CPU walk path** (`decode_step_quant_cpu` + legacy
-//!   `decode_step`): currently decompresses + recompresses the full
-//!   K/V cache per step → O(N²) total compress and decompress. Same
-//!   append-only pattern as dispatch can apply here; queued as
-//!   follow-up (the production hot path on Metal already uses
-//!   append-only).
-//!
-//! Codec contract is the same in both paths: WHT + Lloyd-Max
-//! 3/4-bit per scalar, bit-pack indices, ~cos 0.991 vs full-precision
-//! K/V.
+//! Codec contract is the same in all paths: WHT + Lloyd-Max 3/4-bit
+//! per scalar, bit-pack indices; per-row round-trip cos ≈ 0.9954 at
+//! 4-bit / ≈ 0.980 at 3-bit on isotropic unit vectors (Gaussian
+//! simulation, 2026-07-30).
 
+// `TurboQuant` (stateless codec struct) is portable. Everything else
+// here -- `CompressedLayer` and all its methods, `detect_head_dim`,
+// `resolve_block_dim`, `compress_matrix`, `last_row`, `TurboQuantEngine`
+// (`impl KvEngine`, upstream-gated) -- is native-only: despite not
+// touching VectorIndex/Instant/spin_pool themselves, their only callers
+// are the four `impl TurboQuantEngine` blocks below, all
+// `#[cfg(not(target_arch = "wasm32"))]`-gated (CI-confirmed via wasm32
+// clippy dead-code, not left "portable but uncalled").
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::{cpu_engine_backend, EngineBackend};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::{s, Array2};
 
 use super::{codebooks, lloyd_max, packing, rotation};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::{EngineInfo, KvEngine};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::attention::{
     run_attention_block_decode_step_backend, run_attention_with_kv_backend,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ffn::{BackendFfn, FfnBackend};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::forward::{embed_tokens_pub, run_ffn};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::kv_engine::EngineError;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 // ─── TurboQuant codec ────────────────────────────────────────────────────────
 
@@ -104,9 +126,13 @@ impl TurboQuant {
             }
         }
         rotation::wht_inplace(scratch_f32);
-        let codebook = codebooks::get_codebook(d, self.bits);
+        // Coordinates of the rotated unit vector have std exactly 1/√d;
+        // dividing by that sigma maps them into the N(0, 1) space the
+        // unit codebook is trained on.
+        let codebook = codebooks::unit_codebook(self.bits);
+        let inv_sigma = 1.0 / codebooks::wht_coordinate_sigma(d);
         for &val in scratch_f32.iter() {
-            scratch_u8.push(lloyd_max::quantize_scalar(val, codebook));
+            scratch_u8.push(lloyd_max::quantize_scalar(val * inv_sigma, &codebook));
         }
         out.extend_from_slice(&norm.to_le_bytes());
         packing::pack_indices(scratch_u8, self.bits, out);
@@ -135,14 +161,17 @@ impl TurboQuant {
         let norm = f32::from_le_bytes([encoded[0], encoded[1], encoded[2], encoded[3]]);
         scratch_u8.clear();
         packing::unpack_indices_into(&encoded[4..], dim, self.bits, scratch_u8);
-        let codebook = codebooks::get_codebook(dim, self.bits);
+        let codebook = codebooks::unit_codebook(self.bits);
         out.resize(dim, 0.0);
         for (i, &idx) in scratch_u8.iter().enumerate() {
             out[i] = codebook.centroids[idx as usize];
         }
         rotation::wht_inplace(out);
+        // The WHT is linear, so the sigma scaling (undoing encode's
+        // ×√d) commutes with it and folds into the norm restore.
+        let scale = norm * codebooks::wht_coordinate_sigma(dim);
         for v in out.iter_mut() {
-            *v *= norm;
+            *v *= scale;
         }
     }
 
@@ -153,6 +182,7 @@ impl TurboQuant {
 
 // ─── Compressed K/V layer ────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) struct CompressedLayer {
     pub compressed_k: Vec<u8>,
     pub compressed_v: Vec<u8>,
@@ -162,6 +192,7 @@ pub(super) struct CompressedLayer {
     pub head_dim: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl CompressedLayer {
     pub(super) fn compress(kv: &SharedKV, tq: &TurboQuant) -> Self {
         let (k, v) = kv;
@@ -177,6 +208,7 @@ impl CompressedLayer {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn decompress(&self, tq: &TurboQuant) -> SharedKV {
         let k = decompress_matrix(
             &self.compressed_k,
@@ -195,20 +227,88 @@ impl CompressedLayer {
         (k, v)
     }
 
+    /// Append-only ingest of one new K/V row: encode `k_row` / `v_row`
+    /// head-by-head and push the packed bytes onto the existing
+    /// compressed buffers. Invariant: existing rows' bytes are never
+    /// re-encoded — a decompress→re-encode cycle multiplies each stored
+    /// norm by the codec's reconstruction-norm ratio (< 1) and
+    /// compounds it across decode steps.
+    pub(super) fn append_row(
+        &mut self,
+        k_row: &[f32],
+        v_row: &[f32],
+        tq: &TurboQuant,
+        scratch_f32: &mut Vec<f32>,
+        scratch_u8: &mut Vec<u8>,
+    ) {
+        debug_assert_eq!(k_row.len(), self.kv_dim, "K row width != layer kv_dim");
+        debug_assert_eq!(v_row.len(), self.kv_dim, "V row width != layer kv_dim");
+        for chunk in k_row.chunks(self.head_dim) {
+            tq.encode_vector_into(chunk, &mut self.compressed_k, scratch_f32, scratch_u8);
+        }
+        for chunk in v_row.chunks(self.head_dim) {
+            tq.encode_vector_into(chunk, &mut self.compressed_v, scratch_f32, scratch_u8);
+        }
+        self.num_vecs += 1;
+    }
+
+    /// Drop rows until the layer holds `rows` of them again.
+    ///
+    /// Byte-exact, and that is not an accident of the codec being good: rows
+    /// are appended as whole head-chunks at fixed byte offsets and existing
+    /// bytes are never re-encoded (see [`Self::append_row`]), so removing the
+    /// tail restores precisely the buffer that preceded it. The compression is
+    /// lossy against its *input*, not against what was stored — which is what
+    /// lets a K/V-canonical engine rewind at all.
+    ///
+    /// No-op when `rows` is not smaller than the current count, so a caller
+    /// rewinding a layer the failure never reached costs nothing.
+    pub(super) fn truncate_rows(&mut self, rows: usize, tq: &TurboQuant) {
+        if rows >= self.num_vecs {
+            return;
+        }
+        let heads = self.kv_dim / self.head_dim.max(1);
+        let bytes = rows * heads * tq.bytes_per_vector(self.head_dim);
+        self.compressed_k.truncate(bytes);
+        self.compressed_v.truncate(bytes);
+        self.num_vecs = rows;
+    }
+
     pub(super) fn memory_bytes(&self) -> usize {
         self.compressed_k.len() + self.compressed_v.len()
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn detect_head_dim(kv_dim: usize) -> usize {
     for &hd in &[256usize, 128, 64, 32] {
-        if kv_dim % hd == 0 {
+        if kv_dim.is_multiple_of(hd) {
             return hd;
         }
     }
     kv_dim // fallback: treat whole row as one head
 }
 
+/// Fallible companion to [`detect_head_dim`]: the WHT butterfly requires a
+/// power-of-two block dim, so a kv_dim with no supported head split (e.g.
+/// 80) must surface as a typed error at prefill entry instead of the WHT
+/// assert firing mid-prefill.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn resolve_block_dim(kv_dim: usize) -> Result<usize, EngineError> {
+    let head_dim = detect_head_dim(kv_dim);
+    if head_dim.is_power_of_two() {
+        Ok(head_dim)
+    } else {
+        Err(EngineError::InvariantViolation {
+            what: format!(
+                "turbo-quant codec requires a power-of-two K/V block dim \
+                 (WHT constraint); kv_dim={kv_dim} has no supported head split"
+            ),
+        })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn compress_matrix(m: &Array2<f32>, tq: &TurboQuant, head_dim: usize) -> Vec<u8> {
     let rows = m.shape()[0];
     let cols = m.shape()[1];
@@ -228,6 +328,7 @@ pub(super) fn compress_matrix(m: &Array2<f32>, tq: &TurboQuant, head_dim: usize)
     buf
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn decompress_matrix(
     bytes: &[u8],
     num_vecs: usize,
@@ -269,6 +370,7 @@ pub(super) fn decompress_matrix(
     Array2::from_shape_vec((num_vecs, kv_dim), data).expect("shape mismatch")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
     let last = h.shape()[0] - 1;
     h.slice(s![last..=last, ..]).to_owned()
@@ -276,6 +378,7 @@ pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct TurboQuantEngine {
     pub(super) tq: TurboQuant,
     pub(super) backend: Box<dyn EngineBackend>,
@@ -292,6 +395,7 @@ pub struct TurboQuantEngine {
     pub(super) dequant_scratch: larql_inference::DequantScratch,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TurboQuantEngine {
     pub fn new(bits: u8) -> Self {
         Self::with_backend(bits, cpu_engine_backend())
@@ -314,6 +418,19 @@ impl TurboQuantEngine {
         self.profiling = enabled;
         self
     }
+
+    /// First-use validation of the codec's power-of-two block-dim
+    /// requirement across all layers. Called from every prefill entry
+    /// point; decode paths inherit the guarantee from a successful
+    /// prefill.
+    fn validate_block_dims(&self, weights: &ModelWeights) -> Result<(), EngineError> {
+        let arch = &*weights.arch;
+        for layer in 0..weights.num_layers {
+            let kv_dim = arch.num_kv_heads_for_layer(layer) * arch.head_dim_for_layer(layer);
+            resolve_block_dim(kv_dim)?;
+        }
+        Ok(())
+    }
 }
 
 // W1-GPU dispatch methods (`try_prefill_via_dispatch` /
@@ -321,9 +438,44 @@ impl TurboQuantEngine {
 // additional `impl TurboQuantEngine` block. They mutate the
 // `pub(super)` fields above.
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TurboQuantEngine {
     /// Shared body for `decode_step` / `decode_step_resident`.
+    ///
+    /// **Transactional.** Unlike the residual-canonical engines, this one's
+    /// canonical state *is* the K/V: each layer's compressed cache grows
+    /// before the FFN gets its chance to refuse, so a step that does not
+    /// finish must undo those appends rather than leave a cache holding a
+    /// token that produced no output. [`CompressedLayer::truncate_rows`] does
+    /// that byte-exactly, and `abs_position` advances only on success — so a
+    /// caller who fixes the cause can drive the same token again.
     fn decode_step_impl(
+        &mut self,
+        weights: &ModelWeights,
+        ffn: &dyn FfnBackend,
+        token_id: u32,
+        index: Option<&larql_vindex::VectorIndex>,
+    ) -> Result<Array2<f32>, EngineError> {
+        // Recorded per layer rather than assumed uniform: nothing promises
+        // every layer caches the same number of rows, and a wrong assumption
+        // would rewind to a length no layer ever had.
+        let entry_rows: Vec<usize> = self.layers.iter().map(|l| l.num_vecs).collect();
+        match self.decode_step_appending(weights, ffn, token_id, index) {
+            Ok(hidden) => Ok(hidden),
+            Err(failure) => {
+                for (layer, &rows) in self.layers.iter_mut().zip(&entry_rows) {
+                    layer.truncate_rows(rows, &self.tq);
+                }
+                Err(failure)
+            }
+        }
+    }
+
+    /// The body of a decode step, which appends to `self.layers` as it goes.
+    ///
+    /// Split out so the rewind above can wrap every exit rather than every
+    /// `?` having to remember it.
+    fn decode_step_appending(
         &mut self,
         weights: &ModelWeights,
         ffn: &dyn FfnBackend,
@@ -333,6 +485,12 @@ impl TurboQuantEngine {
         let num_layers = weights.num_layers;
         let abs_position = self.abs_position;
         let mut h = embed_tokens_pub(weights, &[token_id]);
+        // PLE inputs are per-token — recompute for this single-token decode
+        // step, matching the legacy `kv_decode_step_run` recipe exactly.
+        let ple_inputs = precompute_per_layer_inputs(weights, &h, &[token_id]);
+        // Codec scratch reused across layers.
+        let mut scratch_f32: Vec<f32> = Vec::new();
+        let mut scratch_u8: Vec<u8> = Vec::new();
 
         for layer in 0..num_layers {
             // Decompress full prior K/V for attention.
@@ -355,42 +513,32 @@ impl TurboQuantEngine {
 
             // Append-only codec path: encode just the new row head-by-
             // head and push onto the existing compressed buffer.
-            let arch = &*weights.arch;
-            let kv_dim = arch.num_kv_heads_for_layer(layer) * arch.head_dim_for_layer(layer);
-            let head_dim = detect_head_dim(kv_dim);
             let layer_slot = &mut self.layers[layer];
             let new_rows = updated_kv.0.shape()[0];
+            debug_assert_eq!(new_rows, layer_slot.num_vecs + 1, "decode adds one row");
             let k_last = updated_kv.0.row(new_rows - 1).to_owned();
             let v_last = updated_kv.1.row(new_rows - 1).to_owned();
-            let mut scratch_f32: Vec<f32> = Vec::new();
-            let mut scratch_u8: Vec<u8> = Vec::new();
-            for chunk in k_last.as_slice().expect("k row contig").chunks(head_dim) {
-                self.tq.encode_vector_into(
-                    chunk,
-                    &mut layer_slot.compressed_k,
-                    &mut scratch_f32,
-                    &mut scratch_u8,
-                );
-            }
-            for chunk in v_last.as_slice().expect("v row contig").chunks(head_dim) {
-                self.tq.encode_vector_into(
-                    chunk,
-                    &mut layer_slot.compressed_v,
-                    &mut scratch_f32,
-                    &mut scratch_u8,
-                );
-            }
-            layer_slot.num_vecs = new_rows;
-            layer_slot.kv_dim = kv_dim;
-            layer_slot.head_dim = head_dim;
+            layer_slot.append_row(
+                k_last.as_slice().expect("k row contig"),
+                v_last.as_slice().expect("v row contig"),
+                &self.tq,
+                &mut scratch_f32,
+                &mut scratch_u8,
+            );
 
             let bffn = BackendFfn {
                 weights,
                 backend: self.backend.as_ref(),
             };
-            let h_out =
-                crate::engines::layer_ffn_or_moe(weights, &h_post_attn, layer, &bffn, Some(ffn));
-            h = h_out;
+            h = crate::engines::layer_ffn_or_moe(
+                weights,
+                &h_post_attn,
+                layer,
+                &bffn,
+                Some(ffn),
+                ple_inputs.get(layer),
+            )
+            .map_err(EngineError::Execution)?;
         }
 
         self.abs_position += 1;
@@ -398,6 +546,7 @@ impl TurboQuantEngine {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvEngine for TurboQuantEngine {
     fn name(&self) -> &str {
         "turbo-quant"
@@ -426,10 +575,16 @@ impl KvEngine for TurboQuantEngine {
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
+        self.validate_block_dims(weights)?;
         let num_layers = weights.num_layers;
         let be = Some(self.backend.as_compute());
         let mut h = embed_tokens_pub(weights, token_ids);
-        self.layers.clear();
+        // Empty on non-PLE archs — `ple_inputs.get(layer)` then yields `None`.
+        let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
+        // Built into a local, not into `self.layers`: a prefill that refuses
+        // partway must leave the engine holding whatever cache it already had
+        // rather than a truncated one for a prompt it never finished.
+        let mut layers: Vec<CompressedLayer> = Vec::with_capacity(num_layers);
 
         for layer in 0..num_layers {
             let (h_post_attn, k, v) = run_attention_with_kv_backend(
@@ -442,18 +597,24 @@ impl KvEngine for TurboQuantEngine {
             .ok_or_else(|| EngineError::BackendFailure {
                 details: "run_attention_with_kv_backend returned None".into(),
             })?;
-            self.layers
-                .push(CompressedLayer::compress(&(k, v), &self.tq));
+            layers.push(CompressedLayer::compress(&(k, v), &self.tq));
 
             let bffn = BackendFfn {
                 weights,
                 backend: self.backend.as_ref(),
             };
-            let h_out =
-                crate::engines::layer_ffn_or_moe(weights, &h_post_attn, layer, &bffn, Some(ffn));
-            h = h_out;
+            h = crate::engines::layer_ffn_or_moe(
+                weights,
+                &h_post_attn,
+                layer,
+                &bffn,
+                Some(ffn),
+                ple_inputs.get(layer),
+            )
+            .map_err(EngineError::Execution)?;
         }
 
+        self.layers = layers;
         self.abs_position = token_ids.len();
         Ok(last_row(&h))
     }
@@ -508,6 +669,7 @@ impl KvEngine for TurboQuantEngine {
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
+        self.validate_block_dims(weights)?;
         if let Some(hidden) = self.try_prefill_via_dispatch(weights, index, token_ids) {
             return Ok(hidden);
         }
@@ -564,12 +726,15 @@ impl KvEngine for TurboQuantEngine {
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
+        self.validate_block_dims(weights)?;
         if matches!(executor.dispatch_kind(), ExecutorDispatchKind::Fused) {
             return self.prefill_quant(weights, ffn, index, token_ids, executor.backend());
         }
         ensure_attn_tensors_dequantised(&mut self.dequant_scratch, weights, index);
         let num_layers = weights.num_layers;
         let mut h = embed_tokens_pub(weights, token_ids);
+        // Empty on non-PLE archs — `ple_inputs.get(layer)` then yields `None`.
+        let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
         self.layers.clear();
 
         for layer in 0..num_layers {
@@ -584,7 +749,16 @@ impl KvEngine for TurboQuantEngine {
                     details: "executor.run_prefill_layer returned None".into(),
                 })?;
             self.layers.push(CompressedLayer::compress(&kv, &self.tq));
-            h = h_out;
+            // `LayerExecutor::run_*_layer` returns attention + bare FFN only
+            // (`LocalWalkExecutor`, the sole production impl, ends at
+            // `run_ffn`); the PLE + layer_scalar tail is the driving loop's
+            // responsibility, mirroring the legacy `kv_prefill_run` sequence.
+            h = crate::engines::apply_ple_and_layer_scalar(
+                weights,
+                &h_out,
+                layer,
+                ple_inputs.get(layer),
+            );
         }
 
         self.abs_position = token_ids.len();
@@ -607,6 +781,12 @@ impl KvEngine for TurboQuantEngine {
         let num_layers = weights.num_layers;
         let abs_position = self.abs_position;
         let mut h = embed_tokens_pub(weights, &[token_id]);
+        // PLE inputs are per-token — recompute for this single-token decode
+        // step, matching the legacy `kv_decode_step_run` recipe exactly.
+        let ple_inputs = precompute_per_layer_inputs(weights, &h, &[token_id]);
+        // Codec scratch reused across layers.
+        let mut scratch_f32: Vec<f32> = Vec::new();
+        let mut scratch_u8: Vec<u8> = Vec::new();
 
         for layer in 0..num_layers {
             let prior_kv = self.layers[layer].decompress(&self.tq);
@@ -622,17 +802,31 @@ impl KvEngine for TurboQuantEngine {
                 .ok_or_else(|| EngineError::BackendFailure {
                     details: "executor.run_decode_layer returned None".into(),
                 })?;
-            let arch = &*weights.arch;
-            let kv_dim = arch.num_kv_heads_for_layer(layer) * arch.head_dim_for_layer(layer);
-            let head_dim = detect_head_dim(kv_dim);
-            self.layers[layer] = CompressedLayer {
-                compressed_k: compress_matrix(&updated_kv.0, &self.tq, head_dim),
-                compressed_v: compress_matrix(&updated_kv.1, &self.tq, head_dim),
-                num_vecs: updated_kv.0.shape()[0],
-                kv_dim,
-                head_dim,
-            };
-            h = h_out;
+            // Append-only codec path (same structure as `decode_step_impl`
+            // and `decode_step_quant_cpu`): only the LAST row of the
+            // executor's updated K/V is new — the prior rows came from
+            // decompressing our own cache, and re-encoding decompressed
+            // rows compounds the codec's norm shrink every step.
+            let layer_slot = &mut self.layers[layer];
+            let new_rows = updated_kv.0.shape()[0];
+            debug_assert_eq!(new_rows, layer_slot.num_vecs + 1, "decode adds one row");
+            let k_last = updated_kv.0.row(new_rows - 1).to_owned();
+            let v_last = updated_kv.1.row(new_rows - 1).to_owned();
+            layer_slot.append_row(
+                k_last.as_slice().expect("k row contig"),
+                v_last.as_slice().expect("v row contig"),
+                &self.tq,
+                &mut scratch_f32,
+                &mut scratch_u8,
+            );
+            // Executor returns bare post-FFN hidden; PLE + layer_scalar tail
+            // is the driving loop's responsibility (see prefill loop above).
+            h = crate::engines::apply_ple_and_layer_scalar(
+                weights,
+                &h_out,
+                layer,
+                ple_inputs.get(layer),
+            );
         }
 
         self.abs_position += 1;
@@ -642,6 +836,7 @@ impl KvEngine for TurboQuantEngine {
 
 // ── CPU quant-path helper methods (not part of the KvEngine trait) ───────────
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TurboQuantEngine {
     fn prefill_quant_cpu(
         &mut self,
@@ -654,6 +849,8 @@ impl TurboQuantEngine {
         let num_layers = weights.num_layers;
         let be = Some(backend);
         let mut h = embed_tokens_pub(weights, token_ids);
+        // Empty on non-PLE archs — `ple_inputs.get(layer)` then yields `None`.
+        let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
         self.layers.clear();
 
         // Hoist WalkFfn — was rebuilt 34× per prefill.
@@ -671,8 +868,11 @@ impl TurboQuantEngine {
             self.layers
                 .push(CompressedLayer::compress(&(k, v), &self.tq));
 
-            // Native-quantised FFN; falls back to WalkFfn → dense f32.
-            let h_out = larql_inference::vindex::ffn_decode_step_native(
+            // Native-quantised FFN; falls back to WalkFfn → dense f32. Both
+            // branches return the bare post-FFN hidden —
+            // `ffn_decode_step_native` is also `moe_ffn_block_cpu`'s pre-PLE
+            // dense slab — so the PLE + layer_scalar tail applies to either.
+            let h_post_ffn = larql_inference::vindex::ffn_decode_step_native(
                 weights,
                 index,
                 backend,
@@ -683,7 +883,12 @@ impl TurboQuantEngine {
                 let (h, _) = run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
                 h
             });
-            h = h_out;
+            h = crate::engines::apply_ple_and_layer_scalar(
+                weights,
+                &h_post_ffn,
+                layer,
+                ple_inputs.get(layer),
+            );
         }
 
         self.abs_position = token_ids.len();
@@ -709,10 +914,16 @@ impl TurboQuantEngine {
         let embed_us = t_embed
             .map(|t| t.elapsed().as_secs_f64() * 1e6)
             .unwrap_or(0.0);
+        // PLE inputs are per-token — recompute for this single-token decode
+        // step, matching the legacy `kv_decode_step_run` recipe exactly.
+        let ple_inputs = precompute_per_layer_inputs(weights, &h, &[token_id]);
 
         // Hoist WalkFfn — was rebuilt 34× per decode step.
         let walk_ffn = WalkFfn::from_config(weights, index, WalkFfnConfig::dense(num_layers))
             .with_backend(backend);
+        // Codec scratch reused across layers.
+        let mut scratch_f32: Vec<f32> = Vec::new();
+        let mut scratch_u8: Vec<u8> = Vec::new();
 
         // Per-stage accumulators. For turbo_quant we reuse the existing
         // EngineProfiler slots:
@@ -758,9 +969,6 @@ impl TurboQuantEngine {
             }
 
             let t_enc = if timing { Some(Instant::now()) } else { None };
-            let arch = &*weights.arch;
-            let kv_dim = arch.num_kv_heads_for_layer(layer) * arch.head_dim_for_layer(layer);
-            let head_dim = detect_head_dim(kv_dim);
             // Append-only codec path (mirrors `dispatch.rs`'s 2026-05-19
             // fix). The attention call returns the full updated K/V
             // (prior + new); only the LAST row is new, the rest already
@@ -770,35 +978,25 @@ impl TurboQuantEngine {
             // O(head_dim · heads_per_row).
             let layer_slot = &mut self.layers[layer];
             let new_rows = updated_kv.0.shape()[0];
+            debug_assert_eq!(new_rows, layer_slot.num_vecs + 1, "decode adds one row");
             let k_last = updated_kv.0.row(new_rows - 1).to_owned();
             let v_last = updated_kv.1.row(new_rows - 1).to_owned();
-            let mut scratch_f32: Vec<f32> = Vec::new();
-            let mut scratch_u8: Vec<u8> = Vec::new();
-            for chunk in k_last.as_slice().expect("k row contig").chunks(head_dim) {
-                self.tq.encode_vector_into(
-                    chunk,
-                    &mut layer_slot.compressed_k,
-                    &mut scratch_f32,
-                    &mut scratch_u8,
-                );
-            }
-            for chunk in v_last.as_slice().expect("v row contig").chunks(head_dim) {
-                self.tq.encode_vector_into(
-                    chunk,
-                    &mut layer_slot.compressed_v,
-                    &mut scratch_f32,
-                    &mut scratch_u8,
-                );
-            }
-            layer_slot.num_vecs = new_rows;
-            layer_slot.kv_dim = kv_dim;
-            layer_slot.head_dim = head_dim;
+            layer_slot.append_row(
+                k_last.as_slice().expect("k row contig"),
+                v_last.as_slice().expect("v row contig"),
+                &self.tq,
+                &mut scratch_f32,
+                &mut scratch_u8,
+            );
             if let Some(t) = t_enc {
                 codec_encode_us += t.elapsed().as_secs_f64() * 1e6;
             }
 
             let t_ffn = if timing { Some(Instant::now()) } else { None };
-            let h_out = larql_inference::vindex::ffn_decode_step_native(
+            // Both branches return the bare post-FFN hidden —
+            // `ffn_decode_step_native` is also `moe_ffn_block_cpu`'s pre-PLE
+            // dense slab — so the PLE + layer_scalar tail applies to either.
+            let h_post_ffn = larql_inference::vindex::ffn_decode_step_native(
                 weights,
                 index,
                 backend,
@@ -809,6 +1007,12 @@ impl TurboQuantEngine {
                 let (h, _) = run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
                 h
             });
+            let h_out = crate::engines::apply_ple_and_layer_scalar(
+                weights,
+                &h_post_ffn,
+                layer,
+                ple_inputs.get(layer),
+            );
             if let Some(t) = t_ffn {
                 ffn_us += t.elapsed().as_secs_f64() * 1e6;
             }
@@ -844,8 +1048,8 @@ mod tests {
     use crate::accuracy::cosine_similarity;
 
     /// TurboQuant's codebooks are optimised for unit-norm vectors (the natural
-    /// distribution of K/V heads after QK-norm). Using unit-norm inputs gives
-    /// the same quality as real K/V vectors (cos≈0.991 at 4-bit).
+    /// distribution of K/V heads after QK-norm), so unit-norm inputs measure
+    /// the codec at its operating point (cos ≈ 0.9954 at 4-bit).
     /// Generate a unit-norm vector using a simple LCG (no external rand dep).
     /// Uses lower 32 bits of the state for uniform [0, 1) values.
     fn unit_norm_vec(dim: usize, seed: u64) -> Vec<f32> {
@@ -866,6 +1070,69 @@ mod tests {
         }
     }
 
+    // ── Measured codec quality floors (2026-07-30, unit-sigma codebooks) ─────
+    //
+    // Mean round-trip values over 500 Gaussian-direction unit vectors
+    // (`codec_mean_cosine_and_norm_meet_floor`):
+    //   4-bit: mean cos 0.9954–0.9960 across d ∈ {32, 64, 128, 256}
+    //   3-bit: mean cos 0.9830–0.9844
+    //   mean decoded norm ≥ 0.9836 at both bit-widths
+    // The mis-scaled codebooks (sigma trained √2 too small + silent D256
+    // fallback for d ∉ {128, 256}) gave 0.9908 at 4-bit d=256, 0.947 at
+    // d=64, 0.919 at d=32, and decoded norms of 0.95 / 0.70 / 0.55.
+    // Floors sit just under today's measured values so a codebook
+    // regression trips the assert instead of hiding under slack.
+    const MEAN_COS_FLOOR_4BIT: f64 = 0.995;
+    const MEAN_COS_FLOOR_3BIT: f64 = 0.982;
+    const MEAN_NORM_FLOOR: f64 = 0.98;
+    /// Single-vector floors for the LCG fixtures below (measured
+    /// 2026-07-30: 0.9955 / 0.9956 at 4-bit, 0.9839 at 3-bit). The LCG
+    /// produces structured low-bit coordinates, so these are
+    /// deterministic per (dim, seed).
+    const MIN_COS_4BIT: f64 = 0.995;
+    const MIN_COS_3BIT: f64 = 0.982;
+
+    /// Gaussian-direction unit vectors at every supported block dim.
+    /// Pins the accuracy floor AND the absence of the old
+    /// d ∉ {128, 256} fallback cliff.
+    #[test]
+    fn codec_mean_cosine_and_norm_meet_floor() {
+        use rand::prelude::*;
+        use rand_distr::Normal;
+        const N_VECTORS: usize = 500;
+        for bits in [3u8, 4] {
+            for d in [32usize, 64, 128, 256] {
+                let tq = TurboQuant::new(bits);
+                let mut rng = StdRng::seed_from_u64(777);
+                let dist = Normal::new(0.0f32, 1.0).unwrap();
+                let mut cos_sum = 0.0f64;
+                let mut norm_sum = 0.0f64;
+                for _ in 0..N_VECTORS {
+                    let raw: Vec<f32> = (0..d).map(|_| rng.sample(dist)).collect();
+                    let nrm = raw.iter().map(|v| v * v).sum::<f32>().sqrt();
+                    let x: Vec<f32> = raw.iter().map(|v| v / nrm).collect();
+                    let dec = tq.decode_vector(&tq.encode_vector(&x), d);
+                    cos_sum += cosine_similarity(&x, &dec);
+                    norm_sum += dec.iter().map(|v| v * v).sum::<f32>().sqrt() as f64;
+                }
+                let mean_cos = cos_sum / N_VECTORS as f64;
+                let mean_norm = norm_sum / N_VECTORS as f64;
+                let cos_floor = match bits {
+                    4 => MEAN_COS_FLOOR_4BIT,
+                    _ => MEAN_COS_FLOOR_3BIT,
+                };
+                assert!(
+                    mean_cos > cos_floor,
+                    "bits={bits} d={d}: mean cos {mean_cos:.4} < floor {cos_floor}"
+                );
+                assert!(
+                    mean_norm > MEAN_NORM_FLOOR,
+                    "bits={bits} d={d}: mean decoded norm {mean_norm:.4} < floor {MEAN_NORM_FLOOR}"
+                );
+            }
+        }
+    }
+
     // ── Codec roundtrip quality ───────────────────────────────────────────────
 
     #[test]
@@ -875,8 +1142,7 @@ mod tests {
         let enc = tq.encode_vector(&x);
         let dec = tq.decode_vector(&enc, 256);
         let cos = cosine_similarity(&x, &dec);
-        // Synthetic random vectors: cos ≈ 0.91. Real K/V vectors: cos ≈ 0.991 (kv-cache-benchmark).
-        assert!(cos > 0.88, "4-bit cosine {cos:.4} < 0.88");
+        assert!(cos > MIN_COS_4BIT, "4-bit cosine {cos:.4} < {MIN_COS_4BIT}");
     }
 
     #[test]
@@ -886,8 +1152,7 @@ mod tests {
         let enc = tq.encode_vector(&x);
         let dec = tq.decode_vector(&enc, 256);
         let cos = cosine_similarity(&x, &dec);
-        // Synthetic: cos ≈ 0.90. Real K/V: cos ≈ 0.985.
-        assert!(cos > 0.85, "3-bit cosine {cos:.4} < 0.85");
+        assert!(cos > MIN_COS_3BIT, "3-bit cosine {cos:.4} < {MIN_COS_3BIT}");
     }
 
     #[test]
@@ -896,7 +1161,34 @@ mod tests {
         let x = unit_norm_vec(128, 7);
         let enc = tq.encode_vector(&x);
         let dec = tq.decode_vector(&enc, 128);
-        assert!(cosine_similarity(&x, &dec) > 0.88);
+        let cos = cosine_similarity(&x, &dec);
+        assert!(
+            cos > MIN_COS_4BIT,
+            "4-bit d=128 cosine {cos:.4} < {MIN_COS_4BIT}"
+        );
+    }
+
+    /// d = 64 and d = 32 used to fall back to the D256 table silently
+    /// (cos 0.92–0.95); the sigma-scaled unit codebook must serve them
+    /// at full quality. Per-vector cosine variance grows as d shrinks
+    /// (a couple of tail coordinates dominate at d = 32), so the
+    /// single-fixture floor sits below the d ≥ 128 one: measured
+    /// 2026-07-30 at 0.9967 (d=64, seed 21) and 0.9762 (d=32, seed 5).
+    const MIN_COS_4BIT_SMALL_DIM: f64 = 0.975;
+
+    #[test]
+    fn encode_decode_small_dims_full_quality() {
+        let tq = TurboQuant::new(4);
+        for (dim, seed) in [(64usize, 21u64), (32, 5)] {
+            let x = unit_norm_vec(dim, seed);
+            let enc = tq.encode_vector(&x);
+            let dec = tq.decode_vector(&enc, dim);
+            let cos = cosine_similarity(&x, &dec);
+            assert!(
+                cos > MIN_COS_4BIT_SMALL_DIM,
+                "4-bit d={dim} cosine {cos:.4} < {MIN_COS_4BIT_SMALL_DIM}"
+            );
+        }
     }
 
     #[test]
@@ -908,10 +1200,13 @@ mod tests {
         let dec = tq.decode_vector(&enc, 256);
         let norm_dec: f32 = dec.iter().map(|v| v * v).sum::<f32>().sqrt();
         let ratio = norm_dec / norm_orig;
-        // The codec stores the norm explicitly — after roundtrip it should be close.
+        // The codec stores the norm explicitly; the residual shortfall is
+        // quantisation error only (measured ratio ≈ 0.995 at 4-bit,
+        // 2026-07-30 — the mis-scaled codebooks clipped it to ≈ 0.95).
+        const NORM_RATIO_TOL: f32 = 0.02;
         assert!(
-            (ratio - 1.0).abs() < 0.20,
-            "norm ratio {ratio:.4} not near 1.0"
+            (ratio - 1.0).abs() < NORM_RATIO_TOL,
+            "norm ratio {ratio:.4} outside 1.0 ± {NORM_RATIO_TOL}"
         );
     }
 
@@ -1045,15 +1340,39 @@ mod tests {
         // Check last row cosine (most relevant for decode) on both K and V.
         let k_orig_last: Vec<f32> = k_data[9 * 256..10 * 256].to_vec();
         let k_dec_last: Vec<f32> = k_dec.row(9).to_vec();
+        let k_cos = cosine_similarity(&k_orig_last, &k_dec_last);
         assert!(
-            cosine_similarity(&k_orig_last, &k_dec_last) > 0.88,
-            "K roundtrip cosine too low"
+            k_cos > MIN_COS_4BIT,
+            "K roundtrip cosine {k_cos:.4} < {MIN_COS_4BIT}"
         );
         let v_orig_last: Vec<f32> = v_data[9 * 256..10 * 256].to_vec();
         let v_dec_last: Vec<f32> = v_dec.row(9).to_vec();
+        let v_cos = cosine_similarity(&v_orig_last, &v_dec_last);
         assert!(
-            cosine_similarity(&v_orig_last, &v_dec_last) > 0.88,
-            "V roundtrip cosine too low"
+            v_cos > MIN_COS_4BIT,
+            "V roundtrip cosine {v_cos:.4} < {MIN_COS_4BIT}"
+        );
+    }
+
+    // ── Block-dim validation ─────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_block_dim_accepts_power_of_two_splits() {
+        assert_eq!(resolve_block_dim(1024).unwrap(), 256);
+        assert_eq!(resolve_block_dim(128).unwrap(), 128);
+        assert_eq!(resolve_block_dim(96).unwrap(), 32);
+        assert_eq!(resolve_block_dim(64).unwrap(), 64);
+    }
+
+    /// kv_dim = 80 has no power-of-two head split in the supported set;
+    /// it used to fall through to the whole-row fallback and panic on
+    /// the WHT's power-of-two assert mid-prefill.
+    #[test]
+    fn resolve_block_dim_rejects_non_power_of_two() {
+        let err = resolve_block_dim(80).unwrap_err();
+        assert!(
+            matches!(err, EngineError::InvariantViolation { ref what } if what.contains("power-of-two")),
+            "expected InvariantViolation naming the power-of-two constraint, got {err:?}"
         );
     }
 }
@@ -1206,6 +1525,132 @@ mod integration_tests {
         assert!(engine.memory_bytes() > 0);
     }
 
+    /// Steps for the append-only regressions. The pre-fix executor path
+    /// decompressed and re-encoded the whole cache every step, so each
+    /// stored norm shrank by the codec's reconstruction ratio per step
+    /// (compounding to ~0.90 of true norm by 20 steps with today's
+    /// codebooks, ~0.44 with the mis-scaled ones).
+    const APPEND_ONLY_DECODE_STEPS: usize = 20;
+    /// Append-only decode never rewrites old rows' bytes, so the first
+    /// row's decoded norm is bit-stable across steps; tolerance covers
+    /// f64-accumulation slack only.
+    const FIRST_ROW_NORM_DRIFT_TOL: f64 = 1e-6;
+
+    fn layer0_row0_k_norm(engine: &TurboQuantEngine) -> f64 {
+        let (k, _v) = engine.layers[0].decompress(&engine.tq);
+        k.row(0)
+            .iter()
+            .map(|v| (*v as f64).powi(2))
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    /// Packed bytes of layer 0's first K row (all heads).
+    fn layer0_row0_k_bytes(engine: &TurboQuantEngine) -> Vec<u8> {
+        let l = &engine.layers[0];
+        let bytes_per_row = (l.kv_dim / l.head_dim) * engine.tq.bytes_per_vector(l.head_dim);
+        l.compressed_k[..bytes_per_row].to_vec()
+    }
+
+    /// Regression for the executor decode path re-encoding the entire
+    /// cache each step (norm decay ≈ ratio^N on the first cached row).
+    #[test]
+    fn executor_decode_is_append_only_first_row_stable() {
+        use larql_inference::ffn::NullFfn;
+        use larql_inference::layer_executor::LocalWalkExecutor;
+        let weights = make_test_weights();
+        let index = larql_inference::test_utils::make_test_vindex(&weights);
+        let backend = larql_compute::cpu_backend();
+        let executor = LocalWalkExecutor::new(&*backend);
+        let ffn = NullFfn;
+        let mut engine = TurboQuantEngine::new(4);
+        engine
+            .prefill_quant_via_executor(&weights, &executor, &ffn, &index, &[0u32, 1])
+            .expect("prefill");
+        let norm_after_prefill = layer0_row0_k_norm(&engine);
+        let bytes_after_prefill = layer0_row0_k_bytes(&engine);
+        assert!(norm_after_prefill > 0.0, "fixture row must be non-zero");
+
+        for step in 0..APPEND_ONLY_DECODE_STEPS {
+            engine
+                .decode_step_quant_via_executor(
+                    &weights,
+                    &executor,
+                    &ffn,
+                    &index,
+                    (step % 3) as u32,
+                )
+                .expect("decode step");
+        }
+
+        let norm_after = layer0_row0_k_norm(&engine);
+        let drift = (norm_after / norm_after_prefill - 1.0).abs();
+        assert!(
+            drift < FIRST_ROW_NORM_DRIFT_TOL,
+            "first cached row's decoded norm drifted by {drift:.6} over \
+             {APPEND_ONLY_DECODE_STEPS} executor decode steps \
+             ({norm_after_prefill:.6} -> {norm_after:.6}); the append-only \
+             invariant is broken"
+        );
+        assert_eq!(
+            layer0_row0_k_bytes(&engine),
+            bytes_after_prefill,
+            "row-0 packed bytes must never be rewritten by decode"
+        );
+    }
+
+    /// Parity of the append-only invariant across the executor and CPU
+    /// quant decode paths: identical prefill, then N steps down each
+    /// path — both must leave the first row's packed bytes at the
+    /// post-prefill snapshot (and therefore equal to each other).
+    #[test]
+    fn executor_and_cpu_decode_paths_append_only_parity() {
+        use larql_inference::ffn::NullFfn;
+        use larql_inference::layer_executor::LocalWalkExecutor;
+        let weights = make_test_weights();
+        let index = larql_inference::test_utils::make_test_vindex(&weights);
+        let backend = larql_compute::cpu_backend();
+        let executor = LocalWalkExecutor::new(&*backend);
+        let ffn = NullFfn;
+
+        let mut via_executor = TurboQuantEngine::new(4);
+        via_executor
+            .prefill_quant_via_executor(&weights, &executor, &ffn, &index, &[0u32, 1])
+            .expect("prefill (executor engine)");
+        let mut via_cpu = TurboQuantEngine::new(4);
+        via_cpu
+            .prefill_quant_via_executor(&weights, &executor, &ffn, &index, &[0u32, 1])
+            .expect("prefill (cpu engine)");
+
+        let snapshot = layer0_row0_k_bytes(&via_executor);
+        assert_eq!(
+            snapshot,
+            layer0_row0_k_bytes(&via_cpu),
+            "identical prefill must produce identical row-0 bytes"
+        );
+
+        for step in 0..APPEND_ONLY_DECODE_STEPS {
+            let token = (step % 3) as u32;
+            via_executor
+                .decode_step_quant_via_executor(&weights, &executor, &ffn, &index, token)
+                .expect("executor decode step");
+            via_cpu
+                .decode_step_quant(&weights, &ffn, &index, token, &*backend)
+                .expect("cpu decode step");
+        }
+
+        assert_eq!(
+            layer0_row0_k_bytes(&via_executor),
+            snapshot,
+            "executor path rewrote row-0 bytes"
+        );
+        assert_eq!(
+            layer0_row0_k_bytes(&via_cpu),
+            snapshot,
+            "cpu path rewrote row-0 bytes"
+        );
+    }
+
     #[test]
     fn decode_step_quant_via_executor_grows_cache() {
         use larql_inference::ffn::NullFfn;
@@ -1266,14 +1711,6 @@ mod integration_tests {
         fn forward(&self, _layer: usize, x: &ndarray::Array2<f32>) -> ndarray::Array2<f32> {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             ndarray::Array2::zeros((x.shape()[0], self.hidden))
-        }
-        fn forward_with_activation(
-            &self,
-            layer: usize,
-            x: &ndarray::Array2<f32>,
-        ) -> (ndarray::Array2<f32>, ndarray::Array2<f32>) {
-            let out = self.forward(layer, x);
-            (out.clone(), out)
         }
         fn name(&self) -> &str {
             "counting"
@@ -1361,18 +1798,21 @@ mod integration_tests {
     }
 
     #[test]
-    fn counting_ffn_forward_with_activation_returns_paired_arrays() {
+    fn counting_ffn_forward_observed_runs_forward_and_reports_absent() {
         use larql_inference::ffn::FfnBackend;
         let ffn = CountingFfn {
             calls: std::sync::atomic::AtomicUsize::new(0),
             hidden: 8,
         };
         let x = ndarray::Array2::<f32>::zeros((3, 8));
-        let (h, act) = ffn.forward_with_activation(0, &x);
+        let (h, obs) = ffn.forward_observed(0, &x);
         assert_eq!(h.shape(), &[3, 8]);
-        assert_eq!(act.shape(), &[3, 8]);
+        assert!(
+            obs.is_absent(),
+            "counting stub must not fabricate activations"
+        );
         assert_eq!(ffn.name(), "counting");
-        // The `forward_with_activation` impl delegates to `forward`, so
+        // The default `forward_observed` delegates to `forward`, so
         // exactly one call is recorded.
         assert_eq!(ffn.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }

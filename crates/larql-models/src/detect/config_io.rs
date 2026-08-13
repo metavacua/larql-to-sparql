@@ -7,15 +7,37 @@
 //! shape: [2560] to: [2048]`). Failing here keeps the error message
 //! attached to the actual cause.
 
+// No alloc_prelude import: every item in this file is either a plain
+// &str/&[&str] const (no heap allocation at all) or one of the
+// std::fs/std::path-based functions below, which are native-only --
+// nothing here needs Vec/String/Box/ToString on wasm32. CI-confirmed
+// (workflow run 31489222310): this file's only wasm32 clippy finding
+// was the (now-removed) unused `use crate::prelude::*;` itself.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::ModelError;
 
-/// HF-convention config file name read from a model directory.
+/// HF-convention config file name read from a model directory. Native-only:
+/// its only consumers (config_path below, and detect/mod.rs's
+/// ConfigMissing/ConfigFieldsMissing error messages) are all
+/// std::fs/std::path-based.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) const CONFIG_FILE_NAME: &str = "config.json";
 
 /// Nested-config wrapper used by multimodal models (Gemma 3 IT, Gemma 4).
+/// Portable: despite `detect/mod.rs`'s own use of it being native-gated
+/// (the ConfigFieldsMissing error message), `parser.rs::parse_model_config`
+/// -- itself portable, called from `detect_from_json` -- also reads it
+/// directly. Caught by a real compile error (E0432 in parser.rs) after
+/// an initial gate based only on checking detect/mod.rs's usage; fixed
+/// by checking every caller before gating, not just the first one found.
 pub(super) const CONFIG_KEY_TEXT_CONFIG: &str = "text_config";
+
+/// Nested-config wrapper used by speech models whose backbone is a text
+/// LM nested under `language_config` (MOSS-TTS-Realtime).
+pub(super) const CONFIG_KEY_LANGUAGE_CONFIG: &str = "language_config";
 
 // JSON keys for required topology fields. These have no defensible
 // architecture-class default — silently substituting a guess masks real
@@ -54,7 +76,9 @@ pub(super) const CONFIG_KEY_INTERMEDIATE_SIZE: &str = CONFIG_KEY_INTERMEDIATE_SI
 /// alias resolves under top-level or `text_config`. Topology fields have
 /// no defensible architecture-class default — silently substituting one
 /// masks "wrong directory" / "incomplete download" failures and surfaces
-/// later as a broadcast/matmul panic.
+/// later as a broadcast/matmul panic. Native-only: its sole consumer,
+/// require_config_fields, is std::fs-based.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) const REQUIRED_CONFIG_FIELDS: &[&[&str]] = &[
     CONFIG_KEY_HIDDEN_SIZE_ALIASES,
     CONFIG_KEY_NUM_HIDDEN_LAYERS_ALIASES,
@@ -62,6 +86,7 @@ pub(super) const REQUIRED_CONFIG_FIELDS: &[&[&str]] = &[
 ];
 
 /// Resolve the conventional `<model_dir>/config.json` path.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn config_path(model_dir: &Path) -> PathBuf {
     model_dir.join(CONFIG_FILE_NAME)
 }
@@ -72,6 +97,7 @@ pub(super) fn config_path(model_dir: &Path) -> PathBuf {
 /// rather than the prior behavior of synthesising an empty `{}` and
 /// letting magic-number defaults pretend the model was successfully
 /// described.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn read_config_json(config_path: &Path) -> Result<serde_json::Value, ModelError> {
     if !config_path.exists() {
         return Err(ModelError::ConfigMissing(config_path.to_path_buf()));
@@ -81,15 +107,19 @@ pub(super) fn read_config_json(config_path: &Path) -> Result<serde_json::Value, 
 }
 
 /// Fail loudly when a parsed config is missing any field whose silent
-/// default would diverge from a real model's topology. Both top-level and
-/// nested `text_config` (multimodal) layouts are accepted; a field counts
-/// as present when *any* of its aliases (e.g. `hidden_size` or `n_embd`)
-/// resolves under either layout.
+/// default would diverge from a real model's topology. Top-level, nested
+/// `text_config` (multimodal) and nested `language_config` (speech)
+/// layouts are all accepted; a field counts as present when *any* of its
+/// aliases (e.g. `hidden_size` or `n_embd`) resolves under any layout.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn require_config_fields(
     config: &serde_json::Value,
     config_path: &Path,
 ) -> Result<(), ModelError> {
-    let text_config = config.get(CONFIG_KEY_TEXT_CONFIG).unwrap_or(config);
+    let text_config = config
+        .get(CONFIG_KEY_TEXT_CONFIG)
+        .or_else(|| config.get(CONFIG_KEY_LANGUAGE_CONFIG))
+        .unwrap_or(config);
     let model_type = text_config
         .get("model_type")
         .or_else(|| config.get("model_type"))

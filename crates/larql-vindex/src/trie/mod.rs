@@ -12,12 +12,20 @@
 //! consults `LARQL_PROBE_PATH` and `LARQL_PROBE_DIR` env overrides before
 //! falling back to caller-supplied search directories.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use serde::Deserialize;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 // ── Serialised probe format ───────────────────────────────────────────────────
 
+// Native-only: its sole consumer, CascadeTrie::load below, is
+// std::fs-based.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Deserialize)]
 struct ProbeFile {
     layer: usize,
@@ -54,6 +62,7 @@ pub struct CascadeTrie {
 
 impl CascadeTrie {
     /// Load from a JSON file exported by `export_trie_probe.py`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let text = std::fs::read_to_string(path)?;
         let p: ProbeFile = serde_json::from_str(&text)?;
@@ -142,6 +151,7 @@ impl CascadeTrie {
     ///   3. Each entry in `extra_dirs`, joined with [`Self::filename_for`].
     ///
     /// Returns `None` if no probe is found anywhere in the chain.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn find<I, P>(model_id: &str, extra_dirs: I) -> Option<PathBuf>
     where
         I: IntoIterator<Item = P>,
@@ -159,6 +169,7 @@ impl CascadeTrie {
     /// of read from the process environment. Exposed so tests can exercise
     /// the precedence chain without mutating shared env state (which would
     /// race with parallel tests).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn find_with_env<I, P>(
         model_id: &str,
         env_path: Option<PathBuf>,

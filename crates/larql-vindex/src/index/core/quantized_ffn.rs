@@ -9,6 +9,9 @@
 use super::VectorIndex;
 use crate::index::types::QuantizedFfnAccess;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 impl QuantizedFfnAccess for VectorIndex {
     fn has_interleaved_q4(&self) -> bool {
         self.has_interleaved_q4()

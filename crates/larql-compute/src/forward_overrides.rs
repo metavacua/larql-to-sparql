@@ -36,6 +36,18 @@
 //! | `LARQL_LLAMA3_ROPE_SCALING` | `factor,low,high,old_ctx` | Force HF llama3 scaling params. |
 //! | `LARQL_NORM_EPS_OVERRIDE` | `f64` | Override `arch.norm_eps()`. |
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+// wasm32v1-none has no std::env at all, so none of the five diagnostic
+// overrides this module resolves can ever be set there. Each cached
+// resolver below gets a wasm32 twin that calls the same pure parser
+// with `None` -- the identical value the native OnceLock would compute
+// when its env var happens to be unset -- rather than a hand-maintained
+// duplicate of "what the default is." Since it's a plain function call
+// on a constant input, no caching (OnceLock or otherwise) is needed at
+// all on wasm32, unlike cpu/ops/moe/latent_mask.rs's env-gated probes.
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
 /// Diagnostic override for the sliding-window attention bisection.
@@ -47,7 +59,14 @@ use std::sync::OnceLock;
 #[derive(Debug)]
 enum ForceGlobalSpec {
     None,
+    // `All`/`Layers` are native-only: the wasm32 stub of `force_global_spec`
+    // below hardcodes `&ForceGlobalSpec::None` directly rather than parsing
+    // an env var, so these are never constructed on that target -- CI-confirmed
+    // (workflow run 31489222310). `layer_forced_global`'s match below is
+    // cfg-gated to match: `None` is the only reachable arm on wasm32.
+    #[cfg(not(target_arch = "wasm32"))]
     All,
+    #[cfg(not(target_arch = "wasm32"))]
     Layers(Vec<usize>),
 }
 
@@ -55,7 +74,9 @@ enum ForceGlobalSpec {
 /// `ForceGlobalSpec` variant. Split from [`force_global_spec`] so the
 /// parsing logic is testable without going through the `OnceLock`
 /// (which fires once per process and pins to whatever the env was at
-/// first-call time).
+/// first-call time). Native-only: its sole caller, `force_global_spec`
+/// below, hardcodes a wasm32 stub that never calls this.
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_force_global_spec(raw: Option<&str>) -> ForceGlobalSpec {
     let Some(s) = raw else {
         return ForceGlobalSpec::None;
@@ -78,6 +99,12 @@ fn parse_force_global_spec(raw: Option<&str>) -> ForceGlobalSpec {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn force_global_spec() -> &'static ForceGlobalSpec {
+    &ForceGlobalSpec::None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn force_global_spec() -> &'static ForceGlobalSpec {
     static CELL: OnceLock<ForceGlobalSpec> = OnceLock::new();
     CELL.get_or_init(|| {
@@ -87,10 +114,18 @@ fn force_global_spec() -> &'static ForceGlobalSpec {
 
 /// Returns true when `LARQL_FORCE_GLOBAL_LAYERS` requests this layer be
 /// forced onto the global-attention code path.
+///
+/// `layer` is unused on wasm32: `force_global_spec()` there is hard-wired to
+/// `ForceGlobalSpec::None` (env vars don't exist on that target) and the
+/// `All`/`Layers` match arms that read `layer` are native-only. Kept as a
+/// real parameter (not cfg'd out) so the signature matches native callers.
+#[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
 pub fn layer_forced_global(layer: usize) -> bool {
     match force_global_spec() {
         ForceGlobalSpec::None => false,
+        #[cfg(not(target_arch = "wasm32"))]
         ForceGlobalSpec::All => true,
+        #[cfg(not(target_arch = "wasm32"))]
         ForceGlobalSpec::Layers(v) => v.contains(&layer),
     }
 }
@@ -109,6 +144,37 @@ pub fn effective_rope_base_for_layer(
     }
 }
 
+/// Per-layer attention window, honouring the `LARQL_FORCE_GLOBAL_LAYERS`
+/// diagnostic override. `None` = attend the full context.
+///
+/// **Single source of truth.** Both the CPU attention path and the Metal
+/// pipeline spec resolve their window through here, because the two
+/// answering this question independently is exactly how they drift: the
+/// CPU path previously had no notion of a per-layer window at all, so a
+/// Gemma-class model attended full history on layers the architecture
+/// declares sliding while Metal masked them, and "GPU/CPU parity" was
+/// undefined past the window.
+///
+/// An architecture that declares a layer sliding but supplies no window
+/// size is answered `None` — full attention. That combination is
+/// incoherent (there is no window to slide) and the only alternatives
+/// are to invent a size or to mask everything; both are worse than
+/// attending the context we actually have. Some test fixtures are in
+/// exactly this state, which is why it must be a deliberate branch
+/// rather than an `unwrap_or(0)` that silently means "no window" in one
+/// place and "empty window" in another.
+pub fn effective_attention_window_for_layer(
+    arch: &dyn larql_models::ModelArchitecture,
+    layer: usize,
+) -> Option<usize> {
+    if layer_forced_global(layer) || !arch.is_sliding_window_layer(layer) {
+        return None;
+    }
+    // A zero-width declared window means the same thing as no window;
+    // normalise it here so callers never see `Some(0)`.
+    arch.sliding_window_size().filter(|&w| w > 0)
+}
+
 /// Diagnostic position scale read from `LARQL_ROPE_POS_DIVISOR=<f64>`. Matches
 /// HF `rope_scaling = {rope_type: linear, factor: <v>}`. Returns `1.0` when
 /// the env var is unset. Applied uniformly to every layer.
@@ -121,6 +187,12 @@ fn parse_rope_position_divisor(raw: Option<&str>) -> f64 {
         .unwrap_or(1.0)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn rope_position_divisor() -> f64 {
+    parse_rope_position_divisor(None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn rope_position_divisor() -> f64 {
     static CELL: OnceLock<f64> = OnceLock::new();
     *CELL.get_or_init(|| {
@@ -132,6 +204,12 @@ fn rope_position_divisor() -> f64 {
 /// applied only on global (non-sliding) layers. Gemma 3's HF config sets a
 /// linear factor on full-attention layers only via the structured per-layer-
 /// type `rope_scaling` form.
+#[cfg(target_arch = "wasm32")]
+fn rope_position_divisor_global_only() -> f64 {
+    parse_rope_position_divisor(None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn rope_position_divisor_global_only() -> f64 {
     static CELL: OnceLock<f64> = OnceLock::new();
     *CELL.get_or_init(|| {
@@ -180,6 +258,12 @@ fn parse_llama3_rope_scaling(raw: Option<&str>) -> Option<larql_models::Llama3Ro
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn llama3_rope_scaling_override() -> Option<larql_models::Llama3RopeScaling> {
+    parse_llama3_rope_scaling(None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn llama3_rope_scaling_override() -> Option<larql_models::Llama3RopeScaling> {
     static CELL: OnceLock<Option<larql_models::Llama3RopeScaling>> = OnceLock::new();
     *CELL.get_or_init(|| {
@@ -196,6 +280,31 @@ pub fn effective_llama3_rope_scaling(
     llama3_rope_scaling_override().or_else(|| arch.llama3_rope_scaling())
 }
 
+/// The RoPE frequency family this architecture is served under.
+///
+/// **One resolver, called by every attention path.** The four call sites that
+/// rope Q/K (dense prefill, GPU prefill, Q4K-direct decode, cached kquant
+/// decode) previously each reached for `effective_llama3_rope_scaling`
+/// independently, so a family none of them knew about was ignored four times
+/// over. Resolving the whole decision once is the same shape as the shared
+/// `softmax_in_place` that replaced four byte-identical attention-sink copies
+/// (`docs/k3-funnel.md` §4.6).
+///
+/// Llama-3 wins a tie because its env-var override exists for diagnostics and
+/// must stay able to force a family; no checkpoint declares both.
+pub fn effective_rope_freq_scaling(
+    arch: &dyn larql_models::ModelArchitecture,
+) -> crate::attention::rope::RopeFreqScaling {
+    use crate::attention::rope::RopeFreqScaling;
+    if let Some(s) = effective_llama3_rope_scaling(arch) {
+        return RopeFreqScaling::Llama3(s);
+    }
+    if let Some(s) = arch.yarn_rope_scaling() {
+        return RopeFreqScaling::Yarn(s);
+    }
+    RopeFreqScaling::None
+}
+
 /// Diagnostic norm-epsilon override read from `LARQL_NORM_EPS_OVERRIDE=<f64>`.
 /// When set, replaces the architecture's `norm_eps()` value at every
 /// `rms_norm_for_arch` / `layer_norm_for_arch` call site. Use to test
@@ -208,6 +317,12 @@ fn parse_norm_eps_override(raw: Option<&str>) -> Option<f32> {
         .filter(|v| v.is_finite() && *v > 0.0)
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn norm_eps_override() -> Option<f32> {
+    parse_norm_eps_override(None)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn norm_eps_override() -> Option<f32> {
     static CELL: OnceLock<Option<f32>> = OnceLock::new();
     *CELL.get_or_init(|| {

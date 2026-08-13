@@ -15,14 +15,28 @@
 //! Keys are quantised to f16 — KNN cosine retrieval doesn't need f32
 //! precision. Reconstruction goes through `KnnStore::from_entries`.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
 use super::knn_store::{KnnEntry, KnnStore};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 const MAGIC: &[u8; 4] = b"LKNN";
 const VERSION: u32 = 1;
+const U32_BYTES: usize = core::mem::size_of::<u32>();
+const F16_BYTES: usize = core::mem::size_of::<u16>();
+
+/// Cap a `Vec::with_capacity` request from an untrusted header count by
+/// the number of items the remaining input bytes could possibly encode.
+/// The subsequent reads still consume exactly `declared` items — this
+/// only stops a corrupt count from pre-allocating gigabytes before the
+/// first `read_exact` fails.
+fn bounded_capacity(declared: usize, remaining_bytes: usize, min_bytes_per_item: usize) -> usize {
+    declared.min(remaining_bytes / min_bytes_per_item.max(1))
+}
 
 impl KnnStore {
     /// Save to binary format with f16 keys.
@@ -103,15 +117,28 @@ impl KnnStore {
         let dim = read_u32(&mut cursor)? as usize;
         let num_layers = read_u32(&mut cursor)? as usize;
 
-        let mut entries = HashMap::new();
+        let mut entries = HashMap::default();
         for _ in 0..num_layers {
             let layer = read_u32(&mut cursor)? as usize;
             let num_entries = read_u32(&mut cursor)? as usize;
 
+            // Header counts are untrusted — cap every capacity hint by
+            // what the remaining bytes could actually hold, so a corrupt
+            // header yields a read error instead of a multi-GB
+            // allocation. Each entry needs at least dim×2 (f16 key)
+            // + 4 (target id) + 4 (meta len) bytes.
+            let min_entry_bytes = dim
+                .checked_mul(F16_BYTES)
+                .and_then(|n| n.checked_add(U32_BYTES + U32_BYTES))
+                .ok_or_else(|| "knn_store entry size overflow".to_string())?;
+            let remaining = data.len().saturating_sub(cursor.position() as usize);
+            let entry_cap = bounded_capacity(num_entries, remaining, min_entry_bytes);
+            let key_cap = bounded_capacity(dim, remaining, F16_BYTES);
+
             // Keys (f16 → f32)
-            let mut keys = Vec::with_capacity(num_entries);
+            let mut keys = Vec::with_capacity(entry_cap);
             for _ in 0..num_entries {
-                let mut key = Vec::with_capacity(dim);
+                let mut key = Vec::with_capacity(key_cap);
                 for _ in 0..dim {
                     let bits = read_u16(&mut cursor)?;
                     key.push(larql_models::quant::half::f16_to_f32(bits));
@@ -120,15 +147,22 @@ impl KnnStore {
             }
 
             // Target IDs
-            let mut target_ids = Vec::with_capacity(num_entries);
+            let mut target_ids = Vec::with_capacity(entry_cap);
             for _ in 0..num_entries {
                 target_ids.push(read_u32(&mut cursor)?);
             }
 
             // Metadata JSON blobs
-            let mut layer_entries = Vec::with_capacity(num_entries);
+            let mut layer_entries = Vec::with_capacity(entry_cap);
             for i in 0..num_entries {
                 let meta_len = read_u32(&mut cursor)? as usize;
+                let remaining = data.len().saturating_sub(cursor.position() as usize);
+                if meta_len > remaining {
+                    return Err(format!(
+                        "truncated knn_store: meta blob declares {meta_len} bytes, \
+                         {remaining} remain"
+                    ));
+                }
                 let mut meta_bytes = vec![0u8; meta_len];
                 cursor
                     .read_exact(&mut meta_bytes)
@@ -167,4 +201,126 @@ fn read_u16(cursor: &mut Cursor<&[u8]>) -> Result<u16, String> {
         .read_exact(&mut buf)
         .map_err(|e| format!("read u16: {e}"))?;
     Ok(u16::from_le_bytes(buf))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_DIM: u32 = 2;
+    const ONE_LAYER: u32 = 1;
+
+    fn header(dim: u32, n_layers: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.extend_from_slice(&VERSION.to_le_bytes());
+        buf.extend_from_slice(&dim.to_le_bytes());
+        buf.extend_from_slice(&n_layers.to_le_bytes());
+        buf
+    }
+
+    fn load_bytes(bytes: &[u8]) -> Result<KnnStore, String> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.lknn");
+        std::fs::write(&path, bytes).unwrap();
+        KnnStore::load(&path)
+    }
+
+    #[test]
+    fn load_rejects_bad_magic() {
+        let mut bytes = header(TEST_DIM, 0);
+        bytes[..MAGIC.len()].copy_from_slice(b"NOPE");
+        let err = load_bytes(&bytes).unwrap_err();
+        assert!(err.contains("bad magic"), "{err}");
+    }
+
+    #[test]
+    fn load_rejects_unknown_version() {
+        let mut bytes = header(TEST_DIM, 0);
+        let version_at = MAGIC.len();
+        bytes[version_at..version_at + U32_BYTES].copy_from_slice(&99u32.to_le_bytes());
+        let err = load_bytes(&bytes).unwrap_err();
+        assert!(err.contains("unsupported knn_store version"), "{err}");
+    }
+
+    #[test]
+    fn load_rejects_truncated_header() {
+        let bytes = header(TEST_DIM, ONE_LAYER);
+        let err = load_bytes(&bytes[..bytes.len() - 1]).unwrap_err();
+        assert!(err.contains("read"), "{err}");
+    }
+
+    /// A corrupt `n_entries` of u32::MAX must fail with a read error —
+    /// not attempt a multi-GB `Vec::with_capacity` first. Same for a
+    /// huge `dim`. This is the allocation-bomb class the bounded
+    /// capacities exist for.
+    #[test]
+    fn load_rejects_absurd_entry_count_without_allocating() {
+        let mut bytes = header(TEST_DIM, ONE_LAYER);
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // layer id
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes()); // n_entries
+        let err = load_bytes(&bytes).unwrap_err();
+        assert!(err.contains("read"), "{err}");
+
+        let mut bytes = header(u32::MAX, ONE_LAYER);
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // layer id
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // n_entries
+        let err = load_bytes(&bytes).unwrap_err();
+        assert!(err.contains("read"), "{err}");
+    }
+
+    /// A meta blob declaring more bytes than remain in the file is
+    /// rejected before the `vec![0u8; meta_len]` allocation.
+    #[test]
+    fn load_rejects_oversized_meta_len() {
+        let dim = 1u32;
+        let mut bytes = header(dim, ONE_LAYER);
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // layer id
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // n_entries
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // one f16 key value
+        bytes.extend_from_slice(&7u32.to_le_bytes()); // target id
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes()); // meta_len
+        let err = load_bytes(&bytes).unwrap_err();
+        assert!(err.contains("truncated knn_store"), "{err}");
+    }
+
+    /// Corrupt JSON in the meta blob errors instead of being dropped.
+    #[test]
+    fn load_rejects_corrupt_meta_json() {
+        let dim = 1u32;
+        let garbage = b"not json";
+        let mut bytes = header(dim, ONE_LAYER);
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // layer id
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // n_entries
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // one f16 key value
+        bytes.extend_from_slice(&7u32.to_le_bytes()); // target id
+        bytes.extend_from_slice(&(garbage.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(garbage);
+        let err = load_bytes(&bytes).unwrap_err();
+        assert!(err.contains("json decode"), "{err}");
+    }
+
+    /// The happy path still round-trips after the bounded-capacity
+    /// hardening (full round-trip coverage lives in `knn_store.rs`).
+    #[test]
+    fn load_round_trips_saved_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.lknn");
+        let mut store = KnnStore::default();
+        store.add(
+            3,
+            vec![1.0, 0.0],
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            0.9,
+        );
+        store.save(&path).unwrap();
+        let loaded = KnnStore::load(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        let entries = &loaded.entries()[&3];
+        assert_eq!(entries[0].target_id, 42);
+        assert_eq!(entries[0].entity, "France");
+    }
 }

@@ -43,6 +43,12 @@
 //! ```
 
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+// See crates/larql-core/src/lib.rs for the pattern-2 rationale. Every
+// item in this crate is already target_os="macos"-gated (wasm32v1-none
+// has target_os="none"), so the crate is already empty on wasm32 --
+// this alone is still needed because even an empty crate implicitly
+// links `std` without it (E0463), same as an empty file would.
+#![cfg_attr(target_arch = "wasm32", no_std)]
 
 // ───── Module tree (macOS only) ─────
 //
@@ -68,6 +74,8 @@ pub mod kernels;
 #[cfg(target_os = "macos")]
 pub mod kv_dispatch_impl;
 #[cfg(target_os = "macos")]
+pub mod kv_residency_contract;
+#[cfg(target_os = "macos")]
 pub mod ops;
 #[cfg(target_os = "macos")]
 pub mod options;
@@ -86,6 +94,8 @@ mod direct_ops;
 mod f32_ops;
 #[cfg(target_os = "macos")]
 mod moe_dispatch;
+#[cfg(target_os = "macos")]
+mod moe_zero_copy;
 #[cfg(target_os = "macos")]
 mod pipeline;
 

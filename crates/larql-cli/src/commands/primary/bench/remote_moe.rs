@@ -11,6 +11,9 @@ use larql_inference::ffn::moe_remote::ShardConfig;
 
 use super::row::compute_percentiles;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Parse the `--moe-shards` flag value into a `Vec<ShardConfig>`. Accepts
 /// `"START-END=URL,START-END=URL,..."`. Returns an error message with the
 /// offending segment when input is malformed.

@@ -6,6 +6,12 @@
 
 use serde::Serialize;
 
+// `softmax` below uses f64::exp, which core alone doesn't provide (no
+// libm link under wasm32v1-none) — brings `num_traits::Float` into
+// scope for that method, plus bare Vec/String/format!.
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Result of an accuracy test for one strategy on one prompt.
 #[derive(Debug, Clone, Serialize)]
 pub struct AccuracyResult {
@@ -107,8 +113,8 @@ pub fn softmax(logits: &[f32]) -> Vec<f64> {
 
 /// Top-K overlap: fraction of top-K tokens shared between two ranked lists.
 pub fn top_k_overlap(a: &[u32], b: &[u32], k: usize) -> f32 {
-    let a_set: std::collections::HashSet<u32> = a.iter().take(k).copied().collect();
-    let b_set: std::collections::HashSet<u32> = b.iter().take(k).copied().collect();
+    let a_set: crate::collections::HashSet<u32> = a.iter().take(k).copied().collect();
+    let b_set: crate::collections::HashSet<u32> = b.iter().take(k).copied().collect();
     let intersection = a_set.intersection(&b_set).count();
     intersection as f32 / k as f32
 }

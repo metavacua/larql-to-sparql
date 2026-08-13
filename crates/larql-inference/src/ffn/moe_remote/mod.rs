@@ -45,15 +45,26 @@
 //!   collect handle).
 //! - [`backend`][] — the public `RemoteMoeBackend`.
 
+// backend/shard/stream: tokio+rayon+tonic gRPC/HTTP transport.
+// runtime: std::sync::OnceLock (no core/alloc equivalent) + env::var.
+#[cfg(not(target_arch = "wasm32"))]
 mod backend;
 mod config;
 mod error;
 mod ffn_adapter;
+// Mutex/OnceLock (no core/alloc equivalent) + eprintln! (std::io) +
+// env-var-gated via `runtime` (already native-only above) -- the whole
+// module is inherently native-only. Its only consumers (shard/*, backend,
+// layer_graph/grid/remote_moe.rs) are themselves already native-only-gated.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod metrics;
 pub mod multi_layer_wire;
 mod router;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod runtime;
+#[cfg(not(target_arch = "wasm32"))]
 mod shard;
+#[cfg(not(target_arch = "wasm32"))]
 mod stream;
 mod wire;
 
@@ -62,9 +73,18 @@ mod tests;
 
 // ── Public re-exports (preserve the pre-split crate-public API) ──────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use backend::RemoteMoeBackend;
-pub use config::{parse_unit_manifest, ShardConfig, UnitManifest, UnitShard};
+#[cfg(not(target_arch = "wasm32"))]
+pub use config::parse_unit_manifest;
+pub use config::{ShardConfig, UnitManifest, UnitShard};
 pub use error::RemoteMoeError;
+pub use ffn_adapter::{RecordedRefusal, RefusalPolicy};
+// `MoeFfn`'s `FfnBackend` impl calls `moe_ffn_block_cpu` (vindex,
+// native-only) -- see ffn_adapter.rs for the full rationale.
+#[cfg(not(target_arch = "wasm32"))]
+pub use ffn_adapter::MoeFfn;
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn_adapter::RemoteMoeFfn;
 pub use multi_layer_wire::{
     decode_multi_layer_request, decode_multi_layer_request_q8k, decode_multi_layer_response,
@@ -73,6 +93,7 @@ pub use multi_layer_wire::{
     MULTI_LAYER_BATCH_Q8K_CONTENT_TYPE,
 };
 pub use router::MoeRouterWeights;
+#[cfg(not(target_arch = "wasm32"))]
 pub use stream::{InflightMoe, ShardStream};
 pub use wire::{
     decode_expert_request, decode_expert_response, decode_layer_batch_request,

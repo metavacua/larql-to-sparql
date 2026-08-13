@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Metal GPU backend for LARQL. Implements `larql_compute::ComputeBackend` on Apple Silicon via `metal-rs` + custom MSL shaders. Decoupled from larql-compute so non-Mac hosts skip the build entirely."
 keywords = ["metal", "gpu", "apple-silicon", "matmul", "quantization"]
 categories = ["science"]
@@ -18,9 +19,6 @@ larql-compute = { path = "../larql-compute" }
 # Pipeline-side types and constants (quant block sizes, etc.) used by
 # Metal weight-staging paths.
 larql-models = { path = "../larql-models" }
-ndarray = { version = "0.16", features = ["blas"] }
-# MoE expert combinator paths reuse rayon work-stealing.
-rayon = "1.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = "0.29"
@@ -30,6 +28,18 @@ metal = "0.29"
 # uses internally.
 objc = "0.2"
 blas-src = { version = "0.10", features = ["accelerate"] }
+# ndarray/rayon were previously plain (untargeted) dependencies despite
+# every consuming module already being target_os="macos"-gated in
+# lib.rs -- Cargo still resolves and builds every unconditional
+# [dependencies] entry for whatever target is being built regardless of
+# which cfg'd-out code paths would have used it. Scoped here to match
+# where they're actually used; rayon in particular has zero no_std
+# support (see crates/larql-compute/Cargo.toml), so leaving it
+# unscoped would poison the wasm32 build even though not one byte of
+# this crate's own code runs there.
+ndarray = { version = "0.16", features = ["blas"] }
+# MoE expert combinator paths reuse rayon work-stealing.
+rayon = "1.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

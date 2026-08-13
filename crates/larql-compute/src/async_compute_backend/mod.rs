@@ -51,10 +51,20 @@ pub mod cpu;
 // Metal impl moves to `larql-compute-metal` (ADR-0022 Step 4) —
 // orphan rule forces it there once the trait lives in compute.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 use crate::ffn::FfnBackend;
 use crate::kv_dispatch::{KvDispatch, KvHandle, ResidualHandle};
 use ndarray::Array2;
+
+#[cfg(target_arch = "wasm32")]
+use core::error::Error;
+#[cfg(target_arch = "wasm32")]
+use core::fmt;
+#[cfg(not(target_arch = "wasm32"))]
 use std::error::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fmt;
 
 // ── Handle types ─────────────────────────────────────────────────────

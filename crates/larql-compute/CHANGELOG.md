@@ -4,6 +4,137 @@ Reverse-chronological ship log. Entries migrated from ROADMAP.md on
 2026-05-09; pre-2026-05-09 entries preserve the date and voice they were
 originally written in.
 
+## 2026-08-09
+
+### Post-Phase-B performance baseline: correctness hardening is performance-neutral
+
+The capability-audit programme (PRs #231–#237: 22 findings, three
+routing authorities, softcap in all four decode attention kernels,
+sinks on every fallback, per-decode format validation) benchmarked
+against the pre-audit build (`f832c575`, post-Phase-A) on
+**gemma4-26b-a4b-v2** — the hybrid-MoE arch that spends ~95% of decode
+in GPU forward, so the change set has nowhere to hide.
+
+**Protocol** (M3 Max, AC, no thermal warnings): one discarded full
+warm-up round per binary, then **10 paired rounds with alternating
+order**, production defaults (no `LARQL_*` overrides, profile-split
+off), default prompt, 50 decode tokens + 3 token warmups. All 20
+measured runs terminated identically at 49/49 steps.
+
+**Result — median paired deltas (new − old):**
+
+| metric | median Δ | range |
+|---|---|---|
+| decode p50 | +0.54% | −1.27% .. +2.17% |
+| mean decode | +0.43% | −5.12% .. +7.05% |
+| GPU forward | +0.59% | −4.31% .. +6.16% |
+| prefill | −0.30% | −8.79% .. +20.74% |
+| GPU fraction | 95.2% → 95.2% | unchanged |
+
+New was faster in only 2/10 paired rounds — an earlier 2-round result
+suggesting "~2% faster" was a cold-start artifact, which is why the
+paired-alternating protocol exists. **Verdict: performance-neutral
+within the noise floor.**
+
+**Frozen baseline** (both builds within 0.25% on every metric):
+decode p50 **43.2 ms** (~22.9 tok/s), GPU forward **41.8 ms** (95.2%),
+prefill **1.35 s** at the 5-token default prompt.
+
+## 2026-07-29
+
+### Bandwidth roofline measured; spin-pool E-core collapse found and fixed (3.3× on non-bench paths)
+
+Full writeup: [`docs/diagnoses/memory-bandwidth-roofline.md`](../../docs/diagnoses/memory-bandwidth-roofline.md).
+
+**Attainable bandwidth, measured** (M3 Max, AC, quiet). New probe
+`examples/membw_probe.rs`: **CPU cluster 127 GB/s** read — saturating at *two*
+threads (1t 76 → 2t 122 → flat to 16t) — against a **GPU 367 GB/s** (from the
+existing `diag_profile_kernels`' `f32_gemv` streaming 2.68 GB) and a 400 GB/s SoC
+spec. **The CPU cluster reaches 31% of the chip's bandwidth; the GPU reaches 92%,
+a 2.9× structural advantage that no CPU kernel can close.** The probe self-checks
+against the C12 issue-rate trap by running each arm DRAM- *and* cache-resident:
+`read` gives 11.4×, so the 127 is genuinely memory-limited; `copy` gives 1.05× and
+is reported as a **floor by design** (stores reach memory in both arms, so that
+control cannot isolate issue rate — do not "fix" it by loosening the threshold).
+
+**The standing "larql extracts ~47 GB/s" figure was stale.** It came from
+`bench_mt_shapes`, which hand-rolls `par_chunks_mut` over **rayon** — the geometry
+production ran until the spin pool landed 2026-06-13. New `bench_mt_production`
+arm calls the real entry point (`q4k_q8k_matvec_parallel`) at the same shapes:
+that same `kv_proj` shape runs at **98.7 GB/s**. Achieved on per-layer shapes is
+**64–116 GB/s = 50–91% of attainable, not 37%** — CPU decode is far closer to
+finished than the record implied, with ≤~1.6× theoretical headroom left.
+
+**Bug: 3.5× collapse on every non-bench path.** `spin_pool::global()` sized itself
+from `rayon::current_num_threads()`, and `configure_rayon_threads` is called from
+**exactly one place** — the CLI bench path, which picks 8 on Apple silicon.
+`larql run` / `larql serve` configure nothing and inherited
+`available_parallelism()` = 16 = 12 P + 4 E. The pool partitions chunks
+*statically*, so an efficiency core gets a performance core's share and the
+completion barrier waits on the slowest participant (rayon work-steals instead,
+which is why this is specific to the pool). At 65536×2816: **16 participants
+33 GiB/s, 12 → 124, 8 → 126.7**; end-to-end on the 26B, **10.6 tok/s at 16 vs
+37.3 at 8**. Fixed by capping `global()` at the performance-core count
+(`hw.nperflevels` / `hw.perflevel0.logicalcpu`), in the **library** rather than
+the CLI so larql-server and embedders get it too; an explicitly configured
+smaller count still wins. **Verified 10.6 → 34.9 tok/s (3.3×).** Bandwidth-bound
+decode gives up nothing — attainable read saturates at two threads, so the
+E-cores were contributing ~nothing before they became stragglers.
+
+Two things worth carrying forward. **The benchmark harness was structurally
+unable to observe this**: bench was the only path that set a thread count, so
+every historical spin-pool number (+28%, ~35 tok/s, "9% ahead of llama.cpp") was
+taken on the one configuration that avoids the bug. And **criterion's default
+sampling flattered it** — short runs showed 58.5 GiB/s where
+`--measurement-time 20` showed a consistent 33; use long sampling when the pool
+spins.
+
+`run_chunks` also moved from round-robin striding to contiguous blocks (equally
+static, so the `completed == num_chunks` barrier argument is untouched), pinned by
+`each_participant_runs_a_contiguous_block` since the existing exactly-once test
+passes under striding too. That was the *first* hypothesis — a strided owner walks
+the whole slab at an `n × chunk_bytes` stride and defeats the prefetcher — and it
+is **not** the fix: blocks alone did not close the gap, participant count did. It
+is kept for the prefetch property.
+
+Tests: 775 larql-compute (+1) / 1309 larql-inference / 766 larql-kv green.
+
+## 2026-05-28 — Hardening findings from the whole-codebase review
+
+From the whole-codebase review ([`docs/audits/codebase-review-2026-05-28.md`](../../docs/audits/codebase-review-2026-05-28.md)):
+
+- **P0 — MoE forward panics on served paths.** `src/moe/forward.rs:191,211` use `unwrap_or_else(panic!)` — same fail-loud class as the inference paths; convert to `?` once `FfnBackend::forward` is fallible (tracked in larql-inference roadmap).
+- **Medium — `embed_tokens_pub`** skips the vocab bound that `vocab_proj` applies; OOV/unbounded token id → panic. Route through a bounds-checked helper.
+- **Low — debug-only FFI bounds check** at `q4_matvec.rs:29` (no check in release).
+- Note: the Metal KV-cache OOB bug lives in `larql-compute-metal` (no crate roadmap) — tracked at workspace [`ROADMAP.md`](../../ROADMAP.md) §"Codebase hardening" item 2.
+
+## 2026-05-25 — Multi-modal Phase 2, Granite Vision (PR #144)
+
+- **encoders/vision_tower.rs**: `VisionEncoder::family()` now dispatches
+  `"siglip"` vs `"siglip2"` based on `VisionConfig::is_siglip2()`.
+  `encoder_mlp()` parameterised on `hidden_act` — branches for
+  `gelu_pytorch_tanh` (SigLIP default), `gelu`, and `silu` (SigLIP2).
+- **connectors/mlp_connector.rs**: `MlpGelu` (impl `Connector`). CPU
+  forward: `fc1 → GELU-tanh → fc2` with bias on both layers. No spatial
+  pooling — Granite's encoder output has the correct token count per tile.
+
+## 2026-05-24 — Multi-modal substrate Phase 1 (PR #143)
+
+- **forward/embedding_plan.rs**: `EmbeddingChunk` (Tokens / Precomputed),
+  `EmbeddingPlan`, `PositionScheme` (Sequential / Mrope). Phase 0 types
+  that let the forward pass accept mixed text + vision/audio embeddings.
+- **forward/embed.rs**: `embed_plan(weights, &plan)` alongside existing
+  `embed_tokens_pub`. Text-only fast path is bit-identical to
+  `embed_tokens_pub` (pinned by 8 tests). Mixed-modality path
+  concatenates chunks with `PrecomputedScaling` dispatch.
+- **encoders/vision_tower.rs**: `VisionEncoder` (impl `ModalEncoder`).
+  CPU forward pass: patchify → position embed → N transformer blocks
+  (bidirectional attention, GELU MLP, LayerNorm) → post-norm. Generic
+  across vision-transformer families (SigLIP, SigLIP2, ViT).
+- **connectors/projector.rs**: `VisionProjector` (impl `MmConnector`).
+  CPU forward: AvgPool2d spatial → RMSNorm → linear projection. Generic
+  over pool type and norm offset (parameterised at construction).
+
 ## 2026-05-09
 
 ### QKV defuse promoted (Track D, +1.6 tok/s, magnitude undershoot)
@@ -97,6 +228,122 @@ Closes the bug as "expected behaviour given PLE-not-in-Metal limitation". The ac
 
 Touched: `scripts/bench-cross-arch.sh`, `bench/baselines/cross-arch/README.md`. Phase 2: parametrised tests in `crates/larql-compute/tests/`.
 
+## 2026-05-04 — Perf snapshot: M3 Max, real vindex
+
+Point-in-time measurements, migrated from `ROADMAP.md`'s "Current state"
+section on 2026-08-04 — where they had been frozen as *current* for three
+months. They are a baseline to compare against, not a present-tense claim.
+
+| Engine | tok/s | ms/tok | Notes |
+|---|---|---|---|
+| **LARQL Metal** (gemma3-4b-q4k, confirmed 2026-05-04) | **83.2** | 12.0ms | current baseline; lm_head 1.85ms (was 2.95ms), gap to ollama 1.18× |
+| **LARQL Metal** (gemma3-4b-q4k-v2, pre 2026-05-02) | 76 | 13.1ms | pre-fix baseline; stride-32 lm_head workaround |
+| **LARQL Metal** (gemma3-4b-q4k-downq4k, all-Q4_K) | 70.1 | 14.26 | all-Q4_K extract; q4k_geglu_silu_down fires |
+| **Ollama** gemma3:4b | 98.5–99.7 | ~10.0ms | reference (same hardware, same prompt) |
+| **Gap** | LARQL is **~1.18×** slower | ~2.0ms/tok | per-stage decomposition below |
+| **LARQL Metal** (gemma4-26B-A4B, MoE Q4K, confirmed 2026-05-04) | **18.9** | ~53ms | MoE experts on CPU NEON; output coherent multilingual |
+| **LARQL Metal** (gemma4-26B-A4B, pre 2026-05-02) | 5.1 | ~194ms | bug-locked under dispatch-geometry mismatch; degraded output |
+| **LARQL Metal** (gemma4-26B-A4B, `LARQL_SKIP_MOE=1` ceiling) | **56.8** | ~15ms | GPU-only baseline; remaining ~37ms expert work |
+| **Remote-FFN batch, Metal GPU server** (gemma4-31B Q4K, 2026-05-04) | **6.5** | 153ms | `run_dense_ffn_q4k`; 92ms attn local + 60ms FFN remote Metal GPU |
+| **Remote-FFN batch, CPU server** (gemma4-31B Q4K) | 1.6 | ~625ms | same HTTP path, server uses CPU NEON |
+| **Remote-FFN streaming** (gemma4-31B Q4K) | 0.6 | ~1670ms | Q8K wire via `/v1/walk-ffn-q8k`; 60 sequential HTTP round-trips |
+| **Local Metal** (gemma4-31B Q4K) | blocked | — | heterogeneous attention geometry (A1-A3); see `larql-inference/ROADMAP.md` |
+
+> ⚠ **The earlier "81–84 tok/s" number was on broken code.** Bisected
+> 2026-04-28: commit `077884b "working on performance"` (2026-04-27)
+> corrected a silent dispatch bug in
+> `metal/stages/quant_matvec.rs::encode` where Q4_K weights were routed
+> through the **Q4_KF kernel** with Q4_KF's threadgroup geometry
+> (4 rows/TG, 64 threads) — leaving **~75% of output rows unwritten**.
+> The 81–84 was real wall-clock throughput but the model was producing
+> wrong logits. After 077884b, Q4_K dispatches its own kernel (8 rows/TG,
+> 256 threads) and writes all rows. Output is now correct, ~5 tok/s
+> slower. **Don't try to recover 81–84 by reverting** — that
+> re-introduces the bug. Real gains from here require actual Q4_K kernel
+> optimisation (see P0 entries).
+
+Per-stage (50-token decode after 5 warmup, quiet system, 2026-04-28):
+
+| Stage | LARQL | Ollama (est.) | Gap |
+|---|---|---|---|
+| GPU fwd | ~11.6ms | ~8.5ms | ~3.1ms |
+| lm_head | ~1.93ms | ~1.3ms | ~0.6ms |
+| **Total** | **~12.7ms** | **~10.5ms** | **~2.2ms** |
+
+**lm_head shipped 2026-04-26**: 2.28ms → 1.84ms (~0.44ms saved). Two
+pieces — (1) `top_k_sorted` in `larql-vindex/index/storage/lm_head.rs` now
+runs an argmax fast path for `k=1` and a size-K min-heap for `k>1` instead
+of allocating a 2MB `Vec<(u32, f32)>` and `select_nth_unstable` over 262K
+elements (~0.25ms saved). (2) New `f32_topk_partial` MSL shader emits
+`K_TOPK = 8` (val, idx) pairs per TG via repeated simd_max + index-mask;
+backend methods `f16_gemv_topk` / `q4_matvec_topk` route the bench's
+`top_k = 5` lm_head call through GPU partial top-K + 64KB readback +
+size-K CPU heap, avoiding the 1MB scores readback and the linear scan
+over 262K floats (~0.2ms additional). Greedy-decode `f16_gemv_topk1` /
+`q4_matvec_topk1` are also wired (no production caller yet — bench /
+generate both use top_k=5).
+
+**Gap analysis (2026-04-26, measured + per-kernel profiling):**
+
+| Source | LARQL | Ollama (est.) | Gap |
+|---|---|---|---|
+| Dispatch overhead | ~1.87ms (374 × 5µs) | ~1.36ms (272 × 5µs) | **0.51ms** |
+| Kernel compute | ~9.1ms | ~7.1ms | **~2.0ms** |
+| lm_head overhead | ~1.84ms | ~1.30ms | **~0.5ms** |
+
+**Per-kernel profiler results** (run `diag_profile_kernels`, see PERFORMANCE.md). Numbers below use single-cmd-buffer batching — see PROFILER NOTE below for the 2026-04-28 fix that corrected an earlier 2-4× undercount.
+
+| Kernel | Batched GB/s | ms/tok | Bottleneck |
+|---|---|---|---|
+| q6k_matvec (down, K=10240) | **311 GB/s** | ~2.3ms | bandwidth-bound, 84% of LPDDR5X peak |
+| q4k_ffn_gate_up (gate+up, K=2560) | **274 GB/s** | ~3.7ms | bandwidth-bound, 74% of peak |
+| f32_gemv (lm_head, 262K×2560) | **374 GB/s** | — | bandwidth-bound, ~peak |
+
+Down + gate+up = **~6ms/tok** of the ~11ms GPU fwd. Both big FFN kernels are bandwidth-bound near LPDDR5X peak. The earlier "compute-bound at 103 GB/s" diagnosis on q4k_ffn_gate_up was a profiler bug — see PROFILER NOTE.
+
+**PROFILER NOTE (2026-04-28)**: `metal/diag/kernel_profile.rs::measure_batched` was creating a fresh cmd buffer per call (with commit+wait per call) instead of running n_layers dispatches in ONE cmd buffer. The per-call dispatch overhead dominated the measurement, undercounting kernel throughput 2-4×. Fixed via `measure_single_cmdbuf_batched`. Old measurements showed q6k_matvec at 74 GB/s, q4k_ffn_gate_up at 103 GB/s; corrected numbers are 311 GB/s and 274 GB/s respectively.
+
+The "117 tok/s" historical number was synthetic-weight Q4_KF without
+real vindex load. Production extracts use Q6_K down (Ollama
+convention); the q4_KF fast-path doesn't apply to those.
+
+## 2026-05-04 — Metal GPU dense FFN server (`run_dense_ffn_q4k`)
+
+**Status**: Shipped.
+
+`MetalBackend::run_dense_ffn_q4k` in `crates/larql-compute/src/metal/moe_dispatch.rs`
+provides a Metal GPU forward pass for one dense FFN layer given pre-loaded Q4K weight
+buffers. Mirrors the structure of `run_experts_prestaged_metal` but takes separate
+gate, up, and down buffers (not combined gate+up as in the MoE path).
+
+Used by `larql-server::routes::walk_ffn::handle_walk_ffn_q8k` (under
+`--features metal-experts`) to serve the dense remote-FFN path on GPU.
+
+**Per-layer dispatch geometry** (`q4k_matvec_pipeline.rows_per_tg` / `threads_per_tg`,
+not hardcoded) — same fix as the 2026-04-28 dispatch geometry correction.
+
+Bench (Gemma 4 31B Q4K, M3 Max, single-machine localhost):
+
+| Metric | Before | Metal server | Δ |
+|---|---|---|---|
+| Streaming (60 × sequential HTTP, CPU NEON) | 0.1 tok/s | 0.6 tok/s | 6× |
+| Batch (1 × parallel HTTP, CPU NEON) | — | 1.6 tok/s | — |
+| Batch (1 × parallel HTTP, Metal GPU) | 1.6 tok/s | **6.5 tok/s** | **4×** |
+
+Bottleneck at 6.5 tok/s: attention at 92ms/token (60%). Two-pass batch structure
+(capture pass + apply pass) doubles the local Metal attention cost. FFN at 60ms
+is near the GPU bandwidth ceiling for 11.7 GB/token of Q4K weight reads.
+
+> **Corrected 2026-07-29:** this originally read "at the 400 GB/s GPU bandwidth
+> ceiling". 400 GB/s is the SoC **spec sheet**; measured GPU-attainable read on
+> this box is **367 GB/s** (`f32_gemv` streaming 2.68 GB), and the production
+> FFN kernels run at 273–314 GB/s — 74–85% of attainable, near but not at it.
+> See [`docs/diagnoses/memory-bandwidth-roofline.md`](../../docs/diagnoses/memory-bandwidth-roofline.md).
+
+**Build separation required**: `--features metal-experts` must NOT be used for
+`larql-cli` (causes 10.7 vs 18.9 tok/s regression on Gemma 4 26B-A4B due to Metal
+pipeline init overhead in the standard decode path). Only the server binary uses that flag.
+
 ## 2026-05-04
 
 ### Metal GPU dense FFN server — `run_dense_ffn_q4k`
@@ -122,7 +369,12 @@ Bench (Gemma 4 31B Q4K, M3 Max, single-machine localhost):
 
 Bottleneck at 6.5 tok/s: attention at 92ms/token (60%). Two-pass batch structure
 (capture pass + apply pass) doubles the local Metal attention cost. FFN at 60ms
-is at the 400 GB/s GPU bandwidth ceiling for 11.7 GB/token of Q4K weight reads.
+is near the GPU bandwidth ceiling for 11.7 GB/token of Q4K weight reads.
+
+> **Corrected 2026-07-29:** originally "at the 400 GB/s GPU bandwidth ceiling".
+> 400 GB/s is the SoC spec sheet; measured GPU-attainable read is **367 GB/s**
+> and the FFN kernels sit at 273–314 (74–85% of attainable). See
+> [`docs/diagnoses/memory-bandwidth-roofline.md`](../../docs/diagnoses/memory-bandwidth-roofline.md).
 
 **Build separation required**: `--features metal-experts` must NOT be used for
 `larql-cli` (causes 10.7 vs 18.9 tok/s regression on Gemma 4 26B-A4B due to Metal
@@ -253,6 +505,33 @@ to `buffer.contents()` pointers.
 **Effort**: ~1 session. No new shaders needed — just restructure the buffer lifecycle
 in `decode_token_q4k_moe`.
 
+## 2026-05-01 — NEON Q4_K matvec (8.6× CPU MoE sweep speedup)
+
+**Status**: Done. New module `crates/larql-compute/src/cpu/ops/q4k_q8k_dot.rs`
+implements Q4_K weight × Q8_K activation matvec mirroring llama.cpp's
+`ggml_vec_dot_q4_K_q8_K`. NEON inner kernel uses `SDOT` via inline asm
+(stable; `vdotq_s32` is still gated behind unstable `stdarch_neon_dotprod`
+on Rust 1.91, rust-lang/rust#117224). Wired as default for Q4_K weights
+in `cpu/ops/moe/expert.rs::{run_single_expert,run_single_expert_q4k_q8k_into}`,
+`cpu/ops/moe/forward.rs::cpu_moe_forward`, and
+`larql-server/src/routes/expert.rs::run_experts_cpu_batch`.
+`LARQL_DISABLE_Q4K_DIRECT=1` falls back to BLAS-on-cached-f32.
+
+7 new tests: Q8_K quantiser round-trip, scalar Q4_K×Q8_K vs cached-f32 path
+within Q8 noise, multi-block matvec, **NEON vs scalar bit-exact**
+(`to_bits()` equality), edge cases.
+
+Bench (Gemma 4 26B-A4B, M3 Max, single-shard loopback):
+
+| Metric | Baseline | + NEON Q4_K | Δ |
+|---|---|---|---|
+| `cpu_moe_forward` warm floor | 3.52 ms | **0.39 ms** | **9.0×** |
+| 30-layer sweep | 221 ms | **25.6 ms** | **8.6×** |
+| Steady RSS | 11.4 GB | 10.5 GB | -8% (f32 cache mostly inert) |
+
+Projects to ~25-30 tok/s on the gRPC grid (vs prior 2.3 tok/s baseline).
+See `larql-inference/ROADMAP.md` M-CPU-4 for full attribution and follow-ups.
+
 ## 2026-05-01
 
 ### NEON Q4_K matvec — 8.6× CPU MoE sweep speedup
@@ -291,6 +570,58 @@ The `q4k_geglu_silu_down` / `q4k_geglu_gelu_tanh_down` shaders pass their unit t
 ### Metal MoE expert kernel — accuracy bug at inter=704 (workaround landed)
 
 cos≈0.7 vs CPU reference for Gemma 4 26B-A4B-it MoE; same shaders are correct for dense FFN. Workaround: server defaults to CPU expert dispatch (`LARQL_USE_METAL_EXPERTS=1` to opt back in). Once fixed: ~3-4× grid speedup (3.5 tok/s → ~10 tok/s) since server compute is 95% of token wall time. Bug is still open and tracked in ROADMAP.md "Open: Metal MoE expert kernel — accuracy bug at inter=704".
+
+## 2026-04-28 — Session status snapshot
+
+**Decode**: 78.7 tok/s baseline (corrected from 81-84 buggy number). Gap to ollama 1.30× — distributed across pipeline, not concentrated in any single kernel with obvious headroom.
+
+**Prefill**: 196 ms (18 tok) → 2933 ms (340 tok). 4-14× gap to ollama. Has the headroom; needs `q4k_matmul` wired into more sites.
+
+**Shipped this session**:
+- ✓ `q4k_matmul` Metal kernel (1.79× kernel-isolated for prefill); wired at O proj, parity tested
+- ✓ `q4k_ffn_gate_up_f16acc` shader, opt-in via `LARQL_F16_ACC=1`
+- ✓ Profiler harness fix (`measure_single_cmdbuf_batched`)
+- ✓ Encoder coalescing in 3 dispatch sites
+- ✓ Magic-number/string audit + extraction (Q4_K constants, manifest kind enum)
+- ✓ MoE combine helper unification (CPU vs Metal — fixed 26B-A4B garbage output)
+- ✓ lm_head Q4_K vs Q4_0 dispatch fix (was producing gibberish on gemma3-4b-q4k-v2)
+- ✓ `larql parity --component layer` end-to-end Metal-vs-CPU diff (proved MoE fix)
+
+**Negative results documented (don't re-try)**:
+- ✗ N_DST > 1 (multi-row per simdgroup): register pressure regresses on M3 Max
+- ✗ float4 vectorisation in Q4_K kernels: addressing overhead negates gain
+- ✗ sumy precompute: neutral (compiler already hoisting)
+- ✗ f16 accumulators end-to-end: kernel 1.79× but **end-to-end at parity** on quiet GPU. Initial +23% was thermal-throttle artifact. ALU savings absorbed by surrounding bandwidth-bound kernels.
+- ✗ Wiring `q4k_matmul` into prefill (O proj + FFN gate+up, attempted 2026-04-28): kernel-isolated 1.79-3.8× did NOT translate end-to-end. Short-prompt prefill within noise; **long-prompt prefill regressed ~10%**. Root cause: the matmul's `[seq_len × hidden]` X working set thrashes GPU L1 on long prompts, defeating the cache locality the matvec loop had. Reverted. The matmul kernel remains shipped with parity tests but is not worth wiring into the production prefill path on this hardware.
+
+**Pattern across the negative results (3 attempts in a row, then a positive)**: kernel-isolated speedups don't *automatically* translate end-to-end. The 8sg variant did — kernel-isolated 1.37× → end-to-end +2.1% throughput on quiet GPU. The difference: 8sg is a pure dispatch geometry change with same per-thread compute, so the GPU schedules more concurrent simdgroups for free; the failed attempts (f16 acc, matmul) changed the per-thread/per-call work in ways that interacted poorly with the surrounding pipeline. Per-kernel optimisations should still be measured end-to-end on a quiet GPU before wiring.
+
+**GPU-time instrumentation finding (2026-04-28)**: Added `MTLCommandBuffer.gpuStartTime/gpuEndTime` to production decode (`metal/decode/gpu_timing.rs`, env-gated `LARQL_GPU_TIMING=1`). On gemma3-4b-q4k-v2:
+
+```
+wall ≈ 10.9 ms  |  gpu ≈ 10.4 ms  |  cpu ≈ 0.5 ms (4-5%)
+```
+
+**The 2.5 ms gap to ollama is GPU compute time, not CPU dispatch overhead.** Dispatch fusion saves at most ~5% (entire CPU overhead is 0.5 ms). The "374 vs 272 dispatches" framing was overweighted; the real gap is per-kernel GPU efficiency.
+
+**This invalidates the "no per-kernel headroom" claim** but NOT for the cache-pressure reason I initially guessed. Added cold-cache profiling (`metal/diag/kernel_profile.rs` rotates through 8 distinct weight buffer pairs, ~170-240 MB total — far exceeds L2). Cold-cache result: **identical to warm-cache**:
+
+| kernel | warm GB/s | cold GB/s |
+|---|---|---|
+| q6k_matvec (down) | 317 | 316 |
+| q4k_ffn_gate_up | 274 | 276 |
+
+So cache pressure is NOT the gap. Our kernels really do sustain 274/317 GB/s in production conditions.
+
+**Reframed**: M3 Max LPDDR5X peak is **~400 GB/s** (system-wide, ~320 GB/s practical for GPU). Our kernels at 274 = 68% of peak (gate+up) and 317 = 79% of peak (down). Ollama's hand-tuned llama.cpp kernels likely sit at 85%+ of peak — that's where the 2.5 ms decode gap lives. The headroom is real but in **kernel geometry/occupancy choices**, not cache handling.
+
+Concrete next investigation: try different threadgroup configurations (more simdgroups per TG without per-thread register pressure, larger ROWS_PER_TG with corresponding adjustments) to push toward 85% of peak. The auto-memory's "N_DST > 1 regresses" finding rules out per-simdgroup multi-row, but doesn't rule out per-TG multi-simdgroup at fixed nr0=1.
+
+**Open priorities (best-leverage first)**:
+1. **Wire `q4k_matmul` into FFN gate/up/down for prefill** — ~3× prefill speedup expected (kernel proven at 1.79× isolated, multiple sites compound). Days of careful integration.
+2. **Wire `q4k_matmul` into QKV** — fused Q+K+V matmul kernel needed, OR per-projection matmul fallback. Week-scale work.
+3. **Fix profiler for remaining kernels** (q4k_matvec for Wo, etc.) — accurate per-kernel numbers. Hour-scale.
+4. **Decode is at-or-near M3 Max ceiling for this pipeline architecture** — closing the last 25% to ollama would require fundamental fusion / scheduling changes, not per-kernel optimisation.
 
 ## 2026-04-28
 
@@ -455,6 +786,32 @@ tests still pass.
 **Measured impact of partial wiring**: WITHIN NOISE. Short prompt 196 → 203 ms; long prompt 2933 → 3006 ms; decode 13.78 → 13.45 ms/tok. O projection is only ~1/7 of the per-position Q4_K work in prefill — the 3.8× kernel speedup applied to one site saves ~2 ms on an 18-tok prompt, below the ±5% prefill noise floor. The kernel works, but a single call site doesn't show in the headline number.
 
 (Full FFN/QKV wiring closed under D-PREFILL-MM 2026-05-09 — see top of changelog.)
+
+## 2026-04-26 — Diagnostic infrastructure consolidated
+
+Diagnostics were previously scattered across three locations:
+- `src/metal/decode/diag.rs` — NaN detection, residual dumps, per-layer bisect
+- `src/metal/decode/profile.rs` — stage-level `ProfileTimings`
+- `examples/diag_decode_pipeline.rs` — decode pipeline stage bisect entry point
+
+Now consolidated under `src/metal/diag/`:
+- `diag/mod.rs` — public API, re-exports `ProfileTimings`, documents all tools
+- `diag/kernel_profile.rs` — `KernelResult` + `profile_all()` for per-kernel
+  bandwidth measurement (isolated vs batched, GB/s, bottleneck classification)
+- Examples renamed to `diag_*` prefix for clarity
+
+**Key diagnostic commands:**
+```bash
+# Per-kernel bandwidth profiler (results go to PERFORMANCE.md)
+cargo run --release --features gpu -p larql-compute --example diag_profile_kernels
+
+# Decode pipeline stage bisect (bisect CPU/Metal divergence)
+LARQL_METAL_DUMP_LAYERS=/tmp/dump \
+  cargo run --release --features gpu -p larql-compute --example diag_decode_pipeline
+
+# NaN/divergence bisect at specific layer (env-gated, zero binary overhead)
+LARQL_DECODE_DIAG_LAYER=12 larql infer <vindex> "prompt"
+```
 
 ## 2026-04-26
 
@@ -737,6 +1094,38 @@ MoE layer: `_1` on dense, `_2` on MoE, and un-suffixed outer on the
 sum — only the un-suffixed one gets `layer_scalar` applied to the
 whole layer output after residual add).
 
+## 2026-04-09 — Exceed Ollama: kernel + norm optimization
+
+### ✅ Full kernel + norm optimization
+**Status**: Complete — 17% faster than Ollama
+
+8.5ms / 117 tok/s vs Ollama 10.3ms / 98 tok/s. Key changes:
+- Cooperative SIMD norm reduction (O(N²)→O(N)) — saved ~10ms alone
+- Q4_KF (GGUF) FFN through llama.cpp-exact q4kf_proj kernel
+- Fused gate+up kernels (q4k_ffn_gate_up + q4kf_ffn_gate_up)
+- Q4_K matvec rewrite: uint4, 8 rows/TG, multi-row (nr0=2)
+- Pre-allocated scratch buffers (550 allocs → 20)
+- Batched RoPE + V-norm, SIMD KV attention
+- Single cmd buffer + single global encoder
+
+Previous: 29.2ms / 34 tok/s (2.84x Ollama).
+
+### ✅ Dispatch merging
+**Status**: Complete (but negligible impact — Apple Silicon dispatch overhead is ~0ms)
+
+### Wire cached layers into decode path
+**Impact**: ~4x speedup (compute 8 layers instead of 34)  
+**Effort**: Low  
+**Status**: Not started (infrastructure ready in larql-inference)
+
+L0-12 are template-fixed (0.999 cosine similarity). At 0.25ms/layer × 8 layers = 2ms → ~500 tok/s.
+
+### ✅ Optimize KV cache attend kernel
+**Status**: Complete — simd_max/simd_sum reductions, float4 Q·K dot products, 1024-entry scores.
+
+### ✅ Fix O(N²) norm kernels
+**Status**: Complete — cooperative SIMD reduction in all norms. Saved ~10ms (the single biggest win).
+
 ## 2026-04-09
 
 ### Exceeded Ollama — 8.5ms / 117 tok/s = 0.83x Ollama (17% faster)
@@ -943,3 +1332,58 @@ v4 at 61 GB/s.
 ### ComputeBackend trait
 
 Foundation.
+
+## Completed milestones (migrated table)
+
+Migrated from `ROADMAP.md` on 2026-08-04. Predates the dated-entry convention
+above and overlaps several entries; kept as the only per-item record of the
+2026-04 foundation work.
+
+| Item | Date | Impact |
+|------|------|--------|
+| ComputeBackend trait | 2026-04-03 | Foundation |
+| Q4_0 v1-v5 kernels | 2026-04-05 | v4 at 61 GB/s |
+| Multi-layer FFN batch | 2026-04-05 | 8.4ms/21L |
+| Fused attention (RoPE+GQA+softcap) | 2026-04-06 | Correct output |
+| Q8 fused QKV | 2026-04-06 | 2.2x vs separate |
+| Full pipeline (attn+FFN, 1 cmd) | 2026-04-06 | 18.5ms/21L |
+| Safe buffer reads | 2026-04-06 | 13 unsafe sites → 1 |
+| CPU Q4_K/Q6_K reference | 2026-04-06 | Cross-backend tests |
+| Cross-backend tests (11 tests) | 2026-04-06 | Metal vs CPU verified |
+| Q4_K fused QKV | 2026-04-06 | 1.78x vs Q8 |
+| Dual-path decode (Q4_K/Q8 auto) | 2026-04-06 | 59 tok/s |
+| GPU prefill pipeline | 2026-04-06 | seq>1 on GPU |
+| skip_rope flag | 2026-04-06 | Prefill KV cache |
+| Sub-block lane assignment | 2026-04-07 | 83% utilization |
+| llama.cpp kernel architecture port | 2026-04-07 | Register-based input |
+| Component profiling | 2026-04-07 | Found real bottleneck |
+| Zero warnings | 2026-04-07 | Clean build |
+| ADR documentation | 2026-04-07 | 8 decisions recorded |
+| Partial RoPE (rotary_dim) | 2026-04-07 | rope_apply + fused_attention, ADR-010 |
+| Gemma 4 architecture support | 2026-04-07 | Per-layer head_dim, KV heads, K=V, layer_scalar |
+| Shader documentation | 2026-04-07 | docs/shaders.md — all 44 kernels |
+| Quantization format docs | 2026-04-07 | docs/quantization-formats.md |
+| Decode pipeline docs | 2026-04-07 | docs/decode-pipeline.md |
+| Example reorganization | 2026-04-07 | 25 examples: demo_, compare_, profile_, best_, test_ |
+| PERFORMANCE.md refresh | 2026-04-07 | All numbers from fresh benchmark runs |
+| ROADMAP.md | 2026-04-07 | P0/P1/P2 targets documented |
+| Per-layer architecture params (ADR-011) | 2026-04-07 | 18 fields on FullPipelineLayer: eps, attn_scale, head_dim, num_q/kv_heads, rope_base, rotary_dim, sliding_window, v_norm, layer_scalar, norm_type, ffn_type, activation, biases |
+| pipeline.rs extraction | 2026-04-07 | FullPipelineLayer + types moved from lib.rs to pipeline.rs |
+| 7 new shader kernels | 2026-04-07 | silu, gelu_tanh, layer_norm (2), v_norm, scale_vector, rope_at_pos partial |
+| Model-agnostic compute | 2026-04-07 | No hardcoded model assumptions — all behavior parameterized per-layer |
+| Single cmd buffer decode | 2026-04-08 | All 34 layers in one cmd, single encoder per layer |
+| Batched RoPE/V-norm | 2026-04-08 | rope_at_pos_batched, v_norm_batched — 16 dispatches → 3 |
+| Q4_K FFN format routing | 2026-04-08 | Q4_K weights use q4k_matvec, skip Q8 quantize |
+| Fused gate+up kernel | 2026-04-08 | q4k_ffn_gate_up — single dispatch, shared input |
+| Q4_K matvec rewrite | 2026-04-08 | uint4 loads, 8 rows/TG, sub-block striping, nr0=2 |
+| Q4_KF FFN routing | 2026-04-08 | llama.cpp-exact q4kf_proj for FFN gate/up/down |
+| SIMD KV attention | 2026-04-08 | simd_max/simd_sum, float4 dot, 3 barriers (was 6) |
+| Ollama parity | 2026-04-08 | 2.84x → ~1.25x at 34 layers, no caching |
+| Q4_KF fused gate+up | 2026-04-09 | q4kf_ffn_gate_up — llama.cpp inner loop, shared input |
+| Pre-allocated scratch buffers | 2026-04-09 | 550 allocs → 20, saved ~2ms |
+| Single global encoder | 2026-04-09 | One encoder for all 34 layers (no per-layer create/end) |
+| **Cooperative SIMD norms** | **2026-04-09** | **O(N²)→O(N) in rms_norm/residual_norm — saved ~10ms** |
+| **Ollama EXCEEDED** | **2026-04-09** | **8.5ms / 117 tok/s = 0.83x Ollama (17% faster)** |
+| Fused Q4_K geglu+down disabled by default — `LARQL_FUSED_DOWN=1` opt-in | 2026-04-30 | The `q4k_geglu_silu_down` / `q4k_geglu_gelu_tanh_down` shaders pass their unit tests but produce all-NaN at the prefill output for production-shape weights (Gemma 3 4B q4k-downq4k → 2560/2560 NaN; Gemma 4 31B q4k → empty output). Separated path (existing GEGLU dispatch + `q4k_matvec`) is correct for the same shapes. Default flipped in `metal::stages::ffn::encode_gated`; perf parity to be re-tested if/when the fused kernel is fixed |
+| Metal MoE expert kernel — accuracy bug at inter=704 | 2026-04-30 | See top-of-file "Open" section. cos≈0.7 vs CPU reference for Gemma 4 26B-A4B-it MoE; same shaders are correct for dense FFN. Workaround: server defaults to CPU expert dispatch (`LARQL_USE_METAL_EXPERTS=1` to opt back in). Once fixed: ~3-4× grid speedup (3.5 tok/s → ~10 tok/s) since server compute is 95% of token wall time |
+| **NaN on Gemma 4 31B global-attention layers** | **2026-05-04** | `kv_append_attend_fused` used a fixed `tg_scores[1024]` threadgroup array. Global layers (window_size=0) grow unboundedly — once the KV cache exceeds 1024 positions, `tg_scores[t - t_start]` overflowed, corrupting scores → `exp()` produced Inf → softmax NaN. Fix: guard `use_fused_kv_aa` with `attn_span <= SHORT_ATTENTION_SPAN`; global layers fall through to `encode_kv_attend` which auto-selects `kv_attention_long` (4096-entry array) past 1024 tokens. Also fixed: `v_norm_batched` read/write race when `x` and `out` aliased the same buffer (threadgroup barrier missing between reduction and write-back phases; cos≈0.997 drift on L0). |

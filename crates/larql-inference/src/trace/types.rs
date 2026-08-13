@@ -4,6 +4,9 @@ use crate::attention::AttentionWeights;
 use crate::model::ModelWeights;
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// A single waypoint in the residual stream.
 #[derive(Clone)]
 pub struct TraceNode {
@@ -86,6 +89,7 @@ impl ResidualTrace {
         super::vocab::project_to_logits(weights, vec)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn top_k(
         &self,
         weights: &ModelWeights,
@@ -143,6 +147,7 @@ impl ResidualTrace {
         traj
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn layer_summaries<'a>(
         &'a self,
         weights: &'a ModelWeights,

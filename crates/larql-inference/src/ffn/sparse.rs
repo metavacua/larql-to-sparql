@@ -2,8 +2,13 @@
 
 use ndarray::Array2;
 
-use super::sparse_compute::{select_top_k_features, sparse_ffn_forward};
-use super::FfnBackend;
+use super::sparse_compute::{
+    select_top_k_features, sparse_ffn_forward, sparse_ffn_forward_observed,
+};
+use super::{FfnActivations, FfnBackend};
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+use crate::collections::BTreeSet;
 use crate::model::ModelWeights;
 
 /// Sparse FFN: compute all gate activations, select top-K, then
@@ -16,24 +21,30 @@ pub struct SparseFfn<'a> {
     pub top_k: usize,
 }
 
-impl<'a> FfnBackend for SparseFfn<'a> {
-    fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
-        self.forward_with_activation(layer, x).0
-    }
-
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
+impl<'a> SparseFfn<'a> {
+    /// Per-position top-K selection, unioned across the sequence so the
+    /// gather/compute runs once.
+    fn select_features(&self, layer: usize, x: &Array2<f32>) -> Vec<usize> {
         let seq_len = x.shape()[0];
-
-        // Select features per position, union them, then compute once
-        let mut all_features = std::collections::BTreeSet::new();
+        let mut all_features = BTreeSet::new();
         for s in 0..seq_len {
             let x_row = x.row(s);
             let feats = select_top_k_features(self.weights, layer, &x_row, self.top_k);
             all_features.extend(feats);
         }
-        let features: Vec<usize> = all_features.into_iter().collect();
+        all_features.into_iter().collect()
+    }
+}
 
+impl<'a> FfnBackend for SparseFfn<'a> {
+    fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
+        let features = self.select_features(layer, x);
         sparse_ffn_forward(self.weights, layer, x, &features)
+    }
+
+    fn forward_observed(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, FfnActivations) {
+        let features = self.select_features(layer, x);
+        sparse_ffn_forward_observed(self.weights, layer, x, &features)
     }
 
     fn name(&self) -> &str {
@@ -107,16 +118,26 @@ mod tests {
     }
 
     #[test]
-    fn sparse_ffn_with_activation_returns_correct_shapes() {
+    fn sparse_ffn_forward_observed_returns_sparse_pairs() {
         let weights = make_test_weights();
         let ffn = SparseFfn {
             weights: &weights,
             top_k: 4,
         };
         let x = input(2, weights.hidden_size);
-        let (out, act) = ffn.forward_with_activation(0, &x);
+        let (out, obs) = ffn.forward_observed(0, &x);
         assert_eq!(out.shape(), &[2, weights.hidden_size]);
-        assert_eq!(act.shape()[0], 2);
+        match obs {
+            FfnActivations::Sparse(s) => {
+                assert_eq!(s.seq_len(), 2);
+                assert!(
+                    !s.position(0).is_empty(),
+                    "top-K selection must record what it computed"
+                );
+            }
+            other => panic!("expected Sparse observation, got {other:?}"),
+        }
+        assert_eq!(out, ffn.forward(0, &x), "observed and hot outputs agree");
     }
 
     #[test]

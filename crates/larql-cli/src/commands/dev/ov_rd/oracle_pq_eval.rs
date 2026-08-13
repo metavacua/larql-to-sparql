@@ -7,6 +7,9 @@ use super::pq::ModeDTable;
 use super::reports::AddressProbePromptReport;
 use super::types::HeadId;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 pub(super) fn evaluate_predicted_address(
     weights: &mut larql_inference::ModelWeights,
     token_ids: &[u32],
@@ -19,7 +22,7 @@ pub(super) fn evaluate_predicted_address(
     baseline_logp: &[f64],
     baseline_top1: u32,
     oracle_codes_by_position: &[Vec<usize>],
-) -> Result<AddressProbePromptReport, Box<dyn std::error::Error>> {
+) -> Result<AddressProbePromptReport, Box<dyn core::error::Error>> {
     let address_match = address_match_report(oracle_codes_by_position, predicted_codes_by_position);
     let predicted_hidden = forward_q4k_predicted_address_mode_d_head(
         weights,

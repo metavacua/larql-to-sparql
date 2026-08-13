@@ -6,6 +6,8 @@
 
 use crate::config::{ModelArchitecture, ModelConfig};
 use crate::multimodal::{MultiModalProtocol, PlaceholderProtocol, PrecomputedScaling, TokenBudget};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
 
 /// Multi-modal contract for Granite Vision models.
 pub struct GraniteVisionMultiModal;
@@ -68,6 +70,92 @@ impl ModelArchitecture for GraniteArch {
             None
         }
     }
+
+    // ── MoE (granitemoe) ──
+    //
+    // GraniteMoE stacks its experts into three tensors per layer rather than
+    // storing them per-expert, so it uses the PACKED keys — the same shape
+    // convention Gemma 4 uses — and emits no `expert_ffn_*` keys at all:
+    //
+    //   block_sparse_moe.input_linear.weight   [E, 2*inter, hidden]  (gate+up)
+    //   block_sparse_moe.output_linear.weight  [E, hidden, inter]    (down)
+    //   block_sparse_moe.router.layer.weight   [E, hidden]           (router)
+    //
+    // Verified against ibm-granite/granite-3.0-1b-a400m-instruct:
+    // [32, 1024, 1024] / [32, 1024, 512] / [32, 1024] at hidden=1024,
+    // inter=512, E=32.
+    //
+    // Unlike Gemma 4 this is a pure MoE block, not a hybrid — there is no
+    // parallel dense branch — so `is_hybrid_moe()` stays false and the dense
+    // Granite path is untouched (every method here gates on `is_moe()`).
+
+    fn is_moe(&self) -> bool {
+        self.config.num_experts.unwrap_or(0) > 0
+    }
+
+    fn num_experts(&self) -> usize {
+        self.config.num_experts.unwrap_or(0)
+    }
+
+    fn num_experts_per_token(&self) -> usize {
+        self.config
+            .num_experts_per_token
+            .or(self.config.top_k_experts)
+            .unwrap_or(0)
+    }
+
+    /// GraniteMoE has no `moe_intermediate_size`; per-expert width is the
+    /// model's `intermediate_size` (512 for 1B-A400M). Falling back to 0
+    /// would size every expert to nothing.
+    fn moe_intermediate_size(&self) -> usize {
+        if !self.is_moe() {
+            return 0;
+        }
+        self.config
+            .moe_intermediate_size
+            .unwrap_or(self.config.intermediate_size)
+    }
+
+    /// GraniteMoE stacks all experts into one BF16 tensor per projection —
+    /// the same physical layout Gemma 4 26B A4B uses, so the existing
+    /// packed-expert quantiser consumes it unchanged.
+    fn expert_format(&self) -> crate::config::ExpertFormat {
+        if self.is_moe() {
+            crate::config::ExpertFormat::PackedBF16
+        } else {
+            crate::config::ExpertFormat::PerExpert
+        }
+    }
+
+    fn moe_router_key(&self, layer: usize) -> Option<String> {
+        if !self.is_moe() {
+            return None;
+        }
+        Some(format!(
+            "{}block_sparse_moe.router.layer.weight",
+            self.layer_prefix(layer)
+        ))
+    }
+
+    fn packed_experts_gate_up_key(&self, layer: usize) -> Option<String> {
+        if !self.is_moe() {
+            return None;
+        }
+        Some(format!(
+            "{}block_sparse_moe.input_linear.weight",
+            self.layer_prefix(layer)
+        ))
+    }
+
+    fn packed_experts_down_key(&self, layer: usize) -> Option<String> {
+        if !self.is_moe() {
+            return None;
+        }
+        Some(format!(
+            "{}block_sparse_moe.output_linear.weight",
+            self.layer_prefix(layer)
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -95,6 +183,8 @@ mod tests {
             enable_moe_block: false,
             top_k_experts: None,
             moe_intermediate_size: None,
+            swiglu_limit: None,
+            norm_topk_prob: None,
             kv_lora_rank: None,
             q_lora_rank: None,
             qk_nope_head_dim: None,
@@ -117,6 +207,7 @@ mod tests {
             per_layer_embed_dim: None,
             num_kv_shared_layers: None,
             has_vision_config: false,
+            tie_word_embeddings: None,
         }
     }
 

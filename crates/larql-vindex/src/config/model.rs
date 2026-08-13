@@ -4,10 +4,33 @@
 //!
 //! Carved out of the monolithic `config/types.rs` in the 2026-04-25
 //! round-2 cleanup.
+//!
+//! ## This struct is a lossy projection, and the loss is load-bearing
+//!
+//! Every field a checkpoint declares that reaches the forward pass has
+//! to appear here or the served model silently differs from the
+//! checkpoint. That is not hypothetical: `rope_scaling` was absent
+//! until 2026-08-06, so `gemma-3-4b-it` — whose `config.json` says
+//! `{"factor": 8.0, "rope_type": "linear"}` — was served with a
+//! position divisor of 1.0 on its five global layers instead of 8.0.
+//! CPU and Metal read the same `index.json`, so both were wrong in the
+//! same way and the CPU-vs-Metal parity suite stayed green. A parity
+//! gate cannot see a defect in the config both of its arms share.
+//!
+//! `model_config_persists_every_forward_affecting_field` pins the
+//! inventory. When you add a field to `larql_models::ModelConfig`, that
+//! test tells you to either persist it here or record why it does not
+//! need persisting. `embedding_multiplier` is the standing example of
+//! the second case: it round-trips through the top-level
+//! `VindexConfig.embed_scale` instead, and duplicating it here would
+//! create a second source of truth for one number.
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct VindexModelConfig {
     pub model_type: String,
     pub head_dim: usize,
@@ -92,6 +115,37 @@ pub struct VindexModelConfig {
     /// fix in `docs/diagnoses/shannon-cross-engine-divergence.md`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub norm_eps: Option<f64>,
+
+    // ── Fields that were dropped until 2026-08-06 ──
+    // Each is read by the forward pass and each was absent from this
+    // struct, so no vindex-served model ever saw it. All are
+    // `#[serde(default)]`, so vindexes written before this lands still
+    // load — they just keep answering `None`, which is what they
+    // already did. Re-extract to pick the values up.
+    /// RoPE scaling block, in the `config.json` shape
+    /// (`larql_models::RopeScaling::to_config_json`). Carried as raw
+    /// JSON rather than a typed mirror so the detector's parser stays
+    /// the single definition of how each family is read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rope_scaling: Option<serde_json::Value>,
+    /// Gemma 2 attention-logit softcapping. Note `final_logit_softcapping`
+    /// was already persisted and this one was not — the pair splits
+    /// across the same model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attn_logit_softcapping: Option<f64>,
+    /// GPT-OSS clamp on both halves of the fused gate/up projection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swiglu_limit: Option<f64>,
+    /// OLMoE / Mixtral router top-k renormalisation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub norm_topk_prob: Option<bool>,
+    /// Whether `lm_head` is tied to the embedding matrix. ROADMAP H5a
+    /// made an untied-but-missing `lm_head` a hard error in
+    /// `larql-models`; without this field that fix could not reach a
+    /// vindex-served model, which always answered `None` (= "absent, no
+    /// claim either way").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tie_word_embeddings: Option<bool>,
 }
 
 /// MoE (Mixture of Experts) configuration.
@@ -165,6 +219,11 @@ impl VindexModelConfig {
             residual_multiplier: cfg.residual_multiplier,
             logits_scaling: cfg.logits_scaling,
             norm_eps: cfg.norm_eps,
+            rope_scaling: cfg.rope_scaling.as_ref().map(|rs| rs.to_config_json()),
+            attn_logit_softcapping: cfg.attn_logit_softcapping,
+            swiglu_limit: cfg.swiglu_limit,
+            norm_topk_prob: cfg.norm_topk_prob,
+            tie_word_embeddings: cfg.tie_word_embeddings,
         }
     }
 }
@@ -172,6 +231,115 @@ impl VindexModelConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Inventory guard for the lossy projection this struct performs.
+    ///
+    /// `larql_models::ModelConfig` is the parsed checkpoint. Anything in
+    /// it that reaches the forward pass must either appear here or be
+    /// listed below with the reason it does not need to. The list is the
+    /// point: `rope_scaling` was missing for as long as this file
+    /// existed and nothing failed, because nothing was counting.
+    ///
+    /// If this test fails you added a field to `ModelConfig`. Decide
+    /// which bucket it is in — do not just add it to the exempt list to
+    /// get green.
+    #[test]
+    fn model_config_persists_every_forward_affecting_field() {
+        // Carried elsewhere in `VindexConfig`, not in `model_config`.
+        const CARRIED_AT_TOP_LEVEL: &[&str] = &[
+            "num_layers",
+            "hidden_size",
+            "intermediate_size",
+            "vocab_size",
+            // Round-trips as `VindexConfig.embed_scale`; duplicating it
+            // here would give one number two sources of truth.
+            "embedding_multiplier",
+        ];
+        // Carried inside the nested `moe` object.
+        const CARRIED_IN_MOE: &[&str] = &[
+            "num_experts",
+            "num_experts_per_token",
+            "num_shared_experts",
+            "enable_moe_block",
+            "top_k_experts",
+            "moe_intermediate_size",
+        ];
+        // Genuinely not persisted yet. Each entry is a known gap, not an
+        // exemption: no vindex-served model can use these today.
+        const KNOWN_GAPS: &[&str] = &[
+            // Multi-head latent attention (DeepSeek V2/V3). No MLA model
+            // is served from a vindex yet; serving one without these
+            // would silently rebuild the wrong attention geometry.
+            "kv_lora_rank",
+            "q_lora_rank",
+            "qk_nope_head_dim",
+            "qk_rope_head_dim",
+            "v_head_dim",
+            // Vision tower presence. The multimodal path loads its own
+            // config rather than reconstructing from the vindex.
+            "has_vision_config",
+        ];
+
+        let src = include_str!("../../../larql-models/src/config/model_config.rs");
+        let start = src
+            .find("pub struct ModelConfig")
+            .expect("ModelConfig struct not found — did the file move?");
+        let body = &src[start..src[start..].find("\n}").unwrap() + start];
+        let model_fields: Vec<&str> = body
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("pub "))
+            .filter_map(|l| l.split(':').next())
+            .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+            .collect();
+        assert!(
+            model_fields.len() > 30,
+            "parsed only {} ModelConfig fields — the scraper broke, which \
+             would make this guard silently vacuous",
+            model_fields.len()
+        );
+
+        // Scrape this struct from source rather than serialising an
+        // instance: every optional field carries
+        // `skip_serializing_if = "Option::is_none"`, so a `None`-valued
+        // instance serialises to almost nothing and the guard would
+        // report the entire struct as missing.
+        let own = include_str!("model.rs");
+        let vstart = own
+            .find("pub struct VindexModelConfig")
+            .expect("VindexModelConfig struct not found");
+        let vbody = &own[vstart..own[vstart..].find("\n}").unwrap() + vstart];
+        let persisted: Vec<&str> = vbody
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("pub "))
+            .filter_map(|l| l.split(':').next())
+            .filter(|n| !n.is_empty())
+            .collect();
+        assert!(
+            persisted.len() > 20,
+            "parsed only {} VindexModelConfig fields — the scraper broke",
+            persisted.len()
+        );
+
+        let mut unaccounted = Vec::new();
+        for f in &model_fields {
+            let known = persisted.contains(f)
+                || CARRIED_AT_TOP_LEVEL.contains(f)
+                || CARRIED_IN_MOE.contains(f)
+                || KNOWN_GAPS.contains(f)
+                // `model_type` / geometry share names across both structs.
+                || ["model_type", "head_dim", "num_q_heads", "num_kv_heads",
+                    "rope_base", "sliding_window", "norm_eps"].contains(f);
+            if !known {
+                unaccounted.push(*f);
+            }
+        }
+        assert!(
+            unaccounted.is_empty(),
+            "ModelConfig fields with no home in the vindex round-trip: {unaccounted:?}. \
+             A checkpoint declaring one of these is served without it — the defect is \
+             invisible to CPU-vs-Metal parity because both arms read the same index.json."
+        );
+    }
 
     fn minimal_model_config() -> VindexModelConfig {
         VindexModelConfig {
@@ -197,6 +365,7 @@ mod tests {
             residual_multiplier: None,
             logits_scaling: None,
             norm_eps: None,
+            ..Default::default()
         }
     }
 

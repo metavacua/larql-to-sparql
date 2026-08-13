@@ -24,7 +24,11 @@
 pub mod dump_config;
 pub mod embed;
 pub mod hooks;
+// infer_patched/_q4k/_early_exit take &VectorIndex directly.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod infer_patched;
+// InferenceWeights::load calls VectorIndex::load_vindex.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod inference_weights;
 pub mod layer;
 mod layer_interventions;
@@ -55,12 +59,14 @@ pub use hooks::{
     AttnZeroHook, CompositeHook, FFNZeroHook, LayerHook, NoopHook, RecordHook, SteerHook,
     ZeroAblateHook,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use infer_patched::{
     apply_knn_override, apply_knn_override_two_tier, apply_knn_override_verified, infer_patched,
     infer_patched_early_exit, infer_patched_q4k, infer_patched_q4k_early_exit,
     walk_trace_from_residuals, InferPatchedResult, KnnOverride, KnnRouteMode, KNN_COSINE_THRESHOLD,
     KNN_VERIFY_TOPK,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use inference_weights::InferenceWeights;
 pub use layer::{run_attention_public, run_ffn, run_layer_with_capture_hooked, run_layer_with_ffn};
 pub use layer_interventions::{
@@ -70,17 +76,29 @@ pub use layer_interventions::{
     run_layer_with_zeroed_pre_o_heads,
 };
 pub use lens::{logit_lens_topk, track_race, track_token};
-pub use memit::{run_memit, run_memit_with_target_opt, MemitFact, MemitFactResult, MemitResult};
+#[cfg(not(target_arch = "wasm32"))]
+pub use memit::{run_memit, run_memit_with_target_opt};
+pub use memit::{MemitFact, MemitFactResult, MemitResult};
 pub use patching::{
     capture_donor_state, capture_donor_state_with_ffn, patch_and_trace, patch_and_trace_with_ffn,
     DonorState, PatchHook,
 };
 pub use predict::{
     forward_from_layer, forward_raw_logits, forward_raw_logits_with_prefix, hidden_to_raw_logits,
+    RawForward,
+};
+// `logit_lens_top1`/`logits_to_predictions_pub`/`predict`/`predict_from_hidden*`/
+// `predict_with_ffn*`/`predict_with_router`/`predict_with_strategy`/
+// `predict_with_temperature` all originate in `predict::dense`/`predict::ffn`,
+// which take `&tokenizers::Tokenizer` -- native-only (tokenizers/rayon are
+// `cfg(not(target_arch = "wasm32"))` deps in this crate's Cargo.toml), so
+// those source items are gated at their definitions and this re-export must
+// match.
+#[cfg(not(target_arch = "wasm32"))]
+pub use predict::{
     logit_lens_top1, logits_to_predictions_pub, predict, predict_from_hidden,
     predict_from_hidden_with_ffn, predict_with_ffn, predict_with_ffn_attention,
     predict_with_ffn_trace, predict_with_router, predict_with_strategy, predict_with_temperature,
-    RawForward,
 };
 pub use target_delta::{TargetDelta, TargetDeltaOpts};
 pub use trace::{

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Transformer inference engine — forward pass, attention, FFN, layer norm from safetensors weights"
 keywords = ["transformer", "inference", "llm", "interpretability"]
 categories = ["science"]
@@ -20,8 +21,34 @@ larql-compute = { path = "../larql-compute" }
 # Apple-only sibling backend.  Optional + activated by the local
 # `gpu` feature; non-Mac builds skip the dep graph entirely.
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
-larql-core = { path = "../larql-core" }
+# default-features = false: larql-core's default features ("http",
+# "msgpack") pull in reqwest/rmp-serde. Refinement of pattern 7/8: a
+# workspace sibling's *default features*, if left enabled at even ONE
+# call site anywhere in the resolved graph, apply everywhere that
+# dependency is used -- Cargo unifies features across the whole build,
+# not per edge. larql-vindex already restricts this correctly; this
+# crate's un-restricted declaration was silently re-poisoning the
+# wasm32 build for every crate depending on both (confirmed via
+# `cargo tree --target wasm32v1-none -i js-sys`, a metadata-only
+# inspection, not a build/check/test -- traced larql-kv's persistent
+# E0463 cascade to exactly this edge). No source in this crate
+# references larql_core's http/msgpack-gated APIs (confirmed via grep).
+larql-core = { path = "../larql-core", default-features = false }
 larql-vindex = { path = "../larql-vindex" }
+larql-execution = { path = "../larql-execution" }
+# larql-router-protocol is already self-gating (its own Cargo.toml/
+# lib.rs wholesale-exclude everything on wasm32), so it's fine to keep
+# as a plain path dependency -- unlike every crates.io dependency below,
+# it won't pull tonic/tokio/prost into the wasm32 build at all.
+larql-router-protocol = { path = "../larql-router-protocol" }
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. rand/rand_distr/half/ndarray have a genuine
+# no_std mode; everything else below is inherently native (filesystem,
+# networking, OS threads, a WASM *runtime* embedding another WASM
+# runtime makes no sense on wasm32v1-none itself) -- pattern 9, no
+# wasm32 entry at all, same shape as larql-vindex's equivalent split.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -65,15 +92,27 @@ half = "2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
 tonic = { version = "0.13", features = ["tls-ring", "tls-webpki-roots"] }
 prost = "0.13"
-larql-router-protocol = { path = "../larql-router-protocol" }
 async-stream = "0.3"
 futures = "0.3"
 
 # WASM expert registry
-wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"] }
-wasmtime-wasi = "29"
+wasmtime = { version = "36.0.7", default-features = false, features = ["cranelift", "runtime"] }
+wasmtime-wasi = "36.0.7"
 anyhow = "1"
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+rand = { version = "0.8", default-features = false }
+rand_distr = { version = "0.4", default-features = false }
+half = { version = "2", default-features = false }
+ndarray = { version = "0.16", default-features = false }
+# Portable HashMap/HashSet (crate::collections) and Float trait
+# (crate::alloc_prelude) backing -- same pattern as every other crate
+# gated this session.
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+hashbrown = { version = "0.15", default-features = false }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
@@ -106,10 +145,6 @@ required-features = ["gpu"]
 
 [[example]]
 name = "decode_vs_prefill"
-required-features = ["gpu"]
-
-[[example]]
-name = "residual_diff"
 required-features = ["gpu"]
 
 [[example]]

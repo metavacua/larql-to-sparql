@@ -4,18 +4,40 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Compute backend trait + CPU implementation for LARQL. GPU backends ship as sibling crates (larql-compute-metal, future larql-compute-vulkan / larql-compute-cuda)."
 keywords = ["matmul", "cpu", "blas", "quantization", "trait"]
 categories = ["science"]
 
 [dependencies]
+# Wire-format constants (Q4_K_BLOCK_ELEMS, etc.) for padding decisions.
+# Tests/benches depend on it too — keep both lists in sync.
+larql-models = { path = "../larql-models" }
+larql-execution = { path = "../larql-execution" }
+
+# rayon has zero no_std support (no libm-style feature swap exists, per
+# the pattern-6 precedent) -- unlike patterns 1/4/6/7 there is no wasm32
+# substitute to declare, so it's simply omitted from the wasm32 table
+# below rather than swapped. Every module that uses it directly will
+# need pattern-3 whole-module exclusion once CI shows which ones those
+# are. ndarray follows the pattern-7 split (see larql-models/Cargo.toml)
+# regardless: native keeps its per-OS blas feature tables below, wasm32
+# gets default-features = false.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Matrix types — blas feature added per-platform below where a backend exists
 ndarray = "0.16"
 # MoE expert parallelism: top-k experts run independently per token.
 rayon = "1.10"
-# Wire-format constants (Q4_K_BLOCK_ELEMS, etc.) for padding decisions.
-# Tests/benches depend on it too — keep both lists in sync.
-larql-models = { path = "../larql-models" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ndarray = { version = "0.16", default-features = false }
+# See crates/larql-core/Cargo.toml for the pattern-4 (std-collection-
+# needs-no-std-hasher) rationale -- this crate's own HashMap/HashSet
+# usage needs it too.
+hashbrown = { version = "0.15", default-features = false }
+# core's f32/f64 lack sqrt/exp/tanh/round/etc. (pattern 6) -- see
+# alloc_prelude.rs for the rationale, same fix as larql-core/-models/-factory.
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }

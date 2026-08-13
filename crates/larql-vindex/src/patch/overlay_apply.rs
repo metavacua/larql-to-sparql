@@ -6,20 +6,87 @@
 //! Pulled out of `overlay.rs` so the file holding `PatchedVindex`'s
 //! query/mutation API stays focused.
 
+use crate::error::VindexError;
 use crate::index::types::DEFAULT_C_SCORE;
 use crate::index::FeatureMeta;
 
 use super::format::{decode_gate_vector, PatchOp, VindexPatch};
 use super::overlay::PatchedVindex;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+/// Decode-check every embedded vector in `patch` before any overlay
+/// state is mutated, so a corrupt vector rejects the patch wholesale.
+/// Without this, `apply_patch` used to drop the vector while still
+/// applying the op's metadata — a silently half-applied patch.
+fn validate_patch_vectors(patch: &VindexPatch) -> Result<(), VindexError> {
+    fn check(op_idx: usize, field: &str, b64: &str) -> Result<(), VindexError> {
+        decode_gate_vector(b64)
+            .map(|_| ())
+            .map_err(|e| VindexError::Parse(format!("patch op {op_idx}: corrupt {field}: {e}")))
+    }
+    for (i, op) in patch.operations.iter().enumerate() {
+        match op {
+            PatchOp::Insert {
+                gate_vector_b64,
+                up_vector_b64,
+                down_vector_b64,
+                ..
+            }
+            | PatchOp::Update {
+                gate_vector_b64,
+                up_vector_b64,
+                down_vector_b64,
+                ..
+            } => {
+                for (field, b64) in [
+                    ("gate_vector_b64", gate_vector_b64),
+                    ("up_vector_b64", up_vector_b64),
+                    ("down_vector_b64", down_vector_b64),
+                ] {
+                    if let Some(b64) = b64 {
+                        check(i, field, b64)?;
+                    }
+                }
+            }
+            PatchOp::InsertKnn { key_vector_b64, .. } => {
+                check(i, "key_vector_b64", key_vector_b64)?;
+            }
+            PatchOp::Delete { .. } | PatchOp::DeleteKnn { .. } => {}
+        }
+    }
+    Ok(())
+}
+
 impl PatchedVindex {
+    /// Apply a patch, rejecting it wholesale if any embedded vector
+    /// fails to decode. All-or-nothing: on `Err` no overlay state has
+    /// been touched and the patch is not recorded.
+    pub fn try_apply_patch(&mut self, patch: VindexPatch) -> Result<(), VindexError> {
+        validate_patch_vectors(&patch)?;
+        self.apply_patch_unchecked(patch);
+        Ok(())
+    }
+
     /// Apply a patch. Operations are resolved into the override maps.
+    ///
+    /// Infallible compatibility wrapper around [`try_apply_patch`]:
+    /// a patch with a corrupt embedded vector is dropped **whole** (no
+    /// state change, not recorded in `patches`) rather than
+    /// half-applied. Callers that need to surface the decode error use
+    /// `try_apply_patch`.
+    ///
+    /// [`try_apply_patch`]: Self::try_apply_patch
     pub fn apply_patch(&mut self, patch: VindexPatch) {
-        // Collect the layers whose `overrides_gate` we touch so we
-        // can invalidate exactly those cache entries at the end. A
-        // single patch usually touches one or a handful of layers;
-        // the HashSet bounds invalidation cost to O(touched_layers).
-        let mut touched_layers: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let _ = self.try_apply_patch(patch);
+    }
+
+    /// Application body. Every `*_b64` field has already been decode-
+    /// checked by `validate_patch_vectors`, so the inner `if let Ok`
+    /// arms cannot silently skip a vector. Gate-snapshot invalidation
+    /// is handled per-layer inside `GateOverlay`'s mutators.
+    fn apply_patch_unchecked(&mut self, patch: VindexPatch) {
         for op in &patch.operations {
             match op {
                 PatchOp::InsertKnn {
@@ -84,8 +151,7 @@ impl PatchedVindex {
                     self.deleted.remove(&key);
                     if let Some(b64) = gate_vector_b64 {
                         if let Ok(vec) = decode_gate_vector(b64) {
-                            self.overrides_gate.insert(key, vec);
-                            touched_layers.insert(key.0);
+                            self.overrides_gate.insert(key.0, key.1, vec);
                         }
                     }
                     if let Some(b64) = up_vector_b64 {
@@ -119,10 +185,22 @@ impl PatchedVindex {
                         };
                         self.overrides_meta.insert(key, Some(meta));
                     }
+                    // Resurrect: Update on a tombstoned slot implies
+                    // the feature exists again (mirrors Insert; the
+                    // `deleted` contract on `PatchedVindex`, review
+                    // 2026-07-30 M6). If the earlier Delete pinned a
+                    // `None` meta override and this Update carries no
+                    // replacement meta, drop the pin so `feature_meta`
+                    // falls through to the base — keeping
+                    // `feature_meta()` and `gate_knn()` in agreement.
+                    if self.deleted.remove(&key)
+                        && matches!(self.overrides_meta.get(&key), Some(None))
+                    {
+                        self.overrides_meta.remove(&key);
+                    }
                     if let Some(b64) = gate_vector_b64 {
                         if let Ok(vec) = decode_gate_vector(b64) {
-                            self.overrides_gate.insert(key, vec);
-                            touched_layers.insert(key.0);
+                            self.overrides_gate.insert(key.0, key.1, vec);
                         }
                     }
                     if let Some(b64) = up_vector_b64 {
@@ -139,26 +217,15 @@ impl PatchedVindex {
                 PatchOp::Delete { .. } => {
                     self.overrides_meta.insert(key, None);
                     self.deleted.insert(key);
-                    // Always invalidate on Delete — even if the gate
-                    // entry was absent, the per-layer feature set
-                    // shrunk and any cached matrix is stale.
-                    let was_present = self.overrides_gate.remove(&key).is_some();
-                    if was_present {
-                        touched_layers.insert(key.0);
-                    }
+                    // `GateOverlay::remove` invalidates the layer's
+                    // snapshot even when the gate entry was absent —
+                    // the per-layer feature set shrunk either way.
+                    self.overrides_gate.remove(key.0, key.1);
                 }
                 PatchOp::InsertKnn { .. } | PatchOp::DeleteKnn { .. } => {
                     unreachable!("KNN ops handled above");
                 }
             }
-        }
-        // Per-layer invalidation: only drop cache entries for layers
-        // this patch actually mutated. Patches that touch one layer
-        // leave every other layer's cache hot, which matters for
-        // high-frequency single-layer patch streams (e.g. Exp 52
-        // compile loops, INSERT bursts at a single L26 cache).
-        for layer in touched_layers {
-            self.invalidate_gate_cache_layer(layer);
         }
         self.patches.push(patch);
     }
@@ -174,10 +241,10 @@ impl PatchedVindex {
     /// Rebuild override maps from scratch (after removing a patch).
     fn rebuild_overrides(&mut self) {
         self.overrides_meta.clear();
+        // Clears rows AND every layer's cached snapshot.
         self.overrides_gate.clear();
         self.deleted.clear();
         self.knn_store = super::knn_store::KnnStore::default();
-        self.invalidate_gate_cache();
         let patches: Vec<VindexPatch> = self.patches.drain(..).collect();
         for patch in patches {
             self.apply_patch(patch);
@@ -273,8 +340,8 @@ mod tests {
             down_meta: None,
         }]);
         pv.apply_patch(patch);
-        assert!(pv.overrides_gate.contains_key(&(3, 7)));
-        let stored = &pv.overrides_gate[&(3, 7)];
+        assert!(pv.overrides_gate.contains(3, 7));
+        let stored = pv.overrides_gate.get(3, 7).unwrap();
         assert_eq!(stored.len(), 3);
         assert_eq!(stored[0].to_bits(), 1.0f32.to_bits());
     }
@@ -339,7 +406,7 @@ mod tests {
             down_meta: None,
         }]);
         pv.apply_patch(insert_patch);
-        assert!(pv.overrides_gate.contains_key(&(0, 1)));
+        assert!(pv.overrides_gate.contains(0, 1));
 
         let delete_patch = make_patch(vec![PatchOp::Delete {
             layer: 0,
@@ -347,7 +414,7 @@ mod tests {
             reason: None,
         }]);
         pv.apply_patch(delete_patch);
-        assert!(!pv.overrides_gate.contains_key(&(0, 1)));
+        assert!(!pv.overrides_gate.contains(0, 1));
         assert!(pv.deleted.contains(&(0, 1)));
     }
 
@@ -370,7 +437,7 @@ mod tests {
         let meta = pv.overrides_meta[&(0, 2)].as_ref().unwrap();
         assert_eq!(meta.top_token, "updated");
         // No gate override set
-        assert!(!pv.overrides_gate.contains_key(&(0, 2)));
+        assert!(!pv.overrides_gate.contains(0, 2));
     }
 
     #[test]
@@ -451,6 +518,175 @@ mod tests {
         let mut pv = empty_pv();
         pv.remove_patch(999); // should not panic
         assert!(pv.patches.is_empty());
+    }
+
+    #[test]
+    fn try_apply_patch_rejects_corrupt_vector_without_half_applying() {
+        // Regression: a corrupt gate vector used to be silently dropped
+        // while the op's metadata still landed — a half-applied patch.
+        // The whole patch must be rejected and no state mutated,
+        // including ops *before* the corrupt one.
+        let mut pv = empty_pv();
+        let patch = make_patch(vec![
+            PatchOp::Insert {
+                layer: 0,
+                feature: 0,
+                relation: None,
+                entity: "A".into(),
+                target: "B".into(),
+                confidence: Some(0.9),
+                gate_vector_b64: Some(encode_gate_vector(&[1.0, 2.0])),
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+            },
+            PatchOp::Insert {
+                layer: 1,
+                feature: 3,
+                relation: None,
+                entity: "C".into(),
+                target: "D".into(),
+                confidence: None,
+                gate_vector_b64: Some("!!!!".into()), // invalid base64
+                up_vector_b64: None,
+                down_vector_b64: None,
+                down_meta: None,
+            },
+        ]);
+        let err = pv.try_apply_patch(patch).expect_err("corrupt vector");
+        assert!(err.to_string().contains("gate_vector_b64"), "{err}");
+        assert!(pv.overrides_meta.is_empty(), "no meta may be applied");
+        assert!(pv.overrides_gate.is_empty(), "no gate may be applied");
+        assert_eq!(pv.num_patches(), 0, "corrupt patch must not be recorded");
+    }
+
+    #[test]
+    fn try_apply_patch_rejects_truncated_up_vector_on_update() {
+        // Truncated base64 (non-multiple-of-4 length) in an Update op's
+        // up vector: the op's down_meta must NOT be applied.
+        let full = encode_gate_vector(&[1.0f32, -1.0]);
+        let truncated = full[..full.len() - 1].to_string();
+        let mut pv = empty_pv();
+        let patch = make_patch(vec![PatchOp::Update {
+            layer: 2,
+            feature: 4,
+            gate_vector_b64: None,
+            up_vector_b64: Some(truncated),
+            down_vector_b64: None,
+            down_meta: Some(PatchDownMeta {
+                top_token: "x".into(),
+                top_token_id: 1,
+                c_score: 0.5,
+            }),
+        }]);
+        assert!(pv.try_apply_patch(patch).is_err());
+        assert!(pv.overrides_meta.is_empty());
+        assert!(pv.up_override_at(2, 4).is_none());
+    }
+
+    #[test]
+    fn apply_patch_drops_corrupt_patch_wholesale() {
+        // The infallible compatibility wrapper: corrupt patch is a
+        // no-op, never a half-application.
+        let mut pv = empty_pv();
+        let patch = make_patch(vec![PatchOp::Insert {
+            layer: 0,
+            feature: 1,
+            relation: None,
+            entity: "A".into(),
+            target: "B".into(),
+            confidence: None,
+            gate_vector_b64: Some("bad!".into()),
+            up_vector_b64: None,
+            down_vector_b64: None,
+            down_meta: None,
+        }]);
+        pv.apply_patch(patch);
+        assert!(pv.overrides_meta.is_empty());
+        assert_eq!(pv.num_patches(), 0);
+    }
+
+    #[test]
+    fn try_apply_patch_rejects_corrupt_knn_key() {
+        let mut pv = empty_pv();
+        let patch = make_patch(vec![PatchOp::InsertKnn {
+            layer: 0,
+            entity: "e".into(),
+            relation: "r".into(),
+            target: "t".into(),
+            target_id: 1,
+            confidence: None,
+            key_vector_b64: "???".into(),
+        }]);
+        assert!(pv.try_apply_patch(patch).is_err());
+        assert_eq!(pv.knn_store.len(), 0);
+    }
+
+    #[test]
+    fn update_after_delete_clears_tombstone() {
+        // Regression (review 2026-07-30 M6): PatchOp::Update on a
+        // tombstoned slot must resurrect it, mirroring Insert. Before
+        // the fix the tombstone survived, so feature_meta() (via the
+        // Some(meta) override) and gate_knn() (tombstone filter)
+        // disagreed about the same slot.
+        let mut pv = empty_pv();
+        pv.apply_patch(make_patch(vec![PatchOp::Delete {
+            layer: 0,
+            feature: 1,
+            reason: None,
+        }]));
+        assert!(pv.deleted.contains(&(0, 1)));
+
+        pv.apply_patch(make_patch(vec![PatchOp::Update {
+            layer: 0,
+            feature: 1,
+            gate_vector_b64: Some(encode_gate_vector(&[1.0f32, 0.0])),
+            up_vector_b64: None,
+            down_vector_b64: None,
+            down_meta: Some(PatchDownMeta {
+                top_token: "revived".into(),
+                top_token_id: 7,
+                c_score: 0.6,
+            }),
+        }]));
+
+        assert!(
+            !pv.deleted.contains(&(0, 1)),
+            "Update must clear the tombstone"
+        );
+        // Both query paths agree the feature exists again.
+        assert_eq!(pv.feature_meta(0, 1).unwrap().top_token, "revived");
+        let q = ndarray::Array1::from_vec(vec![1.0_f32, 0.0]);
+        let hits = pv.gate_knn(0, &q, 1);
+        assert_eq!(hits.len(), 1, "got {hits:?}");
+        assert_eq!(hits[0].0, 1, "resurrected feature must be visible to KNN");
+    }
+
+    #[test]
+    fn update_without_meta_after_delete_drops_pinned_none_meta() {
+        // Delete pins `overrides_meta[key] = None`; an Update carrying
+        // no down_meta must not leave that pin behind after clearing
+        // the tombstone, or feature_meta() would keep reporting None
+        // for a slot gate_knn() now returns.
+        let mut pv = empty_pv();
+        pv.apply_patch(make_patch(vec![PatchOp::Delete {
+            layer: 0,
+            feature: 2,
+            reason: None,
+        }]));
+        pv.apply_patch(make_patch(vec![PatchOp::Update {
+            layer: 0,
+            feature: 2,
+            gate_vector_b64: Some(encode_gate_vector(&[0.0f32, 1.0])),
+            up_vector_b64: None,
+            down_vector_b64: None,
+            down_meta: None,
+        }]));
+        assert!(!pv.deleted.contains(&(0, 2)));
+        assert!(
+            !matches!(pv.overrides_meta.get(&(0, 2)), Some(None)),
+            "pinned-None meta override must be dropped on resurrection"
+        );
     }
 
     #[test]

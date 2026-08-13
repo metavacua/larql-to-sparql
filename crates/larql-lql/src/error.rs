@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// LQL error types.
 
 #[derive(Debug, thiserror::Error)]
@@ -18,7 +21,7 @@ impl LqlError {
     /// Accepts `&str` or owned `String` for `ctx` so callers can pass a
     /// formatted message (`format!("connect to {url}")`) without an
     /// intermediate `.as_str()` dance.
-    pub fn exec(ctx: impl Into<String>, cause: impl std::fmt::Display) -> Self {
+    pub fn exec(ctx: impl Into<String>, cause: impl core::fmt::Display) -> Self {
         LqlError::Execution(format!("{}: {cause}", ctx.into()))
     }
 }

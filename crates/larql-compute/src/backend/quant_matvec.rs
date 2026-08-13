@@ -19,6 +19,9 @@ use crate::cpu::ops::ternary_matvec::BitLinearWeight;
 use crate::QuantFormat;
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Reverse the `quantize_to_q8` block layout: each 32-element block
 /// has one f32 scale, multiplied through to recover f32 values.
 fn dequantise_q8(q8_x: &[i8], q8_scales: &[f32]) -> Vec<f32> {

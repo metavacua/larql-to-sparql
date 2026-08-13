@@ -14,22 +14,39 @@
 //! - [`honest`] — `predict_honest`, the production GPU+CPU hybrid that
 //!   `larql bench` and the streaming-demo runner use.
 
+// honest/split: predict_honest/predict_split_pass/predict_split_cached all
+// take &tokenizers::Tokenizer + &VectorIndex directly -- native-only.
+#[cfg(not(target_arch = "wasm32"))]
 mod honest;
+#[cfg(not(target_arch = "wasm32"))]
 mod split;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use honest::predict_honest;
+#[cfg(not(target_arch = "wasm32"))]
 pub use split::{predict_split_cached, predict_split_pass};
 
 use super::LayerGraph;
 use crate::model::ModelWeights;
 
-// Re-export moved functions for backward compatibility.
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
+// Re-export moved functions for backward compatibility. All native --
+// generate/finalize_logits/prefill_with_kv all require &VectorIndex or
+// &tokenizers::Tokenizer directly.
+#[cfg(not(target_arch = "wasm32"))]
 pub use super::generate::{generate, GenerateResult};
+#[cfg(not(target_arch = "wasm32"))]
 pub use super::logits::finalize_logits;
+#[cfg(not(target_arch = "wasm32"))]
 pub use super::prefill::prefill_with_kv;
 
 /// Run a full forward pass using vindex logits (KNN against lm_head mmap).
 /// Replaces the 231ms dense logits matmul with a ~1ms KNN lookup.
+///
+/// Native-only: takes `&tokenizers::Tokenizer` and `&larql_vindex::VectorIndex` directly.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_graph_vindex_logits(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -103,6 +120,10 @@ pub fn predict_with_graph_vindex_logits(
 
 /// Run a full forward pass using a LayerGraph for per-layer routing.
 /// This is the generic layer loop — embedding → layers → logits.
+///
+/// Native-only: takes `&tokenizers::Tokenizer` and calls the
+/// already-native-gated `forward::logits_to_predictions_pub`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_graph(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -128,6 +149,10 @@ pub fn predict_with_graph(
 /// 1. Runs embedding → layer loop via LayerGraph
 /// 2. Uses vindex lm_head KNN if available (eliminates 226ms logits matmul)
 /// 3. Falls back to full vocab matmul if no lm_head loaded
+///
+/// Native-only: takes `&tokenizers::Tokenizer` and `Option<&larql_vindex::VectorIndex>`,
+/// and dispatches to the two native-only functions above.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_pipeline(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,

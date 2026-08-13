@@ -6,33 +6,56 @@
 //! - [`sampling`]: greedy / temperature / top-k / top-p sampler.
 
 pub mod chat_session;
+// constrained/cpu/gpu/gpu_setup: &VectorIndex + Metal/GPU dispatch
+// throughout -- native-only. lm_head/policy split internally (their
+// VectorIndex/Sampler/Tokenizer-coupled dispatch fns are native; their
+// config structs + env-reading + pure-math helpers stay portable).
+#[cfg(not(target_arch = "wasm32"))]
 mod constrained;
+#[cfg(not(target_arch = "wasm32"))]
 mod cpu;
 pub mod detok;
 pub mod eos;
+#[cfg(not(target_arch = "wasm32"))]
 mod gpu;
+#[cfg(not(target_arch = "wasm32"))]
 mod gpu_setup;
-mod lm_head;
+pub(crate) mod lm_head;
 pub(crate) mod policy;
 pub mod sampling;
 mod types;
 
 pub use chat_session::{
-    ChatMLRenderer, ChatSession, GemmaRenderer, Llama3Renderer, TurnRenderer, DEFAULT_MAX_CONTEXT,
+    ChatMLRenderer, GemmaRenderer, Llama3Renderer, TurnRenderer, DEFAULT_MAX_CONTEXT,
 };
+// `ChatSession` wraps `tokenizers::Tokenizer` -- native-only (`tokenizers`
+// is under the native-only Cargo.toml dependency section); the renderer
+// types above are pure string templating and stay portable.
+#[cfg(not(target_arch = "wasm32"))]
+pub use chat_session::ChatSession;
+#[cfg(not(target_arch = "wasm32"))]
 pub use constrained::{
     generate_constrained, generate_constrained_streaming, generate_constrained_streaming_sampled,
     try_generate_constrained, try_generate_constrained_streaming,
     try_generate_constrained_streaming_sampled,
 };
+// `Detokenizer` wraps `tokenizers::Tokenizer` -- native-only, see detok.rs.
+#[cfg(not(target_arch = "wasm32"))]
 pub use detok::Detokenizer;
 pub use eos::{EosConfig, BUILTIN_STOP_STRINGS, GENERATION_CONFIG_FILENAME};
+#[cfg(not(target_arch = "wasm32"))]
 pub use gpu::{
     generate, generate_streaming, generate_with_sampling, stream_forced_full_logits, try_generate,
     try_generate_streaming, try_generate_with_sampling, ForcedLogitsResult,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use lm_head::lm_head_topk;
-pub use sampling::{Sampler, SamplingConfig};
+// `Sampler` needs `rand::rngs::StdRng` (`rand`'s `std_rng` feature, which
+// Cargo.toml disables for wasm32) -- native-only, see sampling.rs.
+// `SamplingConfig` is pure data and stays portable.
+#[cfg(not(target_arch = "wasm32"))]
+pub use sampling::Sampler;
+pub use sampling::SamplingConfig;
 pub use types::{GenerateError, GenerateResult, StageTimings};
 
 #[cfg(test)]

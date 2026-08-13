@@ -31,11 +31,28 @@
 //! evolution channel.
 
 #![deny(missing_docs)]
+// See crates/larql-core/src/lib.rs for the pattern-2 (own-crate-missing-
+// no_std) rationale.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate alloc;
 
+// BTreeMap (unlike HashMap) has no hasher requirement, so it's directly
+// available from alloc -- no pattern-4-style wrapper needed here.
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::BTreeMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
+// Pattern 5 (alloc-prelude-types-not-implicit): Vec/String aren't in
+// scope under no_std without an explicit import.
+#[cfg(target_arch = "wasm32")]
+use alloc::{string::String, vec::Vec};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_fixtures;
 pub mod thresholds;
 
 /// Current spec version. Manifests with a different value are rejected

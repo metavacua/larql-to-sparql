@@ -38,7 +38,7 @@ use crate::commands::primary::cache;
 /// | `none` | `NoCache` |
 ///
 /// New callers should prefer `--engine SPEC` / `LARQL_KV_ENGINE` instead
-/// — they accept the full engine catalog (MarkovResidual, UnlimitedContext,
+/// — they accept the full engine catalog (MarkovResidual, WindowedCheckpoint,
 /// TurboQuant, Apollo) not just the three legacy cache strategies.
 /// See `crates/larql-inference/docs/specs/kv-engine-unification.md` §6.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,7 +100,7 @@ pub struct RunArgs {
     ///
     /// Each value maps to an `EngineKind` internally (see `KvCacheKind`
     /// docs). For the full engine catalog (MarkovResidual,
-    /// UnlimitedContext, TurboQuant, Apollo), use `--engine` instead.
+    /// WindowedCheckpoint, TurboQuant, Apollo), use `--engine` instead.
     #[arg(long, default_value = "standard", value_parser = parse_kv_cache)]
     pub kv_cache: KvCacheKind,
 
@@ -116,9 +116,9 @@ pub struct RunArgs {
     ///   standard:window=1024        — sliding-window K/V
     ///   no-cache                    — full re-forward per step (O(N²))
     ///   markov-rs[:window=N]        — residual-stream replacement
-    ///   unlimited-context:window=N  — per-window K/V checkpoints
+    ///   windowed-checkpoint:window=N  — per-window K/V checkpoints
     ///   turbo-quant[:bits=3|4]      — WHT + Lloyd-Max codec
-    ///   apollo:layer=N,coef=F,top_k=K — boundary-residual injection (bench-only)
+    ///   apollo:layer=N,coef=F,top_k=K,bos=B — boundary-residual injection (bench-only)
     ///
     /// Falls back to the `LARQL_KV_ENGINE` env var when unset, and to
     /// the `--kv-cache` mapping when both are absent. CLI flag wins over
@@ -136,6 +136,19 @@ pub struct RunArgs {
     /// Attention runs locally; each layer's FFN is a round trip to the URL.
     #[arg(long, value_name = "URL")]
     pub ffn: Option<String>,
+
+    /// Serve the routed expert banks from a VINDEX3 container, keeping the
+    /// rest of the model (tokenizer, config, embeddings, attention, norms,
+    /// routers, dense/shared FFN, LM head) from the VINDEX2 `MODEL` argument.
+    ///
+    /// Exactly one operand source is replaced — spec §4 classes 4 and 5 —
+    /// so a comparison against the same prompt without this flag is a
+    /// statement about the routed bytes and nothing else.
+    ///
+    /// Never falls back: if the container cannot serve every routed layer the
+    /// model needs, the run is refused before the prompt is encoded.
+    #[arg(long, value_name = "DIR")]
+    pub routed_from: Option<String>,
 
     /// HTTP timeout in seconds for --ffn.
     #[arg(long, default_value = "60")]
@@ -281,9 +294,63 @@ pub struct RunArgs {
     /// key prefix.
     #[arg(long, value_name = "DIR")]
     pub mm_weights: Option<PathBuf>,
+
+    /// Speak the prompt: run the model as a speech generator
+    /// (MOSS-TTS-Realtime) and synthesise audio tokens instead of text.
+    /// Pure TTS — the prompt is what gets said, no chat LLM in front.
+    /// `model` is the checkpoint's safetensors directory until the model
+    /// moves into the vindex (TTS funnel step 6).
+    #[arg(long)]
+    pub speak: bool,
+
+    /// Voice reference for `--speak`: a token-rows file produced by the
+    /// external codec's encode mode (one frame per line). Omit for the
+    /// model's unconditioned voice.
+    #[arg(long, value_name = "TOKENS")]
+    pub voice: Option<PathBuf>,
+
+    /// External codec command for `--speak`, with `{tokens}` and `{wav}`
+    /// placeholders (falls back to $LARQL_MOSS_CODEC_CMD). Without it,
+    /// audio tokens are written and WAV synthesis is skipped.
+    #[arg(long, value_name = "CMD")]
+    pub codec_cmd: Option<String>,
+
+    /// Output WAV path for `--speak` (default: speech.wav).
+    #[arg(long, value_name = "WAV")]
+    pub speech_out: Option<PathBuf>,
+
+    /// Play the synthesised WAV after codec decode (`--speak`, macOS).
+    #[arg(long)]
+    pub play: bool,
+
+    /// Frame cap for `--speak` (12.5 frames per second of audio).
+    #[arg(long, default_value = "1500")]
+    pub max_frames: usize,
+
+    /// Greedy decoding for `--speak` (parity/debug). Default is the
+    /// reference's sampled mode — greedy does not terminate reliably on
+    /// novel text.
+    #[arg(long)]
+    pub greedy: bool,
+
+    /// RNG seed for `--speak` sampled mode (reproducible synthesis).
+    #[arg(long, default_value = "0")]
+    pub seed: u64,
+
+    /// Quantise FFN weights to Q4_K for `--speak` (both transformers;
+    /// attention stays fp32). The realtime experiment of
+    /// docs/tts-funnel.md — check voice quality before trusting speed.
+    #[arg(long)]
+    pub q4: bool,
 }
 
 pub fn run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
+    // Speech mode routes before vindex resolution: the speech model lives
+    // in its safetensors directory until TTS funnel step 6.
+    if args.speak {
+        return super::run_cmd_speak::run_speak(&args);
+    }
+
     let vindex_path = cache::resolve_model(&args.model)?;
     if !vindex_path.is_dir() {
         return Err(format!(
@@ -306,6 +373,14 @@ pub fn run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(false)
     {
         return run_bitnet(&vindex_path, &args);
+    }
+
+    if let Some(ref routed_dir) = args.routed_from {
+        let prompt = args
+            .prompt
+            .as_deref()
+            .ok_or("--routed-from requires a prompt argument (chat mode not yet supported)")?;
+        return run_with_routed_container(&vindex_path, routed_dir, prompt, args.max_tokens);
     }
 
     if let Some(ref ffn_url) = args.ffn {
@@ -568,7 +643,7 @@ fn run_with_moe_shards(
     // `ffn` trait (where `RemoteMoeFfn` hooks the experts): `standard` and
     // `boundary_kv` (which wraps a StandardEngine and adds compressed-residual
     // boundary frames — same dispatch, wire-efficient cold-context). The
-    // compression engines (markov_residual / turbo_quant / unlimited_context /
+    // compression engines (markov_residual / turbo_quant / windowed_checkpoint /
     // boundary_per_layer) route FFN through the backend's fused coarse path, and
     // apollo/no_cache re-forward — none have a remote-expert hook, so they'd
     // silently drop experts. Reject them clearly.
@@ -579,7 +654,7 @@ fn run_with_moe_shards(
             kind,
             larql_kv::EngineKind::Standard { .. }
                 | larql_kv::EngineKind::BoundaryKv { .. }
-                | larql_kv::EngineKind::UnlimitedContext { .. }
+                | larql_kv::EngineKind::WindowedCheckpoint { .. }
                 | larql_kv::EngineKind::MarkovResidual { .. }
                 | larql_kv::EngineKind::MarkovResidualCodec { .. }
                 | larql_kv::EngineKind::TurboQuant { .. }
@@ -587,7 +662,7 @@ fn run_with_moe_shards(
         ) {
             return Err(format!(
                 "`--engine {}` is not supported with remote MoE (--moe-shards). Supported: \
-                 standard, boundary, unlimited-context, markov-rs, markov-residual-codec, \
+                 standard, boundary, windowed-checkpoint, markov-rs, markov-residual-codec, \
                  turbo-quant, boundary-per-layer (they dispatch FFN per-layer through the ffn \
                  trait where experts hook in). `no-cache` / `apollo` re-forward and would \
                  multiply expert round-trips. See larql-kv ROADMAP §\"MoE-aware KV engines (C1)\".",
@@ -644,22 +719,10 @@ fn run_with_moe_shards(
 
     let num_shards = configs.len();
     // Initialise compute backend early so we can report it in the topology banner.
-    // Mirrors the `--metal` wiring in `run_with_remote_ffn` (PR #122): explicit
-    // opt-in via the CLI flag, with Metal-init failure falling back to CPU.
-    let backend: Box<dyn larql_compute::ComputeBackend> = if metal {
-        #[cfg(all(feature = "gpu", target_os = "macos"))]
-        {
-            larql_compute_metal::metal_backend()
-                .map(|m| Box::new(m) as Box<dyn larql_compute::ComputeBackend>)
-                .unwrap_or_else(larql_compute::cpu_backend)
-        }
-        #[cfg(not(all(feature = "gpu", target_os = "macos")))]
-        {
-            return Err("`--metal` requires the `gpu` feature on macOS".into());
-        }
-    } else {
-        larql_compute::cpu_backend()
-    };
+    // An explicit `--metal` with no usable Metal device is a loud error, not a
+    // CPU fallback — see `backend_select`.
+    let backend: Box<dyn larql_compute::ComputeBackend> =
+        crate::backend_select::backend_for_metal_flag(metal)?;
     eprintln!("Connecting to {} MoE shard(s)…", num_shards);
     let remote = RemoteMoeBackend::connect(configs)
         .map_err(|e| format!("failed to connect to MoE shards: {e}"))?;
@@ -711,16 +774,19 @@ fn run_with_moe_shards(
         .map_err(|e| format!("failed to tokenise prompt: {e}"))?;
     eprintln!("[chat] tokenised to {} ids", prompt_ids.len());
 
-    // Backend-aware dispatch. The Metal backend implements the fused
-    // `DecodeBackend::decode_token_with_moe` trait method; the CPU backend
-    // does not (it is a GPU-only trait method that returns `None`), which
-    // previously surfaced as "decode_token_with_moe returned None during
-    // prefill" whenever `--metal` was omitted (#146). On CPU we route through
-    // the CPU remote-MoE forward instead: per-token
-    // `predict_kquant_hidden(Some(remote))` → `run_moe_layer_cpu` →
-    // `forward_moe_seq`, which dispatches each MoE layer's experts to the
-    // shards over HTTP.
-    let (tokens, decode_ms): (Vec<String>, Vec<f64>) = if metal {
+    // Backend-aware dispatch, probed on the constructed backend instance
+    // rather than the `--metal` flag: backends that implement the fused
+    // `DecodeBackend::decode_token_with_moe` trait method (Metal today,
+    // CUDA post-G-ladder) take the fused path; backends that don't (CPU —
+    // the method returns `None`, which previously surfaced as
+    // "decode_token_with_moe returned None during prefill" whenever
+    // `--metal` was omitted, #146) route through the CPU remote-MoE
+    // forward instead: per-token `predict_kquant_hidden(Some(remote))` →
+    // `run_moe_layer_cpu` → `forward_moe_seq`, which dispatches each MoE
+    // layer's experts to the shards over HTTP.
+    let (tokens, decode_ms): (Vec<String>, Vec<f64>) = if backend
+        .supports(larql_compute::Capability::DecodeMoe)
+    {
         let eos =
             larql_inference::layer_graph::generate::eos::EosConfig::from_vindex_dir(vindex_path);
         let result = if dispatch == "batch" {
@@ -767,6 +833,8 @@ fn run_with_moe_shards(
                 );
             }
             let started = std::time::Instant::now();
+            // Fatal by policy: a shard failure aborts the run rather than
+            // finishing the sentence from a model missing an expert layer.
             let toks = generate_kquant_cpu_remote(
                 &mut weights,
                 &tokenizer,
@@ -774,7 +842,8 @@ fn run_with_moe_shards(
                 max_tokens,
                 &index,
                 &remote,
-            );
+            )
+            .map_err(|e| format!("remote MoE dispatch failed, generation aborted: {e}"))?;
             let total_ms = started.elapsed().as_secs_f64() * 1000.0;
             let strings: Vec<String> = toks.into_iter().map(|(s, _)| s).collect();
             let n = strings.len();
@@ -896,6 +965,82 @@ fn run_with_moe_shards(
     Ok(())
 }
 
+/// `--routed-from DIR` — routed expert banks served from a VINDEX3 container.
+///
+/// The composition, precisely:
+///
+/// ```text
+/// VINDEX2 model   tokenizer, config, embeddings, attention, norms,
+///                 routers, dense/shared FFN, LM head
+/// VINDEX3 dir     routed gate/up and routed down banks  (spec §4 classes 4-5)
+/// ```
+///
+/// Everything but the routed banks is read exactly as an ordinary run reads
+/// it, so the same prompt without the flag is a controlled comparison: the
+/// only variable is where the expert bytes came from.
+///
+/// This is a *composed* run, not a VINDEX3 model. A container holding only
+/// routed banks has no tokenizer and no spine; `larql run <vindex3-dir>` is
+/// still correctly refused. Container completeness is a separate rung.
+fn run_with_routed_container(
+    vindex_path: &std::path::Path,
+    routed_dir: &str,
+    prompt: &str,
+    max_tokens: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let routed_path = std::path::Path::new(routed_dir);
+
+    let mut cb = larql_vindex::SilentLoadCallbacks;
+    let mut weights = larql_vindex::load_model_weights_kquant(vindex_path, &mut cb)
+        .map_err(|e| format!("failed to load spine weights: {e}"))?;
+    let tokenizer = larql_vindex::load_vindex_tokenizer(vindex_path)
+        .map_err(|e| format!("failed to load tokenizer: {e}"))?;
+    let mut index = larql_vindex::VectorIndex::load_vindex(vindex_path, &mut cb)
+        .map_err(|e| format!("failed to load vindex: {e}"))?;
+    index
+        .load_attn_kquant(vindex_path)
+        .map_err(|e| format!("failed to load attn Q4K: {e}"))?;
+    index
+        .load_interleaved_kquant(vindex_path)
+        .map_err(|e| format!("failed to load interleaved Q4K: {e}"))?;
+    let _ = index.load_lm_head_kquant(vindex_path);
+
+    // Compose *before* the prompt is encoded. Every shape, count and region is
+    // checked here, so a mismatch is reported against two named artifacts
+    // rather than surfacing as a wrong number seventeen layers into a forward
+    // pass that has already printed part of an answer.
+    let routed = larql_inference::ffn::ContainerRoutedBackend::open(routed_path, &weights, true)
+        .map_err(|e| format!("--routed-from refused: {e}"))?;
+    eprintln!("{}", routed.describe(vindex_path));
+
+    let wrapped_prompt =
+        larql_inference::chat::render_user_prompt(vindex_path, weights.arch.family(), prompt)?;
+    let prompt_ids = larql_inference::encode_prompt(&tokenizer, &*weights.arch, &wrapped_prompt)
+        .map_err(|e| format!("failed to tokenise prompt: {e}"))?;
+
+    let started = std::time::Instant::now();
+    let toks = larql_inference::vindex::generate_kquant_cpu_routed(
+        &mut weights,
+        &tokenizer,
+        &prompt_ids,
+        max_tokens,
+        &index,
+        &routed,
+    )
+    .map_err(|e| format!("routed container dispatch failed, generation aborted: {e}"))?;
+    let total_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    let text: String = toks.iter().map(|(t, _)| t.as_str()).collect();
+    println!("{text}");
+    let n = toks.len();
+    eprintln!(
+        "\n  {n} token(s) in {:.0} ms ({:.0} ms/token)",
+        total_ms,
+        if n == 0 { 0.0 } else { total_ms / n as f64 }
+    );
+    Ok(())
+}
+
 /// `--ffn URL` dispatch path for dense models.
 ///
 /// Metal runs attention on the local GPU. Every layer's FFN is a round trip
@@ -921,20 +1066,8 @@ fn run_with_remote_ffn(
     use std::time::Duration;
 
     let timeout = Duration::from_secs(ffn_timeout_secs);
-    let backend: Box<dyn larql_compute::ComputeBackend> = if metal {
-        #[cfg(all(feature = "gpu", target_os = "macos"))]
-        {
-            larql_compute_metal::metal_backend()
-                .map(|m| Box::new(m) as Box<dyn larql_compute::ComputeBackend>)
-                .unwrap_or_else(larql_compute::cpu_backend)
-        }
-        #[cfg(not(all(feature = "gpu", target_os = "macos")))]
-        {
-            return Err("`--metal` requires the `gpu` feature on macOS".into());
-        }
-    } else {
-        larql_compute::cpu_backend()
-    };
+    let backend: Box<dyn larql_compute::ComputeBackend> =
+        crate::backend_select::backend_for_metal_flag(metal)?;
     eprintln!("Connecting to remote FFN at {ffn_url}…");
     let remote = LayerShardedBackend::connect(ffn_url, timeout)
         .map_err(|e| format!("failed to connect to remote FFN server: {e}"))?;
@@ -1067,9 +1200,10 @@ mod experts {
         }
     }
 
-    /// Resolved runtime — model + index + chosen strategy. Lives across
-    /// REPL turns so loads only happen once.
+    /// Resolved runtime — model + index + backend + chosen strategy. Lives
+    /// across REPL turns so loads (and Metal init) only happen once.
     struct Runtime {
+        backend: Box<dyn larql_compute::ComputeBackend>,
         weights: larql_inference::ModelWeights,
         tokenizer: tokenizers::Tokenizer,
         index: Option<VectorIndex>,
@@ -1113,7 +1247,7 @@ mod experts {
             let text = match self.strategy {
                 Strategy::MetalQ4K => {
                     let index = self.index.as_ref().expect("metal-q4k needs index");
-                    let backend = larql_compute::default_backend();
+                    let backend = self.backend.as_ref();
                     let cached_layers =
                         larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
                     let num_layers = self.weights.num_layers;
@@ -1126,7 +1260,7 @@ mod experts {
                             &token_ids,
                             max_tokens,
                             index,
-                            &*backend,
+                            backend,
                             &cached_layers,
                             0..num_layers,
                             |ids, logits| mask.apply(ids, logits),
@@ -1138,7 +1272,7 @@ mod experts {
                             &token_ids,
                             max_tokens,
                             index,
-                            &*backend,
+                            backend,
                             &cached_layers,
                             0..num_layers,
                         )
@@ -1284,15 +1418,9 @@ mod experts {
         }
     }
 
-    /// Whether the active compute backend can serve Q4 work-sets via Metal.
-    /// Wraps the impure `default_backend()` call so [`pick_strategy`] stays pure.
-    fn metal_ready_for_q4(want_metal: bool) -> bool {
-        want_metal
-            && larql_compute::default_backend().supports_quant(::larql_compute::QuantFormat::Q4_K)
-    }
-
     /// Pure strategy selector: given the vindex quant format and whether
-    /// Metal is available + requested, pick a decode strategy.
+    /// the constructed backend has a fused Q4 decode pipeline, pick a
+    /// decode strategy.
     fn pick_strategy(quant: larql_vindex::QuantFormat, metal_ready: bool) -> Strategy {
         match (quant, metal_ready) {
             (larql_vindex::QuantFormat::Q4K, true) => Strategy::MetalQ4K,
@@ -1305,7 +1433,16 @@ mod experts {
     fn load_runtime(vindex_path: &Path, args: &RunArgs) -> Result<Runtime, BoxErr> {
         let mut cb = SilentLoadCallbacks;
         let cfg = larql_vindex::load_vindex_config(vindex_path)?;
-        let strategy = pick_strategy(cfg.quant, metal_ready_for_q4(args.metal));
+        // Build the backend first, then probe the *instance* for the fused
+        // Q4 decode pipeline (the canonical PrefillQ4 + DecodeToken pair).
+        // The old `metal_ready_for_q4` probed `default_backend()` — always
+        // CPU since ADR-019, whose `supports_quant(Q4_K)` is `true` — so it
+        // reduced to `== args.metal` and the "metal-q4k" strategy then ran
+        // on a CPU backend.
+        let backend = crate::backend_select::backend_for_metal_flag(args.metal)?;
+        let fused_q4_ready = backend.supports(larql_compute::Capability::PrefillQ4)
+            && backend.supports(larql_compute::Capability::DecodeToken);
+        let strategy = pick_strategy(cfg.quant, fused_q4_ready);
 
         if args.verbose {
             eprintln!(
@@ -1336,6 +1473,7 @@ mod experts {
         };
         let tokenizer = load_vindex_tokenizer(vindex_path)?;
         Ok(Runtime {
+            backend,
             weights,
             tokenizer,
             index,

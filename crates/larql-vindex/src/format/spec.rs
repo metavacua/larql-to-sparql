@@ -29,6 +29,9 @@ use crate::config::dtype::StorageDtype;
 use crate::config::index::{ExtractLevel, VindexConfig, VindexLayerInfo, VindexSource};
 use crate::config::quantization::QuantFormat;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Errors returned by [`VindexManifest::try_from`] when `VindexConfig`
 /// is missing fields v1 requires.
 #[derive(Debug, thiserror::Error)]

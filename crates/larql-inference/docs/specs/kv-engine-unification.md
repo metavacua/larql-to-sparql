@@ -479,7 +479,7 @@ byte-for-byte.
   `larql-inference` (calls `generate_with_engine`), so
   `larql-inference` core code never names `larql-kv`. The only
   remaining consumer in `larql-inference/` is
-  `examples/apollo_rd_backend.rs`, which justifies the dev-dep.
+  `crates/larql-demos/examples/inference/apollo_rd_backend.rs`, which justifies the dev-dep.
 
 ### 8.8 Rollback
 

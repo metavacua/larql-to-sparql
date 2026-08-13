@@ -7,6 +7,9 @@
 //! - Tensor key pattern: experts under mlp.experts.{id}, shared under mlp.shared_experts
 
 use crate::config::{ModelArchitecture, ModelConfig};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+use crate::tensor_keys::moe_experts;
 
 pub struct DeepSeekArch {
     config: ModelConfig,
@@ -46,28 +49,19 @@ impl ModelArchitecture for DeepSeekArch {
     }
 
     fn moe_router_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}mlp.gate.weight", self.layer_prefix(layer)))
+        moe_experts::router(&self.layer_prefix(layer))
     }
 
     fn expert_ffn_gate_key(&self, layer: usize, expert_id: usize) -> Option<String> {
-        Some(format!(
-            "{}mlp.experts.{expert_id}.gate_proj.weight",
-            self.layer_prefix(layer)
-        ))
+        moe_experts::gate_proj(&self.layer_prefix(layer), expert_id)
     }
 
     fn expert_ffn_up_key(&self, layer: usize, expert_id: usize) -> Option<String> {
-        Some(format!(
-            "{}mlp.experts.{expert_id}.up_proj.weight",
-            self.layer_prefix(layer)
-        ))
+        moe_experts::up_proj(&self.layer_prefix(layer), expert_id)
     }
 
     fn expert_ffn_down_key(&self, layer: usize, expert_id: usize) -> Option<String> {
-        Some(format!(
-            "{}mlp.experts.{expert_id}.down_proj.weight",
-            self.layer_prefix(layer)
-        ))
+        moe_experts::down_proj(&self.layer_prefix(layer), expert_id)
     }
 
     fn shared_expert_gate_key(&self, layer: usize) -> Option<String> {

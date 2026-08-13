@@ -4,6 +4,9 @@
 //! The actual DESCRIBE logic lives in the executor (larql-lql), but these
 //! types are vindex-level so they can be shared across consumers.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Source of a relation label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelSource {
@@ -19,8 +22,8 @@ pub enum LabelSource {
     KnnStore,
 }
 
-impl std::fmt::Display for LabelSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for LabelSource {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Probe => write!(f, "probe"),
             Self::Cluster => write!(f, "cluster"),

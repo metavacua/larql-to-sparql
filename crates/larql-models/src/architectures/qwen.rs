@@ -6,6 +6,9 @@
 //! - Qwen3 MoE: router at `mlp.gate.weight`, per-expert `mlp.experts.{E}.{gate,up,down}_proj.weight`
 
 use crate::config::{ModelArchitecture, ModelConfig};
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+use crate::tensor_keys::{attn_bias, moe_experts, qk_norm};
 
 pub struct QwenArch {
     config: ModelConfig,
@@ -51,37 +54,28 @@ impl ModelArchitecture for QwenArch {
         if !self.is_moe() {
             return None;
         }
-        Some(format!("{}mlp.gate.weight", self.layer_prefix(layer)))
+        moe_experts::router(&self.layer_prefix(layer))
     }
 
     fn expert_ffn_gate_key(&self, layer: usize, expert_id: usize) -> Option<String> {
         if !self.is_moe() {
             return None;
         }
-        Some(format!(
-            "{}mlp.experts.{expert_id}.gate_proj.weight",
-            self.layer_prefix(layer)
-        ))
+        moe_experts::gate_proj(&self.layer_prefix(layer), expert_id)
     }
 
     fn expert_ffn_up_key(&self, layer: usize, expert_id: usize) -> Option<String> {
         if !self.is_moe() {
             return None;
         }
-        Some(format!(
-            "{}mlp.experts.{expert_id}.up_proj.weight",
-            self.layer_prefix(layer)
-        ))
+        moe_experts::up_proj(&self.layer_prefix(layer), expert_id)
     }
 
     fn expert_ffn_down_key(&self, layer: usize, expert_id: usize) -> Option<String> {
         if !self.is_moe() {
             return None;
         }
-        Some(format!(
-            "{}mlp.experts.{expert_id}.down_proj.weight",
-            self.layer_prefix(layer)
-        ))
+        moe_experts::down_proj(&self.layer_prefix(layer), expert_id)
     }
 
     // ── QK norms (Qwen3) ──
@@ -89,31 +83,25 @@ impl ModelArchitecture for QwenArch {
     // the forward pass checks if the vector exists before using it.
 
     fn attn_q_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.q_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.k_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::k(&self.layer_prefix(layer))
     }
 
     // ── Attention bias (Qwen2/2.5 only; absent in Qwen3) ──
     // Returning keys for absent tensors is harmless.
 
     fn attn_q_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.q_proj.bias", self.layer_prefix(layer)))
+        attn_bias::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.k_proj.bias", self.layer_prefix(layer)))
+        attn_bias::k(&self.layer_prefix(layer))
     }
 
     fn attn_v_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.v_proj.bias", self.layer_prefix(layer)))
+        attn_bias::v(&self.layer_prefix(layer))
     }
 }

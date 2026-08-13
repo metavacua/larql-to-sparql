@@ -5,6 +5,9 @@
 //! caller's model + tokenizer state. See `BOUNDARY_REF_PROTOCOL.md` §10.4 for
 //! the receiver-side mismatch semantics.
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Identity fields embedded in every emitted boundary frame.
 ///
 /// `model_revision` is the canonical identity for mismatch checks (it should

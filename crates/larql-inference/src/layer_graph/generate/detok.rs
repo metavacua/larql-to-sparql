@@ -15,12 +15,22 @@
 //! Multi-byte UTF-8 characters that straddle a token boundary are handled
 //! by snapping the slice point to the next char boundary before emitting.
 
+// `tokenizers::Tokenizer` is a native-only dependency: Cargo.toml puts
+// `tokenizers = "0.21"` under the `[target.'cfg(not(target_arch =
+// "wasm32"))'.dependencies]` section, so the crate isn't even available
+// on wasm32. `Detokenizer`'s only purpose is decoding through a
+// `Tokenizer`, so the whole struct/impl is native-only -- nothing
+// portable remains in this file.
+#[cfg(not(target_arch = "wasm32"))]
 use tokenizers::Tokenizer;
 
 /// Stateful, single-stream incremental detokeniser.
 ///
 /// One instance per generation call. Not `Sync` — clone the underlying
 /// tokenizer if multiple streams are decoded in parallel.
+///
+/// Native-only: wraps a `&Tokenizer` (see the `tokenizers` import note above).
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Detokenizer<'a> {
     tokenizer: &'a Tokenizer,
     skip_special: bool,
@@ -29,6 +39,7 @@ pub struct Detokenizer<'a> {
     emitted: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> Detokenizer<'a> {
     /// Create a new detokeniser. `skip_special` controls the
     /// `skip_special_tokens` flag passed to the underlying decoder; `true`
@@ -104,7 +115,10 @@ impl<'a> Detokenizer<'a> {
     }
 }
 
+// Every test here exercises Detokenizer/Tokenizer, so the whole module
+// is gated alongside them.
 #[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use super::*;
 

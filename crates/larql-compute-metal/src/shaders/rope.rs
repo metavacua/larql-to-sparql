@@ -3,6 +3,16 @@
 //! Split-half pairing: rotates (x[i], x[i + half_dim]) pairs.
 //! Matches HuggingFace default and MLX traditional=False.
 //!
+//! ## Frequencies come from the host, not from `pow` in-shader
+//!
+//! The rope-bearing kernels take an `inv_freq` buffer and an `amplitude`
+//! scalar, precomputed by `larql_compute::attention::rope::rope_freq_plan` —
+//! the same function the CPU path uses. Deriving `1/base^(2d/rdim)` in-shader
+//! is what let Metal decode ignore llama3, YaRN *and* Gemma 3's linear
+//! position divisor while Metal prefill honoured all three
+//! (`docs/k3-funnel.md` §4.10). A kernel that cannot see `rope_base` cannot
+//! forget to scale it.
+//!
 //! Both kernels support partial rotation via `rotary_dim`:
 //! only the first `rotary_dim` dimensions are rotated, the rest pass through.
 //! Gemma 4 global layers use 25% rotation (rotary_dim = head_dim * 0.25).
@@ -32,19 +42,19 @@ pub const SHADER: &str = r#"
 kernel void rope_at_pos(
     device float* x           [[buffer(0)]],   // [dim] — modified in-place (one head)
     constant uint&  dim       [[buffer(1)]],   // head_dim
-    constant float& base      [[buffer(2)]],   // rope_theta
+    device const float* inv_freq [[buffer(2)]], // [rotary_dim/2], host-computed
     constant uint&  pos       [[buffer(3)]],   // absolute position in sequence
     constant uint&  rotary_dim[[buffer(4)]],   // dimensions to rotate (≤ dim). 0 = use dim.
+    constant float& amplitude [[buffer(5)]],   // cos/sin scalar (YaRN); 1.0 otherwise
     uint tid [[thread_position_in_grid]])
 {
     uint rdim = (rotary_dim == 0) ? dim : min(rotary_dim, dim);
     uint hdim = rdim / 2;
     if (tid >= hdim) return;
 
-    float freq = 1.0f / pow(base, float(2 * tid) / float(rdim));
-    float angle = float(pos) * freq;
-    float cos_a = cos(angle);
-    float sin_a = sin(angle);
+    float angle = float(pos) * inv_freq[tid];
+    float cos_a = cos(angle) * amplitude;
+    float sin_a = sin(angle) * amplitude;
 
     float re = x[tid];
     float im = x[tid + hdim];
@@ -61,8 +71,9 @@ kernel void rope_at_pos(
 kernel void rope_apply(
     device float* x           [[buffer(0)]],   // [seq_len, dim] — modified in-place
     constant uint&  dim       [[buffer(1)]],
-    constant float& base      [[buffer(2)]],   // rope_theta (e.g., 10000.0 or 1000000.0)
+    device const float* inv_freq [[buffer(2)]], // [rotary_dim/2], host-computed
     constant uint&  rotary_dim[[buffer(3)]],   // dimensions to rotate (≤ dim). 0 = use dim.
+    constant float& amplitude [[buffer(4)]],   // cos/sin scalar (YaRN); 1.0 otherwise
     uint2 tid [[thread_position_in_grid]])
 {
     uint rdim = (rotary_dim == 0) ? dim : min(rotary_dim, dim);
@@ -71,10 +82,9 @@ kernel void rope_apply(
     uint hdim = rdim / 2;
     if (d >= hdim) return;
 
-    float freq = 1.0f / pow(base, float(2 * d) / float(rdim));
-    float angle = float(pos) * freq;
-    float cos_a = cos(angle);
-    float sin_a = sin(angle);
+    float angle = float(pos) * inv_freq[d];
+    float cos_a = cos(angle) * amplitude;
+    float sin_a = sin(angle) * amplitude;
 
     uint idx_re = pos * dim + d;
     uint idx_im = pos * dim + d + hdim;
@@ -91,10 +101,11 @@ kernel void rope_apply(
 kernel void rope_at_pos_batched(
     device float*       x          [[buffer(0)]],   // [num_heads, head_dim] — in-place
     constant uint&      head_dim   [[buffer(1)]],
-    constant float&     base       [[buffer(2)]],
+    device const float* inv_freq   [[buffer(2)]],  // [rotary_dim/2]
     constant uint&      pos        [[buffer(3)]],
     constant uint&      rotary_dim [[buffer(4)]],
     constant uint&      num_heads  [[buffer(5)]],
+    constant float&     amplitude  [[buffer(6)]],
     uint2 tid [[thread_position_in_grid]])
 {
     uint d  = tid.x;   // pair index within head
@@ -104,10 +115,9 @@ kernel void rope_at_pos_batched(
     uint hdim = rdim / 2;
     if (d >= hdim) return;
 
-    float freq  = 1.0f / pow(base, float(2 * d) / float(rdim));
-    float angle = float(pos) * freq;
-    float cos_a = cos(angle);
-    float sin_a = sin(angle);
+    float angle = float(pos) * inv_freq[d];
+    float cos_a = cos(angle) * amplitude;
+    float sin_a = sin(angle) * amplitude;
 
     uint base_idx = h * head_dim;
     float re = x[base_idx + d];
@@ -123,10 +133,11 @@ kernel void rope_at_pos_batched_qk(
     device float*       Q          [[buffer(0)]],   // [num_q_heads * head_dim]
     device float*       K          [[buffer(1)]],   // [num_kv_heads * head_dim]
     constant uint&      head_dim   [[buffer(2)]],
-    constant float&     rope_base  [[buffer(3)]],
+    device const float* inv_freq   [[buffer(3)]],  // [rotary_dim/2]
     constant uint&      pos        [[buffer(4)]],
     constant uint&      rotary_dim [[buffer(5)]],
     constant uint&      num_q      [[buffer(6)]],   // q heads count
+    constant float&     amplitude  [[buffer(7)]],
     uint2 tid [[thread_position_in_grid]])
 {
     uint d = tid.x;   // pair index
@@ -141,10 +152,9 @@ kernel void rope_at_pos_batched_qk(
     device float* x = is_q ? Q : K;
     uint base_idx = local_h * head_dim;
 
-    float freq  = 1.0f / pow(rope_base, float(2u * d) / float(rdim));
-    float angle = float(pos) * freq;
-    float cos_a = cos(angle);
-    float sin_a = sin(angle);
+    float angle = float(pos) * inv_freq[d];
+    float cos_a = cos(angle) * amplitude;
+    float sin_a = sin(angle) * amplitude;
 
     float re = x[base_idx + d];
     float im = x[base_idx + d + hdim];

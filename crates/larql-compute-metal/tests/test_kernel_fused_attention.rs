@@ -145,7 +145,21 @@ fn fused_attention_matches_cpu_reference() {
     enc.set_bytes(6, 4, &num_q as *const u32 as *const std::ffi::c_void);
     enc.set_bytes(7, 4, &num_kv as *const u32 as *const std::ffi::c_void);
     enc.set_bytes(8, 4, &scale as *const f32 as *const std::ffi::c_void);
-    enc.set_bytes(9, 4, &rope_base as *const f32 as *const std::ffi::c_void);
+    // Buffer 9 is the frequency *table*, not `rope_base` — the kernels stopped
+    // deriving frequencies in-shader so they could not go on silently ignoring
+    // every scaling family (docs/k3-funnel.md §4.10). Unscaled here, which is
+    // what this fixture's CPU reference computes.
+    let rope_plan = larql_compute::attention::rope::RopeFreqPlan::unscaled(
+        head_dim as usize,
+        0,
+        rope_base as f64,
+    );
+    let inv_freq = rope_plan.inv_freq_f32();
+    enc.set_bytes(
+        9,
+        std::mem::size_of_val(&inv_freq[..]) as u64,
+        inv_freq.as_ptr() as *const std::ffi::c_void,
+    );
     enc.set_bytes(10, 4, &use_qk_norm as *const u32 as *const std::ffi::c_void);
     enc.set_bytes(11, 4, &softcap as *const f32 as *const std::ffi::c_void);
     let skip_rope_val = 0u32;
@@ -159,6 +173,19 @@ fn fused_attention_matches_cpu_reference() {
         13,
         4,
         &rotary_dim_val as *const u32 as *const std::ffi::c_void,
+    );
+    // Buffer 16: cos/sin amplitude (YaRN); 1.0 for an unscaled fixture.
+    let amplitude = rope_plan.amplitude as f32;
+    enc.set_bytes(16, 4, &amplitude as *const f32 as *const std::ffi::c_void);
+    // Buffers 14/15: attention sinks. Bound even when unused — Metal has
+    // no null buffer, and an unbound `has_sinks` would be read as garbage.
+    let no_sinks = [0.0f32];
+    enc.set_bytes(14, 4, no_sinks.as_ptr() as *const std::ffi::c_void);
+    let has_sinks_val = 0u32;
+    enc.set_bytes(
+        15,
+        4,
+        &has_sinks_val as *const u32 as *const std::ffi::c_void,
     );
     enc.dispatch_thread_groups(
         metal::MTLSize::new(num_q as u64, seq_len as u64, 1),
@@ -311,6 +338,14 @@ fn fused_attention_head_dim_512() {
     enc.set_bytes(11, 4, &softcap as *const f32 as *const std::ffi::c_void);
     enc.set_bytes(12, 4, &skip_rope as *const u32 as *const std::ffi::c_void);
     enc.set_bytes(13, 4, &rotary_dim as *const u32 as *const std::ffi::c_void);
+    let no_sinks = [0.0f32];
+    enc.set_bytes(14, 4, no_sinks.as_ptr() as *const std::ffi::c_void);
+    let has_sinks_val = 0u32;
+    enc.set_bytes(
+        15,
+        4,
+        &has_sinks_val as *const u32 as *const std::ffi::c_void,
+    );
     enc.dispatch_thread_groups(
         metal::MTLSize::new(num_q as u64, seq_len as u64, 1),
         metal::MTLSize::new(256, 1, 1),
@@ -356,5 +391,145 @@ fn fused_attention_head_dim_512() {
         cos > 0.999999,
         "fused_attention@head_dim=512 cos_sim {cos:.6} below 0.999999 — \
          subtle kernel drift that compounds across layers",
+    );
+}
+
+// ── Attention sinks (GPT-OSS) ────────────────────────────────────────────
+
+/// The Metal kernel must reproduce the reference sink formulation:
+/// concatenate the per-head sink to the causal logits, softmax jointly,
+/// then drop the sink column — so the emitted weights sum to less than
+/// one. Verified against a CPU reference computed here.
+/// See `docs/k3-funnel.md` §4.6.
+#[test]
+fn fused_attention_with_sinks_matches_cpu_reference() {
+    let Some(device) = metal::Device::system_default() else {
+        return;
+    };
+    let src = larql_compute_metal::shaders::all_shaders();
+    let lib = device
+        .new_library_with_source(&src, &metal::CompileOptions::new())
+        .unwrap();
+    let pipeline = device
+        .new_compute_pipeline_state_with_function(
+            &lib.get_function("fused_attention", None).unwrap(),
+        )
+        .unwrap();
+    let queue = device.new_command_queue();
+
+    let (seq_len, head_dim, num_q, num_kv) = (3u32, 8u32, 2u32, 2u32);
+    let scale = 1.0f32 / (head_dim as f32).sqrt();
+    // Real values from gpt-oss-20b: mean +2.45, max +8.19.
+    let sinks = [2.45f32, 8.19f32];
+
+    let total = (seq_len * num_q * head_dim) as usize;
+    let kv_total = (seq_len * num_kv * head_dim) as usize;
+    let q: Vec<f32> = (0..total)
+        .map(|i| (i as f32 * 0.37 + 1.0).sin() * 0.5)
+        .collect();
+    let k: Vec<f32> = (0..kv_total)
+        .map(|i| (i as f32 * 0.29 + 2.0).cos() * 0.5)
+        .collect();
+    let v: Vec<f32> = (0..kv_total)
+        .map(|i| (i as f32 * 0.19 + 3.0).sin() * 0.5)
+        .collect();
+
+    // ── CPU reference: sink joins the softmax, then is discarded ──
+    let mut cpu_out = vec![0.0f32; total];
+    for head in 0..num_q as usize {
+        let kv_head = head / (num_q / num_kv) as usize;
+        let sink = sinks[head] as f64;
+        for qi in 0..seq_len as usize {
+            let mut logits = Vec::new();
+            for ki in 0..=qi {
+                let mut dot = 0.0f32;
+                for d in 0..head_dim as usize {
+                    dot += q[qi * (num_q * head_dim) as usize + head * head_dim as usize + d]
+                        * k[ki * (num_kv * head_dim) as usize + kv_head * head_dim as usize + d];
+                }
+                logits.push((dot * scale) as f64);
+            }
+            let m = logits.iter().copied().fold(sink, f64::max);
+            let exps: Vec<f64> = logits.iter().map(|l| (l - m).exp()).collect();
+            let denom: f64 = exps.iter().sum::<f64>() + (sink - m).exp();
+            for d in 0..head_dim as usize {
+                let mut acc = 0.0f64;
+                for (ki, e) in exps.iter().enumerate() {
+                    acc += (e / denom)
+                        * v[ki * (num_kv * head_dim) as usize + kv_head * head_dim as usize + d]
+                            as f64;
+                }
+                cpu_out[qi * (num_q * head_dim) as usize + head * head_dim as usize + d] =
+                    acc as f32;
+            }
+        }
+    }
+
+    // ── Metal ──
+    let mk = |data: &[f32]| {
+        device.new_buffer_with_data(
+            data.as_ptr() as *const std::ffi::c_void,
+            std::mem::size_of_val(data) as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        )
+    };
+    let buf_q = mk(&q);
+    let buf_k = mk(&k);
+    let buf_v = mk(&v);
+    let buf_out = device.new_buffer(
+        (total * std::mem::size_of::<f32>()) as u64,
+        metal::MTLResourceOptions::StorageModeShared,
+    );
+
+    let cmd = queue.new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&pipeline);
+    enc.set_buffer(0, Some(&buf_q), 0);
+    enc.set_buffer(1, Some(&buf_k), 0);
+    enc.set_buffer(2, Some(&buf_v), 0);
+    enc.set_buffer(3, Some(&buf_out), 0);
+    let c = |v: &u32| v as *const u32 as *const std::ffi::c_void;
+    let f = |v: &f32| v as *const f32 as *const std::ffi::c_void;
+    enc.set_bytes(4, 4, c(&seq_len));
+    enc.set_bytes(5, 4, c(&head_dim));
+    enc.set_bytes(6, 4, c(&num_q));
+    enc.set_bytes(7, 4, c(&num_kv));
+    enc.set_bytes(8, 4, f(&scale));
+    let rope_base = 10000.0f32;
+    enc.set_bytes(9, 4, f(&rope_base));
+    let (zero, one) = (0u32, 1u32);
+    enc.set_bytes(10, 4, c(&zero)); // use_qk_norm
+    let softcap = 0.0f32;
+    enc.set_bytes(11, 4, f(&softcap));
+    enc.set_bytes(12, 4, c(&one)); // skip_rope: compare raw QK
+    enc.set_bytes(13, 4, c(&zero)); // rotary_dim
+    enc.set_bytes(
+        14,
+        std::mem::size_of_val(&sinks) as u64,
+        sinks.as_ptr() as *const std::ffi::c_void,
+    );
+    enc.set_bytes(15, 4, c(&one)); // has_sinks
+    enc.dispatch_thread_groups(
+        metal::MTLSize::new(num_q as u64, seq_len as u64, 1),
+        metal::MTLSize::new(256, 1, 1),
+    );
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let gpu: Vec<f32> =
+        unsafe { std::slice::from_raw_parts(buf_out.contents() as *const f32, total).to_vec() };
+    let diff = max_diff(&cpu_out, &gpu);
+    assert!(
+        diff < 1e-4,
+        "fused_attention with sinks: max diff {diff}\nCPU[0..8]: {:?}\nGPU[0..8]: {:?}",
+        &cpu_out[..8],
+        &gpu[..8]
+    );
+
+    // The sink must actually divert mass: outputs differ from the no-sink run.
+    assert!(
+        cpu_out.iter().any(|x| x.abs() > 1e-6),
+        "degenerate fixture — reference output is all zeros"
     );
 }

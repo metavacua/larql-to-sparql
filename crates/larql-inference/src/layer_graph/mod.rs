@@ -15,23 +15,45 @@
 mod cached;
 mod dense;
 pub mod generate;
+// grid/hybrid/logits/predict/prefill: &VectorIndex + GPU-pipeline/remote-
+// shard dispatch throughout -- native-only. grid/config.rs's portable
+// pieces (if any downstream consumer needs them independently of the
+// rest of grid/) become a follow-up refinement, not gated separately here.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod grid;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod hybrid;
+// Splits internally: finalize_logits (&VectorIndex/&Tokenizer) is
+// native; softmax_prob is pure f32/f64 arithmetic but its only caller
+// (generate::gpu::sampling_step) lives in the native-only gpu module,
+// so it's gated native-only too (CI-confirmed, not left portable-but-dead).
 pub mod logits;
 pub mod pipeline_layer;
+// Splits internally: honest/split submodules + the VectorIndex-taking
+// predict_with_graph* fns are native; trace_with_graph (pure &dyn
+// LayerGraph, no VectorIndex/Tokenizer) stays portable.
 pub mod predict;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod prefill;
 mod template;
 mod walk;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use generate::{
     generate, generate_constrained, generate_constrained_streaming,
     generate_constrained_streaming_sampled, generate_streaming, generate_with_sampling,
     lm_head_topk, try_generate, try_generate_constrained, try_generate_constrained_streaming,
     try_generate_constrained_streaming_sampled, try_generate_streaming, try_generate_with_sampling,
-    ChatMLRenderer, ChatSession, Detokenizer, EosConfig, GemmaRenderer, GenerateError,
-    GenerateResult, Llama3Renderer, Sampler, SamplingConfig, StageTimings, TurnRenderer,
 };
+pub use generate::{
+    ChatMLRenderer, EosConfig, GemmaRenderer, GenerateError, GenerateResult, Llama3Renderer,
+    SamplingConfig, StageTimings, TurnRenderer,
+};
+// `ChatSession`/`Detokenizer` wrap `tokenizers::Tokenizer` and `Sampler`
+// needs `rand`'s `std_rng` feature -- all native-only, see
+// `generate/chat_session.rs`, `generate/detok.rs`, `generate/sampling.rs`.
+#[cfg(not(target_arch = "wasm32"))]
+pub use generate::{ChatSession, Detokenizer, Sampler};
 
 use ndarray::Array2;
 

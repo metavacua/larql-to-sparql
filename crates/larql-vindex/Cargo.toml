@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Vindex — the queryable model format. Storage, KNN index, build, load, mutate."
 keywords = ["transformer", "vindex", "knn", "interpretability"]
 categories = ["science"]
@@ -13,49 +14,68 @@ larql-core = { path = "../larql-core", default-features = false }
 larql-models = { path = "../larql-models" }
 larql-compute = { path = "../larql-compute" }
 larql-vindex-spec = { path = "../larql-vindex-spec" }
-serde = { workspace = true }
+larql-execution = { path = "../larql-execution" }
 # Apple-only sibling backend.  Made `optional = true` so the
 # (target-gated) cfg path on non-macOS doesn't need to fake it out;
 # enabling the `gpu` feature pulls it in.
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
+
+# OS-level mmap hints (madvise)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# See crates/larql-core/Cargo.toml for the pattern-1 (dependency-default-
+# std-feature) rationale. sha2/base64/bytes/rand/ndarray all have a
+# genuine no_std mode (default-features = false, verified against each
+# crate's own feature docs before relying on it, not assumed). rayon
+# (pattern 9: zero no_std support at all) and tokenizers/safetensors/
+# memmap2/hf-hub/reqwest (inherently native: parallelism, native
+# tokenizer bindings, mmap-based file loading, HTTP) have no wasm32
+# entry at all -- simply absent from the wasm32 table below, same shape
+# as larql-compute's rayon and larql-models' safetensors/memmap2. Every
+# module using them directly will need pattern-3 whole-module exclusion
+# once the next real CI round shows which ones those are.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-
 # Matrix types (all compute via larql-compute)
 ndarray = "0.16"
-
 # Parallelism for the direct-Q4K matmul kernel (feature walk).
 rayon = "1.10"
-
 # RNG for randomized SVD (per-expert MoE summary tier in extract/moe_svd.rs).
 rand = "0.8"
-
 # Tokenizer (for embeddings loading + token resolution)
 tokenizers = "0.21"
-
 # Checksums
 sha2 = "0.10"
-
 # base64 encoding for the HF preupload file-sample field.
 base64 = "0.22"
-
 # Model weights (for safetensors loading during extract)
 safetensors = "0.7"
 memmap2 = "0.9"
-
 # Refcounted, slice-cheap byte handle returned by the `VindexStorage`
 # trait. `Bytes::from_owner(Arc<Mmap>)` is zero-copy from the existing
 # mmap path and Redis / S3 backends can return owned bytes without
 # lifetime contortions. Already transitive via reqwest / hf-hub.
 bytes = "1"
-
 # HuggingFace Hub integration
 hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
-# OS-level mmap hints (madvise)
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+ndarray = { version = "0.16", default-features = false }
+rand = { version = "0.8", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+base64 = { version = "0.22", default-features = false }
+bytes = { version = "1", default-features = false }
+# core's f32/f64 lack sqrt/exp/tanh/round/etc. (pattern 6).
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+# std::collections::HashMap/HashSet have no core/alloc equivalent (pattern 4).
+hashbrown = { version = "0.15", default-features = false }
 
 [features]
 default = []
@@ -66,6 +86,9 @@ gpu = ["dep:larql-compute-metal"]
 
 [dev-dependencies]
 larql-inference = { path = "../larql-inference" }
+# The KvEngine decode path, for the teacher-forced / free-running decode
+# parity harness. Dev-only: nothing in the library depends on the engine layer.
+larql-kv = { path = "../larql-kv" }
 criterion = "0.5"
 tempfile = "3"
 # HTTP mocking for the publish trio (lfs / remote / upload).
@@ -74,6 +97,10 @@ tempfile = "3"
 # parallel runs would race.
 mockito = "1.7"
 serial_test = "3.2"
+
+[[bench]]
+name = "vindex3_bound_execute"
+harness = false
 
 [[bench]]
 name = "vindex_ops"

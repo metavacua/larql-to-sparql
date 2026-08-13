@@ -10,6 +10,9 @@
 
 use crate::engines::markov_residual_codec::codec::ColdResidualCodec;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Errors a [`BoundaryLayerPolicy`] may surface during construction.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum PolicyError {

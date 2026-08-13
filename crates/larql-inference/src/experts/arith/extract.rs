@@ -12,6 +12,9 @@
 
 use super::alu::{BigInt, Expr, Op};
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// One lexed token of the prompt surface. `Other` breaks operand/operator
 /// adjacency so unrelated numbers never join into an expression. Spans are
 /// char indices into the input, used for the weak-chain cue check.

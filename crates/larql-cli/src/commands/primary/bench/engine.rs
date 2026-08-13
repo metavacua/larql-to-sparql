@@ -1,13 +1,17 @@
-//! Pure helpers for the KV-engine bench path (markov-rs, unlimited-context).
+//! Pure helpers for the KV-engine bench path (markov-rs, windowed-checkpoint).
 //! The I/O-bound bench loops live in `engine_runtime.rs`; this file owns:
 //!   * `argmax_token` — greedy next-token pick
 //!   * `format_engine_label` — engine info → label string (with / without Q4K)
 //!   * `EngineSummary` + `summarize_engine_result` — decode-result trim + percentile
-//!   * `format_kv_memory_note` — "hot=X cold=Y N× vs std-kv" string
+//!
+//! The `notes` column formatters live in `notes.rs`.
 //!
 //! All exercised in this file's tests.
 
 use super::row::compute_percentiles;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
 
 /// Greedy argmax over a logits slice. Returns 0 on empty input, which is
 /// safe because the decode loop bails on empty hidden states before
@@ -16,7 +20,7 @@ pub(super) fn argmax_token(logits: &[f32]) -> u32 {
     logits
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(i, _)| i as u32)
         .unwrap_or(0)
 }
@@ -63,24 +67,6 @@ pub(super) fn summarize_engine_result(decode_ms_all: &[f64], warmup: usize) -> E
         tok_per_s: 1000.0 / avg,
         n_steps: n,
     }
-}
-
-/// Render the memory-footprint note for an engine row: hot, cold, and the
-/// compression ratio relative to a Standard KV (FP16) baseline.
-/// `total = 0` means we couldn't query the engine; emit a 0× ratio.
-pub(super) fn format_kv_memory_note(total: usize, cold: usize, kv_ref: usize) -> String {
-    let hot = total.saturating_sub(cold);
-    let ratio = if total > 0 {
-        kv_ref as f64 / total as f64
-    } else {
-        0.0
-    };
-    format!(
-        "hot={:.1}MB cold={:.1}MB  {:.0}× vs std-kv",
-        hot as f64 / 1_048_576.0,
-        cold as f64 / 1_048_576.0,
-        ratio,
-    )
 }
 
 #[cfg(test)]
@@ -166,29 +152,5 @@ mod tests {
         let s = summarize_engine_result(&decode, 3);
         assert_eq!(s.n_steps, 5);
         assert!((s.avg_decode_ms - 10.0).abs() < 1e-9);
-    }
-
-    // ── format_kv_memory_note ────────────────────────────────────────────
-
-    #[test]
-    fn kv_memory_note_normal_case() {
-        // total = 16 MB, cold = 4 MB → hot = 12 MB. Ratio = 64/16 = 4.
-        let s = format_kv_memory_note(16 * 1024 * 1024, 4 * 1024 * 1024, 64 * 1024 * 1024);
-        assert!(s.contains("hot=12.0MB"));
-        assert!(s.contains("cold=4.0MB"));
-        assert!(s.contains("4× vs std-kv"));
-    }
-
-    #[test]
-    fn kv_memory_note_zero_total_emits_zero_ratio() {
-        let s = format_kv_memory_note(0, 0, 1024);
-        assert!(s.contains("0× vs std-kv"));
-    }
-
-    #[test]
-    fn kv_memory_note_clamps_hot_when_cold_exceeds_total() {
-        // Engine bug guard: cold > total shouldn't underflow.
-        let s = format_kv_memory_note(1024, 4096, 0);
-        assert!(s.contains("hot=0.0MB"));
     }
 }

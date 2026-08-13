@@ -27,6 +27,9 @@
 //! `scale = clip / INT8_QMAX`, where `clip = CLIP_SIGMA × σ(r)`.
 //! The original value is recovered as `q as f32 × scale`.
 
+#[cfg(target_arch = "wasm32")]
+use crate::prelude::*;
+
 /// Number of bytes in the scale header.
 pub const SCALE_BYTES: usize = 4;
 

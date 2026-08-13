@@ -21,9 +21,21 @@
 //! distribution across L8-L12 on v11 TinyStories 115M. See
 //! `~/chris-source/chris-experiments/compilation/15_v11_model/RESULTS.md §20`.
 
+use ndarray::Array2;
+// Array1/ModelWeights/capture_ffn_activation_matrix/estimate_ffn_covariance
+// are only used inside the native-gated run_memit* / memit_solve_layer
+// functions below (Array2 above stays portable: MemitResult::delta_w).
+#[cfg(not(target_arch = "wasm32"))]
 use super::trace::{capture_ffn_activation_matrix, estimate_ffn_covariance};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::ModelWeights;
-use ndarray::{Array1, Array2};
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array1;
+
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::collections::HashMap;
 
 /// A single fact to be compiled via MEMIT.
 #[derive(Debug, Clone)]
@@ -61,6 +73,7 @@ pub struct MemitFactResult {
 /// activation covariance C = E[k(x) k(x)^T]. Sampling across varied
 /// domains gives a well-conditioned C. Python reference used ~2000
 /// prompts with ~14K total positions.
+#[cfg(not(target_arch = "wasm32"))]
 const COVARIANCE_PROMPTS: &[&str] = &[
     "Once upon a time, there was a",
     "The quick brown fox jumps over the",
@@ -113,6 +126,7 @@ const COVARIANCE_PROMPTS: &[&str] = &[
 /// differ, the "optimise at output, edit upstream" heuristic applies
 /// — residual connections propagate the signal approximately intact,
 /// though not identically.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_memit_with_target_opt(
     weights: &ModelWeights,
     facts: &[MemitFact],
@@ -136,6 +150,7 @@ pub fn run_memit_with_target_opt(
 ///
 /// `spread = 1` is identical to single-layer MEMIT with target-delta.
 /// Python reference used `spread = 5` for 200/200 on v11 (L8-L12).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_memit_with_target_opt_multi(
     weights: &ModelWeights,
     facts: &[MemitFact],
@@ -202,6 +217,7 @@ pub fn run_memit_with_target_opt_multi(
 /// Returns one `MemitResult` per unique layer in the fact set.
 /// The caller applies each `delta_w` to the corresponding layer's
 /// W_down tensor.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_memit(
     weights: &ModelWeights,
     facts: &[MemitFact],
@@ -221,11 +237,13 @@ pub fn run_memit(
 /// Source for the R matrix rows — either per-fact optimised residual
 /// deltas (from `optimise_target_delta`) or the embed-shortcut
 /// `target_alpha × unit(embed[target])`.
+#[cfg(not(target_arch = "wasm32"))]
 enum RSource<'a> {
     EmbedShortcut(f32),
     OptimisedDeltas(&'a [Array1<f32>]),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_memit_inner(
     weights: &ModelWeights,
     facts: &[MemitFact],
@@ -238,8 +256,7 @@ fn run_memit_inner(
     }
 
     // Group facts by layer.
-    let mut by_layer: std::collections::HashMap<usize, Vec<&MemitFact>> =
-        std::collections::HashMap::new();
+    let mut by_layer: HashMap<usize, Vec<&MemitFact>> = HashMap::default();
     for fact in facts {
         by_layer.entry(fact.layer).or_default().push(fact);
     }
@@ -259,7 +276,7 @@ fn run_memit_inner(
     // Build a fact-index map so RSource::OptimisedDeltas can look up
     // the delta corresponding to each fact passed into the per-layer
     // solver.
-    let fact_index_map: std::collections::HashMap<(usize, u32, Vec<u32>), usize> = facts
+    let fact_index_map: HashMap<(usize, u32, Vec<u32>), usize> = facts
         .iter()
         .enumerate()
         .map(|(i, f)| ((f.layer, f.target_token_id, f.prompt_tokens.clone()), i))
@@ -293,12 +310,14 @@ fn run_memit_inner(
 
 /// Per-layer view of the R source — the shortcut scalar or the
 /// subset of optimised deltas for this layer's facts.
+#[cfg(not(target_arch = "wasm32"))]
 enum RPerLayer {
     EmbedShortcut(f32),
     OptimisedDeltas(Vec<Array1<f32>>),
 }
 
 /// MEMIT solve for a single layer — the core algorithm.
+#[cfg(not(target_arch = "wasm32"))]
 fn memit_solve_layer(
     weights: &ModelWeights,
     facts: &[&MemitFact],

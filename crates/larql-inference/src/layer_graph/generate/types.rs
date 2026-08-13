@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Sum of per-stage decode times across every successful step.
 ///
 /// Dividing each field by `GenerateResult::decode_ms.len()` gives the
@@ -8,6 +11,16 @@
 pub struct StageTimings {
     pub embed_ms_total: f64,
     pub gpu_ms_total: f64,
+    /// Of `gpu_ms_total`, the part the GPU was actually executing. The
+    /// remainder is CPU encode, submission and readback — but note that
+    /// profiling itself inflates that remainder several-fold, so the ratio
+    /// describes the profiled run and not production. Zero unless
+    /// `LARQL_PROFILE_SPLIT=1`.
+    pub gpu_only_ms_total: f64,
+    /// Attention share of the GPU split. Zero unless profiling is on.
+    pub attn_ms_total: f64,
+    /// Command buffers submitted across the measured run.
+    pub cmd_buffers_total: u64,
     /// CPU fallback forward time when the backend lacks fused Q4 decode.
     pub cpu_fwd_ms_total: f64,
     /// Gate+up dispatch time within GPU fwd (populated when LARQL_PROFILE_SPLIT=1).
@@ -67,8 +80,8 @@ impl GenerateError {
     }
 }
 
-impl std::fmt::Display for GenerateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for GenerateError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             GenerateError::UnsupportedBackend { reason } => write!(f, "{reason}"),
             GenerateError::MissingWeights { reason } => write!(f, "{reason}"),
@@ -92,7 +105,7 @@ impl std::fmt::Display for GenerateError {
     }
 }
 
-impl std::error::Error for GenerateError {}
+impl core::error::Error for GenerateError {}
 
 impl From<String> for GenerateError {
     fn from(reason: String) -> Self {
@@ -129,6 +142,10 @@ impl StageTimings {
         StageTimings {
             embed_ms_total: self.embed_ms_total / nf,
             gpu_ms_total: self.gpu_ms_total / nf,
+            gpu_only_ms_total: self.gpu_only_ms_total / nf,
+            attn_ms_total: self.attn_ms_total / nf,
+            // A count, not a duration: per-token average, rounded down.
+            cmd_buffers_total: (self.cmd_buffers_total as f64 / nf) as u64,
             cpu_fwd_ms_total: self.cpu_fwd_ms_total / nf,
             gate_up_ms_total: self.gate_up_ms_total / nf,
             down_ms_total: self.down_ms_total / nf,
@@ -276,8 +293,8 @@ mod tests {
 
     #[test]
     fn generate_error_is_std_error() {
-        // Compile-time assertion: GenerateError implements std::error::Error.
-        fn assert_error<E: std::error::Error>() {}
+        // Compile-time assertion: GenerateError implements core::error::Error.
+        fn assert_error<E: core::error::Error>() {}
         assert_error::<GenerateError>();
     }
 
@@ -315,6 +332,7 @@ mod tests {
             lm_head_ms_total: 70.0,
             detok_ms_total: 80.0,
             dequant_ms_total: 90.0,
+            ..Default::default()
         };
         let avg = t.avg_per_step(10);
         assert_eq!(avg.embed_ms_total, 1.0);

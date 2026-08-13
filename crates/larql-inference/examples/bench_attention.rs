@@ -239,11 +239,11 @@ fn main() {
     let v = synth_matrix(6, nkv * hd, 802);
 
     let no_cap_us = bench("Fused without capture", 500, || {
-        let _ = gqa_attention_with_weights(&q, &k, &v, nq, hd, reps, scale, 6, false, None);
+        let _ = gqa_attention_with_weights(&q, &k, &v, nq, hd, reps, scale, 6, false, None, None);
     });
 
     let cap_us = bench("Fused with capture", 500, || {
-        let _ = gqa_attention_with_weights(&q, &k, &v, nq, hd, reps, scale, 6, true, None);
+        let _ = gqa_attention_with_weights(&q, &k, &v, nq, hd, reps, scale, 6, true, None, None);
     });
 
     let overhead = (cap_us / no_cap_us.max(0.1) - 1.0) * 100.0;
@@ -253,11 +253,12 @@ fn main() {
     println!("--- Softcap Overhead (Gemma2-style) ---\n");
 
     let no_softcap_us = bench("Fused without softcap", 500, || {
-        let _ = gqa_attention_with_weights(&q, &k, &v, nq, hd, reps, scale, 6, false, None);
+        let _ = gqa_attention_with_weights(&q, &k, &v, nq, hd, reps, scale, 6, false, None, None);
     });
 
     let softcap_us = bench("Fused with softcap=50.0", 500, || {
-        let _ = gqa_attention_with_weights(&q, &k, &v, nq, hd, reps, scale, 6, false, Some(50.0));
+        let _ =
+            gqa_attention_with_weights(&q, &k, &v, nq, hd, reps, scale, 6, false, Some(50.0), None);
     });
 
     let overhead = (softcap_us / no_softcap_us.max(0.1) - 1.0) * 100.0;

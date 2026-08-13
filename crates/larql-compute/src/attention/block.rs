@@ -3,9 +3,7 @@
 //! norm → Q/K/V projection → bias → V-norm → QK-norm → RoPE → GQA → O projection → residual.
 //! Supports KV sharing (reuse K/V from a source layer).
 
-use super::gqa::{
-    gqa_attention_with_all_weights, gqa_attention_with_weights, gqa_reduced_qk_all_weights,
-};
+use super::gqa::gqa_reduced_qk_all_weights;
 use super::{AttentionAllWeights, AttentionWeights, SharedKV};
 use ndarray::{s, Array2};
 
@@ -333,7 +331,15 @@ fn run_attention_block_core(
     // capture a specific layer instead — Gemma 4 global layers (5, 11, …)
     // are useful for bisecting partial-RoPE / V-norm interactions.
     let dump_cfg = crate::forward::dump_config::DumpConfig::get();
+    // std::fs has no core/alloc equivalent -- wasm32v1-none has no
+    // filesystem at all, and stage_dump is unconditionally None there
+    // (DumpConfig routes through options::env_value, which is None on
+    // wasm32), so the whole dump path is dead code on that target --
+    // hence the wasm32-only allow rather than renaming to `_stage_dump`
+    // (which broke the native closure below referencing it by name).
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
     let stage_dump = dump_cfg.stage_dir(layer);
+    #[cfg(not(target_arch = "wasm32"))]
     let dump_f32 = |name: &str, arr: &Array2<f32>| {
         if let Some(dir) = stage_dump {
             let slice = arr.as_slice().unwrap_or(&[]);
@@ -341,6 +347,8 @@ fn run_attention_block_core(
             let _ = std::fs::write(format!("{dir}/cpu_L0_{name}.f32"), &bytes);
         }
     };
+    #[cfg(target_arch = "wasm32")]
+    let dump_f32 = |_name: &str, _arr: &Array2<f32>| {};
 
     // Input norm
     let h_norm =
@@ -380,7 +388,9 @@ fn run_attention_block_core(
     let rotary_frac = arch.rotary_fraction_for_layer(layer);
     let pos_divisor =
         crate::forward_overrides::effective_rope_position_divisor_for_layer(arch, layer);
-    let llama3 = crate::forward_overrides::effective_llama3_rope_scaling(arch);
+    // M1: honour every scaling family (llama3 / YaRN / linear), not just
+    // llama3 — the same resolver the Metal pipeline spec reads.
+    let rope_scaling = crate::forward_overrides::effective_rope_freq_scaling(arch);
     let q_rope = crate::attention::rope::apply_rope_partial_at_full(
         &q_normed,
         num_q,
@@ -389,7 +399,7 @@ fn run_attention_block_core(
         rotary_frac,
         0,
         pos_divisor,
-        llama3,
+        rope_scaling,
     );
 
     // K/V: either from shared cache or computed fresh
@@ -454,7 +464,7 @@ fn run_attention_block_core(
             rotary_frac,
             0,
             pos_divisor,
-            llama3,
+            rope_scaling,
         );
         (k_r, v_full)
     };
@@ -465,18 +475,27 @@ fn run_attention_block_core(
 
     // GQA attention
     let softcap = arch.attn_logit_softcapping();
+    // Attention sinks: one learned logit per query head, competing in the
+    // softmax and then discarded (GPT-OSS). Absent for every other
+    // architecture, in which case the softmax is the ordinary one.
+    let sinks = super::sinks::resolve(
+        arch.attn_sinks_key(layer),
+        |k| weights.vectors.get(k).map(|v| v.as_slice()),
+        num_q,
+        layer,
+    );
     let reduced_qk_weights = reduced_qk_rank.map(|rank| {
         gqa_reduced_qk_all_weights(
-            &q_rope, &k_rope, num_q, head_dim, reps, scale, seq_len, softcap, rank,
+            &q_rope, &k_rope, num_q, head_dim, reps, scale, seq_len, softcap, sinks, rank,
         )
     });
-    let (mut attn_out, attn_weights, full_all_attn_weights) = if capture_all_attention {
-        let (out, all_weights) = gqa_attention_with_all_weights(
-            &q_rope, &k_rope, &v_final, num_q, head_dim, reps, scale, seq_len, softcap,
-        );
-        (out, None, Some(all_weights))
-    } else {
-        let (out, weights) = gqa_attention_with_weights(
+    // Sliding window for THIS layer, from the shared rule the Metal
+    // pipeline spec also uses. `None` on a full-attention layer (or an
+    // architecture without windows) leaves the maths bit-identical to
+    // the unwindowed path.
+    let window = crate::forward_overrides::effective_attention_window_for_layer(arch, layer);
+    let (mut attn_out, attn_weights, full_all_attn_weights) = {
+        let (out, last, all) = super::gqa::gqa_attention_capture(
             &q_rope,
             &k_rope,
             &v_final,
@@ -485,10 +504,13 @@ fn run_attention_block_core(
             reps,
             scale,
             seq_len,
-            capture_attention,
+            capture_attention && !capture_all_attention,
+            capture_all_attention,
             softcap,
+            sinks,
+            window,
         );
-        (out, weights, None)
+        (out, last, all)
     };
     let all_attn_weights = reduced_qk_weights.or(full_all_attn_weights);
     if let Some(heads) = zero_pre_o_heads {

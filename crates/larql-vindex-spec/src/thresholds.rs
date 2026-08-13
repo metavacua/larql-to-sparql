@@ -14,6 +14,9 @@
 //! isn't validated by this crate in v1 — the FP4 compliance gate
 //! already lives in `larql-vindex` and runs at extract time.
 
+#[cfg(target_arch = "wasm32")]
+use alloc::vec::Vec;
+
 use crate::{QuantFormat, StorageDtype};
 
 /// Validation thresholds for one (quant, dtype) combination.

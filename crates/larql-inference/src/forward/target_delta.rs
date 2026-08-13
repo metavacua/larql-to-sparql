@@ -60,6 +60,9 @@ use ndarray::{Array1, ArrayView1, ArrayView2};
 
 use crate::model::ModelWeights;
 
+#[cfg(target_arch = "wasm32")]
+use crate::alloc_prelude::*;
+
 /// Hyperparameters for target-delta optimisation. Defaults match the
 /// Python reference (`vindex_compile_rome_v11.py::optimise_target_delta`).
 #[derive(Debug, Clone, Copy)]

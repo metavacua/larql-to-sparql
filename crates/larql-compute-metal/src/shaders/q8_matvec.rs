@@ -61,6 +61,13 @@ kernel void q8_matvec(
 }
 "#;
 
+/// Hard input-length ceiling from the threadgroup staging arrays
+/// (`tg_x8[8192]` int8 + 256 block scales): the staging loops write
+/// past both for larger K — threadgroup-memory corruption, not a
+/// graceful failure. Host dispatch sites assert against this
+/// (capability audit F13).
+pub const MAX_K: usize = 8192;
+
 pub const ROWS_PER_TG: u64 = 8;
 pub const THREADS_PER_TG: u64 = 256;
 
