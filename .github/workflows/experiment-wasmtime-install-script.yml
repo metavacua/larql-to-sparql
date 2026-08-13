@@ -1,0 +1,22 @@
+name: experiment-wasmtime-install-script
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
+
+jobs:
+  install-wasmtime:
+    name: install-wasmtime (official script)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install wasmtime via official install script
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+
+      - name: Verify wasmtime is on PATH and runs
+        run: wasmtime --version
