@@ -1,2 +1,5 @@
 [target.wasm32v1-none]
 runner = "wasmtime run"
+
+[target.wasm32-unknown-unknown]
+runner = "wasmtime run"
