@@ -2,6 +2,8 @@ name: experiment-fmt-check
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
 
 jobs:
   fmt-check:
