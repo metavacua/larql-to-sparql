@@ -2,7 +2,7 @@ name: larql-cli-target-sampling
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/larql-cli-target-sampling]
   pull_request:
     branches: [main]
   workflow_dispatch: {}
