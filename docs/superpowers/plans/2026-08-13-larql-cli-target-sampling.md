@@ -446,10 +446,12 @@ jobs:
           retention-days: 7
 
       - name: Build
+        if: always()
         continue-on-error: true
         run: cargo build -p larql-cli --bins --no-default-features --target wasm32v1-none
 
       - name: Test (via wasmtime)
+        if: always()
         continue-on-error: true
         run: cargo test -p larql-cli --no-default-features --target wasm32v1-none
 
@@ -505,10 +507,12 @@ jobs:
           retention-days: 7
 
       - name: Build
+        if: always()
         continue-on-error: true
         run: cargo build -p larql-cli --bins --no-default-features --target wasm32-unknown-unknown
 
       - name: Test (via wasmtime)
+        if: always()
         continue-on-error: true
         run: cargo test -p larql-cli --no-default-features --target wasm32-unknown-unknown
 ```
@@ -1016,9 +1020,11 @@ jobs:
           path: wasm32v1-none.patch
           retention-days: 7
       - name: Build
+        if: always()
         continue-on-error: true
         run: cargo build -p larql-cli --bins --no-default-features --target wasm32v1-none
       - name: Test (via wasmtime)
+        if: always()
         continue-on-error: true
         run: cargo test -p larql-cli --no-default-features --target wasm32v1-none
 
@@ -1062,9 +1068,11 @@ jobs:
           path: wasm32-unknown-unknown.patch
           retention-days: 7
       - name: Build
+        if: always()
         continue-on-error: true
         run: cargo build -p larql-cli --bins --no-default-features --target wasm32-unknown-unknown
       - name: Test (via wasmtime)
+        if: always()
         continue-on-error: true
         run: cargo test -p larql-cli --no-default-features --target wasm32-unknown-unknown
 
