@@ -76,3 +76,7 @@ bench/dec0/dec0_*.json
 # quant-obs calibration captures — regenerable via `larql dec-bench capture`
 bench/quant-obs/residuals-*/
 bench/quant-obs/*.log
+
+# Subagent-driven-development scratch workspace (ledgers, briefs, reports,
+# review packages) — per-plan, regenerable, not part of the shipped code.
+.superpowers/
