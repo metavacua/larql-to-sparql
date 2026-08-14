@@ -1,27 +1,37 @@
-# Experiment: exhaustive clippy + build attempts for every workspace crate
-# on nvptx64-nvidia-cuda -- same pattern as every other target job in this
-# project -- run it and let it break, the breakage is the analysis data.
-# Test/execution is deferred pending a separate decision on GPU/CUDA
-# emulation for free-tier runners.
+# Experiment: exhaustive clippy + build attempt, across every crate in
+# larql-cli's own dependency tree, on nvptx64-nvidia-cuda -- same pattern as
+# every other target job in this project -- run it and let it break, the
+# breakage is the analysis data. Test/execution is deferred pending a
+# separate decision on GPU/CUDA emulation for free-tier runners.
 #
-# Matrixed across the crates actually reachable from larql-cli's own
-# dependency graph x {default, no-default} features (26 jobs, fail-fast
-# disabled) -- confirmed against the real `cargo tree -p larql-cli` output
-# from an actual CI run, not guessed: larql-boundary, larql-cli,
-# larql-compute, larql-core, larql-execution, larql-factory,
-# larql-inference, larql-kv, larql-lql, larql-models,
-# larql-router-protocol, larql-vindex, larql-vindex-spec. The rest of the
-# workspace (larql-server, larql-router, larql-python, larql-demos,
-# larql-compute-metal, model-compute) is not part of larql-cli's dependency
-# tree and is out of scope for this experiment.
+# Scoped to the crates actually reachable from larql-cli's own dependency
+# graph -- confirmed against the real `cargo tree -p larql-cli` output from
+# an actual CI run, not guessed: larql-boundary, larql-cli, larql-compute,
+# larql-core, larql-execution, larql-factory, larql-inference, larql-kv,
+# larql-lql, larql-models, larql-router-protocol, larql-vindex,
+# larql-vindex-spec. The rest of the workspace (larql-server, larql-router,
+# larql-python, larql-demos, larql-compute-metal, model-compute) is not part
+# of larql-cli's dependency tree and is out of scope for this experiment.
 #
-# GitHub-hosted runner time costs nothing at this project's tier, so there
-# is no reason to predict which of these crates would fail from
-# dependency-graph analysis alone when CI can just attempt every one of them
-# for real and get ground truth instead of a guess. `--keep-going` on both
-# Clippy and Build so a single failing crate within a job's own dependency
-# graph doesn't hide every other independent error that job could otherwise
-# have surfaced in the same run.
+# One job per feature-set (default / no-default), NOT one job per crate.
+# An earlier iteration of this workflow matrixed per-crate too, spinning up
+# 13 (or worse, 19 before scoping) separate jobs each repeating toolchain
+# install + checkout + dependency resolution from scratch. That was
+# duplicated effort for no real signal gain: `cargo build/clippy` already
+# accepts multiple `-p` flags in one invocation, `--keep-going` already
+# continues past one crate's failure to attempt every other independent
+# crate in the same graph, and `--message-format=json` already tags every
+# diagnostic with the exact package it came from. One combined invocation
+# per feature-set gets the identical per-crate-attributable, exhaustive
+# result as the 13-way fan-out, without repeating setup 13x. The only thing
+# a per-crate job bought was a separate colored checkmark per crate in the
+# Actions UI -- moot here anyway, since continue-on-error already makes
+# per-job conclusions unreliable as a pass/fail signal on this workflow.
+#
+# GitHub-hosted runner time costs nothing at this project's tier, so nothing
+# here is scoped down for speed; it's scoped down only to remove actual
+# duplication (repeated setup) and actual irrelevance (crates outside
+# larql-cli's own tree).
 #
 # Toolchain requirement, confirmed via doc.rust-lang.org and a local test
 # build: nightly + `rust-src` + `llvm-tools` + `llvm-bitcode-linker`
@@ -43,28 +53,22 @@ on:
 
 jobs:
   nvptx64-nvidia-cuda:
-    name: nvptx64-nvidia-cuda (${{ matrix.crate }}, ${{ matrix.features }})
+    name: nvptx64-nvidia-cuda (${{ matrix.features }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        crate:
-          - larql-boundary
-          - larql-cli
-          - larql-compute
-          - larql-core
-          - larql-execution
-          - larql-factory
-          - larql-inference
-          - larql-kv
-          - larql-lql
-          - larql-models
-          - larql-router-protocol
-          - larql-vindex
-          - larql-vindex-spec
         features: [default, no-default]
+    env:
+      # Every crate actually reachable from larql-cli's own dependency
+      # graph -- see header comment for how this list was derived.
+      PKGS: >-
+        -p larql-boundary -p larql-cli -p larql-compute -p larql-core
+        -p larql-execution -p larql-factory -p larql-inference -p larql-kv
+        -p larql-lql -p larql-models -p larql-router-protocol -p larql-vindex
+        -p larql-vindex-spec
     steps:
       - uses: actions/checkout@v7
 
@@ -90,22 +94,51 @@ jobs:
       # for this target -- e.g. reqwest's default `default-tls` feature
       # pulling in native-tls -> openssl-sys, which then fails to
       # cross-compile for a target with no host OpenSSL to link against.
-      # Without this, diagnosing a Clippy/Build failure means hand-tracing
-      # Cargo.lock after the fact; with it, the cause is already in the log.
+      # Scoped from larql-cli's own root: its tree already contains every
+      # other in-scope crate, so one dump covers the whole set.
       - name: Dependency graph for this target
         run: |
           {
             echo '```'
-            cargo +nightly tree -p ${{ matrix.crate }} ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -e normal,build,features
+            cargo +nightly tree -p larql-cli ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -e normal,build,features
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Single invocation per tool, --message-format=json only: the JSON
+      # stream's per-message "rendered" field already carries the exact same
+      # human-readable text `--message-format=human` would print, and each
+      # message carries the package_id it came from. Re-running the same
+      # build a second time just to get human-formatted output would double
+      # real compute for a rendering that's already sitting in the JSON.
       - name: Clippy
         id: clippy
         continue-on-error: true
-        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly clippy -p ${{ matrix.crate }} --all-targets ${{ steps.feat.outputs.flag }} --no-deps --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going -- -D warnings
+        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly clippy $PKGS --all-targets ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going --message-format=json -- -D warnings > clippy.json || true
 
       - name: Build
         id: build
         continue-on-error: true
-        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly build -p ${{ matrix.crate }} --all-targets ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going
+        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly build $PKGS --all-targets ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going --message-format=json > build.json || true
+
+      # Per-crate pass/fail plus the rendered diagnostic text, both derived
+      # from the same JSON stream captured above -- no second build needed.
+      - name: Per-crate summary
+        if: always()
+        run: |
+          {
+            echo "### Per-crate result (${{ matrix.features }} features)"
+            for f in clippy.json build.json; do
+              [ -f "$f" ] || continue
+              echo "#### $f -- error count by crate"
+              echo '```'
+              jq -r 'select(.reason=="compiler-message" and .message.level=="error") | .target.name' "$f" 2>/dev/null \
+                | sort | uniq -c | sort -rn
+              echo '```'
+              echo "<details><summary>$f -- rendered diagnostics</summary>"
+              echo ''
+              echo '```'
+              jq -r 'select(.reason=="compiler-message") | .message.rendered' "$f" 2>/dev/null
+              echo '```'
+              echo '</details>'
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
