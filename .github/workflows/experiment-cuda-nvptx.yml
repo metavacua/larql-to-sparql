@@ -1,0 +1,170 @@
+# Experiment: clippy + build + validate pipeline for nvptx64-nvidia-cuda.
+#
+# Researched (WebFetch of doc.rust-lang.org, the rust-lang/rust source tree,
+# and real prior-art repos) and empirically verified locally before writing
+# this, rather than assumed:
+#
+#   - nvptx64-nvidia-cuda is Tier 2, `no_std` ONLY (std: false in the target
+#     spec) -- and this was tested directly, not inferred from the doc: a
+#     plain `fn main()` std binary fails outright (E0463, no prebuilt std),
+#     and forcing `-Zbuild-std=std` fails with 15 compile errors because
+#     libstd's platform layer (sys::alloc, sys::thread_local, sys::random)
+#     has NO Os::Cuda implementation at all -- this is not a missing
+#     prebuilt-artifact problem, the source itself has no CUDA branch.
+#     larql-cli categorically cannot be attempted for this target the way
+#     it was for the wasm targets -- there is no "let it break and see
+#     what happens" experiment available for a std-based CLI binary here.
+#     What CAN be built is a minimal `#![no_std]` crate exposing
+#     `extern "ptx-kernel"` functions, scaffolded inline below (not
+#     committed to the workspace -- this validates the pipeline mechanics
+#     only, same as this project's other technical-choice experiments).
+#
+#   - Required toolchain: nightly + `rust-src` + `llvm-tools` +
+#     `llvm-bitcode-linker` components. Build recipe (doc-verified AND
+#     locally test-compiled successfully):
+#       RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly rustc \
+#         --target=nvptx64-nvidia-cuda -Zbuild-std=core --crate-type=cdylib
+#     `cargo clippy` with the same flags was also confirmed working, no
+#     known nvptx-specific clippy issues found in either official tracker.
+#
+#   - GPU EXECUTION is not available for free anywhere in this project's
+#     CI. GitHub-hosted GPU "larger runners" (one config: 4-core + Tesla
+#     T4) exist, but are billed per-minute (~$0.05-0.10/min) and available
+#     ONLY to orgs on the paid GitHub Team/Enterprise Cloud plan -- there
+#     is no public-repo exemption, unlike the free ubuntu-latest/etc.
+#     runners this project otherwise uses. Third-party GPU CI (Cirun.io,
+#     RunsOn) only makes the *orchestration* free; the GPU cloud time
+#     itself is always billed to some account. No zero-cost path to real
+#     kernel execution was found. This is a genuine infrastructure/budget
+#     decision, not something a workflow file alone can solve -- so this
+#     experiment does not attempt it.
+#
+#   - What this pipeline uses INSTEAD, as the closest legitimate CI-only
+#     correctness gate beyond "did rustc's NVPTX backend accept it": NVIDIA's
+#     `ptxas` PTX assembler, run against the emitted .ptx. ptxas is a
+#     host-side, CPU-only offline compiler -- it needs no GPU or driver
+#     present to run, confirmed by the CUDA toolkit installing and ptxas
+#     running on plain ubuntu-latest. This is precedented: the Rust-CUDA
+#     project's own CI does exactly this as its GPU-less validation
+#     strategy. It catches PTX-level codegen/register-allocation errors
+#     beyond what rustc/LLVM alone catch, but proves nothing about runtime
+#     or numerical correctness -- that gap stays open until/unless real
+#     GPU CI is deliberately funded.
+#
+#   - This uses rustc's own built-in NVPTX/LLVM codegen path (no CUDA
+#     toolkit needed for the build step itself, no custom codegen
+#     backend), the same route rust-lang/stdarch's own CI uses to build
+#     `core_arch` for this exact target (confirmed currently passing).
+#     This is a different, much lighter path than the Rust-CUDA
+#     ecosystem project's `rustc_codegen_nvvm`, which swaps in a custom
+#     `-Zcodegen-backend` targeting NVIDIA's closed-source libNVVM and
+#     requires its own source-built, specifically-pinned LLVM (7.1.0 or
+#     19.1.7) -- not needed and not used here.
+
+name: experiment-cuda-nvptx
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
+
+jobs:
+  nvptx64-nvidia-cuda:
+    name: nvptx64-nvidia-cuda (clippy + build + ptxas validation, no GPU execution)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy, rust-src, llvm-tools
+
+      - name: Install llvm-bitcode-linker
+        run: rustup component add llvm-bitcode-linker --toolchain nightly
+
+      - name: Scaffold minimal no_std PTX kernel smoke-test crate
+        run: |
+          mkdir -p /tmp/nvptx-smoke-test/src
+          cat > /tmp/nvptx-smoke-test/Cargo.toml <<'EOF'
+          [package]
+          name = "nvptx-smoke-test"
+          version = "0.0.0"
+          edition = "2021"
+          publish = false
+
+          [lib]
+          crate-type = ["cdylib"]
+          EOF
+          cat > /tmp/nvptx-smoke-test/src/lib.rs <<'EOF'
+          #![no_std]
+          #![feature(abi_ptx)]
+
+          use core::panic::PanicInfo;
+
+          #[panic_handler]
+          fn panic(_info: &PanicInfo) -> ! {
+              loop {}
+          }
+
+          /// # Safety
+          /// Caller must supply valid, appropriately-sized device pointers for
+          /// `a`, `b`, `c`, with `n` matching their element count.
+          #[no_mangle]
+          pub unsafe extern "ptx-kernel" fn add(a: *const f32, b: *const f32, c: *mut f32, n: usize) {
+              let i = 0;
+              if i < n {
+                  *c.add(i) = *a.add(i) + *b.add(i);
+              }
+          }
+          EOF
+
+      - name: Clippy (nvptx64-nvidia-cuda, -Zbuild-std=core)
+        id: clippy
+        continue-on-error: true
+        working-directory: /tmp/nvptx-smoke-test
+        run: |
+          RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly clippy \
+            --target=nvptx64-nvidia-cuda -Zbuild-std=core -- -D warnings
+
+      - name: Build (emit PTX)
+        id: build
+        continue-on-error: true
+        working-directory: /tmp/nvptx-smoke-test
+        run: |
+          RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly rustc \
+            --target=nvptx64-nvidia-cuda -Zbuild-std=core --crate-type=cdylib --release
+
+      - name: Locate and show the emitted PTX
+        if: always()
+        run: |
+          PTX_FILE=$(find /tmp/nvptx-smoke-test/target/nvptx64-nvidia-cuda -name '*.ptx' | head -1)
+          if [ -n "$PTX_FILE" ]; then
+            echo "=== $PTX_FILE ==="
+            cat "$PTX_FILE"
+          else
+            echo "No .ptx artifact found -- build did not reach codegen."
+          fi
+
+      - name: Install CUDA toolkit (CPU-only install -- no GPU present or required)
+        if: always()
+        continue-on-error: true
+        uses: Jimver/cuda-toolkit@v0.2.29
+        with:
+          method: network
+
+      - name: Validate PTX with ptxas -- compile-time only, no GPU/driver involved
+        if: always()
+        continue-on-error: true
+        run: |
+          PTX_FILE=$(find /tmp/nvptx-smoke-test/target/nvptx64-nvidia-cuda -name '*.ptx' | head -1)
+          if [ -z "$PTX_FILE" ]; then
+            echo "No PTX file to validate -- build step did not produce output."
+            exit 0
+          fi
+          ptxas --version
+          ptxas -arch=sm_89 "$PTX_FILE" -o /tmp/nvptx-smoke-test/out.cubin
+          echo "ptxas accepted the PTX and produced a cubin."
+          echo "This validates PTX-level codegen only -- no GPU execution was attempted (see workflow header)."
