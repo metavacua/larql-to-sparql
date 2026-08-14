@@ -30,6 +30,42 @@ use crate::MetalBackend;
 use larql_compute::FullPipelineLayer;
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
 
+/// First of the two consecutive `attn_fused` slots carrying attention
+/// sinks; the `has_sinks` flag follows in slot 19. See `stages::sinks`.
+const ATTN_FUSED_SINKS_INDEX: u64 = 18;
+
+/// `inv_freq` slot on `attn_fused` — took over the old `rope_base` index in
+/// place, so no other binding moved.
+const ATTN_FUSED_INV_FREQ_INDEX: u64 = 16;
+
+/// `amplitude` slot on `attn_fused`, appended after the sinks pair.
+const ATTN_FUSED_AMPLITUDE_INDEX: u64 = 20;
+
+/// `softcap` slot on `attn_fused` (0.0 = disabled).
+const ATTN_FUSED_SOFTCAP_INDEX: u64 = 22;
+
+/// `has_qk_norm` slot on `attn_fused` — 0 lets no-QK-norm archs
+/// (GPT-OSS) take the single-dispatch path with Q/K passed through raw.
+const ATTN_FUSED_HAS_QK_NORM_INDEX: u64 = 23;
+
+/// First of the four consecutive `attn_fused` slots carrying the Q/K/V
+/// projection biases: q_bias(24), k_bias(25), v_bias(26), then the
+/// `has_qkv_bias` flag (27). Sinks convention — stub buffers bound when
+/// absent, flag gates the read.
+const ATTN_FUSED_QKV_BIAS_INDEX: u64 = 24;
+
+/// `softcap` slot on `kv_append_attend_fused` (0.0 = disabled).
+const KV_APPEND_ATTEND_SOFTCAP_INDEX: u64 = 14;
+
+/// Absolute stream position for RoPE on `attn_fused`. The kernel's cache
+/// row stays occupancy-indexed; only the rotation angle uses this. The
+/// two diverge once a sliding window compacts (audit F11).
+const ATTN_FUSED_ABS_POS_INDEX: u64 = 21;
+
+/// First of the two consecutive `kv_append_attend_fused` slots carrying
+/// attention sinks; the `has_sinks` flag follows in slot 13.
+const KV_APPEND_ATTEND_SINKS_INDEX: u64 = 12;
+
 pub(super) struct AttnBufs<'a> {
     /// Layer-input residual (read).
     pub h_buf: &'a Buffer,
@@ -51,20 +87,64 @@ pub(super) struct AttnBufs<'a> {
     /// Scratch for the unfused post-attn norm chain.
     pub normed_scratch: &'a Buffer,
     pub wo: &'a Buffer,
-    pub wo_scales: &'a Buffer,
+    pub wo_scales: Option<&'a Buffer>,
     pub post_attn_norm: &'a Buffer,
 }
 
 pub(super) struct AttnDims {
     pub hidden: usize,
     pub layer_q_dim: usize,
-    pub uses_kquant: bool,
     /// True iff the FFN side will run Q4_K family (selects the fused
     /// `residual_norm_store` path that mirrors the FFN's input dtype).
     pub ffn_uses_kquant: bool,
 }
 
 impl MetalBackend {
+    /// Whether this layer's decode step will take the fully-fused
+    /// `attn_fused` path (QK-norm/passthrough + RoPE + KV-append +
+    /// attend + optional QKV biases, ONE dispatch).
+    ///
+    /// The SINGLE authority for that decision: `encode_input_norm_and_qkv`
+    /// consults it to skip the separate Q/K/V `bias_add` dispatches (the
+    /// fused kernel applies them on load), and `encode_attention_block`
+    /// consults it to pick the dispatch. Two sites re-deriving this
+    /// independently is the dispatch-geometry-disagreement defect class —
+    /// a bias applied twice or not at all, silently.
+    pub(super) fn attn_fused_will_fire(
+        &self,
+        layer: &FullPipelineLayer,
+        kv_cache: &ops::kv_cache::KVCache,
+        layer_idx: usize,
+    ) -> bool {
+        let attn_spec = layer.attention_spec();
+        if layer.kv_shared_source.is_some()
+            || !self.decode_flags.fused_attn
+            || attn_spec.head_dim > MAX_HEAD_DIM_SINGLE_SG
+            || attn_spec.has_v_norm
+        {
+            return false;
+        }
+        // QK-norm must be both-or-neither: the kernel norms Q and K under
+        // one flag. A half-normed arch takes the unfused chain.
+        if attn_spec.q_norm_enabled != attn_spec.k_norm_enabled {
+            return false;
+        }
+        // Same all-or-nothing rule for the projection biases: the kernel
+        // reads all three under one flag, and a partially-biased layer
+        // bound with stub buffers would read out of bounds. The unfused
+        // chain's per-site bias_add dispatches handle mixed presence.
+        let n_bias = [layer.attn_q_bias, layer.attn_k_bias, layer.attn_v_bias]
+            .iter()
+            .filter(|b| b.is_some())
+            .count();
+        if n_bias != 0 && n_bias != 3 {
+            return false;
+        }
+        let window_size = self.effective_window_for(attn_spec.sliding_window as u32);
+        let t_val = (kv_cache.layers[layer_idx].current_len + 1) as u32;
+        ops::kv_cache::attention_span(t_val, window_size) <= ops::kv_cache::SHORT_ATTENTION_SPAN
+    }
+
     /// Encode the per-layer attention block (Steps 1.5–5). See the module
     /// doc-comment for the full input/output contract.
     #[allow(clippy::too_many_arguments)]
@@ -80,7 +160,6 @@ impl MetalBackend {
         let AttnDims {
             hidden,
             layer_q_dim,
-            uses_kquant,
             ffn_uses_kquant,
         } = dims;
         let hidden_val = hidden as u32;
@@ -99,13 +178,17 @@ impl MetalBackend {
         let layer_head_dim = attn_spec.head_dim;
         let layer_num_q_heads = attn_spec.num_q_heads;
         let layer_num_kv_heads = attn_spec.num_kv_heads;
-        let layer_rope_base = attn_spec.rope_base;
+        let layer_rope_plan = &layer.rope_freq;
         let layer_rotary_dim = if attn_spec.rotary_dim > 0 {
             attn_spec.rotary_dim
         } else {
             layer_head_dim
         };
-        let window_size = attn_spec.sliding_window as u32;
+        // Narrower of the architecture's per-layer SWA and any window the
+        // engine imposed on this sequence. The kernel attends
+        // `[T - window_size, T)`, so this both bounds attention and lets
+        // the cache hold more rows than the window between compactions.
+        let window_size = self.effective_window_for(attn_spec.sliding_window as u32);
 
         // Env flags governing kernel-level fusion. Cached at backend
         // startup (see `metal::flags::DecodeFlags`) so the decode hot
@@ -128,19 +211,24 @@ impl MetalBackend {
         // block for this token by the time we reach the shared layer).
         let kv_shared_source = layer.kv_shared_source;
         let attend_cache_idx = kv_shared_source.unwrap_or(layer_idx);
+        // `pos` is the ABSOLUTE stream position to RoPE at; `t_val` is how
+        // many cached rows to attend. They are equal-and-offset only while
+        // nothing has been evicted — once a window slides, occupancy falls
+        // and position keeps climbing, so they must be read from different
+        // fields. Deriving `t_val` from `pos` (as `pos + 1`) is what tied
+        // them together before.
         let pos = if let Some(src) = kv_shared_source {
-            // Source has already incremented its current_len for this token.
-            // Position to RoPE is the same as the source's last-written index.
-            (kv_cache.layers[src].current_len.saturating_sub(1)) as u32
+            // Source has already advanced past the row it just wrote;
+            // RoPE at that row's position.
+            (kv_cache.layers[src].abs_position.saturating_sub(1)) as u32
         } else {
-            kv_cache.layers[layer_idx].current_len as u32
+            kv_cache.layers[layer_idx].abs_position as u32
         };
         let t_val = if kv_shared_source.is_some() {
-            // Source's current_len already counts this token; t_val is the
-            // total positions to attend over (= source.current_len).
+            // Source's current_len already counts this token.
             kv_cache.layers[attend_cache_idx].current_len as u32
         } else {
-            pos + 1
+            (kv_cache.layers[layer_idx].current_len + 1) as u32
         };
         let attn_span = ops::kv_cache::attention_span(t_val, window_size);
 
@@ -163,32 +251,23 @@ impl MetalBackend {
             && kv_shared_source.is_none();
         let use_fused_post_attn = self.decode_flags.fused_post_attn_norm;
 
-        // Path 1: full attention fusion. Skips both qk_norm_rope dispatch AND
-        // kv_append_attend_fused dispatch — handles them in `attn_fused`.
-        // M2: `has_v_norm` and `q_norm_enabled` / `k_norm_enabled` come
-        // from the structured AttentionSpec; the actual `q_norm_weight`
-        // / `k_norm_weight` slices stay as direct layer reads because
-        // the spec only carries presence flags, not the weight bytes.
-        let did_fused_attn = use_fused_attn
-            && layer_head_dim <= MAX_HEAD_DIM_SINGLE_SG
-            && attn_span <= ops::kv_cache::SHORT_ATTENTION_SPAN
-            && attn_spec.q_norm_enabled
-            && attn_spec.k_norm_enabled
-            && !attn_spec.has_v_norm
-            // attn_fused writes the layer's own K/V cache; shared layers
-            // must not, so we fall through to the manual qk_norm + RoPE
-            // branch. The K-side work is wasted on shared layers (the
-            // result is discarded), but correctness > 35-layer dispatch
-            // saving on a non-default opt-in path.
-            && kv_shared_source.is_none();
+        // Path 1: full attention fusion. Skips the qk_norm_rope dispatch,
+        // the kv_append_attend_fused dispatch, AND the three Q/K/V
+        // bias_add dispatches (when the layer has biases) — all handled
+        // inside `attn_fused`. The decision comes from the shared
+        // `attn_fused_will_fire` authority, which `encode_input_norm_and_qkv`
+        // also consulted to skip its bias dispatches — the two sites must
+        // agree or a bias is applied twice / dropped.
+        let did_fused_attn = self.attn_fused_will_fire(layer, kv_cache, layer_idx);
+        let _ = use_fused_attn;
 
         // ── Step 1.5 + 2: QK-norm + RoPE ──
         if did_fused_attn {
             let cache = &kv_cache.layers[layer_idx];
-            let q_w = layer.q_norm_weight.unwrap();
-            let k_w = layer.k_norm_weight.unwrap();
-            let q_w_buf = self.bufs.get_f32(q_w);
-            let k_w_buf = self.bufs.get_f32(k_w);
+            // No-QK-norm archs bind the shared empty-slice stub; the
+            // has_qk_norm flag gates the read (sinks convention).
+            let q_w_buf = self.bufs.get_f32(layer.q_norm_weight.unwrap_or(&[]));
+            let k_w_buf = self.bufs.get_f32(layer.k_norm_weight.unwrap_or(&[]));
             let t_val = (cache.current_len + 1) as u32;
             let hd_val = layer_head_dim as u32;
             let nq_val = layer_num_q_heads as u32;
@@ -216,17 +295,59 @@ impl MetalBackend {
             enc.set_bytes(13, 4, &window_size as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(14, 4, &eps as *const f32 as *const std::ffi::c_void);
             enc.set_bytes(15, 4, &qk_off as *const f32 as *const std::ffi::c_void);
-            enc.set_bytes(
-                16,
-                4,
-                &layer_rope_base as *const f32 as *const std::ffi::c_void,
-            );
             enc.set_bytes(17, 4, &rdim as *const u32 as *const std::ffi::c_void);
+            // Attention sinks (GPT-OSS) — see `stages::sinks`.
+            crate::stages::sinks::bind(
+                enc,
+                ATTN_FUSED_SINKS_INDEX,
+                layer.attn_sinks,
+                layer_num_q_heads,
+            );
+            crate::stages::rope_freq::bind(
+                enc,
+                ATTN_FUSED_INV_FREQ_INDEX,
+                ATTN_FUSED_AMPLITUDE_INDEX,
+                layer_rope_plan,
+                layer_head_dim,
+                layer.rotary_dim,
+            );
+            enc.set_bytes(
+                ATTN_FUSED_ABS_POS_INDEX,
+                4,
+                &pos as *const u32 as *const std::ffi::c_void,
+            );
+            enc.set_bytes(
+                ATTN_FUSED_SOFTCAP_INDEX,
+                4,
+                &layer.attn_softcap as *const f32 as *const std::ffi::c_void,
+            );
+            // QK-norm flag + Q/K/V projection biases (GPT-OSS). Presence
+            // is all-or-nothing here by `attn_fused_will_fire`'s gate;
+            // absent slots bind the empty-slice stub, unread under the
+            // flags.
+            let has_qk_norm: u32 = u32::from(attn_spec.q_norm_enabled);
+            enc.set_bytes(
+                ATTN_FUSED_HAS_QK_NORM_INDEX,
+                4,
+                &has_qk_norm as *const u32 as *const std::ffi::c_void,
+            );
+            let has_qkv_bias: u32 = u32::from(layer.attn_q_bias.is_some());
+            let qb_buf = self.bufs.get_f32(layer.attn_q_bias.unwrap_or(&[]));
+            let kb_buf = self.bufs.get_f32(layer.attn_k_bias.unwrap_or(&[]));
+            let vb_buf = self.bufs.get_f32(layer.attn_v_bias.unwrap_or(&[]));
+            enc.set_buffer(ATTN_FUSED_QKV_BIAS_INDEX, Some(&qb_buf), 0);
+            enc.set_buffer(ATTN_FUSED_QKV_BIAS_INDEX + 1, Some(&kb_buf), 0);
+            enc.set_buffer(ATTN_FUSED_QKV_BIAS_INDEX + 2, Some(&vb_buf), 0);
+            enc.set_bytes(
+                ATTN_FUSED_QKV_BIAS_INDEX + 3,
+                4,
+                &has_qkv_bias as *const u32 as *const std::ffi::c_void,
+            );
             enc.dispatch_thread_groups(
                 MTLSize::new(layer_num_q_heads as u64, 1, 1),
                 MTLSize::new(tg_w, 1, 1),
             );
-            kv_cache.layers[layer_idx].current_len += 1;
+            kv_cache.layers[layer_idx].advance_one();
         } else if use_fused_qkn_rope
             && layer.q_norm_weight.is_some()
             && layer.k_norm_weight.is_some()
@@ -253,13 +374,16 @@ impl MetalBackend {
             enc.set_bytes(5, 4, &nq_val as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(6, 4, &eps as *const f32 as *const std::ffi::c_void);
             enc.set_bytes(7, 4, &qk_off as *const f32 as *const std::ffi::c_void);
-            enc.set_bytes(
-                8,
-                4,
-                &layer_rope_base as *const f32 as *const std::ffi::c_void,
-            );
             enc.set_bytes(9, 4, &pos as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(10, 4, &rdim as *const u32 as *const std::ffi::c_void);
+            crate::stages::rope_freq::bind(
+                enc,
+                8,
+                11,
+                layer_rope_plan,
+                layer_head_dim,
+                layer.rotary_dim,
+            );
             enc.dispatch_thread_groups(
                 MTLSize::new(total_heads, 1, 1),
                 MTLSize::new(tg_w as u64, 1, 1),
@@ -301,14 +425,17 @@ impl MetalBackend {
             enc.set_buffer(0, Some(bufs.q_out), 0);
             enc.set_buffer(1, Some(bufs.k_out), 0);
             enc.set_bytes(2, 4, &hd as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(
-                3,
-                4,
-                &layer_rope_base as *const f32 as *const std::ffi::c_void,
-            );
             enc.set_bytes(4, 4, &pos as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(5, 4, &rdim as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(6, 4, &num_q as *const u32 as *const std::ffi::c_void);
+            crate::stages::rope_freq::bind(
+                enc,
+                3,
+                7,
+                layer_rope_plan,
+                layer_head_dim,
+                layer.rotary_dim,
+            );
             enc.dispatch_threads(
                 MTLSize::new(rope_pairs, total_qk_heads, 1),
                 MTLSize::new(rope_pairs.min(256), 1, 1),
@@ -362,6 +489,18 @@ impl MetalBackend {
             enc.set_bytes(9, 4, &window_size as *const u32 as *const std::ffi::c_void);
             enc.set_buffer(10, Some(bufs.k_out), 0);
             enc.set_buffer(11, Some(bufs.v_out), 0);
+            // Attention sinks (GPT-OSS) — see `stages::sinks`.
+            crate::stages::sinks::bind(
+                enc,
+                KV_APPEND_ATTEND_SINKS_INDEX,
+                layer.attn_sinks,
+                layer_num_q_heads,
+            );
+            enc.set_bytes(
+                KV_APPEND_ATTEND_SOFTCAP_INDEX,
+                4,
+                &layer.attn_softcap as *const f32 as *const std::ffi::c_void,
+            );
             enc.dispatch_thread_groups(
                 MTLSize::new(layer_num_q_heads as u64, 1, 1),
                 MTLSize::new(
@@ -399,6 +538,12 @@ impl MetalBackend {
             enc.set_bytes(7, 4, &num_kv_u as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(8, 4, &scale as *const f32 as *const std::ffi::c_void);
             enc.set_bytes(9, 4, &window_size as *const u32 as *const std::ffi::c_void);
+            crate::stages::sinks::bind(enc, 10, layer.attn_sinks, layer_num_q_heads);
+            enc.set_bytes(
+                12,
+                4,
+                &layer.attn_softcap as *const f32 as *const std::ffi::c_void,
+            );
             enc.dispatch_thread_groups(
                 MTLSize::new(layer_num_q_heads as u64, 1, 1),
                 MTLSize::new(
@@ -425,74 +570,145 @@ impl MetalBackend {
                 layer_num_q_heads,
                 scale,
                 window_size,
+                layer.attn_sinks,
+                layer.attn_softcap,
             );
         }
         // Only own-cache layers advance current_len; shared layers leave
         // their (unused) cache pointer at 0 forever.
         if !did_fused_attn && kv_shared_source.is_none() {
-            kv_cache.layers[layer_idx].current_len += 1;
+            kv_cache.layers[layer_idx].advance_one();
         }
 
         // ── Step 5a: O projection ──
-        if uses_kquant {
-            use crate::stages::quant_matvec::Pipelines;
-            let pipes = Pipelines {
-                q4kf_proj: Some(&self.attention.q4kf_proj_pipeline.state),
-                q4k_matvec_fallback: &self.quant.q4k_matvec_pipeline,
-                q6k_matvec: &self.quant.q6k_matvec_pipeline,
-                q4_matvec: &self.q4.matvec,
-                q4k_matmul: None,
-            };
-            crate::stages::o_proj::encode(
+        //
+        // Dispatched on `wo`'s own format, not `wq`'s. Selecting an
+        // operand's ABI from a *different* operand's representation is
+        // what produced the defect this replaced: `uses_kquant` reads
+        // `wq`, so a Q4_0 `wo` fell to the Q8-only branch below and was
+        // handed to `q8_matvec` as though its 18-byte packed blocks were
+        // int8 rows, alongside a weight-scale buffer Q4_0 has no source
+        // for. That was survivable only because every caller fabricated
+        // an empty scale buffer; removing the fabrication exposed it.
+        match layer.wo.format() {
+            // `o_proj::encode` understands all four packed formats — its
+            // own doc covers "Q4_0 / Q8_0: quantise attn_in -> Q8 int8 +
+            // per-32 f16 scale" as well as the k-quant families.
+            larql_compute::QuantFormat::Q4_0
+            | larql_compute::QuantFormat::Q4_K
+            | larql_compute::QuantFormat::Q4_KF
+            | larql_compute::QuantFormat::Q6_K => {
+                use crate::stages::quant_matvec::Pipelines;
+                let pipes = Pipelines {
+                    q4kf_proj: Some(&self.attention.q4kf_proj_pipeline.state),
+                    q4k_matvec_fallback: &self.quant.q4k_matvec_pipeline,
+                    q6k_matvec: &self.quant.q6k_matvec_pipeline,
+                    q4_matvec: &self.q4.matvec,
+                    q4k_matmul: None,
+                };
+                // K from the store's own row width, not the logical
+                // `layer_q_dim` — O rows may be padded to the quant block
+                // (same audit-F17 hazard as the QKV kernels; the padded
+                // columns dequantise to zero, so the stored width is
+                // exact given the input buffer's zeroed slack).
+                let o_k_store = layer.wo.stored_cols(hidden, layer_q_dim);
+                crate::stages::o_proj::encode(
+                    enc,
+                    &pipes,
+                    &self.quant.q8_quant_pipeline,
+                    layer.wo.format(),
+                    bufs.wo,
+                    bufs.attn_out_buf,
+                    0,
+                    bufs.o_q8_scratch,
+                    0,
+                    bufs.o_q8s_scratch,
+                    0,
+                    bufs.o_out_buf,
+                    0,
+                    o_k_store,
+                    hidden,
+                );
+            }
+            // Q8 legacy path: decode-specific `q8_matvec` shader (not in
+            // stages::quant_matvec, which uses `q4_matvec` with a
+            // different buffer layout). Q8_0 only — it is the one format
+            // that supplies the external weight scales this shader reads
+            // at buffer index 2.
+            larql_compute::QuantFormat::Q8_0 => {
+                let dim_val = layer_q_dim as u32;
+                let blocks = layer_q_dim.div_ceil(LEGACY_BLOCK_ELEMS) as u32;
+                enc.set_compute_pipeline_state(&self.quant.q8_quant_pipeline);
+                enc.set_buffer(0, Some(bufs.attn_out_buf), 0);
+                enc.set_buffer(1, Some(bufs.o_q8_scratch), 0);
+                enc.set_buffer(2, Some(bufs.o_q8s_scratch), 0);
+                enc.set_bytes(3, 4, &dim_val as *const u32 as *const std::ffi::c_void);
+                enc.dispatch_threads(
+                    MTLSize::new(blocks as u64, 1, 1),
+                    MTLSize::new(
+                        crate::kernels::DISPATCH_TG_MAX_THREADS.min(blocks as u64),
+                        1,
+                        1,
+                    ),
+                );
+
+                let o_rows = hidden as u32;
+                let o_k = layer_q_dim as u32;
+                assert!(
+                    layer_q_dim <= crate::shaders::q8_matvec::MAX_K,
+                    "q8_matvec stages its Q8 input in threadgroup memory capped at \
+                     K = {}; layer_q_dim {layer_q_dim} would corrupt it (audit F13)",
+                    crate::shaders::q8_matvec::MAX_K,
+                );
+                enc.set_compute_pipeline_state(&self.quant.q8_matvec_pipeline.state);
+                enc.set_buffer(0, Some(bufs.wo), 0);
+                enc.set_buffer(1, Some(bufs.o_q8_scratch), 0);
+                enc.set_buffer(
+                    2,
+                    Some(
+                        bufs.wo_scales
+                            .expect("legacy scale path requires an external-scale format"),
+                    ),
+                    0,
+                );
+                enc.set_buffer(3, Some(bufs.o_q8s_scratch), 0);
+                enc.set_buffer(4, Some(bufs.o_out_buf), 0);
+                enc.set_bytes(5, 4, &o_rows as *const u32 as *const std::ffi::c_void);
+                enc.set_bytes(6, 4, &o_k as *const u32 as *const std::ffi::c_void);
+                enc.dispatch_thread_groups(
+                    MTLSize::new((hidden as u64).div_ceil(8), 1, 1),
+                    MTLSize::new(256, 1, 1),
+                );
+            }
+            // Loud rather than silent. The previous predicate routed
+            // anything non-k-quant here, so an unsupported format was
+            // reinterpreted as Q8 and produced plausible numbers instead
+            // of an error.
+            format => panic!(
+                "O projection has no dispatch for {format:?}; supported: \
+                 Q4_0, Q4_K, Q4_KF, Q6_K (o_proj::encode) and Q8_0 (legacy q8_matvec)"
+            ),
+        }
+
+        // O-projection bias (GPT-OSS) joins before the residual add —
+        // the same point the CPU reference (`forward::add_bias`) applies
+        // it. Dispatched only when the layer carries the bias.
+        if let Some(b) = layer.attn_o_bias {
+            assert_eq!(
+                b.len(),
+                hidden,
+                "O projection bias has {} entries but hidden is {hidden} — \
+                 the extracted tensor does not match this model",
+                b.len()
+            );
+            let b_buf = self.bufs.get_f32(b);
+            crate::stages::bias_add::encode(
                 enc,
-                &pipes,
-                &self.quant.q8_quant_pipeline,
-                layer.wo.format,
-                bufs.wo,
-                bufs.attn_out_buf,
-                0,
-                bufs.o_q8_scratch,
-                0,
-                bufs.o_q8s_scratch,
-                0,
+                &self.attention.bias_add_pipeline,
                 bufs.o_out_buf,
                 0,
-                layer_q_dim,
+                &b_buf,
                 hidden,
-            );
-        } else {
-            // Q8 legacy path: decode-specific `q8_matvec` shader (not in
-            // stages::quant_matvec which uses `q4_matvec` for Q4_0/Q8_0 with
-            // a different buffer layout). Inline.
-            let dim_val = layer_q_dim as u32;
-            let blocks = (layer_q_dim / LEGACY_BLOCK_ELEMS) as u32;
-            enc.set_compute_pipeline_state(&self.quant.q8_quant_pipeline);
-            enc.set_buffer(0, Some(bufs.attn_out_buf), 0);
-            enc.set_buffer(1, Some(bufs.o_q8_scratch), 0);
-            enc.set_buffer(2, Some(bufs.o_q8s_scratch), 0);
-            enc.set_bytes(3, 4, &dim_val as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_threads(
-                MTLSize::new(blocks as u64, 1, 1),
-                MTLSize::new(
-                    crate::kernels::DISPATCH_TG_MAX_THREADS.min(blocks as u64),
-                    1,
-                    1,
-                ),
-            );
-
-            let o_rows = hidden as u32;
-            let o_k = layer_q_dim as u32;
-            enc.set_compute_pipeline_state(&self.quant.q8_matvec_pipeline.state);
-            enc.set_buffer(0, Some(bufs.wo), 0);
-            enc.set_buffer(1, Some(bufs.o_q8_scratch), 0);
-            enc.set_buffer(2, Some(bufs.wo_scales), 0);
-            enc.set_buffer(3, Some(bufs.o_q8s_scratch), 0);
-            enc.set_buffer(4, Some(bufs.o_out_buf), 0);
-            enc.set_bytes(5, 4, &o_rows as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(6, 4, &o_k as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_thread_groups(
-                MTLSize::new((hidden as u64).div_ceil(8), 1, 1),
-                MTLSize::new(256, 1, 1),
             );
         }
 
@@ -504,7 +720,13 @@ impl MetalBackend {
             } else {
                 bufs.post_attn_norm.clone()
             };
-            if use_fused_post_attn && ffn_uses_kquant {
+            // The triple-fused kernel has no `b_scale` slot, so a
+            // Granite-style `residual_multiplier != 1.0` must take the
+            // unfused chain below, which binds it. The equivalent guards
+            // in `encode_post_ffn.rs` existed for exactly this reason;
+            // this site lacked one (capability audit F18).
+            let fusable_residual = layer.residual_multiplier == 1.0;
+            if use_fused_post_attn && ffn_uses_kquant && fusable_residual {
                 // Triple-fused: post_attn_norm + residual_norm + h_post_attn
                 // store in ONE dispatch.
                 enc.set_compute_pipeline_state(&self.norms.post_attn_residual_norm_store_pipeline);

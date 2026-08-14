@@ -22,7 +22,7 @@ use ndarray::{s, Array1, Array2};
 use thiserror::Error;
 
 use super::entry::{InjectionConfig, VecInjectEntry};
-use super::routing::{RoutingIndex, RoutingQuery};
+use super::routing::{RoutingBuildError, RoutingIndex, RoutingQuery};
 use super::store::ApolloStore;
 use crate::{EngineInfo, RetrievalEngine};
 use larql_inference::forward::{embed_tokens_pub, forward_from_layer, forward_raw_logits};
@@ -46,6 +46,66 @@ pub enum ApolloError {
     Forward,
     #[error("no windows matched query (routing returned empty)")]
     NoMatch,
+    #[error(transparent)]
+    Routing(#[from] RoutingBuildError),
+}
+
+// ─── Free helpers ────────────────────────────────────────────────────────────
+
+/// Number of leading query tokens to drop when building the
+/// `window_tokens ++ query_tokens` context. Exactly one token is dropped,
+/// and only when the query starts with the *known* BOS id; `bos = None`
+/// means the BOS id is unknown and nothing is dropped.
+fn bos_skip_count(query_ids: &[u32], bos: Option<u32>) -> usize {
+    match bos {
+        Some(b) if query_ids.first() == Some(&b) => 1,
+        _ => 0,
+    }
+}
+
+/// Fail-closed injection-layer gate, mirroring the markov engines'
+/// `check_residual_recompute_preconditions` placement at prefill entry —
+/// the earliest point the engine sees both the model (`num_layers`) and
+/// the store (`crystal_layer`).
+///
+/// `forward_layer_range` applies the injection delta only on the iteration
+/// where `layer == injection_layer`, so a layer outside the executed range
+/// is never reached and the retrieval injection silently no-ops — the worst
+/// failure mode for an engine whose only contract is task-level accuracy:
+///   - `injection_layer >= num_layers`: unreachable on every path (the
+///     default `injection_layer=30` on a <=30-layer model trips this);
+///   - compressed path (store has boundary residuals) runs only
+///     `crystal_layer..num_layers`, so `injection_layer < crystal_layer`
+///     is also unreachable (e.g. `apollo:layer=25` against a `crystal=30`
+///     store).
+pub(crate) fn check_injection_layer_preconditions(
+    engine_name: &str,
+    weights: &ModelWeights,
+    config: &InjectionConfig,
+    store: &ApolloStore,
+) -> Result<(), EngineError> {
+    if config.injection_layer >= weights.num_layers {
+        return Err(EngineError::InvariantViolation {
+            what: format!(
+                "{engine_name}: injection_layer ({}) >= num_layers ({}) — the forward pass \
+                 never reaches the perturbation layer, so retrieval injection would \
+                 silently no-op; set injection_layer < num_layers",
+                config.injection_layer, weights.num_layers,
+            ),
+        });
+    }
+    let crystal = store.manifest.crystal_layer;
+    if !store.boundaries.is_empty() && config.injection_layer < crystal {
+        return Err(EngineError::InvariantViolation {
+            what: format!(
+                "{engine_name}: injection_layer ({}) < crystal_layer ({crystal}) — the \
+                 compressed forward runs only crystal_layer..num_layers, so retrieval \
+                 injection would be silently skipped; set injection_layer >= crystal_layer",
+                config.injection_layer,
+            ),
+        });
+    }
+    Ok(())
 }
 
 // ─── Trace types ─────────────────────────────────────────────────────────────
@@ -103,7 +163,7 @@ impl ApolloEngine {
 
     pub fn build_routing_index(&mut self) -> Result<(), ApolloError> {
         let store = self.store.as_ref().ok_or(ApolloError::StoreNotLoaded)?;
-        self.routing = RoutingIndex::from_store(store);
+        self.routing = RoutingIndex::from_store(store)?;
         Ok(())
     }
 
@@ -235,14 +295,18 @@ impl ApolloEngine {
         let entries = self.retrieve_entries(query_ids, &[top_window]).ok()?;
         let window_tokens = store.window_tokens.get(top_window as usize)?;
 
-        // Context = window_tokens ++ query_tokens (drop leading BOS if present).
+        // Context = window_tokens ++ query_tokens. A BOS at the front of the
+        // query would land mid-context, so it is dropped — but only when the
+        // BOS id is actually known: the explicit engine config wins, else the
+        // architecture's structural hook (populated for models whose
+        // tokenizer omits BOS and larql prepends it, e.g. Gemma 4). Neither
+        // known → nothing is stripped; there is no hardcoded model default.
+        let bos = self
+            .config
+            .bos_token_id
+            .or_else(|| weights.arch.bos_token_id());
         let mut context: Vec<u32> = window_tokens.clone();
-        let skip = if !query_ids.is_empty() && query_ids[0] == 2 {
-            1
-        } else {
-            0
-        };
-        context.extend_from_slice(&query_ids[skip..]);
+        context.extend_from_slice(&query_ids[bos_skip_count(query_ids, bos)..]);
 
         // Injection delta: sum of answer-side entry embeddings.
         let hidden = weights.hidden_size;
@@ -260,29 +324,11 @@ impl ApolloEngine {
         }
 
         // Boundary residual: if the store has one for this window, the compressed
-        // path can skip layers 0..crystal_layer entirely.
+        // path can skip layers 0..crystal_layer entirely. Injection-layer
+        // reachability (vs both crystal_layer and num_layers) is enforced
+        // fail-closed by `check_injection_layer_preconditions` at prefill.
         let boundary = store.boundaries.get(top_window as usize).cloned();
         let crystal = store.manifest.crystal_layer;
-
-        // Guard the silent-no-op footgun: the compressed forward runs only
-        // `crystal..num_layers`, so an `injection_layer < crystal` never reaches
-        // the perturbation layer and the retrieval-injection is silently dropped
-        // (the engine then degrades to plain boundary replay). Warn once rather
-        // than failing — Apollo is experimental and the contract is only
-        // task-level — but make the misconfiguration loud. (Selector example
-        // `apollo:layer=25` against a default `crystal=30` store trips this.)
-        if boundary.is_some() && self.config.injection_layer < crystal {
-            static WARNED: std::sync::Once = std::sync::Once::new();
-            WARNED.call_once(|| {
-                eprintln!(
-                    "[apollo] WARNING: injection_layer ({}) < crystal_layer ({crystal}): the \
-                     compressed forward starts at crystal_layer, so the injection at \
-                     injection_layer is SKIPPED (no retrieval-injection occurs). Set \
-                     injection_layer >= crystal_layer.",
-                    self.config.injection_layer,
-                );
-            });
-        }
 
         Some((context, Array1::from(delta), boundary, crystal))
     }
@@ -341,13 +387,30 @@ impl ApolloEngine {
 // `FfnBackend` dispatch (forward goes through `forward_from_layer` /
 // `forward_raw_logits` directly), and its `None` returns map to
 // `RetrievalMiss` rather than the per-layer backend failures of
-// `KvEngine`. Construction sites build it as
+// `KvEngine`.
+//
+// That missing dispatch is why both entry points refuse a hybrid-MoE
+// architecture outright (see `APOLLO_HAS_NO_FFN_SEAM`) rather than serving it
+// a dense-only forward that would answer for a different model. Construction sites build it as
 // [`larql_inference::AnyEngine::Retrieval`] so the harness branches
 // once at the top of the autoregressive loop.
 
+/// Why Apollo cannot dispatch experts, for the refusal it owes a MoE model.
+///
+/// Structural, not an omission: `forward_from_layer` / `forward_raw_logits`
+/// live in `larql-compute` *below* the `FfnBackend` seam and construct their
+/// own `ViewFfn` over the dense weights, so no caller-supplied backend — and
+/// therefore no bound expert route — can reach them. Giving Apollo real
+/// dispatch means threading an `FfnBackend` through `forward_layer_range`,
+/// which is a change to the forward, not to this engine.
+const APOLLO_ENGINE_NAME: &str = "apollo";
+
+const APOLLO_HAS_NO_FFN_SEAM: &str =
+    "its forward runs below the FfnBackend seam and builds its own dense FFN";
+
 impl RetrievalEngine for ApolloEngine {
     fn name(&self) -> &str {
-        "apollo"
+        APOLLO_ENGINE_NAME
     }
 
     fn info(&self) -> EngineInfo {
@@ -392,14 +455,20 @@ impl RetrievalEngine for ApolloEngine {
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
+        crate::engines::refuse_if_moe(APOLLO_ENGINE_NAME, APOLLO_HAS_NO_FFN_SEAM, weights)?;
+        let store = self
+            .store
+            .as_ref()
+            .ok_or_else(|| EngineError::RetrievalMiss {
+                reason: "apollo store not attached".into(),
+            })?;
+        // Fail closed on unreachable injection layers before any forward work.
+        check_injection_layer_preconditions("apollo", weights, &self.config, store)?;
         if self.routing.is_empty() {
-            let store = self
-                .store
-                .as_ref()
-                .ok_or_else(|| EngineError::RetrievalMiss {
-                    reason: "apollo store not attached".into(),
+            self.routing =
+                RoutingIndex::from_store(store).map_err(|e| EngineError::InvariantViolation {
+                    what: format!("apollo: {e}"),
                 })?;
-            self.routing = RoutingIndex::from_store(store);
         }
 
         let (context, delta, boundary, crystal) = self
@@ -447,6 +516,7 @@ impl RetrievalEngine for ApolloEngine {
         weights: &ModelWeights,
         token_id: u32,
     ) -> Result<Array2<f32>, EngineError> {
+        crate::engines::refuse_if_moe(APOLLO_ENGINE_NAME, APOLLO_HAS_NO_FFN_SEAM, weights)?;
         self.context_tokens.push(token_id);
         let delta =
             self.injection_delta
@@ -774,6 +844,7 @@ mod tests {
             injection_layer: 1, // 2-layer model: inject before final layer
             inject_coefficient: 2.0,
             top_k: 4,
+            bos_token_id: None,
         };
         let mut engine = ApolloEngine::new(cfg).with_store(store);
         engine.build_routing_index().unwrap();
@@ -868,6 +939,7 @@ mod tests {
             injection_layer: 1,
             inject_coefficient: 1.0,
             top_k: 4,
+            bos_token_id: None,
         })
         .with_store(store);
         engine.build_routing_index().unwrap();
@@ -876,6 +948,134 @@ mod tests {
             .prefill(&weights, &[0u32, 1u32])
             .expect("prefill uncompressed");
         assert_eq!(h.shape(), &[1, weights.hidden_size]);
+    }
+
+    // ── BOS handling (no hardcoded model-specific BOS id) ────────────────
+
+    #[test]
+    fn bos_skip_count_drops_one_token_only_on_known_bos_match() {
+        // Known BOS and query starts with it → exactly one token dropped.
+        assert_eq!(bos_skip_count(&[3, 0, 1], Some(3)), 1);
+        // Known BOS but query starts elsewhere → nothing dropped.
+        assert_eq!(bos_skip_count(&[0, 3, 1], Some(3)), 0);
+        // Unknown BOS → nothing dropped, even if token 2 (Gemma's BOS,
+        // the old hardcoded value) leads the query.
+        assert_eq!(bos_skip_count(&[2, 0, 1], None), 0);
+        // Empty query → nothing to drop.
+        assert_eq!(bos_skip_count(&[], Some(3)), 0);
+    }
+
+    /// Uncompressed-path engine over the synthetic 2-layer weights with a
+    /// caller-chosen BOS id, so the cached `context_tokens` expose the
+    /// window++query assembly exactly.
+    fn mk_uncompressed_engine_with_bos(
+        weights: &larql_inference::ModelWeights,
+        bos_token_id: Option<u32>,
+    ) -> ApolloEngine {
+        let mut store = mk_store_in_vocab(2, 4, weights.hidden_size, weights.vocab_size);
+        store.boundaries.clear();
+        let mut engine = ApolloEngine::new(InjectionConfig {
+            injection_layer: 1,
+            inject_coefficient: 1.0,
+            top_k: 4,
+            bos_token_id,
+        })
+        .with_store(store);
+        engine.build_routing_index().unwrap();
+        engine
+    }
+
+    #[test]
+    fn prefill_strips_leading_bos_when_configured() {
+        let weights = larql_inference::test_utils::make_test_weights();
+        let mut engine = mk_uncompressed_engine_with_bos(&weights, Some(3));
+        // Window 0 tokens are [0, 1, 2, 3]; query leads with the configured
+        // BOS id 3, which must be dropped from the assembled context.
+        engine.prefill(&weights, &[3u32, 0, 1]).expect("prefill");
+        assert_eq!(engine.context_tokens, vec![0, 1, 2, 3, 0, 1]);
+    }
+
+    #[test]
+    fn prefill_keeps_all_query_tokens_when_bos_unknown() {
+        let weights = larql_inference::test_utils::make_test_weights();
+        // No configured BOS, and the synthetic "tinymodel" arch's
+        // `bos_token_id()` is None → no structural source → strip nothing.
+        assert_eq!(weights.arch.bos_token_id(), None);
+        let mut engine = mk_uncompressed_engine_with_bos(&weights, None);
+        engine.prefill(&weights, &[3u32, 0, 1]).expect("prefill");
+        assert_eq!(engine.context_tokens, vec![0, 1, 2, 3, 3, 0, 1]);
+    }
+
+    // ── Injection-layer preconditions (fail-closed at prefill) ───────────
+
+    #[test]
+    fn prefill_rejects_injection_layer_at_or_beyond_num_layers() {
+        let weights = larql_inference::test_utils::make_test_weights();
+        // num_layers = 2, so injection_layer = 2 is never reached by the
+        // forward loop (valid layers are 0..2). Before the gate this
+        // prefill SUCCEEDED and silently dropped the injection.
+        let store = mk_store_in_vocab(2, 4, weights.hidden_size, weights.vocab_size);
+        let mut engine = ApolloEngine::new(InjectionConfig {
+            injection_layer: 2,
+            inject_coefficient: 1.0,
+            top_k: 4,
+            bos_token_id: None,
+        })
+        .with_store(store);
+        engine.build_routing_index().unwrap();
+        match engine.prefill(&weights, &[0u32, 1]) {
+            Err(EngineError::InvariantViolation { what }) => {
+                assert!(
+                    what.contains("injection_layer (2) >= num_layers (2)"),
+                    "unexpected message: {what}"
+                );
+            }
+            other => panic!("expected InvariantViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefill_rejects_injection_layer_below_crystal_on_compressed_store() {
+        let weights = larql_inference::test_utils::make_test_weights();
+        // Store has boundary residuals and crystal_layer = 1, so the
+        // compressed forward runs layers 1..2 only; injection_layer = 0 is
+        // never reached. Before the gate this warned on stderr and ran
+        // anyway with the injection silently skipped.
+        let store = mk_store_in_vocab(2, 4, weights.hidden_size, weights.vocab_size);
+        assert!(!store.boundaries.is_empty(), "fixture must be compressed");
+        let mut engine = ApolloEngine::new(InjectionConfig {
+            injection_layer: 0,
+            inject_coefficient: 1.0,
+            top_k: 4,
+            bos_token_id: None,
+        })
+        .with_store(store);
+        engine.build_routing_index().unwrap();
+        match engine.prefill(&weights, &[0u32, 1]) {
+            Err(EngineError::InvariantViolation { what }) => {
+                assert!(
+                    what.contains("injection_layer (0) < crystal_layer (1)"),
+                    "unexpected message: {what}"
+                );
+            }
+            other => panic!("expected InvariantViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn injection_layer_equal_to_crystal_passes_the_gate() {
+        // Positive control for the gate boundary: injection_layer ==
+        // crystal_layer is the first executed layer of the compressed
+        // range and must be accepted.
+        let weights = larql_inference::test_utils::make_test_weights();
+        let store = mk_store_in_vocab(2, 4, weights.hidden_size, weights.vocab_size);
+        let cfg = InjectionConfig {
+            injection_layer: 1, // == crystal_layer, < num_layers (2)
+            inject_coefficient: 1.0,
+            top_k: 4,
+            bos_token_id: None,
+        };
+        assert!(check_injection_layer_preconditions("apollo", &weights, &cfg, &store).is_ok());
     }
 
     #[test]
@@ -966,6 +1166,7 @@ mod tests {
             injection_layer: 1,
             inject_coefficient: 1.0,
             top_k: 4,
+            bos_token_id: None,
         })
         .with_store(store);
         apollo.build_routing_index().unwrap();
@@ -989,14 +1190,6 @@ mod tests {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             ndarray::Array2::zeros((x.shape()[0], self.hidden))
         }
-        fn forward_with_activation(
-            &self,
-            layer: usize,
-            x: &ndarray::Array2<f32>,
-        ) -> (ndarray::Array2<f32>, ndarray::Array2<f32>) {
-            let out = self.forward(layer, x);
-            (out.clone(), out)
-        }
         fn name(&self) -> &str {
             "counting"
         }
@@ -1018,6 +1211,7 @@ mod tests {
             injection_layer: 1,
             inject_coefficient: 1.0,
             top_k: 4,
+            bos_token_id: None,
         })
         .with_store(store);
         apollo.build_routing_index().unwrap();

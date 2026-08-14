@@ -40,7 +40,7 @@ fn parse_merge_strategy(s: &str) -> lq::MergeStrategy {
 
 // ── PyEdge ──
 
-#[pyclass(name = "Edge")]
+#[pyclass(name = "Edge", from_py_object)]
 #[derive(Clone)]
 pub struct PyEdge {
     inner: lq::Edge,
@@ -209,7 +209,7 @@ impl PyEdge {
 
 // ── PyNode ──
 
-#[pyclass(name = "Node")]
+#[pyclass(name = "Node", from_py_object)]
 #[derive(Clone)]
 pub struct PyNode {
     inner: lq::core::node::Node,

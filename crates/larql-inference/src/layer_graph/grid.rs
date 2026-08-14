@@ -14,12 +14,17 @@
 //! This isolates whether errors come from remote dispatch vs. dense FFN.
 
 mod config;
+mod forced_score;
 mod remote_ffn;
 mod remote_moe;
 mod setup;
 mod timing;
 
-pub use remote_ffn::{generate_with_remote_ffn, generate_with_remote_ffn_batch};
+pub use forced_score::score_forced_with_remote_ffn;
+pub use remote_ffn::{
+    generate_with_remote_ffn, generate_with_remote_ffn_batch,
+    generate_with_remote_ffn_batch_captured, ResidualCaptureSink,
+};
 pub use remote_moe::{generate_with_remote_moe, generate_with_remote_moe_batch};
 
 // ── Bottleneck diagnostic ────────────────────────────────────────────────────

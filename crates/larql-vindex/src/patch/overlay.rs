@@ -10,7 +10,6 @@
 //! `PatchDownMeta`, base64 helpers) lives in `super::format`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
 use ndarray::Array1;
 
@@ -18,28 +17,23 @@ use crate::index::storage::vindex_storage::VindexStorage;
 use crate::index::{FeatureMeta, VectorIndex, WalkHit, WalkTrace};
 
 use super::format::VindexPatch;
+use super::gate_overlay::GateOverlay;
 
-/// Per-layer contiguous gate-override snapshot built lazily by
-/// `gate_knn`. Keeps the override matvec cache-friendly — same memory
-/// layout as `ShardCache` — instead of pointer-chasing through a
-/// `HashMap<(layer, feat), Vec<f32>>`.
-///
-/// Built on first query at a layer, invalidated on any mutation to
-/// `overrides_gate` via [`PatchedVindex::invalidate_gate_cache`].
-/// Memory cost: one f32-per-element per cached layer, which doubles
-/// the override storage; pays off after ≥1 cache hit per build.
-struct LayerGateCache {
-    /// Feature IDs in row-order of `gate_matrix`. Indices are stable
-    /// for the lifetime of one cache entry — invalidating + rebuilding
-    /// the cache renumbers them.
-    feature_ids: Vec<usize>,
-    /// `n × d` row-major; n = `feature_ids.len()`. Direct slice access
-    /// gives the gate vector for the i-th feature ID.
-    gate_matrix: Vec<f32>,
-    /// Hidden dim — needed for slicing the matrix. Cached so callers
-    /// don't have to pull it from `base.hidden_size` each call.
-    d: usize,
-}
+/// Oversampling factor for the base KNN query when the overlay has
+/// gate overrides and/or tombstoned deletions at the queried layer.
+/// Overrides can re-score base hits and tombstones remove them, so
+/// the merge/filter/sort step needs headroom beyond `top_k` to stay
+/// correct. Kept small — the common case is a handful of overlay
+/// entries, and this factor prices every patched-layer query.
+const BASE_KNN_OVERSAMPLE_FACTOR: usize = 2;
+
+/// First escalation of [`BASE_KNN_OVERSAMPLE_FACTOR`] when tombstoned
+/// deletions hollow out the oversampled window (review 2026-07-30
+/// M11): if more than `top_k` of the top `2·top_k` base hits are
+/// deleted, re-query at 4× before falling back to an all-features
+/// query. Keeps the common few-deletions case on the cheap 2× path
+/// while guaranteeing `top_k` survivors whenever the base has them.
+const BASE_KNN_OVERSAMPLE_RETRY_FACTOR: usize = 4;
 
 // ═══════════════════════════════════════════════════════════════
 // PatchedVindex — overlay on immutable base
@@ -99,18 +93,22 @@ pub struct PatchedVindex {
     /// Resolved gate vector overrides: (layer, feature) → gate vector.
     /// Lives in the overlay (not on `base`) so that the source
     /// `gate_vectors.bin` stays clean — see layering doc above.
-    pub(crate) overrides_gate: HashMap<(usize, usize), Vec<f32>>,
+    /// Stored in the shared [`GateOverlay`] retrieval structure (the
+    /// same kernel serves the arch-B `KnnStore` since the 2026-07-31
+    /// unification), which owns the per-layer flattened snapshot cache
+    /// and invalidates it automatically on every mutation.
+    pub(crate) overrides_gate: GateOverlay,
     /// Tombstones for deleted features.
+    ///
+    /// Contract (review 2026-07-30 M6): `Delete` adds the key;
+    /// `Insert` **and** `Update` on the same slot remove it —
+    /// mutating a feature implies it exists (resurrection). Every
+    /// query path (`feature_meta`, `gate_knn`, `bake_down`) must
+    /// agree with this set; a path that consults the tombstones
+    /// differently from the others is a bug.
     pub(crate) deleted: std::collections::HashSet<(usize, usize)>,
     /// Architecture B: per-layer retrieval-override KNN store.
     pub knn_store: super::knn_store::KnnStore,
-    /// Lazy per-layer cache of `overrides_gate` flattened into a
-    /// contiguous matrix. Built on first `gate_knn` query at each
-    /// layer; per-layer invalidation by every mutator that touches
-    /// `overrides_gate` so a single-layer patch stream leaves
-    /// unrelated layers' caches hot. `Arc` lets cached entries be
-    /// read without holding the outer `RwLock` for the whole matvec.
-    gate_cache: RwLock<HashMap<usize, Arc<LayerGateCache>>>,
 }
 
 impl PatchedVindex {
@@ -120,100 +118,19 @@ impl PatchedVindex {
             base,
             patches: Vec::new(),
             overrides_meta: HashMap::new(),
-            overrides_gate: HashMap::new(),
+            overrides_gate: GateOverlay::default(),
             deleted: std::collections::HashSet::new(),
             knn_store: super::knn_store::KnnStore::default(),
-            gate_cache: RwLock::new(HashMap::new()),
         }
-    }
-
-    /// Drop every layer's cached `overrides_gate` matrix. Used by
-    /// `rebuild_overrides`, which clears the entire override state at
-    /// once and re-applies the patch list from scratch. Per-mutation
-    /// sites prefer [`invalidate_gate_cache_layer`] so a busy
-    /// patch-stream doesn't keep evicting unrelated layers.
-    ///
-    /// `&mut self` is explicit about who's invalidating; the `RwLock`
-    /// is internal and never poisoned in practice.
-    pub(crate) fn invalidate_gate_cache(&mut self) {
-        if let Ok(mut g) = self.gate_cache.write() {
-            g.clear();
-        }
-    }
-
-    /// Drop the cached `overrides_gate` matrix for one layer. Called
-    /// by `insert_feature` / `delete_feature` / `set_gate_override`
-    /// (which all know their target layer) and by `apply_patch` (once
-    /// per touched layer, deduplicated). Leaves caches for other
-    /// layers intact — important for high-frequency patch streams
-    /// that touch a single layer repeatedly.
-    pub(crate) fn invalidate_gate_cache_layer(&mut self, layer: usize) {
-        if let Ok(mut g) = self.gate_cache.write() {
-            g.remove(&layer);
-        }
-    }
-
-    /// Build (or reuse) the per-layer contiguous gate-override
-    /// snapshot for `layer`. The first call per layer pays the
-    /// flatten cost; every subsequent `gate_knn` query at that layer
-    /// reuses the `Arc` without holding the outer `RwLock`.
-    ///
-    /// Returns `None` when there are no gate overrides for `layer`,
-    /// avoiding allocating an empty cache entry. Callers fall back
-    /// to the per-entry `overrides_gate` iteration in that case
-    /// (which the fast-path short-circuit usually avoids anyway).
-    fn layer_gate_cache(&self, layer: usize) -> Option<Arc<LayerGateCache>> {
-        // Fast path: read-lock check.
-        if let Ok(g) = self.gate_cache.read() {
-            if let Some(cache) = g.get(&layer) {
-                return Some(Arc::clone(cache));
-            }
-        }
-        // Slow path: flatten under a write lock.
-        // Counts overrides at this layer first so we can pre-size
-        // the matrix exactly — saves a reallocation per build.
-        let mut feature_ids: Vec<usize> = Vec::new();
-        let mut total_floats = 0usize;
-        let mut d = 0usize;
-        for (&(l, f), gate_vec) in &self.overrides_gate {
-            if l != layer {
-                continue;
-            }
-            if d == 0 {
-                d = gate_vec.len();
-            } else if gate_vec.len() != d {
-                // Mixed widths inside a single layer — caller messed
-                // up the API. Skip the cache and let the slow path
-                // handle it via the regular iterator.
-                return None;
-            }
-            feature_ids.push(f);
-            total_floats += gate_vec.len();
-        }
-        if feature_ids.is_empty() {
-            return None;
-        }
-        let mut gate_matrix = Vec::with_capacity(total_floats);
-        for &feat in &feature_ids {
-            // Indexed by `feature_ids` order so the matrix rows align
-            // with the IDs. `overrides_gate[(layer, feat)]` is the
-            // canonical store and is guaranteed to exist by the loop
-            // above.
-            let gate_vec = &self.overrides_gate[&(layer, feat)];
-            gate_matrix.extend_from_slice(gate_vec);
-        }
-        let cache = Arc::new(LayerGateCache {
-            feature_ids,
-            gate_matrix,
-            d,
-        });
-        if let Ok(mut g) = self.gate_cache.write() {
-            g.insert(layer, Arc::clone(&cache));
-        }
-        Some(cache)
     }
 
     /// Insert a feature directly into the overlay (auto-patch mode).
+    ///
+    /// An empty `gate_vec` means "no gate override" (metadata-only
+    /// insert, e.g. a Vindexfile INSERT without embeddings to
+    /// synthesise a gate): the slot is claimed via `overrides_meta`
+    /// but nothing lands in `overrides_gate` — a zero-width row would
+    /// poison the flattened per-layer gate cache.
     pub fn insert_feature(
         &mut self,
         layer: usize,
@@ -223,9 +140,12 @@ impl PatchedVindex {
     ) {
         let key = (layer, feature);
         self.overrides_meta.insert(key, Some(meta));
-        self.overrides_gate.insert(key, gate_vec);
+        if gate_vec.is_empty() {
+            self.overrides_gate.remove(layer, feature);
+        } else {
+            self.overrides_gate.insert(layer, feature, gate_vec);
+        }
         self.deleted.remove(&key);
-        self.invalidate_gate_cache_layer(layer);
     }
 
     /// Delete a feature via the overlay.
@@ -233,14 +153,22 @@ impl PatchedVindex {
         let key = (layer, feature);
         self.overrides_meta.insert(key, None);
         self.deleted.insert(key);
-        self.overrides_gate.remove(&key);
-        self.invalidate_gate_cache_layer(layer);
+        self.overrides_gate.remove(layer, feature);
     }
 
     /// Update feature metadata via the overlay.
+    ///
+    /// Mirrors [`Self::insert_feature`]'s tombstone contract:
+    /// updating a feature implies it exists, so a prior
+    /// [`Self::delete_feature`] tombstone on the slot is cleared
+    /// (resurrection). Without this, `feature_meta()` reported the
+    /// feature while `gate_knn()` permanently filtered it out — two
+    /// query paths disagreeing about the same overlay state
+    /// (review 2026-07-30 M6).
     pub fn update_feature_meta(&mut self, layer: usize, feature: usize, meta: FeatureMeta) {
         let key = (layer, feature);
         self.overrides_meta.insert(key, Some(meta));
+        self.deleted.remove(&key);
     }
 
     /// Check if a (layer, feature) has been overridden.
@@ -305,18 +233,14 @@ impl PatchedVindex {
     /// patch overlay. Used by `COMPILE INTO VINDEX` to read each
     /// inserted gate vector for sidecar serialisation.
     pub fn overrides_gate_at(&self, layer: usize, feature: usize) -> Option<&[f32]> {
-        self.overrides_gate
-            .get(&(layer, feature))
-            .map(|v| v.as_slice())
+        self.overrides_gate.get(layer, feature)
     }
 
     /// Read-only iterator over every gate override slot in the overlay.
     /// Used by `COMPILE INTO VINDEX WITH REFINE` to enumerate the
     /// constellation before refining.
     pub fn overrides_gate_iter(&self) -> impl Iterator<Item = (usize, usize, &[f32])> + '_ {
-        self.overrides_gate
-            .iter()
-            .map(|(&(l, f), v)| (l, f, v.as_slice()))
+        self.overrides_gate.iter()
     }
 
     /// Replace the gate override for `(layer, feature)` with a new
@@ -325,11 +249,7 @@ impl PatchedVindex {
     /// effect if the slot does not already have a gate override (we
     /// only refine slots that were already touched by a patch).
     pub fn set_gate_override(&mut self, layer: usize, feature: usize, vector: Vec<f32>) {
-        let key = (layer, feature);
-        if let Some(slot) = self.overrides_gate.get_mut(&key) {
-            *slot = vector;
-            self.invalidate_gate_cache_layer(layer);
-        }
+        self.overrides_gate.replace_existing(layer, feature, vector);
     }
 
     /// Find a free feature slot at this layer that is NOT already
@@ -349,13 +269,20 @@ impl PatchedVindex {
             return None;
         }
 
+        // A slot is overlay-claimed if it has a gate override OR a
+        // live meta override (metadata-only INSERTs carry no gate
+        // vector; a `None` meta is a tombstone, so the slot is free).
+        let taken_by_overlay = |i: usize| -> bool {
+            self.overrides_gate.contains(layer, i)
+                || matches!(self.overrides_meta.get(&(layer, i)), Some(Some(_)))
+        };
+
         // First preference: a slot with no base metadata AND no
         // overlay entry. This matches the base's "no metadata = free"
         // semantics but also respects the overlay.
         for i in 0..n {
             let taken_by_base = self.base.feature_meta(layer, i).is_some();
-            let taken_by_overlay = self.overrides_gate.contains_key(&(layer, i));
-            if !taken_by_base && !taken_by_overlay {
+            if !taken_by_base && !taken_by_overlay(i) {
                 return Some(i);
             }
         }
@@ -367,7 +294,7 @@ impl PatchedVindex {
         let mut weakest_idx: Option<usize> = None;
         let mut weakest_score = f32::MAX;
         for i in 0..n {
-            if self.overrides_gate.contains_key(&(layer, i)) {
+            if taken_by_overlay(i) {
                 continue;
             }
             if let Some(meta) = self.base.feature_meta(layer, i) {
@@ -392,6 +319,46 @@ impl PatchedVindex {
         self.base.feature_meta(layer, feature)
     }
 
+    /// Base-index KNN at `layer` that keeps escalating the oversample
+    /// window until `top_k` non-tombstoned hits survive or the base is
+    /// exhausted (review 2026-07-30 M11).
+    ///
+    /// The cheap path oversamples by [`BASE_KNN_OVERSAMPLE_FACTOR`].
+    /// If the base returned a full (unfiltered) result set — meaning
+    /// more features exist — yet fewer than `top_k` hits survive the
+    /// tombstone filter, the query escalates to
+    /// [`BASE_KNN_OVERSAMPLE_RETRY_FACTOR`] and finally to a single
+    /// all-features query, so callers never silently under-fill while
+    /// live features remain. Returned hits are already
+    /// tombstone-filtered and stay sorted by `|score|` descending
+    /// (`retain` preserves the base's ordering).
+    fn base_knn_surviving_deletions(
+        &self,
+        layer: usize,
+        residual: &Array1<f32>,
+        top_k: usize,
+    ) -> Vec<(usize, f32)> {
+        let num_features = self.base.num_features(layer);
+        for factor in [BASE_KNN_OVERSAMPLE_FACTOR, BASE_KNN_OVERSAMPLE_RETRY_FACTOR] {
+            let requested = top_k.saturating_mul(factor);
+            let mut hits = self.base.gate_knn(layer, residual, requested);
+            // A short (non-full) return means the base has nothing
+            // more to offer — retrying with a bigger window can't help.
+            let base_exhausted =
+                requested >= num_features || hits.len() < requested.min(num_features);
+            hits.retain(|(f, _)| !self.deleted.contains(&(layer, *f)));
+            if hits.len() >= top_k || base_exhausted {
+                return hits;
+            }
+        }
+        // Final rung: score every feature once. Bounded — runs at most
+        // once per query, and only when both fixed windows were
+        // hollowed out by deletions.
+        let mut hits = self.base.gate_knn(layer, residual, num_features);
+        hits.retain(|(f, _)| !self.deleted.contains(&(layer, *f)));
+        hits
+    }
+
     /// Gate KNN with patched vectors.
     /// For features with overridden gate vectors, uses the patch vector.
     /// For deleted features, excludes them from results.
@@ -406,7 +373,7 @@ impl PatchedVindex {
         // touches `layer`, the base index's sorted top-k is already
         // the answer — skip the 2× oversample, the override merge,
         // and the re-sort.
-        let has_overrides = self.overrides_gate.keys().any(|&(l, _)| l == layer);
+        let has_overrides = self.overrides_gate.has_layer(layer);
         let has_deletions = self.deleted.iter().any(|&(l, _)| l == layer);
         if !has_overrides && !has_deletions {
             return self.base.gate_knn(layer, residual, top_k);
@@ -419,73 +386,50 @@ impl PatchedVindex {
         // `gate_knn_mmap_fast` → `resolve_gate` → returning empty.
         // That's ~3–5 µs of pure overhead per call.
         //
-        // When the base does carry features, oversample by 2× so the
-        // sort step has headroom to keep top_k correct after override
-        // merge. `saturating_mul` guards `usize::MAX` callers.
+        // When the base does carry features, oversample by
+        // `BASE_KNN_OVERSAMPLE_FACTOR` so the sort step has headroom
+        // to keep top_k correct after override merge. When tombstones
+        // exist at this layer, a fixed window can be hollowed out by
+        // deletions — go through the escalating helper instead.
+        // `saturating_mul` guards `usize::MAX` callers.
         let mut hits = if self.base.num_features(layer) > 0 {
-            self.base.gate_knn(layer, residual, top_k.saturating_mul(2))
+            if has_deletions {
+                self.base_knn_surviving_deletions(layer, residual, top_k)
+            } else {
+                self.base.gate_knn(
+                    layer,
+                    residual,
+                    top_k.saturating_mul(BASE_KNN_OVERSAMPLE_FACTOR),
+                )
+            }
         } else {
             Vec::new()
         };
 
         if has_overrides {
-            // #2 + #3: pull the per-layer contiguous gate matrix
-            // (cached after the first query at this layer). One
-            // n × d row-major slab + a parallel `feature_ids` Vec
-            // give us a cache-friendly matvec — same memory layout
-            // as `ShardCache::cosine_similarities`, no
-            // pointer-chasing through the `overrides_gate` HashMap.
-            // Falls back to per-entry iteration only when mixed gate
-            // widths poison the cache (`layer_gate_cache` returns
-            // `None`).
-            if let Some(cache) = self.layer_gate_cache(layer) {
-                // Fast path: empty base → push every override at once.
-                if hits.is_empty() {
-                    hits.reserve(cache.feature_ids.len());
-                    for (i, &feat) in cache.feature_ids.iter().enumerate() {
-                        let row = &cache.gate_matrix[i * cache.d..(i + 1) * cache.d];
-                        let score: f32 = row.iter().zip(residual.iter()).map(|(a, b)| a * b).sum();
-                        hits.push((feat, score));
-                    }
-                } else {
-                    // Build a feat → hit_idx lookup once so the merge
-                    // is O(overrides + hits) instead of O(overrides ×
-                    // hits). Previous `hits.iter_mut().find(...)`
-                    // per override was quadratic at n ≈ 256.
-                    let mut idx: HashMap<usize, usize> =
-                        hits.iter().enumerate().map(|(i, (f, _))| (*f, i)).collect();
-                    for (i, &feat) in cache.feature_ids.iter().enumerate() {
-                        let row = &cache.gate_matrix[i * cache.d..(i + 1) * cache.d];
-                        let score: f32 = row.iter().zip(residual.iter()).map(|(a, b)| a * b).sum();
-                        match idx.get(&feat) {
-                            Some(&hit_idx) => hits[hit_idx].1 = score,
-                            None => {
-                                idx.insert(feat, hits.len());
-                                hits.push((feat, score));
-                            }
-                        }
-                    }
-                }
+            // Score every override row at this layer through the
+            // shared `GateOverlay` kernel (flattened per-layer
+            // snapshot with the zero-width/mixed-width slow-path
+            // fallback — the same code path the arch-B `KnnStore`
+            // queries through), then merge into the base hits.
+            let override_scores = self.overrides_gate.score_layer(layer, residual);
+            if hits.is_empty() {
+                // Fast path: empty base → the override scores ARE
+                // the candidate set.
+                hits = override_scores;
             } else {
-                // Slow path: mixed-width overrides (caller bug or
-                // unusual configuration). Iterate the canonical
-                // `overrides_gate` HashMap directly.
+                // Build a feat → hit_idx lookup once so the merge
+                // is O(overrides + hits) instead of O(overrides ×
+                // hits). Previous `hits.iter_mut().find(...)`
+                // per override was quadratic at n ≈ 256.
                 let mut idx: HashMap<usize, usize> =
                     hits.iter().enumerate().map(|(i, (f, _))| (*f, i)).collect();
-                for (&(l, f), gate_vec) in &self.overrides_gate {
-                    if l != layer {
-                        continue;
-                    }
-                    let score: f32 = gate_vec
-                        .iter()
-                        .zip(residual.iter())
-                        .map(|(a, b)| a * b)
-                        .sum();
-                    match idx.get(&f) {
+                for (feat, score) in override_scores {
+                    match idx.get(&feat) {
                         Some(&hit_idx) => hits[hit_idx].1 = score,
                         None => {
-                            idx.insert(f, hits.len());
-                            hits.push((f, score));
+                            idx.insert(feat, hits.len());
+                            hits.push((feat, score));
                         }
                     }
                 }
@@ -542,12 +486,7 @@ impl PatchedVindex {
                 .into_iter()
                 .filter_map(|(feature, gate_score)| {
                     let meta = self.feature_meta(layer, feature)?.clone();
-                    Some(WalkHit {
-                        layer,
-                        feature,
-                        gate_score,
-                        meta,
-                    })
+                    Some(WalkHit::from_gate(layer, feature, gate_score, meta))
                 })
                 .collect();
             trace_layers.push((layer, walk_hits));
@@ -596,7 +535,7 @@ impl PatchedVindex {
 
             let gate = base_gate.map(|mut g| {
                 // Apply gate vector overrides
-                for (&(l, f), vec) in &self.overrides_gate {
+                for (l, f, vec) in self.overrides_gate.iter() {
                     if l != layer {
                         continue;
                     }
@@ -947,6 +886,58 @@ mod gate_override_tests {
         assert_eq!(p2.find_free_feature(0), Some(2));
     }
 
+    /// Regression (review 2026-07-30 H3): a zero-width gate vector
+    /// coexisting with real ones at the same layer used to poison
+    /// `layer_gate_cache` — `feature_ids` included the empty entry
+    /// while the flattened matrix skipped its 0 floats, so row slicing
+    /// read the wrong feature's data or panicked, depending on HashMap
+    /// iteration order. Empty vectors now force the safe slow path.
+    /// Rebuilt across iterations to shake out iteration orders.
+    #[test]
+    fn gate_knn_survives_zero_width_gate_vector_in_overlay() {
+        // Enough repeats that pre-fix the "empty iterated before real"
+        // panic ordering is hit with overwhelming probability.
+        const ORDER_SHAKE_ITERATIONS: usize = 32;
+        for _ in 0..ORDER_SHAKE_ITERATIONS {
+            let mut p = make_empty_base();
+            p.insert_feature(0, 1, vec![1.0, 0.0, 0.0, 0.0], make_meta("real"));
+            // Simulate a legacy/corrupt overlay carrying zero-width
+            // rows (insert_feature no longer produces them).
+            p.overrides_gate.insert(0, 0, vec![]);
+            p.overrides_gate.insert(0, 2, vec![]);
+            let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+            // Twice: first call builds (or refuses) the cache, second
+            // exercises whatever got cached.
+            for _ in 0..2 {
+                let hits = p.gate_knn(0, &q, 3);
+                assert!(!hits.is_empty());
+                assert_eq!(hits[0].0, 1, "real override must rank first");
+                assert!(
+                    (hits[0].1 - 1.0).abs() < 1e-6,
+                    "real override must score by its own row, got {}",
+                    hits[0].1
+                );
+            }
+        }
+    }
+
+    /// An empty gate vec means "no gate override": metadata lands,
+    /// `overrides_gate` stays clean, and the slot still counts as
+    /// claimed so successive metadata-only INSERTs (Vindexfile) get
+    /// distinct slots instead of overwriting each other.
+    #[test]
+    fn insert_feature_with_empty_gate_is_metadata_only() {
+        let mut p = make_empty_base();
+        p.insert_feature(0, 0, vec![], make_meta("a"));
+        assert_eq!(p.feature_meta(0, 0).unwrap().top_token, "a");
+        assert!(p.overrides_gate_at(0, 0).is_none());
+        // Slot 0 is claimed via meta → next free slot is 1.
+        assert_eq!(p.find_free_feature(0), Some(1));
+        // Meta-only inserts must not poison KNN at the layer.
+        let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+        let _ = p.gate_knn(0, &q, 3);
+    }
+
     /// `find_free_feature` returns `None` on a layer with zero features.
     #[test]
     fn find_free_feature_returns_none_when_layer_empty() {
@@ -955,5 +946,126 @@ mod gate_override_tests {
         let index = VectorIndex::empty(2, 4);
         let p = PatchedVindex::new(index);
         assert!(p.find_free_feature(0).is_none());
+    }
+
+    // ── Tombstone resurrection contract (review 2026-07-30 M6) ─────────
+
+    /// Regression (M6): Delete→Update must resurrect the slot for BOTH
+    /// query paths. Before the fix, `update_feature_meta` left the
+    /// tombstone in place, so `feature_meta()` said the feature existed
+    /// while `gate_knn()` permanently filtered it out.
+    #[test]
+    fn update_after_delete_resurrects_feature_for_both_paths() {
+        let mut p = make_empty_base();
+        p.insert_feature(0, 1, vec![1.0, 0.0, 0.0, 0.0], make_meta("a"));
+        p.delete_feature(0, 1);
+        p.update_feature_meta(0, 1, make_meta("b"));
+
+        // Path 1: metadata lookup sees the feature again.
+        assert_eq!(p.feature_meta(0, 1).unwrap().top_token, "b");
+        // Path 2: KNN may return it again. The base gate rows are all
+        // zeros, so any result set that includes feature 1 proves the
+        // tombstone filter no longer applies.
+        let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+        let hits = p.gate_knn(0, &q, 3);
+        assert!(
+            hits.iter().any(|&(f, _)| f == 1),
+            "gate_knn must agree the feature exists again, got {hits:?}"
+        );
+    }
+
+    /// Pin the other half of the M6 contract: Delete with NO
+    /// subsequent Update stays tombstoned for both paths.
+    #[test]
+    fn delete_without_update_stays_tombstoned_for_both_paths() {
+        let mut p = make_empty_base();
+        p.insert_feature(0, 1, vec![1.0, 0.0, 0.0, 0.0], make_meta("a"));
+        p.delete_feature(0, 1);
+
+        assert!(
+            p.feature_meta(0, 1).is_none(),
+            "meta path must report deleted"
+        );
+        let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+        let hits = p.gate_knn(0, &q, 3);
+        assert!(
+            hits.iter().all(|&(f, _)| f != 1),
+            "KNN path must keep filtering the tombstoned slot, got {hits:?}"
+        );
+    }
+
+    // ── Deletion oversampling escalation (review 2026-07-30 M11) ───────
+
+    /// A 1-layer base whose feature `i` has gate `[n - i, 0, 0, 0]`, so
+    /// a query along e0 ranks feature 0 highest, descending from there.
+    /// Metadata is all-`None`; only the gate scores matter here.
+    fn make_scored_base(n: usize) -> PatchedVindex {
+        let mut gate = Array2::<f32>::zeros((n, 4));
+        for i in 0..n {
+            gate[[i, 0]] = (n - i) as f32;
+        }
+        let down_meta = vec![Some(vec![None; n])];
+        let index = VectorIndex::new(vec![Some(gate)], down_meta, 1, 4);
+        PatchedVindex::new(index)
+    }
+
+    /// Regression (M11): with `top_k + 1` tombstones covering the top
+    /// base hits, the fixed 2× oversample window used to be hollowed
+    /// out and the caller silently got fewer than `top_k` hits even
+    /// though live features remained. The escalation must fill `top_k`.
+    #[test]
+    fn gate_knn_fills_top_k_despite_deletions_covering_oversample_window() {
+        const N: usize = 8;
+        const TOP_K: usize = 3;
+        let mut p = make_scored_base(N);
+        // Delete the TOP_K + 1 highest-scoring features (0..=3): they
+        // occupy the top of the 2× (= 6-wide) oversample window.
+        for f in 0..=TOP_K {
+            p.delete_feature(0, f);
+        }
+        let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+        let hits = p.gate_knn(0, &q, TOP_K);
+        assert_eq!(
+            hits.len(),
+            TOP_K,
+            "must fill top_k from live features, got {hits:?}"
+        );
+        let feats: Vec<usize> = hits.iter().map(|&(f, _)| f).collect();
+        assert_eq!(
+            feats,
+            vec![4, 5, 6],
+            "next-best live features in rank order"
+        );
+    }
+
+    /// The escalation ladder's last rung: enough tombstones that even
+    /// the 4× retry window is fully deleted — the all-features query
+    /// must still surface the best surviving feature.
+    #[test]
+    fn gate_knn_escalates_to_all_features_when_retry_window_is_deleted() {
+        const N: usize = 12;
+        let mut p = make_scored_base(N);
+        // top_k = 1 → 2× window = 2 hits, 4× window = 4 hits. Delete
+        // the top 8 so both fixed windows are hollow.
+        for f in 0..8 {
+            p.delete_feature(0, f);
+        }
+        let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+        let hits = p.gate_knn(0, &q, 1);
+        assert_eq!(hits.len(), 1, "got {hits:?}");
+        assert_eq!(hits[0].0, 8, "best surviving feature");
+    }
+
+    /// When every feature is tombstoned the escalation terminates and
+    /// returns empty rather than looping or panicking.
+    #[test]
+    fn gate_knn_returns_empty_when_all_features_deleted() {
+        const N: usize = 4;
+        let mut p = make_scored_base(N);
+        for f in 0..N {
+            p.delete_feature(0, f);
+        }
+        let q = Array1::from_vec(vec![1.0_f32, 0.0, 0.0, 0.0]);
+        assert!(p.gate_knn(0, &q, 2).is_empty());
     }
 }

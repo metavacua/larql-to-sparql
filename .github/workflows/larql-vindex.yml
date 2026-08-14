@@ -32,6 +32,13 @@ on:
 
 env:
   LARQL_VINDEX_COVERAGE_MIN: 71
+  # Fail extraction on any source tensor no `ModelArchitecture` accessor
+  # names. Off by default in the library (flipping it would break existing
+  # extractions of merely-incomplete architectures), but CI is exactly where
+  # an unnamed tensor should stop the line: every silent-drop bug this
+  # codebase has had was a naming gap that shipped because nothing failed.
+  # See `extract::streaming::stages::tensor_audit`.
+  LARQL_EXTRACT_STRICT: 1
 
 jobs:
   test:
@@ -45,7 +52,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -77,7 +84,7 @@ jobs:
         run: choco install protoc -y --no-progress
 
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -99,6 +106,18 @@ jobs:
       - name: Clippy
         run: cargo clippy -p larql-vindex --all-targets -- -D warnings
 
+      # E0 — VINDEX2 preservation. Named separately from the general test
+      # step so a failure reads as "the shipped generation regressed" rather
+      # than as one red test among hundreds. Any regression blocks merge:
+      # finding one now identifies the introducing commit, finding one after
+      # another ten changes produces archaeology.
+      #
+      # Scope caveat: this is the generation-boundary subset. The full matrix
+      # (decode, WALK, slice, publish/pull) needs multi-GB checkpoints and
+      # runs locally against tests/goldens/e0 via scripts/e0-capture-goldens.sh.
+      - name: E0 - VINDEX2 preservation (generation boundary)
+        run: cargo test -p larql-vindex --test e0_generation_boundary
+
       - name: Tests
         run: cargo test -p larql-vindex
 
@@ -111,7 +130,7 @@ jobs:
     timeout-minutes: 35
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable

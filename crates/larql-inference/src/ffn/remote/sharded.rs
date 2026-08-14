@@ -11,9 +11,15 @@ use std::time::Duration;
 
 use ndarray::Array2;
 
+use super::codec::WireFormat;
 use super::http::{RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference};
 use crate::ffn::FfnBackend;
 use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
+
+/// [`crate::ffn::FfnActivations::Absent`] reason when no shard owns the
+/// requested layer — the backend returns a zero output delta and has
+/// observed nothing.
+const REASON_NO_SHARD_FOR_LAYER: &str = "no shard owns this layer (zero FFN delta, unobserved)";
 
 struct LayerShard {
     start: usize,
@@ -42,12 +48,26 @@ impl LayerShardedBackend {
         timeout: Duration,
         wire: WirePreference,
     ) -> Result<Self, RemoteFfnError> {
+        Self::connect_with_wire_formats(spec, timeout, WireFormat::F32, wire)
+    }
+
+    /// Build from a spec string with both wire directions set explicitly:
+    /// `wire_in` is the request residual encoding (request `Content-Type`),
+    /// `wire_out` the `Accept`-negotiated response preference. The asymmetric
+    /// twin of [`Self::connect_with_wire`] (DEC funnel v0.5 §3 DEC-1A) —
+    /// every shard connection gets the same direction pair.
+    pub fn connect_with_wire_formats(
+        spec: &str,
+        timeout: Duration,
+        wire_in: WireFormat,
+        wire_out: WirePreference,
+    ) -> Result<Self, RemoteFfnError> {
         let shards = if spec.contains('=') {
-            parse_shard_map_with_wire(spec, timeout, wire)?
+            parse_shard_map_with_wire(spec, timeout, wire_in, wire_out)?
         } else {
             let config = RemoteFfnConfig::new(spec)
                 .with_timeout(timeout)
-                .with_wire(wire);
+                .with_wire_formats(wire_in, wire_out);
             let backend = RemoteWalkBackend::connect(config)?;
             vec![LayerShard {
                 start: 0,
@@ -111,6 +131,14 @@ impl LayerShardedBackend {
     /// Returns one FFN output vector per layer, in layer order.
     ///
     /// Uses `std::thread::scope` so shards can be borrowed without `Arc`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a layer has no owning shard, or if a shard's request fails
+    /// (mirrors `RemoteWalkBackend::forward`'s own panic-on-transport-error
+    /// convention). A silent zero-fill here would let decode continue on a
+    /// corrupted hidden state — see
+    /// docs/audits/dec-readiness-review-2026-07-22.md §1c.
     pub fn forward_predispatch_all(&self, h_per_layer: &[Vec<f32>]) -> Vec<Vec<f32>> {
         let hidden = self.hidden_size();
         let num_layers = h_per_layer.len();
@@ -126,14 +154,20 @@ impl LayerShardedBackend {
                             .expect("h_per_layer shape must match hidden");
                         match self.shard_for(layer) {
                             Some(shard) => shard.forward(layer, &x).row(0).to_vec(),
-                            None => vec![0.0f32; hidden],
+                            None => panic!(
+                                "forward_predispatch_all: layer {layer} has no owning shard \
+                                 (check --ffn shard-map coverage)"
+                            ),
                         }
                     })
                 })
                 .collect();
 
             for (result, handle) in results.iter_mut().zip(handles) {
-                *result = handle.join().unwrap_or_else(|_| vec![0.0f32; hidden]);
+                *result = match handle.join() {
+                    Ok(v) => v,
+                    Err(e) => std::panic::resume_unwind(e),
+                };
             }
         });
 
@@ -250,13 +284,22 @@ impl FfnBackend for LayerShardedBackend {
         }
     }
 
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
+    fn forward_observed(
+        &self,
+        layer: usize,
+        x: &Array2<f32>,
+    ) -> (Array2<f32>, crate::ffn::FfnActivations) {
         match self.shard_for(layer) {
-            Some(shard) => shard.forward_with_activation(layer, x),
-            None => {
-                let z = Array2::zeros(x.raw_dim());
-                (z.clone(), z)
-            }
+            // Delegates to `RemoteWalkBackend`'s trait default — the
+            // shard wire protocol carries outputs only, so the honest
+            // observation is Absent.
+            Some(shard) => shard.forward_observed(layer, x),
+            None => (
+                Array2::zeros(x.raw_dim()),
+                crate::ffn::FfnActivations::Absent {
+                    reason: REASON_NO_SHARD_FOR_LAYER,
+                },
+            ),
         }
     }
 
@@ -264,9 +307,13 @@ impl FfnBackend for LayerShardedBackend {
         &self,
         layer: usize,
         h_post_attn: &Array2<f32>,
-    ) -> Option<Array2<f32>> {
-        self.shard_for(layer)?
-            .forward_moe_full_layer(layer, h_post_attn)
+    ) -> Result<Option<Array2<f32>>, larql_execution::BoxRefusal> {
+        // No shard owns this layer: not applicable, not a refusal. The caller
+        // dispatches locally and its result is still correct.
+        let Some(shard) = self.shard_for(layer) else {
+            return Ok(None);
+        };
+        shard.forward_moe_full_layer(layer, h_post_attn)
     }
 
     fn name(&self) -> &str {
@@ -279,7 +326,8 @@ impl FfnBackend for LayerShardedBackend {
 fn parse_shard_map_with_wire(
     spec: &str,
     timeout: Duration,
-    wire: WirePreference,
+    wire_in: WireFormat,
+    wire_out: WirePreference,
 ) -> Result<Vec<LayerShard>, RemoteFfnError> {
     let mut shards = Vec::new();
     for segment in spec.split(',') {
@@ -299,7 +347,7 @@ fn parse_shard_map_with_wire(
         })?;
         let config = RemoteFfnConfig::new(url)
             .with_timeout(timeout)
-            .with_wire(wire);
+            .with_wire_formats(wire_in, wire_out);
         let backend = RemoteWalkBackend::connect(config)?;
         shards.push(LayerShard {
             start,
@@ -323,5 +371,51 @@ fn parse_layer_range(s: &str) -> Option<(usize, usize)> {
         Some((start, end))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A shard-less backend: every layer is unowned. Constructible
+    /// without a network because the no-shard arms are exactly the
+    /// code that must not depend on one.
+    fn empty_backend() -> LayerShardedBackend {
+        LayerShardedBackend { shards: Vec::new() }
+    }
+
+    #[test]
+    fn no_shard_forward_returns_zero_delta() {
+        let be = empty_backend();
+        let x = Array2::<f32>::from_elem((2, 4), 1.0);
+        let out = be.forward(0, &x);
+        assert_eq!(out.shape(), &[2, 4]);
+        assert!(out.iter().all(|v| *v == 0.0), "unowned layer → zero delta");
+        assert_eq!(be.name(), "layer-sharded-remote");
+    }
+
+    #[test]
+    fn no_shard_forward_observed_is_absent_with_named_reason() {
+        let be = empty_backend();
+        let x = Array2::<f32>::from_elem((1, 4), 1.0);
+        let (out, obs) = be.forward_observed(0, &x);
+        assert!(out.iter().all(|v| *v == 0.0));
+        assert_eq!(
+            obs.absent_reason(),
+            Some(REASON_NO_SHARD_FOR_LAYER),
+            "a zero delta from an unowned layer must be marked unobserved, \
+             never a fabricated activation tensor"
+        );
+        // No shard owns the layer: not applicable, and specifically not a
+        // refusal — the caller must still be free to dispatch locally.
+        assert!(matches!(be.forward_moe_full_layer(0, &x), Ok(None)));
+    }
+
+    #[test]
+    fn parse_layer_range_accepts_ordered_and_rejects_reversed() {
+        assert_eq!(parse_layer_range("3-7"), Some((3, 7)));
+        assert_eq!(parse_layer_range("7-3"), None);
+        assert_eq!(parse_layer_range("x-3"), None);
     }
 }

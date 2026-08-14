@@ -1,0 +1,95 @@
+# larql-factory cross-platform CI
+#
+# Vindex Factory recipe schema, build_id canonicaliser, structural
+# validator, capability manifest, and card generator
+# (docs/vindex-factory.md). Pure logic + serde — no BLAS, no GPU, no
+# platform-specific system deps. Same surface runs on Linux, Windows,
+# and macOS.
+
+name: larql-factory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-factory/**'
+      - 'crates/larql-models/src/detect/**'
+      - 'crates/larql-vindex-spec/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-factory.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-factory/**'
+      - 'crates/larql-models/src/detect/**'
+      - 'crates/larql-vindex-spec/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-factory.yml'
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: test - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-factory-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-factory-
+
+      - name: Format check
+        run: cargo fmt -p larql-factory -- --check
+
+      - name: Check (all targets)
+        run: cargo check -p larql-factory --all-targets
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy -p larql-factory --all-targets --no-deps -- -D warnings
+
+      - name: Test
+        run: cargo test -p larql-factory
+
+  coverage:
+    name: coverage - ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage policy gate
+        # `make larql-factory-coverage-summary` runs `cargo llvm-cov`
+        # with the floor check AND calls
+        # `scripts/check_coverage_policy.py`, so any per-file or total
+        # coverage regression fails CI here.
+        run: make larql-factory-coverage-summary

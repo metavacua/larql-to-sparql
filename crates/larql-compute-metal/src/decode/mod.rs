@@ -19,6 +19,7 @@ mod moe_interleave;
 pub mod profile;
 mod setup;
 
+pub(crate) use moe_interleave::InlineMoeCtx;
 pub use profile::ProfileTimings;
 
 pub(crate) const DEFAULT_KV_CACHE_MAX_SEQ: usize = 4096;
@@ -64,6 +65,29 @@ impl MetalBackend {
             .collect()
     }
 
+    /// Per-layer capacities implied by each layer's own attention window.
+    pub(crate) fn kv_capacities_for_layers(
+        layers: &[larql_compute::FullPipelineLayer<'_>],
+        default_capacity: usize,
+    ) -> Vec<usize> {
+        layers
+            .iter()
+            .map(|layer| {
+                larql_compute::pipeline_layer::kv_capacity_for_window(
+                    layer.sliding_window,
+                    default_capacity,
+                )
+            })
+            .collect()
+    }
+
+    /// Ensure a cache sized by each layer's *own* capacity.
+    ///
+    /// This must not route through [`Self::ensure_kv_cache_for_shapes`]:
+    /// that grows every layer to a single `max_seq`, which would
+    /// immediately re-inflate a sliding layer that was deliberately
+    /// allocated at `SLACK * W` and undo the saving on the first decode
+    /// step.
     pub(crate) fn ensure_kv_cache_for_layers<'a>(
         &self,
         cache: &'a mut Option<ops::kv_cache::KVCache>,
@@ -71,7 +95,22 @@ impl MetalBackend {
         max_seq: usize,
     ) -> &'a mut ops::kv_cache::KVCache {
         let shapes = Self::kv_shapes_for_layers(layers);
-        self.ensure_kv_cache_for_shapes(cache, &shapes, max_seq)
+        let capacities = Self::kv_capacities_for_layers(layers, max_seq);
+
+        let needs_rebuild = cache
+            .as_ref()
+            .is_none_or(|kv| kv.has_shape_mismatch(&shapes));
+        if needs_rebuild {
+            *cache = Some(ops::kv_cache::KVCache::new_per_layer_with_capacities(
+                &self.bufs,
+                &shapes,
+                &capacities,
+                max_seq,
+            ));
+        }
+        let kv = cache.as_mut().expect("KV cache initialized above");
+        kv.grow_to_capacities(&self.bufs, &shapes, &capacities, max_seq);
+        kv
     }
 
     pub(crate) fn ensure_kv_cache_for_shapes<'a>(
@@ -162,6 +201,7 @@ impl MetalBackend {
             None,
             None,
             larql_compute::StateDumpMask::Full,
+            None,
         )
     }
 
@@ -247,6 +287,7 @@ impl MetalBackend {
             None,
             Some(state),
             mask,
+            None,
         )
     }
 
@@ -271,7 +312,22 @@ impl MetalBackend {
         mut moe_collect_fn: Option<&mut dyn FnMut(usize) -> Vec<f32>>,
         mut state_dump: Option<&mut larql_compute::DecodeStateDump>,
         state_dump_mask: larql_compute::StateDumpMask,
+        inline_moe: Option<&moe_interleave::InlineMoeCtx<'_>>,
     ) -> Vec<f32> {
+        // Refuse unroutable FFN formats BEFORE any command buffer or
+        // encoder exists: a panic that unwinds past a live Metal
+        // encoder trips the ObjC "released without endEncoding"
+        // assertion and turns a clean refusal into a process-killing
+        // SIGTRAP (the failure mode that hid #229 behind an earlier
+        // test's abort). `encode_ffn_step` re-checks as defence in
+        // depth for callers that bypass this entry point.
+        for layer in layers {
+            // A fully-remote FFN never runs locally; its dense weight
+            // slots may be placeholders and are not validated.
+            if !layer.ffn_is_remote {
+                encode_ffn::validate_ffn_formats(layer);
+            }
+        }
         // W10 Phase B/C: capture flags. `dump_kv` controls the K/V
         // staging + readback (skipped under HOnly + None — Metal's own
         // kv cache still receives the K/V as a side effect for
@@ -457,7 +513,6 @@ impl MetalBackend {
             let layer_head_dim = layer.head_dim;
             let layer_num_q_heads = layer.num_q_heads;
             let layer_num_kv_heads = layer.num_kv_heads;
-            let uses_kquant = layer.wq.format.is_kquant_family();
             let layer_q_dim = layer_num_q_heads * layer_head_dim;
             let layer_kv_dim = layer_num_kv_heads * layer_head_dim;
 
@@ -474,6 +529,12 @@ impl MetalBackend {
             // shaders (uniform / mixed Q4K+Q6K-V / per-projection
             // fallback); Q4_0 routes through fused norm+Q8 then
             // Q8 QKV. Implementation lives in `encode_qkv.rs`.
+            //
+            // When the fully-fused attention kernel will fire, it applies
+            // the Q/K/V projection biases itself — the QKV stage must
+            // skip its bias dispatches (shared `attn_fused_will_fire`
+            // authority; disagreement = biases applied twice).
+            let qkv_bias_deferred = self.attn_fused_will_fire(layer, kv_cache, l);
             self.encode_input_norm_and_qkv(
                 &enc,
                 layer,
@@ -484,9 +545,9 @@ impl MetalBackend {
                     wq: &wq_bufs[l],
                     wk: &wk_bufs[l],
                     wv: &wv_bufs[l],
-                    wq_scales: &wq_scale_bufs[l],
-                    wk_scales: &wk_scale_bufs[l],
-                    wv_scales: &wv_scale_bufs[l],
+                    wq_scales: wq_scale_bufs[l].as_ref(),
+                    wk_scales: wk_scale_bufs[l].as_ref(),
+                    wv_scales: wv_scale_bufs[l].as_ref(),
                     norm_out: &norm_f32_buf,
                     q_out: &q_out,
                     k_out: &k_out,
@@ -501,8 +562,8 @@ impl MetalBackend {
                     eps,
                     norm_offset,
                 },
-                uses_kquant,
                 prelayer_norm_active,
+                qkv_bias_deferred,
             );
 
             // ── Steps 1.5–5: attention block ──
@@ -531,18 +592,16 @@ impl MetalBackend {
                     ffn_q8s: &ffn_q8s,
                     normed_scratch: &normed_scratch,
                     wo: &wo_bufs[l],
-                    wo_scales: &wo_scale_bufs[l],
+                    wo_scales: wo_scale_bufs[l].as_ref(),
                     post_attn_norm: &post_attn_norm_bufs[l],
                 },
                 encode_attn::AttnDims {
                     hidden,
                     layer_q_dim,
-                    uses_kquant,
-                    ffn_uses_kquant: layer.gate.format.is_kquant_family(),
+                    ffn_uses_kquant: layer.gate.format().is_kquant_family(),
                 },
             );
             let new_h = if l % 2 == 0 { &h_a } else { &h_b };
-            let ffn_uses_kquant = layer.gate.format.is_kquant_family();
 
             // ── Steps 6-7: FFN + post-FFN residual ──
             //
@@ -556,6 +615,14 @@ impl MetalBackend {
             // will be provided by the remote server via moe_fn, so there
             // is no local FFN work to encode on the GPU.
             let defer_ffn_for_split = split_mode && layer.moe.is_some();
+
+            // Pure-MoE layers extract no dense FFN weights — encoding the
+            // dense branch would run the kernels over empty slices and
+            // poison `new_h` with garbage that the expert add can't
+            // recover. Their FFN is the expert block alone; the MoE
+            // interleave below writes `new_h = h_post_attn + moe_out`
+            // directly (same combine as the remote-FFN arm).
+            let layer_runs_dense_ffn = layer.has_dense_ffn() || layer.moe.is_none();
 
             // Stage-timing boundary: when LARQL_PROFILE_SPLIT=1 (or the legacy
             // alias LARQL_DECODE_STAGE_TIMING=1), close the encoder here so
@@ -574,7 +641,7 @@ impl MetalBackend {
                 encoder_ended = false;
             }
 
-            if !defer_ffn_for_split && !layer.ffn_is_remote {
+            if !defer_ffn_for_split && !layer.ffn_is_remote && layer_runs_dense_ffn {
                 let ffn_bufs = encode_ffn::FfnBufs {
                     gate_w: &gate_bufs[l],
                     up_w: &up_bufs[l],
@@ -621,13 +688,7 @@ impl MetalBackend {
                 if stage_timing_split && !has_moe {
                     // Fine split: gate+up in one CB, act+down+residual in another.
                     // Step 6a: gate+up
-                    self.encode_ffn_gate_up_phase(
-                        &enc,
-                        layer,
-                        &ffn_bufs,
-                        ffn_dims,
-                        ffn_uses_kquant,
-                    );
+                    self.encode_ffn_gate_up_phase(&enc, layer, &ffn_bufs, ffn_dims);
                     enc.end_encoding();
                     cmd.commit();
                     cmd.wait_until_completed();
@@ -635,7 +696,7 @@ impl MetalBackend {
                     cmd = self.queue.new_command_buffer().to_owned();
                     enc = cmd.new_compute_command_encoder().to_owned();
                     // Step 6b + 7: activation+down + post-FFN residual
-                    self.encode_ffn_down_phase(&enc, layer, &ffn_bufs, ffn_dims, ffn_uses_kquant);
+                    self.encode_ffn_down_phase(&enc, layer, &ffn_bufs, ffn_dims);
                     self.encode_post_ffn_residual(
                         &enc,
                         layer,
@@ -653,7 +714,7 @@ impl MetalBackend {
                     encoder_ended = false;
                 } else {
                     // Production path: whole FFN in one encoder block.
-                    self.encode_ffn_step(&enc, layer, ffn_bufs, ffn_dims, ffn_uses_kquant);
+                    self.encode_ffn_step(&enc, layer, ffn_bufs, ffn_dims);
                     self.encode_post_ffn_residual(
                         &enc,
                         layer,
@@ -749,7 +810,17 @@ impl MetalBackend {
             // on CPU (direct shared-memory access), then restart for the next layer.
             // layer_scalar is applied AFTER MoE so it scales the combined output
             // (dense + MoE). Applying it before would leave the MoE contribution unscaled.
-            if has_moe {
+            //
+            // Branch on THIS LAYER being a MoE/remote layer, not on the
+            // model-level `has_moe`: with the model-level test, a dense
+            // layer of a hybrid-MoE model entered `handle_moe_interleave`
+            // (which returns immediately for dense layers) and the
+            // `else` arm's layer_scalar was never applied — the same
+            // mis-scaling class as the 14x incident recorded in
+            // `moe_combine.rs`. Capability audit F9. MoE layers get
+            // their scalar inside `moe_combine::apply_outer_combine`.
+            let layer_is_moe = layer.moe.is_some() || layer.ffn_is_remote;
+            if layer_is_moe {
                 self.handle_moe_interleave(
                     layer,
                     moe_interleave::MoeInterleaveCtx {
@@ -758,7 +829,6 @@ impl MetalBackend {
                         hidden,
                         inter,
                         inter_padded,
-                        ffn_uses_kquant,
                         defer_ffn_for_split,
                         stage_timing_split,
                         layer_in_snapshot: layer_in_snapshot.as_deref(),
@@ -788,6 +858,7 @@ impl MetalBackend {
                     },
                     &mut moe_fn,
                     &mut moe_collect_fn,
+                    inline_moe,
                 );
             } else {
                 // ── Step 8: Optional layer scalar (non-MoE layers) ──
@@ -1001,6 +1072,15 @@ impl MetalBackend {
                 attn_ms: gpu_time.attn_ms,
                 gate_up_ms: gpu_time.gate_up_ms,
                 down_ms: gpu_time.down_ms,
+                // The GPU/wall pair travels with the stage split so a caller
+                // can report how much of the token was on the GPU at all.
+                // The numbers were already measured here; they only ever
+                // reached stderr via `print_if_enabled`, so every structured
+                // consumer — the bench table, `--json` — attributed the whole
+                // wall to "GPU fwd".
+                gpu_ms: gpu_time.total_gpu_ms,
+                wall_ms,
+                cmd_buffers: gpu_time.n_cmd_buffers as u32,
             });
         }
 
@@ -1039,3 +1119,6 @@ impl MetalBackend {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

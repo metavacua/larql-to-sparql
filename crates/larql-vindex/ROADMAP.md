@@ -1,113 +1,93 @@
 # Roadmap — larql-vindex
 
-## Hardening — codebase review 2026-05-28
+For shipped work, see [CHANGELOG.md](CHANGELOG.md).
 
-From the whole-codebase review ([`docs/audits/codebase-review-2026-05-28.md`](../../../docs/audits/codebase-review-2026-05-28.md)):
+## Current state (verified 2026-08-04)
 
-- **P1 — NaN `partial_cmp().unwrap()`** at `router:107`, `lm_head:322`, `gate_store:330`. Route through a shared NaN-safe top-K/sort helper (workspace-wide cleanup, ~10 sites across vindex/core/cli/python).
-- **Low — implicit 4-byte alignment** in the `*const f32` reinterprets in `decode_floats` / `decode_gate_vector`; invariant is enforced only by caller offset arithmetic, not the helper.
+**Tests.** 1298 lib tests passing (`cargo test -p larql-vindex --lib`).
+Crate-local checks are wired through `make larql-vindex-ci`: fmt, clippy
+`-D warnings`, tests, example compile checks, bench compile/tests, and coverage
+policy. All four self-contained examples (`mmap_demo`, `demo_memit_solve`,
+`q4k_demo`, `walker_demo`) run end-to-end; the rest compile clean via
+`cargo check --examples`.
 
-## Current state (as of 2026-05-16)
+**Layout.** 196 source files across `cache`, `clustering`, `config`, `engine`,
+`extract`, `format`, `index`, `patch`, `quant`, `trie`, `vindexfile`, `walker`.
+The decomposition history — which round split which monolith — is in
+[`CHANGELOG.md`](CHANGELOG.md); the invariants that came out of it are:
 
-- **975 lib tests** on `larql-vindex` (`cargo test -p larql-vindex
-  --lib`). Crate-local checks are wired through `make larql-vindex-ci`:
-  fmt, clippy `-D warnings`, tests, example compile checks, bench
-  compile/tests, and coverage policy. All four self-contained examples
-  (`mmap_demo`, `demo_memit_solve`, `q4k_demo`, `walker_demo`) run
-  end-to-end; the rest compile clean via `cargo check --examples`.
-- **Folder layout decomposed**:
-  - `index/{storage,compute,mutate}/` — substores, KNN dispatch, mutation
-  - `index/compute/gate_knn/{mod,dispatch,scores_batch,hnsw_lifecycle}.rs`
-    (round-4 split)
-  - `index/storage/ffn_store/{mod,down,up,interleaved,interleaved_q4,interleaved_q4k,gate_q4,fp4,q4k_cache}.rs`
-    (round-4 split)
-  - `index/storage/lm_head/{mod,loaders,knn}.rs` (round-4 split)
-  - `extract/build/{mod,down_meta,index_json,resume}.rs` (round-4 / 2026-05-09 re-split)
-  - `extract/streaming/{mod,tensor_io}.rs` (round-5 phase 1, 2026-05-09)
-  - `format/huggingface/publish/{mod,remote,upload,lfs,protocol}.rs`
-    (round-5, 2026-05-09)
-  - `format/weights/load/{mod,f32,q4k}.rs` (round-5, 2026-05-09)
-  - `index/core/{mod,gate_lookup,patch_overrides,native_ffn,quantized_ffn,fp4_ffn}.rs`
-    (round-5, 2026-05-09 — one capability impl per sibling)
-  - `index/types/{mod,gate_lookup,patch_overrides,native_ffn,quantized_ffn,fp4_ffn,ffn_row}.rs`
-    (round-5, 2026-05-09 — one trait per sibling, data structs in mod.rs)
-  - `extract/streaming/stages/{mod,gate_vectors,router_weights,embeddings,down_meta,tokenizer,index_json,model_weights}.rs`
-    (round-5, 2026-05-09 — one stage per sibling)
-  - `format/weights/write_q4k/{mod,attn,ffn,moe_layers,norms,ple,lm_head,feature_major_down}.rs`
-    (round-5, 2026-05-09 — one emitted artefact per sibling)
-  - `format/{weights,filenames,fp4_codec,…}/`
-  - `engine/` (was `storage/`) — StorageEngine + epoch + MEMIT
-  - `config/{index,quantization,model,compliance,dtype}.rs` — was the
-    624-line `types.rs` monolith
-  - Large-file debt **partially closed 2026-05-10**: every file
-    touched by rounds 4–5 is under the soft 600-LOC threshold, but
-    the 2026-05-10 health pass found 8 files ≥800 LOC that were not
-    in the round work-set (notably the new
-    `index/storage/vindex_storage/mmap_storage.rs` 1182 L from the
-    `VindexStorage` migration, and pre-existing
-    `walker/vector_extractor.rs` 1213 L,
-    `format/huggingface/download.rs` 941 L,
-    `format/huggingface/publish/lfs.rs` 905 L,
-    `index/types/ffn_row.rs` 875 L,
-    `extract/build_helpers.rs` 848 L,
-    `index/storage/gate_accessors.rs` 845 L,
-    `format/huggingface/discovery.rs` 800 L). Tracked under P1
-    "Residual large-file debt" below.
-- **Quant dispatch via `quant::registry`** — adding the next K-quant is
-  one table entry plus codec functions; ~3-file edit. Block sizes flow
-  through `larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS` (round-4 M4).
-  `LEGACY_BLOCK_Q4_K_STRIDE` names the 148-byte historical bug shape
-  (round-4 M5).
-- **Filename literals centralised** in `format::filenames` (252+
-  occurrences → one constant module). Round-2 added 8 missed
-  constants (LM_HEAD_BIN + FP4 family + attn_q4/q8 manifests). Round-4
-  M1 closed `UP_WEIGHTS_BIN` / `DOWN_WEIGHTS_BIN`; the 2026-05-08
-  pass added `ROUTER_WEIGHTS_BIN` and moved layer-weight paths through
-  `LAYERS_DIR` / `layer_weights_filename`.
-- **`DEFAULT_C_SCORE`** lifted on `index::types` so the patch overlay
-  fallback and the vindexfile builder share one default (round-4 M3).
-- **`VectorIndex` god struct decomposed** into four typed substores
-  (`GateStore`, `FfnStore`, `ProjectionStore`, `MetadataStore`). Adding
-  a new field is one edit in the relevant store.
-- **5 storage formats**: f32, f16, Q4_0, Q4_K/Q6_K (Ollama-compatible),
-  Q8, FP4/FP8 (exp 26).
-- Mmap zero-copy with adaptive residency.
-- HNSW graph index wired into `gate_knn` (opt-in via `--hnsw`).
-- Q4_K dequant cache LRU-bounded via `--max-q4k-cache-layers`.
-- Patch system for editable knowledge (`PatchedVindex` overlay).
-  **2026-05-16 `gate_knn` optimization pass** (driven by the Exp 53
-  shard service's bench gap): empty-base short-circuit when the
-  layer has no native features, O(overrides²) → O(overrides) merge
-  via `HashMap<feat, hit_idx>`, `argmax` instead of sort at
-  `top_k = 1`, sort-skip when only deletions modified hits, lazy
-  per-layer contiguous gate-override matrix with per-layer
-  invalidation. Wins: vindex↔cache gap closed from ~20% to ~7% on
-  the steady-state shard-query bench; cross-layer mutation cost
-  cut by ~17% (218.8 → 181.9 µs at n=256/d=1024) because mutating
-  layer B no longer evicts layer A's cache. See
-  `crates/larql-server/benches/shard_query.rs`.
-- **Vindexfile `FROM hf://...`** — HF resolution wired through the
-  same resolver `larql run` and `larql extract` use.
-- **Streaming extract checkpoints + auto-resume** — phase-level
-  progress recorded to `.extract_checkpoint.json`; gate + down_meta
-  phases auto-skip on a compatible checkpoint.
-- **Stage labels centralised** in `extract::stage_labels` (15 labels;
-  typo at any site is now a compile error).
-- `make larql-vindex-coverage-summary` + `make
-  larql-vindex-coverage-html` (cargo-llvm-cov) enforce both the
-  aggregate line floor and `coverage-policy.json`.
-- **Coverage ratchet**: aggregate floor is 71% lines from the
-  2026-05-08 baseline of 71.56%; current measured **90.86% lines**
-  as of 2026-05-16, with **105 of 147 files at the 90% default**
-  and 42 debt baselines. The `patch/overlay.rs` baseline (82%) is
-  the one entry the 2026-05-16 gate_knn optimization touched —
-  added LayerGateCache code paths + targeted unit tests; file now
-  sits at 88.61%.
-- **Cross-platform CI**: `.github/workflows/larql-vindex.yml` runs
-  format, check, examples, clippy, tests, and bench compile/tests on
-  Linux, Windows, and macOS. Coverage policy runs on Ubuntu.
-- Bench rig daemon-aware (`make bench-vindex-scaling` refuses if
-  `larql-server` / `larql-router` are running on the host).
+- `VectorIndex` is four typed substores (`GateStore`, `FfnStore`,
+  `ProjectionStore`, `MetadataStore`), so adding a field is one edit in one
+  store.
+- `index/core/` and `index/types/` hold one capability impl / one trait per
+  sibling file.
+- `extract/streaming/stages/` holds one extraction stage per sibling file.
+- `format/weights/write_q4k/` holds one emitted artefact per sibling file.
+
+**Storage formats — 5**: f32, f16, Q4_0, Q4_K/Q6_K (Ollama-compatible), Q8,
+FP4/FP8. Quant dispatch runs through `quant::registry`, so adding the next
+K-quant is one table entry plus codec functions (~3-file edit). Block sizes
+flow through `larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS`.
+`LEGACY_BLOCK_Q4_K_STRIDE` names the 148-byte historical bug shape.
+
+**Runtime behaviour.** Mmap zero-copy with adaptive residency. HNSW graph index
+wired into `gate_knn` (opt-in via `--hnsw`). Q4_K dequant cache LRU-bounded via
+`--max-q4k-cache-layers`. Patch system for editable knowledge
+(`PatchedVindex` overlay).
+
+**Extraction.** Streaming extract checkpoints + auto-resume — phase-level
+progress recorded to `.extract_checkpoint.json`; gate and down_meta phases
+auto-skip on a compatible checkpoint. Vindexfile `FROM hf://…` resolves through
+the same resolver `larql run` and `larql extract` use. Stage labels are
+centralised in `extract::stage_labels` (15 labels; a typo at any site is a
+compile error).
+
+**Constants.** Filename literals live in `format::filenames` (252+ occurrences
+collapsed to one constant module). `DEFAULT_C_SCORE` is lifted onto
+`index::types` so the patch overlay fallback and the vindexfile builder share
+one default.
+
+**Coverage.** Enforced: 90% per file and 90% aggregate, with 45 debt baselines
+that may only ratchet upward. `make larql-vindex-coverage-summary` /
+`make larql-vindex-coverage-html` (cargo-llvm-cov) enforce both.
+
+**CI.** `.github/workflows/larql-vindex.yml` runs format, check, examples,
+clippy, tests, and bench compile/tests on Linux, Windows, and macOS. Coverage
+policy runs on Ubuntu. `LARQL_EXTRACT_STRICT=1` is set in this workflow, so an
+unrecognised checkpoint tensor fails the build. The bench rig is daemon-aware
+(`make bench-vindex-scaling` refuses if `larql-server` / `larql-router` are
+running on the host).
+
+**Large-file debt — re-measured, and the list has changed.** Five files are now
+≥800 LOC:
+
+| File | LOC | Note |
+|---|--:|---|
+| `format/huggingface/download/mod.rs` | 1329 | Grew and became a directory since the last count |
+| `index/storage/vindex_storage/mmap_storage.rs` | 1187 | From the `VindexStorage` migration |
+| `patch/overlay.rs` | 1071 | **New to this list** |
+| `extract/build/mod.rs` | 862 | |
+| `format/weights/write_f32_tests.rs` | 815 | Test file |
+
+Six files previously tracked here have since been split and are gone from the
+list: `walker/vector_extractor.rs`, `format/huggingface/publish/lfs.rs`,
+`index/types/ffn_row.rs`, `extract/build_helpers.rs`,
+`index/storage/gate_accessors.rs`, `format/huggingface/discovery.rs`. Tracked
+under P1 "Residual large-file debt" below.
+
+---
+
+## Open defects
+
+Both raised by the 2026-05-28 whole-codebase review; neither is fixed.
+
+- **P1 — NaN `partial_cmp().unwrap()`** at `router:107`, `lm_head:322`,
+  `gate_store:330`. Route through a shared NaN-safe top-K/sort helper. This is
+  a workspace-wide cleanup (~10 sites across vindex/core/cli/python) —
+  `larql-core` has five and `larql-cli` one.
+- **Low — implicit 4-byte alignment** in the `*const f32` reinterprets in
+  `decode_floats` / `decode_gate_vector`; the invariant is enforced only by
+  caller offset arithmetic, not by the helper.
 
 ---
 
@@ -156,96 +136,6 @@ strings for vindex-owned files (met), extraction remains model-family
 agnostic (met — see P1), `GateIndex` split into narrower capability
 traits (met), and no new module grows past the current large-file
 debt without a split plan.
-
-### `VindexStorage` trait abstraction
-**Impact**: Lets Redis / S3 / GPU-residency backends plug in
-**Effort**: Medium
-**Status**: ✅ Closed 2026-05-10 — all 7 migration steps shipped;
-walk kernels, Metal dispatch, KNN, and overlay all consume the
-trait. Future Redis / S3 backends land as parallel `VindexStorage`
-impls without touching this code. Detail kept here as the migration
-record; the section will move to `CHANGELOG.md` next time a P0 item
-displaces it.
-
-The substore extraction (`GateStore`, `FfnStore`, `ProjectionStore`,
-`MetadataStore`) got most of the way there. Formalise a sealed
-`VindexStorage` trait (mmap-agnostic row accessor) so Q4_K row reads
-can route through Redis-cached or S3-buffered backends without
-walk-kernel changes.
-
-**Why now**: the per-layer FFN format (Phase 2, closed today) made
-"give me the bytes for layer L, component C, feature F" the canonical
-addressing contract. That's exactly the right granularity for a
-storage trait — every concrete backend can satisfy it. The current
-mmap path becomes one impl among several.
-
-**Acceptance bar**:
-- A sealed `VindexStorage` trait whose surface is defined by the
-  current walk-kernel and decode hot-paths (`q4k_ffn_row_*`,
-  `gate_*`, `down_features_*`, `attn_*_layer_data`).
-- One impl: `MmapStorage` reproducing today's behavior bit-for-bit
-  (no measurable decode regression on the cool-machine 4B/26B
-  baselines).
-- Walk kernels and Metal dispatch consume only the trait, not
-  concrete `Mmap` types.
-- Coverage: every trait method has a test against `MmapStorage`;
-  the trait-object boxing path has at least one round-trip test.
-
-**Out of scope for this round**: Redis / S3 backends (those land on
-top of the trait once it's stable). Same for GPU-resident storage —
-the trait surface should leave room for it but we don't implement.
-
-**Migration steps:**
-
-- [x] Step 1 — sealed trait skeleton in
-  `index/storage/vindex_storage/mod.rs`. 14 byte-yielding methods
-  covering hot-path substore reaches; FP4 + DownMeta deliberately
-  not behind the trait (richer per-feature decoders).
-- [x] Step 2 — `MmapStorage` parity impl
-  (`from_substores(&FfnStore, &GateStore, &ProjectionStore, hidden)`).
-- [x] Step 3 — Criterion perf gate
-  (`benches/vindex_storage_dispatch.rs`). Initial `Bytes`-returning
-  shape paid 6 atomic ops per fetch (12× direct); redesigned
-  per-layer accessors to return `BytesView<'a>` with
-  `as_slice() -> &'a [u8]` zero-atomic / `to_owned_bytes()` opt-in.
-  Final: `Arc<dyn>` within ~5% of direct on both layer-fetch and
-  per-row.
-- [x] Step 4 — `storage: Arc<dyn VindexStorage>` field on
-  `VectorIndex`, populated by `refresh_storage()` at the end of
-  every loader that mutates substore mmaps. Per-layer
-  byte-yielding accessors forward through `self.storage`
-  (`attn_q4k_layer_data` / `attn_q8_layer_data` /
-  `attn_q4_layer_slices` / `interleaved_q4k_layer_data` /
-  `down_features_q4k_layer_data` / `gate_q4_data`). Whole-buffer
-  accessors (`attn_q4_data`, `interleaved_q4*_mmap_ref`) deferred
-  to step 5 — they need an API-shape decision once substore mmap
-  fields drop.
-- [x] Step 5 (partial) — `storage` field is now
-  `Arc<MmapStorage>` (concrete, mutable via `Arc::make_mut`).
-  Loaders rewritten to use `set_*()` setters; `refresh_storage()`
-  removed. 12 setters + 11 `has_*` + 6 `*_view()` helpers added.
-  Read sites migrated for `lm_head/knn.rs`, `interleaved_q4.rs`,
-  `gate_accessors.rs` `is_some()` checks, `is_mmap()`,
-  `attn_q4_data`. `MmapStorage` field visibility tightened to
-  `pub(crate)` for test ergonomics.
-- [x] Step 6 — gate KNN compute paths (`gate_accessors.rs`,
-  `compute/gate_knn/*`, `gate_store.rs`, `mutate/mod.rs`,
-  `patch/overlay.rs`) migrated to `self.storage.gate_layer_view(layer)`;
-  trait-covered `Arc<Mmap>` substore fields dropped from
-  `FfnStore` / `GateStore`. `ProjectionStore` deleted entirely (its
-  9 fields all moved to `MmapStorage`). `MmapStorage::release_pages()`
-  added — tracks `Arc<Mmap>` handles per setter; replaces the
-  per-substore-field madvise loop in `release_mmap_pages`. Heap
-  fields (`gate_vectors`, decode caches, HNSW caches, FP4 storage)
-  stay on substores.
-- [x] Step 7 — f32 native FFN paths (`up_features`,
-  `down_features`, `interleaved_f32`) migrated to `MmapStorage`.
-  `FfnStore` shrunk to caches + FP4 storage only.
-  `release_mmap_pages` collapsed to a single
-  `self.storage.release_pages()` call.
-
-See `CHANGELOG.md` 2026-05-10 entry for the full step 1-3 writeup
-plus bench numbers.
 
 ## P1: Active
 
@@ -301,50 +191,37 @@ agree on family, embedding scale, layer bands, and required tensor
 coverage; unsupported attention layouts fail before any file is written;
 no string-prefix inheritance of curated band tables.
 
-### Residual large-file debt (review finding 2026-05-10)
+### Residual large-file debt — reopened 2026-08-04
 **Impact**: Code navigability + future split cost
 **Effort**: Small–Medium per file
-**Status**: ✅ Closed 2026-05-10 — all 7 listed files split or
-documented as won't-split.
+**Status**: Reopened. The round-6 pass closed this on 2026-05-10 with "no file
+outside the won't-split list is ≥800 LOC" — that is no longer true. See
+[`CHANGELOG.md`](CHANGELOG.md) 2026-05-10 for what was split and why
+`mmap_storage.rs` was deliberately kept whole.
 
-Round-6 splits (2026-05-10):
+Four files now breach, three of them new:
 
-- [x] `walker/vector_extractor.rs` (1213 L) → 7 siblings under
-  `walker/vector_extractor/` (largest 373 L). All siblings ≥94.8%
-  line coverage.
-- [x] `extract/build_helpers.rs` (848 L) → 6 siblings + test_support
-  under `extract/build_helpers/` (largest 264 L). All ≥98%.
-- [x] `format/huggingface/download.rs` (941 L) → minimal 2-way
-  split (`download/mod.rs` 676 L, `download/helpers.rs` 270 L).
-  Pure helpers at 100%; the network-bound mod.rs inherits the 74%
-  baseline as `download/mod.rs:64.0` (HF API hard to mock without
-  significant test infrastructure). `mod.rs` still over 600 LOC by
-  user direction.
-- [x] `format/huggingface/publish/lfs.rs` (905 L) → 4 siblings +
-  test_support under `publish/lfs/` (largest 281 L). All ≥91%; old
-  `lfs.rs:97` debt baseline removed (every sibling at default 90%).
-- [x] `format/huggingface/discovery.rs` (800 L) → 3 siblings +
-  test_support under `discovery/` (largest 386 L). All ≥94%.
-- [x] `index/types/ffn_row.rs` (875 L) → 3 siblings under
-  `index/types/ffn_row/` (largest 444 L). Trait declaration in
-  `mod.rs` (87.1%, debt baseline added), shared `Stub` fixture in
-  `test_support.rs` (84.9%, debt baseline added), tests in
-  `tests.rs`. Production coverage was always at 87% — split made it
-  visible by removing dilution from co-located tests.
-- [x] `index/storage/gate_accessors.rs` (845 L) → 3 siblings under
-  `gate_accessors/` (mod.rs 347 L, accessor_tests.rs 445 L,
-  release_pages_tests.rs 53 L). Production-only mod.rs at 92.3%
-  (up from old 70.5% combined-file baseline).
-- [x] `index/storage/vindex_storage/mmap_storage.rs` (1182 L) —
-  **kept as a single file by design**: 12-method trait impl, dense
-  per-substore mmap storage. Splitting by trait method fragments
-  without modularity gain.
+- [ ] `format/huggingface/download/mod.rs` — **1329 L**, up from the 676 L it
+  was left at by the round-6 two-way split. The largest regression, and the
+  same file the round-6 entry already flagged as "still over 600 LOC by user
+  direction". It is network-bound and hard to mock, which is why it carries a
+  64% coverage baseline; a split should separate the pure helpers from the HF
+  API surface rather than slicing by line count.
+- [ ] `patch/overlay.rs` — **1071 L**, new to the list. Grew through the
+  2026-05-16 `gate_knn` optimization pass, which added the LayerGateCache code
+  paths.
+- [ ] `extract/build/mod.rs` — **862 L**, new to the list.
+- [ ] `format/weights/write_f32_tests.rs` — **815 L**, new to the list. A test
+  file, so the navigability cost is real but the coverage risk is not; lowest
+  priority of the four.
 
-**Outcome**: workspace coverage 90.30% (was 90.17% at start of
-round); 104 files at 90% default (was 86); 42 debt baselines (was
-40 — net +2 from ffn_row split). 932 lib tests + 19 integration
-suites pass; clippy clean. No file outside the won't-split list is
-≥800 LOC.
+`index/storage/vindex_storage/mmap_storage.rs` (1187 L) remains on the
+won't-split list by the original 2026-05-10 reasoning — a 12-method trait impl
+that fragments without modularity gain. Nothing here changes that.
+
+**Why it regressed**: the acceptance bar was a one-time measurement, not a
+gate. If this matters, the fix is a CI check that fails on a new file ≥800 LOC
+outside a declared exemption list — otherwise it will regress again.
 
 ### HF LFS multipart upload for files >5 GB
 **Impact**: `larql publish` fails on any vindex with a single file >5 GB
@@ -410,55 +287,32 @@ References:
   manual Python resume picks up where the failed `larql publish`
   left off.
 
-### Production-path `unwrap`/`expect` triage (review finding 2026-05-10)
-**Impact**: Crash-safety on I/O failures
-**Effort**: Small
-**Status**: ✅ Closed 2026-05-10 — 6 hotspot files audited (56
-production sites total); only `extract/build_from_vectors.rs`
-needed real fixes (9 sites converted, 3 new error-path tests).
-The other 47 sites are defensible idioms — left as-is.
-
-Triage outcome:
-
-| File | Sites | Verdict |
-|---|---|---|
-| `extract/build_from_vectors.rs` | 9 | **Fixed** — JSONL field-access panics on missing/malformed records converted to `VindexError::Parse` via two helpers (`parse_u64_field`, `parse_f32_vector`). 3 new error-path regression tests. |
-| `index/storage/gate_store.rs` | 12 | Defensible — 5× mutex/RwLock locks, 4× shape ops with static invariants, 1× `as_slice` on owned-from-vec Array2, 2× cache slot just-assigned. The review's "concrete target" line 391 was inside `#[cfg(test)] mod gate_cache_lru_tests` (starts line 373) — false positive. |
-| `index/compute/gate_knn/hnsw_lifecycle.rs` | 12 | Defensible — 9× mutex locks, 3× shape ops with caller-side invariants. Optional cleanup: line 56 could mirror the sibling at line 82 which uses `.ok()?`. |
-| `index/compute/gate_knn/scores_batch.rs` | 9 | Defensible — 3× lock guards, 5× shape ops bounds-checked or invariant, 1× cache slot just-assigned. |
-| `patch/knn_store.rs` | 8 | Defensible — 7× mutex locks, 1× `partial_cmp().unwrap_or()` fallback. |
-| `index/storage/ffn_store/q4k_cache.rs` | 6 | Defensible — 6× mutex locks. |
-
-Lesson: the review's "~120 sites" framing over-stated the
-fix surface. The signal-to-noise was ~10% — `Mutex::lock().unwrap()`
-and `ArrayView2::from_shape().unwrap()` with static shapes are
-idiomatic Rust, not crash hazards. Future audits should pre-filter
-these patterns before counting.
-
-**Acceptance bar (met)**: every production `.unwrap()` in the six
-hotspot files is either a mutex/RwLock lock, a statically-provable
-shape op, a just-assigned cache slot, or has been converted to `?`
-with a typed error. 922 lib tests + all integration suites pass;
-clippy clean.
-
-### Coverage round-7 (review finding 2026-05-10)
-**Impact**: Per-file ratchet — 40 files still below the 90% default
+### Coverage round-7 (review finding 2026-05-10, re-checked 2026-08-04)
+**Impact**: Per-file ratchet — files below the 90% default
 **Effort**: Small per file
-**Status**: Active
+**Status**: Active, and the count has moved the wrong way
 
-Aggregate is at 90.04% (workspace floor met for the first time),
-but the per-file ratchet has 40 debt entries. Highest-leverage
-targets by current coverage:
+The debt list was 40 entries when this was raised; `coverage-policy.json` now
+carries **45**. The aggregate floor is met (enforced at 90%), so the ratchet is
+holding the line but not advancing it.
 
-- [ ] `format/weights/write_q4k/moe_layers.rs` — **34.0%** (the
-  single biggest tractable win)
+Highest-leverage targets, taken from the current policy file rather than the
+2026-05-10 snapshot:
+
+- [ ] `format/weights/write_kquant/moe_layers.rs` — **34.0%**, still the single
+  biggest tractable win. (This file was listed here as
+  `write_q4k/moe_layers.rs`; the directory was renamed, the debt was not paid.)
+- [ ] `quant/convert_q4k.rs` — 55.0%
+- [ ] `format/weights/load/q4k.rs` — 57.0%
 - [ ] `config/compliance.rs` — 57.9%
-- [ ] `format/load.rs` — 62.9%
+- [ ] `format/weights/write_f32.rs` — 58.0%
+- [ ] `format/weights/write_kquant/norms.rs` — 60.0%
+- [ ] `format/load.rs` — 62.0%
 - [ ] `engine/core.rs` — 82.0%
 
-**Acceptance bar**: each listed file moves to ≥90% line coverage
-or carries a documented rationale (e.g. error-path branches that
-require a real S3 outage to exercise).
+**Acceptance bar**: each listed file moves to ≥90% line coverage or carries a
+documented rationale (e.g. error-path branches that require a real S3 outage to
+exercise).
 
 ### Cached layer decode for template-fixed layers (L0–12) — parked
 **Impact**: 155+ tok/s decode (skip 13 of 21 layers)

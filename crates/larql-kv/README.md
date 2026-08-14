@@ -20,7 +20,7 @@ GPU→CPU state bridge entirely (W10 mask cascade, default-on).
 | `markov-rs` | residual stream | **derivative** | exact logits under arch contract | **98.0** |
 | `markov-rs-codec` | compressed residuals | **derivative** | bounded KL | **98.1** |
 | `boundary-per-layer` | per-layer codec residuals | **derivative** | bounded KL per-layer | **98.7** |
-| `unlimited-context` | KV (within window) + checkpoints | **derivative** | exact within window | 94.2 |
+| `windowed-checkpoint` | KV (within window) + checkpoints | **derivative** | exact within window | 94.2 |
 | `turbo-quant` | quantised K/V | canonical (destructive) | bounded KL | 85.0 |
 | `boundary-kv` | K/V + boundary frames | canonical | exact logits | composes `standard` |
 | `apollo` *(RetrievalEngine)* | boundary retrieval store | n/a (retrieval) | task-level | orthogonal |
@@ -50,7 +50,7 @@ for the dep-graph rationale.
 
 | Trait | For | Per-step contract |
 |---|---|---|
-| `KvEngine` | per-token K/V cache engines (`standard`, `no-cache`, `markov-rs`, `markov-rs-codec`, `unlimited-context`, `turbo-quant`, `boundary-kv`, `boundary-per-layer`) | append K/V per layer; dispatches FFN through `&dyn FfnBackend`; state reconstructible to K/V tensors |
+| `KvEngine` | per-token K/V cache engines (`standard`, `no-cache`, `markov-rs`, `markov-rs-codec`, `windowed-checkpoint`, `turbo-quant`, `boundary-kv`, `boundary-per-layer`) | append K/V per layer; dispatches FFN through `&dyn FfnBackend`; state reconstructible to K/V tensors |
 | `RetrievalEngine` | retrieval-injection engines (`apollo`, future Mode 5) | no per-token K/V append; no `FfnBackend` dispatch; state is residual delta + token list |
 
 Both return `Result<Array2<f32>, EngineError>` from `prefill` /
@@ -59,7 +59,7 @@ five variants — `EmptyPrompt`, `BackendUnavailable`,
 `RetrievalMiss { reason }`, `InvariantViolation { what }`,
 `BackendFailure { details }` — and the typed error replaces the
 historical `Option<T>` that collapsed all five into a silent
-`None`. See the 2026-05-24 entry in [`ROADMAP.md`](ROADMAP.md).
+`None`. See the 2026-05-24 entry in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Full engine catalog
 
@@ -76,20 +76,20 @@ windowed checkpoints, retrieval injection, etc.).
 | [`markov_residual`](src/engines/markov_residual) | Residual-stream replacement, K/V derived from stored residuals (W2 cache) | 54.4 MB → **0 MB** | 88.2 | **99.5** (None, +13%) | exact (KL = 0.0) under contract | [markov-residual-engine.md](../larql-inference/docs/specs/markov-residual-engine.md) |
 | [`markov_residual_codec`](src/engines/markov_residual_codec) | `markov_residual` + bf16-encoded cold-tier residuals (2× cold saving) | 54.4 MB → **0 MB** | 87.2 | **99.8** (None, +14%) | bounded-KL vs markov_residual | [markov-residual-codec-engine.md](../larql-inference/docs/specs/markov-residual-codec-engine.md) |
 | [`boundary_per_layer`](src/engines/boundary_per_layer) | Per-layer codec policy on cold tier; calibration-driven; W1-GPU + W10 wired | 19.6 MB → **0 MB** | 86.9 | **99.3** (None, +14%) | per-layer KL bound | [boundary-per-layer-engine.md](../larql-inference/docs/specs/boundary-per-layer-engine.md) |
-| [`unlimited_context`](src/engines/unlimited_context) | Per-window K/V checkpoint + token archive; supports replay | 15.7 MB → **0 MB** | 86.1 | **95.0** (HOnly, +10%) | exact within window | [unlimited-context-engine.md](../larql-inference/docs/specs/unlimited-context-engine.md) |
+| [`windowed_checkpoint`](src/engines/windowed_checkpoint) | Per-window K/V checkpoint + token archive; supports replay | 15.7 MB → **0 MB** | 86.1 | **95.0** (HOnly, +10%) | exact within window | [windowed-checkpoint-engine.md](../larql-inference/docs/specs/windowed-checkpoint-engine.md) |
 | [`turbo_quant`](src/engines/turbo_quant) | WHT + Lloyd-Max 3/4-bit K/V codec, in-place compression | 0.7 MB | **37.7** (10-tok) | n/a (canonical K/V) | cos ≈ 0.991 | [turbo-quant-engine.md](../larql-inference/docs/specs/turbo-quant-engine.md) |
 | [`apollo`](src/engines/apollo) | Constellation map + boundary-residual injection (retrieval) | scales w/ store | requires store | n/a | task-level | [apollo-engine.md](../larql-inference/docs/specs/apollo-engine.md) |
 
 **Numbers are post W2 (hot K/V cache), W1-GPU (per-layer state-dump
 dispatch), W7 (blit-encoder fusion), and W10 (state-bridge mask
 cascade).** Three derivative-K/V engines (`markov_residual`,
-`markov_residual_codec`, `unlimited_context`) now match or exceed
+`markov_residual_codec`, `windowed_checkpoint`) now match or exceed
 `standard`'s fused-kernel ~100 tok/s ceiling under their best mask,
 with engine-side memory shadows fully eliminated on Metal. See
 [`PERFORMANCE.md`](PERFORMANCE.md) for per-token cost decomposition,
 the `state_capture` / `state_materialise` / `state_append` timer
-cascade, and the bench protocol. ROADMAP "Closed (recent)" has the
-milestone history.
+cascade, and the bench protocol. [`CHANGELOG.md`](CHANGELOG.md) has
+the milestone history.
 
 ### W10 — state-bridge mask cascade (default-on since 2026-05-21)
 
@@ -126,6 +126,42 @@ mechanisms** that happen to produce bit-identical output on supported
 architectures. Don't conflate them — the CLI's historical `--kv-cache
 markov-bounded` flag maps to `Standard { window_size: Some(N) }`, **not**
 `MarkovResidual`. Use the spec's table in §5 when in doubt.
+
+### Windowed engines and the fused path
+
+A window means two promises at once: attend at most `N` positions, and
+hold at most that much K/V. Until 2026-08 the only way to keep both was
+to leave the backend's fused (coarse) path for the generic per-layer
+route — and on Metal every per-layer dispatch method delegates to the
+CPU, so a windowed engine ran its whole forward on the host while the
+bench row still said `[metal (GPU)]`. On Gemma 3 4B Q4K that cost ~9x,
+for a window that should make attention *cheaper*.
+
+Windowed engines now stay on the fused path. The window is requested via
+`coarse_prefill_windowed` / `coarse_decode_step_windowed`, which **fail
+closed**: a backend that cannot bound both attention and K/V answers
+`None` and the engine falls back to per-layer, exactly as before. Both
+`CpuBackend` and `MetalBackend` implement them.
+
+Two caveats worth knowing:
+
+- **A prompt longer than the window still takes the per-layer path.** The
+  fused prefill has no per-query-position masking, so accepting would
+  attend the whole prompt while advertising a bound.
+- **Metal holds up to 2x the window** between compactions. Attention is
+  still bounded at the window every step (the kernel attends
+  `[T - window, T)`); the surplus rows are resident but never read.
+  Compacting every step would memmove the window per token.
+
+Measured on Gemma 3 4B Q4K, Metal, 80 decode steps at `window=8`:
+
+| | latency | hot K/V |
+|---|---|---|
+| unwindowed | 12.06 ms | 23.6 MB |
+| `window=8` | **11.61 ms** | **2.4 MB** |
+
+The same config cost 115.44 ms before. A bench row reports which shape
+it actually took — `[coarse]` or `[per-layer->host]`.
 
 ## Usage
 
@@ -183,7 +219,7 @@ standard:window=1024                      # sliding-window K/V
 no-cache                                  # full re-forward per step (O(N²)), debug only
 markov-rs                                 # residual-stream replacement
 markov-rs:window=1024
-unlimited-context:window=256
+windowed-checkpoint:window=256
 turbo-quant:bits=3        # alias: tq3
 turbo-quant               # bits=4 default; alias: tq4
 apollo:layer=25,coef=8.0,top_k=12
@@ -224,7 +260,7 @@ let backend: Box<dyn AsyncComputeBackend> = Box::new(CpuBackend);
 let mut async_engine = StandardEngine::with_async_backend(None, backend);
 ```
 
-The other research engines (`MarkovResidual`, `UnlimitedContext`,
+The other research engines (`MarkovResidual`, `WindowedCheckpoint`,
 `TurboQuant`, `NoCache`, `Apollo`) gain the same `with_async_backend`
 constructor in subsequent slices. Spec:
 [`async-compute-backend.md`](../larql-inference/docs/specs/async-compute-backend.md).
@@ -252,7 +288,7 @@ larql-kv/
 │       ├── apollo/               — boundary-residual injection, ~4,000× compression
 │       ├── markov_residual/      — residual-stream KV replacement, KL = 0
 │       ├── turbo_quant/          — WHT + Lloyd-Max K/V codec (3- or 4-bit)
-│       └── unlimited_context/    — windowed re-prefill from checkpoints
+│       └── windowed_checkpoint/    — windowed re-prefill from checkpoints
 ├── benches/            — criterion microbenchmarks
 ├── examples/           — end-to-end demos on synthetic test_utils
 ├── baselines/          — committed `larql accuracy` regression baselines
@@ -260,7 +296,7 @@ larql-kv/
 ```
 
 The `KvEngine` trait itself lives in
-[`larql-inference/src/kv_engine.rs`](../larql-inference/src/kv_engine.rs).
+[`larql-inference/src/kv_engine.rs`](../larql-inference/src/kv_engine/mod.rs).
 
 ## Architecture notes
 

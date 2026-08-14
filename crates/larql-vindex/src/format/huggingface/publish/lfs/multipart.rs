@@ -24,6 +24,7 @@ use crate::error::VindexError;
 
 use super::super::protocol::{CONTENT_TYPE_LFS_JSON, LFS_PUT_TIMEOUT};
 use super::super::PublishCallbacks;
+use super::retry::{backoff_for, is_transient_status, retry_after_secs, TRANSIENT_MAX_ATTEMPTS};
 
 /// Streamed multipart LFS upload. Returns successfully once HF's
 /// completion endpoint has accepted the assembled parts.
@@ -102,21 +103,56 @@ pub(super) fn upload_multipart(
             ))
         })?;
 
-        let resp = client.put(part_url).body(buf).send().map_err(|e| {
-            VindexError::Parse(format!(
-                "multipart upload {remote_filename} part {part_number}/{}: PUT failed: {e}",
-                parts.len()
-            ))
-        })?;
+        // Retry transient failures rather than aborting the publish. HF's S3
+        // backend rate-limits a long upload with `503 SlowDown`, and losing
+        // the run at part N leaves the repo holding stale files with no
+        // replacement — a partially-published repo still serves, so it is
+        // worse than a clean failure. The body is re-sent from `buf`, which
+        // is already in memory, so a retry costs no extra read.
+        let mut attempt: u32 = 1;
+        let resp = loop {
+            let outcome = client.put(part_url).body(buf.clone()).send();
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().unwrap_or_default();
-            return Err(VindexError::Parse(format!(
-                "multipart upload {remote_filename} part {part_number}/{} ({status}): {body}",
-                parts.len()
-            )));
-        }
+            let (retryable, detail, resp) = match outcome {
+                Ok(r) if r.status().is_success() => break r,
+                Ok(r) => {
+                    let status = r.status();
+                    let wait = retry_after_secs(r.headers());
+                    let transient = is_transient_status(status.as_u16());
+                    (transient, format!("{status}"), Some((r, wait)))
+                }
+                // A transport error (reset, timeout, DNS blip) is always
+                // worth one more go — nothing was necessarily rejected.
+                Err(e) => (true, format!("transport error: {e}"), None),
+            };
+
+            if !retryable || attempt >= TRANSIENT_MAX_ATTEMPTS {
+                let body = match resp {
+                    Some((r, _)) => r.text().unwrap_or_default(),
+                    None => String::new(),
+                };
+                let give_up = if retryable {
+                    format!(" after {TRANSIENT_MAX_ATTEMPTS} attempts")
+                } else {
+                    String::new()
+                };
+                return Err(VindexError::Parse(format!(
+                    "multipart upload {remote_filename} part {part_number}/{} ({detail}){give_up}: {body}",
+                    parts.len()
+                )));
+            }
+
+            let wait = backoff_for(attempt, resp.and_then(|(_, w)| w));
+            callbacks.on_retry(
+                &format!("{remote_filename} part {part_number}/{}", parts.len()),
+                attempt + 1,
+                TRANSIENT_MAX_ATTEMPTS,
+                &detail,
+                wait,
+            );
+            std::thread::sleep(wait);
+            attempt += 1;
+        };
 
         // S3 returns the part's ETag in the response header. The
         // completion POST must reference these ETags in order.

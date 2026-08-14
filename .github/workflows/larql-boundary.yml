@@ -37,15 +37,24 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
+      # protoc on PATH satisfies the `cfg(windows)` no-op in
+      # `larql-router-protocol`'s build.rs. Required because the
+      # "Run examples" step below builds `larql-demos`, which depends
+      # on `larql-router-protocol` directly.
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -72,8 +81,8 @@ jobs:
 
       - name: Run examples
         run: |
-          cargo run -p larql-boundary --example encode_decode
-          cargo run -p larql-boundary --example gate_decision
+          cargo run -p larql-demos --example encode_decode
+          cargo run -p larql-demos --example gate_decision
 
   coverage:
     name: coverage · ubuntu
@@ -81,7 +90,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable

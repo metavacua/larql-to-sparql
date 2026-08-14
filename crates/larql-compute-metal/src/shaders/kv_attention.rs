@@ -22,6 +22,9 @@ kernel void kv_attention(
     constant uint&      num_kv  [[buffer(7)]],
     constant float&     scale   [[buffer(8)]],
     constant uint&      window_size [[buffer(9)]],
+    constant float*     sinks   [[buffer(10)]],  // per-Q-head sink logits
+    constant uint&      has_sinks [[buffer(11)]], // 0 = slot is a placeholder
+    constant float&     softcap [[buffer(12)]],  // 0.0 = disabled
     uint tg_id  [[threadgroup_position_in_grid]],
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]],
@@ -49,6 +52,11 @@ kernel void kv_attention(
         }
         for (uint d = (head_dim & ~3u); d < head_dim; d++) dot += q[d] * k[d];
         dot *= scale;
+        // Gemma-2-style logit softcapping. Clamp the tanh argument like
+        // the GELU kernels do: Apple's tanh NaNs past |y| ~ 44.
+        if (softcap > 0.0f) {
+            dot = softcap * tanh(clamp(dot / softcap, -15.0f, 15.0f));
+        }
         tg_scores[t - t_start] = dot;
         local_max = max(local_max, dot);
     }
@@ -60,6 +68,11 @@ kernel void kv_attention(
     float global_max = tg_sg_vals[0];
     uint n_sg = (tg_sz + 31) / 32;
     for (uint i = 1; i < n_sg; i++) global_max = max(global_max, tg_sg_vals[i]);
+    // The sink competes in the softmax, so it must join the max or
+    // exp(sink - max) overflows when the sink dominates. Mirrors
+    // kv_append_attend_fused — these kernels are its fallback, and a
+    // fallback must not change the softmax denominator (audit F7).
+    if (has_sinks != 0u) global_max = max(global_max, sinks[head]);
 
     // Phase 2: softmax
     float local_sum = 0.0f;
@@ -81,6 +94,9 @@ kernel void kv_attention(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     float global_sum = tg_sg_vals[0];
     for (uint i = 1; i < n_sg; i++) global_sum += tg_sg_vals[i];
+    // Denominator only: the sink has no output slot, so the emitted
+    // weights deliberately sum to less than one.
+    if (has_sinks != 0u) global_sum += exp(sinks[head] - global_max);
     float inv_sum = 1.0f / global_sum;
 
     // Normalize
@@ -111,6 +127,9 @@ kernel void kv_attention_long(
     constant uint&      num_kv  [[buffer(7)]],
     constant float&     scale   [[buffer(8)]],
     constant uint&      window_size [[buffer(9)]],
+    constant float*     sinks   [[buffer(10)]],  // per-Q-head sink logits
+    constant uint&      has_sinks [[buffer(11)]], // 0 = slot is a placeholder
+    constant float&     softcap [[buffer(12)]],  // 0.0 = disabled
     uint tg_id  [[threadgroup_position_in_grid]],
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]],
@@ -137,6 +156,11 @@ kernel void kv_attention_long(
         }
         for (uint d = (head_dim & ~3u); d < head_dim; d++) dot += q[d] * k[d];
         dot *= scale;
+        // Gemma-2-style logit softcapping. Clamp the tanh argument like
+        // the GELU kernels do: Apple's tanh NaNs past |y| ~ 44.
+        if (softcap > 0.0f) {
+            dot = softcap * tanh(clamp(dot / softcap, -15.0f, 15.0f));
+        }
         tg_scores[t - t_start] = dot;
         local_max = max(local_max, dot);
     }
@@ -148,6 +172,11 @@ kernel void kv_attention_long(
     float global_max = tg_sg_vals[0];
     uint n_sg = (tg_sz + 31) / 32;
     for (uint i = 1; i < n_sg; i++) global_max = max(global_max, tg_sg_vals[i]);
+    // The sink competes in the softmax, so it must join the max or
+    // exp(sink - max) overflows when the sink dominates. Mirrors
+    // kv_append_attend_fused — these kernels are its fallback, and a
+    // fallback must not change the softmax denominator (audit F7).
+    if (has_sinks != 0u) global_max = max(global_max, sinks[head]);
 
     float local_sum = 0.0f;
     for (uint t = t_start + tid; t < T; t += tg_sz) {
@@ -168,6 +197,9 @@ kernel void kv_attention_long(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     float global_sum = tg_sg_vals[0];
     for (uint i = 1; i < n_sg; i++) global_sum += tg_sg_vals[i];
+    // Denominator only: the sink has no output slot, so the emitted
+    // weights deliberately sum to less than one.
+    if (has_sinks != 0u) global_sum += exp(sinks[head] - global_max);
     float inv_sum = 1.0f / global_sum;
 
     for (uint t = t_start + tid; t < T; t += tg_sz) {

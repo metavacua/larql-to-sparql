@@ -49,12 +49,15 @@ fn dequantize_q4_0_row(row: &[u8], hidden: usize) -> Vec<f32> {
         let block = &row[b * 18..(b + 1) * 18];
         let scale_bits = u16::from_le_bytes([block[0], block[1]]);
         let scale = f16_to_f32(scale_bits);
+        // ggml planar Q4_0 (`quantize_row_q4_0_ref`): byte j holds element j
+        // in its low nibble and element j+16 in its high nibble — the two
+        // halves of the 32-element block, not an adjacent pair.
         for j in 0..16 {
             let byte = block[2 + j];
             let lo = (byte & 0x0F) as i32 - 8;
             let hi = ((byte >> 4) & 0x0F) as i32 - 8;
-            out[b * 32 + 2 * j] = lo as f32 * scale;
-            out[b * 32 + 2 * j + 1] = hi as f32 * scale;
+            out[b * 32 + j] = lo as f32 * scale;
+            out[b * 32 + j + 16] = hi as f32 * scale;
         }
     }
     out

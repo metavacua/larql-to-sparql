@@ -87,12 +87,20 @@
 //!   12    M×4   output (f32[] LE)
 //! ```
 //!
-//! ## Module layout (post-split, 2026-05-17)
+//! ## Module layout (post-split, 2026-05-17; codec consolidated 2026-07)
 //!
-//! - [`types`] — `WalkFfnRequest`, `FfnEntry`, `FfnOutput`, `RifGuard`,
-//!   `BINARY_CT`, `BATCH_MARKER`. Pure data.
-//! - [`binary`] — `decode_binary_request`, `encode_binary_output(_f16|_i8)`,
-//!   `encode_json_full_output`. Pure functions + in-file unit tests.
+//! The frame codec itself is single-sourced in
+//! `larql_inference::ffn::remote::codec` (ROADMAP hardening item 16 —
+//! same discipline as the q8k and MoE wires); the layout diagrams above
+//! are documentation of that shared implementation.
+//!
+//! - [`types`] — `WalkFfnRequest`, `RifGuard`; re-exports `FfnEntry`,
+//!   `FfnOutput` from the shared codec.
+//! - [`binary`] — shim over the shared codec: `decode_request` (inbound
+//!   Content-Type dispatch over f32/f16/i8, wraps into
+//!   `WalkFfnRequest`/`ServerError`), re-exports
+//!   `encode_binary_output(_f16|_i8)` + `encode_json_full_output`;
+//!   carries the server-side regression tests for the shared guards.
 //! - [`validate`] — `collect_scan_layers`, `validate_residual`,
 //!   `validate_owned`. Pure-function correctness checks.
 //! - [`core`] — `run_full_output_core` (the FFN compute + MoE-layer

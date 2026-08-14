@@ -26,7 +26,7 @@ pub fn encode(
     num_kv_heads: usize,
     head_dim: usize,
     rotary_dim: usize,
-    rope_base: f32,
+    plan: &larql_compute::attention::rope::RopeFreqPlan,
 ) {
     let hd = head_dim as u32;
     let rdim_val = rotary_dim as u32;
@@ -44,9 +44,9 @@ pub fn encode(
             enc.set_compute_pipeline_state(pipeline);
             enc.set_buffer(0, Some(q_buf), offset);
             enc.set_bytes(1, 4, &hd as *const u32 as *const c_void);
-            enc.set_bytes(2, 4, &rope_base as *const f32 as *const c_void);
             enc.set_bytes(3, 4, &pos_val as *const u32 as *const c_void);
             enc.set_bytes(4, 4, &rdim_val as *const u32 as *const c_void);
+            super::rope_freq::bind(enc, 2, 5, plan, head_dim, rotary_dim);
             enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
         }
         for kvh in 0..num_kv_heads {
@@ -54,9 +54,9 @@ pub fn encode(
             enc.set_compute_pipeline_state(pipeline);
             enc.set_buffer(0, Some(k_buf), offset);
             enc.set_bytes(1, 4, &hd as *const u32 as *const c_void);
-            enc.set_bytes(2, 4, &rope_base as *const f32 as *const c_void);
             enc.set_bytes(3, 4, &pos_val as *const u32 as *const c_void);
             enc.set_bytes(4, 4, &rdim_val as *const u32 as *const c_void);
+            super::rope_freq::bind(enc, 2, 5, plan, head_dim, rotary_dim);
             enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
         }
     }

@@ -24,8 +24,10 @@ use crate::metrics::{encode_metrics_text, RouterMetrics};
 use crate::shards::{find_shard_for_layer, peek_binary, Shard};
 
 /// Content-Type used by the FFN binary protocol. JSON requests use the
-/// standard `application/json`.
-pub const BINARY_CT: &str = "application/x-larql-ffn";
+/// standard `application/json`. Single-sourced in the shared walk-ffn
+/// codec (ROADMAP hardening item 16); re-exported under the historical
+/// `larql_router::http::BINARY_CT` path.
+pub use larql_inference::ffn::remote::BINARY_CT;
 
 /// Shared HTTP service state. Holds the static shard map, an optional
 /// grid handle, and a single reqwest client (whose connection pool is

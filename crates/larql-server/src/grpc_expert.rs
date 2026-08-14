@@ -82,10 +82,7 @@ impl ExpertService for ExpertGrpcService {
         let n_cores = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(8);
-        let mode =
-            mode_override
-                .as_deref()
-                .unwrap_or(if n_items <= n_cores { "par" } else { "chunked" });
+        let mode = mode_override.unwrap_or(if n_items <= n_cores { "par" } else { "chunked" });
         let results: Vec<ExpertBatchResult> = tokio::task::block_in_place(|| {
             use rayon::prelude::*;
             let t0 = Instant::now();
@@ -217,10 +214,22 @@ impl ExpertService for ExpertGrpcService {
                 } else {
                     path_used = "cpu";
                     tokio::task::block_in_place(|| -> Result<Vec<f32>, Status> {
-                        crate::routes::expert::run_experts_cpu_batch(
+                        let (h2, n_run) = crate::routes::expert::run_experts_cpu_batch(
                             &state2, layer, &residual, &expert_ids, &expert_weights,
                         )
-                        .map_err(|e| Status::internal(e.to_string()))
+                        .map_err(|e| Status::internal(e.to_string()))?;
+                        // Loud-error contract of `run_experts_cpu_batch`: an
+                        // unresolvable expert must never yield a partial sum.
+                        let n_requested =
+                            expert_weights.iter().filter(|&&w| w != 0.0).count();
+                        if n_run != n_requested {
+                            return Err(Status::invalid_argument(format!(
+                                "layer {layer}: {} of {n_requested} requested experts \
+                                 could not be resolved on this shard",
+                                n_requested - n_run
+                            )));
+                        }
+                        Ok(h2)
                     })?
                 };
                 let compute_ms = t_compute.elapsed().as_secs_f32() * 1000.0;

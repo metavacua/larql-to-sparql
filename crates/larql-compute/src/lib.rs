@@ -59,11 +59,16 @@
 //!
 //! ## Adding a quant format
 //!
-//! Adding e.g. FP4 = one [`QuantFormat`] variant + one match arm in
+//! Adding e.g. FP4 = one [`QuantFormat`] variant + one arm in
+//! [`QuantFormat::route`] (the [`FormatRoute`] registry — dequant +
+//! matvec + matmul kernel pointers in one place) + one match arm in
 //! [`QuantMatVec::quant_matvec`]'s default impl + one CPU kernel +
 //! one shader per GPU-backend crate.  The shader-side wiring is
 //! local to each backend crate, so a new format doesn't require
-//! touching every consumer.
+//! touching every consumer.  Formats whose weights carry side
+//! metadata (I2S trit scales, MXFP4 E8M0 scales) follow the
+//! `ternary_matvec` parallel-path template instead — see the
+//! unknown-format contract in [`quant_route`].
 
 #[cfg(any(
     target_os = "linux",
@@ -86,9 +91,12 @@ pub mod kquant_forward;
 pub mod kv_dispatch;
 pub mod kv_index;
 pub mod options;
+pub mod packed_attn_index;
 pub mod per_layer_decode_state;
+pub mod phase_timing;
 pub mod pipeline;
 pub mod pipeline_layer;
+pub mod quant_route;
 pub mod residual;
 pub mod state_handle;
 
@@ -97,24 +105,26 @@ pub mod state_handle;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_fixtures;
 
-pub use kv_index::{KvIndex, FFN_COMPONENTS_PER_LAYER};
+pub use kv_index::{KvIndex, FFN_COMPONENTS_PER_LAYER, FFN_DOWN, FFN_GATE, FFN_UP};
 pub use per_layer_decode_state::PerLayerDecodeState;
 
 // ── Re-exports: pipeline types ──
 
 pub use pipeline::{
-    Activation, AttentionSpec, AttentionWeights, FfnSpec, FfnType, FfnWeights, FullPipelineLayer,
-    LayerNorms, LayerWeights, MoeDownPaddingPolicy, MoeExpertScalePolicy, MoeInputSource,
-    MoeLayerWeights, MoePostExpertNormPolicy, MoeRouterNormPolicy, MoeRoutingPolicy, MoeSpec,
-    MoeTopKWeightPolicy, MoeWeightLayout, NormType, PositionEncodingType, QuantFormat, QuantWeight,
-    RemoteFfnSpec, RMSNORM_EPSILON_DEFAULT, ROPE_BASE_DEFAULT, ROPE_BASE_GLOBAL,
+    stored_gate_up_cols, Activation, AttentionSpec, AttentionWeights, ExpertMlp, ExternalScaleKind,
+    FfnSpec, FfnType, FfnWeights, FullPipelineLayer, LayerNorms, LayerWeights,
+    MoeDownPaddingPolicy, MoeExpertScalePolicy, MoeGateRule, MoeInputSource, MoeLayerWeights,
+    MoePostExpertNormPolicy, MoeRouterNormPolicy, MoeRoutingPolicy, MoeSpec, MoeTopKWeightPolicy,
+    MoeWeightLayout, NormType, PositionEncodingType, QuantAux, QuantFormat, QuantWeight,
+    RemoteFfnSpec, ScaleStorage, RMSNORM_EPSILON_DEFAULT, ROPE_BASE_DEFAULT, ROPE_BASE_GLOBAL,
 };
 
 // ── Re-exports: backend ──
 
 pub use backend::{
-    dot_proj_gpu, matmul_gpu, Capability, ComputeBackend, DecodeBackend, DecodeStateDump, MatMul,
-    MatMulOp, ProfileTimings, QuantMatVec, StateDumpMask,
+    backend_from_spec, dot_proj_gpu, matmul_gpu, BackendCtor, BackendKind, BackendSelectError,
+    Capability, ComputeBackend, DecodeBackend, DecodeStateDump, MatMul, MatMulOp, ProfileTimings,
+    QuantMatVec, StateDumpMask,
 };
 
 /// Bring every backend sub-trait into scope at once.
@@ -129,10 +139,14 @@ pub mod prelude {
     };
 }
 
+pub use quant_route::FormatRoute;
+
 pub use cpu::ops::linalg::{cholesky, cholesky_inverse, cholesky_solve, ridge_decomposition_solve};
 pub use cpu::ops::moe::{quantize_x_to_q8k, Q8KActivation};
+pub use cpu::ops::q4k_matvec::f16_to_f32;
 pub use cpu::ops::vector::{cosine, dot, norm};
 pub use cpu::CpuBackend;
+pub use packed_attn_index::PackedAttnIndex;
 
 /// Build a CPU backend.  Always returns a usable backend (BLAS on
 /// macOS via Accelerate, OpenBLAS on Linux/Windows).

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Core graph engine for LARQL — knowledge graphs extracted from neural network weights"
 keywords = ["knowledge-graph", "llm", "interpretability", "graph"]
 categories = ["data-structures", "science"]
@@ -33,19 +34,5 @@ name = "graph"
 harness = false
 
 [[example]]
-name = "algorithm_demo"
-
-[[example]]
 name = "bench_graph"
 
-[[example]]
-name = "edge_demo"
-
-[[example]]
-name = "filter_demo"
-
-[[example]]
-name = "graph_demo"
-
-[[example]]
-name = "serialization_demo"

@@ -7,6 +7,7 @@
 //! - Uses GQA with sliding window
 
 use crate::config::{Activation, FfnType, ModelArchitecture, ModelConfig, NormType};
+use crate::tensor_keys::attn_bias;
 
 pub struct StarCoder2Arch {
     config: ModelConfig,
@@ -29,6 +30,14 @@ impl ModelArchitecture for StarCoder2Arch {
 
     fn norm_type(&self) -> NormType {
         NormType::LayerNorm
+    }
+
+    /// `Starcoder2Config.norm_epsilon` defaults to 1e-5, not the crate-wide
+    /// 1e-6. Declared for the same reason as GPT-OSS's: the fallback is what
+    /// runs for any sibling checkpoint that omits the field, and inheriting
+    /// another family's value there is a silent, per-layer error.
+    fn default_norm_eps(&self) -> f32 {
+        crate::defaults::DEFAULT_NORM_EPS_1E5
     }
 
     fn activation(&self) -> Activation {
@@ -59,18 +68,18 @@ impl ModelArchitecture for StarCoder2Arch {
 
     // Attention biases (including O proj)
     fn attn_o_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.o_proj.bias", self.layer_prefix(layer)))
+        attn_bias::o(&self.layer_prefix(layer))
     }
 
     fn attn_q_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.q_proj.bias", self.layer_prefix(layer)))
+        attn_bias::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.k_proj.bias", self.layer_prefix(layer)))
+        attn_bias::k(&self.layer_prefix(layer))
     }
 
     fn attn_v_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.v_proj.bias", self.layer_prefix(layer)))
+        attn_bias::v(&self.layer_prefix(layer))
     }
 }

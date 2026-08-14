@@ -3,7 +3,7 @@
 **Status:** COMPLETE — CONFIRMED (the opposite of V1). FP4-friendliness is universal
 and near-lossless across the archs measured.
 **Harnesses:** `crates/larql-vindex/examples/fp4_q1_scan.rs` (static, generalized for
-`*_weights.bin` naming), `crates/larql-inference/examples/walk_ffn_v2_fp4_nll.rs` (predictive).
+`*_weights.bin` naming), `chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_v2_fp4_nll.rs` (predictive).
 **Artifacts:** `bench/aim-validation/v2_*_scan.json`
 **Date:** 2026-05-31
 

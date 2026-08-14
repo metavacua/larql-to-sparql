@@ -1,0 +1,522 @@
+//! Build a [`SystemGraph`] from architecture inventories.
+//!
+//! Placement is **evidence-driven**: roles come from declared interfaces
+//! and component topologies, the feature projector is identified by its
+//! shape against the declared taps, and anything the rules cannot place
+//! comes back in [`BuiltGraph::unplaced`] / `unresolved_interfaces` as
+//! data. The planner treats "the builder placed it" as the definition of
+//! representable — there is no separate capability table to drift.
+
+use std::collections::BTreeMap;
+
+use larql_models::inventory::{ArchitectureInventory, TensorGroup};
+
+use super::component::{Component, ComponentRole};
+use super::edge::HiddenStateEdge;
+use super::object::{Fidelity, LogicalObject, ObjectKind, Representation, SourceBinding};
+use super::policy::{AttentionLayerPolicy, AttentionSpan};
+use super::surface::{
+    attach_stack_evidence, gate_evidence, head_from_resolved, surface_from_nested,
+    surface_from_resolved,
+};
+use super::{SystemGraph, GRAPH_SCHEMA};
+
+/// Sliding-layer label in the inventory's resolved table.
+const RESOLVED_ATTENTION_SLIDING: &str = "sliding";
+
+/// Role-derived component ids. Stable and conceptual; collisions get a
+/// numeric suffix rather than a physical name.
+const COMPONENT_ID_TARGET: &str = "target";
+const COMPONENT_ID_DRAFT: &str = "draft";
+
+/// The interface-declaring key (mirrors the inventory's registry).
+const TARGET_LAYER_IDS_KEY: &str = "target_layer_ids";
+
+/// Config leaf carrying the drafter block protocol.
+const BLOCK_SIZE_KEY: &str = "block_size";
+
+/// A tensor group no placement rule could own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnplacedGroup {
+    pub artifact: String,
+    pub prefix: String,
+    pub reason: String,
+}
+
+/// A declared interface the builder could not turn into an edge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedInterface {
+    pub artifact: String,
+    pub reason: String,
+}
+
+/// A component whose execution surface could not be completed — the
+/// missing source facts, as data. Blocking downstream: an executor with a
+/// partial surface would have to default, which G5 forbids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncompleteSurface {
+    pub artifact: String,
+    pub component: String,
+    pub missing: Vec<String>,
+}
+
+/// The build result: the graph plus everything that did not fit.
+pub struct BuiltGraph {
+    pub graph: SystemGraph,
+    pub unplaced: Vec<UnplacedGroup>,
+    pub unresolved_interfaces: Vec<UnresolvedInterface>,
+    pub incomplete_surfaces: Vec<IncompleteSurface>,
+}
+
+/// Name-fragment vocabulary for classifying tensor groups into object
+/// kinds. First match wins; specific fragments precede generic ones (a
+/// vision tower has `layers` segments too).
+const GROUP_PATTERNS: &[(GroupClass, &[&str])] = &[
+    (
+        GroupClass::PerceptionTower,
+        &["vision_tower", "vision_model", "visual", "audio_tower"],
+    ),
+    (
+        GroupClass::PerceptionAdapter,
+        &[
+            "vision_adapter",
+            "vision_projection",
+            "mm_projector",
+            "multi_modal_projector",
+        ],
+    ),
+    (
+        GroupClass::Embedding,
+        &["embed_tokens", "wte", "wpe", "token_embd", "embedding"],
+    ),
+    (GroupClass::Head, &["lm_head", "output.weight"]),
+    (GroupClass::Norm, &["norm", "ln_", "layernorm"]),
+    (GroupClass::Stack, &["layers", "blocks"]),
+];
+
+/// Intermediate classification of one tensor-group prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GroupClass {
+    PerceptionTower,
+    PerceptionAdapter,
+    Embedding,
+    Head,
+    Norm,
+    Stack,
+    Unknown,
+}
+
+fn classify_group(prefix: &str) -> GroupClass {
+    for (class, patterns) in GROUP_PATTERNS {
+        if patterns.iter().any(|p| prefix.contains(p)) {
+            return *class;
+        }
+    }
+    GroupClass::Unknown
+}
+
+/// Build the system graph over every inventory given.
+pub fn build_from_inventories(named: &[(String, ArchitectureInventory)]) -> BuiltGraph {
+    let mut components: Vec<Component> = Vec::new();
+    let mut objects: BTreeMap<String, LogicalObject> = BTreeMap::new();
+    let mut edges: Vec<HiddenStateEdge> = Vec::new();
+    let mut unplaced: Vec<UnplacedGroup> = Vec::new();
+    let mut unresolved_interfaces: Vec<UnresolvedInterface> = Vec::new();
+    let mut nested_by_component: BTreeMap<
+        String,
+        &larql_models::inventory::components::ComponentTopology,
+    > = BTreeMap::new();
+
+    // Pass 1: components. Roles from evidence: a declared tap interface
+    // makes a drafter; a nested component with perception geometry makes a
+    // perception component; otherwise the artifact carries a primary text
+    // model.
+    for (artifact, inventory) in named {
+        let is_drafter = declared_taps(inventory).is_some();
+        let base_id = if is_drafter {
+            COMPONENT_ID_DRAFT
+        } else {
+            COMPONENT_ID_TARGET
+        };
+        let id = unique_id(base_id, &components);
+        components.push(Component {
+            id,
+            role: if is_drafter {
+                ComponentRole::Drafter
+            } else {
+                ComponentRole::PrimaryText
+            },
+            source_artifact: artifact.clone(),
+            num_layers: inventory.resolved.num_layers,
+            hidden_size: inventory.resolved.hidden_size,
+            attention: Some(attention_table(inventory)),
+            execution: None, // attached in pass 3, once objects are known
+        });
+        for nested in &inventory.nested_components {
+            let id = unique_id(&nested.name, &components);
+            nested_by_component.insert(id.clone(), nested);
+            components.push(Component {
+                id,
+                role: ComponentRole::Perception,
+                source_artifact: artifact.clone(),
+                num_layers: nested.num_layers.unwrap_or(0),
+                hidden_size: nested.hidden_size.unwrap_or(0),
+                // No per-layer resolution exists for nested components yet;
+                // absent is honest, a fabricated table would not be.
+                attention: None,
+                execution: None, // attached in pass 3
+            });
+        }
+    }
+
+    // Pass 2: objects from tensor groups. For a drafter artifact the
+    // projector claim runs FIRST — the fusion tensor is identified by
+    // shape evidence, and every group sharing its first path segment joins
+    // the projector by structural adjacency, *before* name classification
+    // gets a chance to scatter its siblings (a projector's own norm would
+    // otherwise name-classify as `final_norm`).
+    for (artifact, inventory) in named {
+        let text_component = component_for_artifact(&components, artifact);
+        let perception_component = components
+            .iter()
+            .find(|c| c.source_artifact == *artifact && c.role == ComponentRole::Perception)
+            .map(|c| c.id.clone());
+
+        let taps = declared_taps(inventory);
+        let projector_segment = taps.as_ref().and_then(|taps| {
+            find_projector_segment(artifact, inventory, taps, &mut unresolved_interfaces)
+        });
+
+        for group in &inventory.tensors.groups {
+            if let (Some(segment), Some(consumer)) = (&projector_segment, &text_component) {
+                if group.prefix.split('.').next() == Some(segment.as_str()) {
+                    merge_binding(
+                        &mut objects,
+                        consumer,
+                        ObjectKind::FeatureProjector,
+                        artifact,
+                        group,
+                        inventory,
+                    );
+                    continue;
+                }
+            }
+            let class = classify_group(&group.prefix);
+            let placement = match class {
+                GroupClass::PerceptionTower => perception_component
+                    .clone()
+                    .map(|c| (c, ObjectKind::PerceptionTower)),
+                GroupClass::PerceptionAdapter => perception_component
+                    .clone()
+                    .map(|c| (c, ObjectKind::PerceptionAdapter)),
+                GroupClass::Embedding => text_component.clone().map(|c| (c, ObjectKind::Embedding)),
+                GroupClass::Head => text_component.clone().map(|c| (c, ObjectKind::OutputHead)),
+                GroupClass::Norm => text_component.clone().map(|c| (c, ObjectKind::FinalNorm)),
+                GroupClass::Stack => text_component
+                    .clone()
+                    .map(|c| (c, ObjectKind::DecoderStack)),
+                GroupClass::Unknown => None,
+            };
+            match placement {
+                Some((component, kind)) => {
+                    merge_binding(&mut objects, &component, kind, artifact, group, inventory);
+                }
+                None => unplaced.push(UnplacedGroup {
+                    artifact: artifact.clone(),
+                    prefix: group.prefix.clone(),
+                    reason: if matches!(class, GroupClass::Unknown) {
+                        "no placement rule owns this group — judge it before conversion".to_string()
+                    } else {
+                        "classified for a component this artifact does not declare".to_string()
+                    },
+                }),
+            }
+        }
+
+        // The interface edge, once the projector object exists.
+        if let (Some(taps), Some(_)) = (&taps, &projector_segment) {
+            wire_edge(
+                artifact,
+                inventory,
+                taps,
+                &components,
+                &mut edges,
+                &mut unresolved_interfaces,
+            );
+        }
+    }
+
+    // Pass 3: execution surfaces, now that objects are known (a head
+    // surface exists iff the component owns embedding/head objects; a
+    // perception FFN's gating is tensor evidence under the tower). A
+    // surface that cannot be completed is recorded as missing facts —
+    // blocking downstream — never filled with defaults.
+    let mut incomplete_surfaces: Vec<IncompleteSurface> = Vec::new();
+    for component in &mut components {
+        let Some((_, inventory)) = named.iter().find(|(n, _)| *n == component.source_artifact)
+        else {
+            continue;
+        };
+        let result = match component.role {
+            ComponentRole::Perception => match nested_by_component.get(&component.id) {
+                Some(nested) => {
+                    let has_gate_tensors = objects.values().any(|object| {
+                        object.component == component.id
+                            && object.kind == ObjectKind::PerceptionTower
+                            && gate_evidence(inventory, object)
+                    });
+                    surface_from_nested(nested, has_gate_tensors)
+                }
+                None => Err(vec!["nested component reading".to_string()]),
+            },
+            ComponentRole::PrimaryText | ComponentRole::Drafter => surface_from_resolved(inventory)
+                .and_then(|mut surface| {
+                    let owns_head = objects.values().any(|object| {
+                        object.component == component.id
+                            && matches!(object.kind, ObjectKind::Embedding | ObjectKind::OutputHead)
+                    });
+                    if owns_head {
+                        surface.head = Some(head_from_resolved(inventory)?);
+                    }
+                    // Facts only the operand estate can state (norm
+                    // placement) — evidence outranks family defaults.
+                    if let Some(stack) = objects.values().find(|object| {
+                        object.component == component.id && object.kind == ObjectKind::DecoderStack
+                    }) {
+                        attach_stack_evidence(&mut surface, inventory, stack)?;
+                    }
+                    Ok(surface)
+                }),
+        };
+        match result {
+            Ok(surface) => component.execution = Some(surface),
+            Err(missing) => incomplete_surfaces.push(IncompleteSurface {
+                artifact: component.source_artifact.clone(),
+                component: component.id.clone(),
+                missing,
+            }),
+        }
+    }
+
+    components.sort_by(|a, b| a.id.cmp(&b.id));
+    BuiltGraph {
+        graph: SystemGraph {
+            schema: GRAPH_SCHEMA,
+            components,
+            objects: objects.into_values().collect(),
+            edges,
+        },
+        unplaced,
+        unresolved_interfaces,
+        incomplete_surfaces,
+    }
+}
+
+/// The artifact's declared tap layers, when it declares any.
+fn declared_taps(inventory: &ArchitectureInventory) -> Option<Vec<usize>> {
+    inventory
+        .interfaces
+        .iter()
+        .find(|i| i.path.ends_with(TARGET_LAYER_IDS_KEY))
+        .and_then(|i| {
+            i.value.as_array().map(|arr| {
+                arr.iter()
+                    .filter_map(serde_json::Value::as_u64)
+                    .map(|v| v as usize)
+                    .collect()
+            })
+        })
+}
+
+/// Declared drafter block size, read from the config facts.
+fn declared_block_size(inventory: &ArchitectureInventory) -> Option<usize> {
+    inventory
+        .config_keys
+        .iter()
+        .find(|f| f.path == BLOCK_SIZE_KEY || f.path.ends_with(&format!(".{BLOCK_SIZE_KEY}")))
+        .and_then(|f| f.value.as_u64())
+        .map(|v| v as usize)
+}
+
+/// Non-perception component owned by `artifact`.
+fn component_for_artifact(components: &[Component], artifact: &str) -> Option<String> {
+    components
+        .iter()
+        .find(|c| c.source_artifact == artifact && c.role != ComponentRole::Perception)
+        .map(|c| c.id.clone())
+}
+
+fn unique_id(base: &str, components: &[Component]) -> String {
+    if !components.iter().any(|c| c.id == base) {
+        return base.to_string();
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{base}_{n}");
+        if !components.iter().any(|c| c.id == candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+fn attention_table(inventory: &ArchitectureInventory) -> Vec<AttentionLayerPolicy> {
+    inventory
+        .resolved
+        .layers
+        .iter()
+        .map(|layer| AttentionLayerPolicy {
+            span: if layer.attention == RESOLVED_ATTENTION_SLIDING {
+                AttentionSpan::Sliding
+            } else {
+                AttentionSpan::Full
+            },
+            window: layer.window,
+            position: layer.position,
+        })
+        .collect()
+}
+
+/// Merge one tensor group into the `(component, kind)` object, creating it
+/// on first sight.
+fn merge_binding(
+    objects: &mut BTreeMap<String, LogicalObject>,
+    component: &str,
+    kind: ObjectKind,
+    artifact: &str,
+    group: &TensorGroup,
+    inventory: &ArchitectureInventory,
+) {
+    let id = format!("{component}.{}", kind.name());
+    let object = objects.entry(id.clone()).or_insert_with(|| LogicalObject {
+        id,
+        component: component.to_string(),
+        kind,
+        source_bindings: Vec::new(),
+        representations: canonical_representation(inventory, &group.prefix)
+            .into_iter()
+            .collect(),
+    });
+    object.source_bindings.push(SourceBinding {
+        artifact: artifact.to_string(),
+        tensor_prefix: group.prefix.clone(),
+        tensors: group.tensors,
+        bytes: group.bytes,
+    });
+}
+
+/// The canonical representation for an object: encodings actually observed
+/// in the shard headers under this prefix, falling back to the checkpoint's
+/// declared dtype when the per-tensor list was stripped. Never invented.
+fn canonical_representation(
+    inventory: &ArchitectureInventory,
+    prefix: &str,
+) -> Option<Representation> {
+    let mut encodings: Vec<&str> = inventory
+        .tensors
+        .tensors
+        .iter()
+        .filter(|t| t.name.starts_with(prefix))
+        .map(|t| t.dtype.as_str())
+        .collect();
+    encodings.sort_unstable();
+    encodings.dedup();
+    let encoding = if encodings.is_empty() {
+        inventory.identity.dtype.clone()?
+    } else {
+        encodings.join("+")
+    };
+    Some(Representation {
+        encoding,
+        fidelity: Fidelity::Canonical,
+    })
+}
+
+/// Identify the tap-fusion projector by shape evidence: a 2-D tensor of
+/// shape `len(taps)·hidden × hidden` (either orientation). Returns the
+/// tensor's first path segment — the adjacency key that claims its sibling
+/// groups — or records why identification failed.
+fn find_projector_segment(
+    artifact: &str,
+    inventory: &ArchitectureInventory,
+    taps: &[usize],
+    unresolved: &mut Vec<UnresolvedInterface>,
+) -> Option<String> {
+    let hidden = inventory.resolved.hidden_size;
+    let expected = taps.len() * hidden;
+    if inventory.tensors.tensors.is_empty() {
+        unresolved.push(UnresolvedInterface {
+            artifact: artifact.to_string(),
+            reason: "per-tensor list absent — projector cannot be identified by shape".to_string(),
+        });
+        return None;
+    }
+    let projector_tensor = inventory.tensors.tensors.iter().find(|t| {
+        t.shape.len() == 2
+            && ((t.shape[0] == expected && t.shape[1] == hidden)
+                || (t.shape[0] == hidden && t.shape[1] == expected))
+    });
+    match projector_tensor {
+        Some(tensor) => Some(
+            tensor
+                .name
+                .split('.')
+                .next()
+                .unwrap_or(&tensor.name)
+                .to_string(),
+        ),
+        None => {
+            unresolved.push(UnresolvedInterface {
+                artifact: artifact.to_string(),
+                reason: format!(
+                    "no 2-D tensor of shape {expected}×{hidden} implements the declared \
+                     {}-tap interface",
+                    taps.len()
+                ),
+            });
+            None
+        }
+    }
+}
+
+/// Wire the interface edge: the producer must be exactly one other
+/// component deep enough to own every declared tap.
+fn wire_edge(
+    artifact: &str,
+    inventory: &ArchitectureInventory,
+    taps: &[usize],
+    components: &[Component],
+    edges: &mut Vec<HiddenStateEdge>,
+    unresolved: &mut Vec<UnresolvedInterface>,
+) {
+    let Some(consumer) = component_for_artifact(components, artifact) else {
+        unresolved.push(UnresolvedInterface {
+            artifact: artifact.to_string(),
+            reason: "declaring artifact has no component".to_string(),
+        });
+        return;
+    };
+    let max_tap = taps.iter().copied().max().unwrap_or(0);
+    let mut producers = components.iter().filter(|c| {
+        c.source_artifact != *artifact
+            && c.role == ComponentRole::PrimaryText
+            && c.num_layers > max_tap
+    });
+    match (producers.next(), producers.next()) {
+        (Some(producer), None) => edges.push(HiddenStateEdge {
+            producer_component: producer.id.clone(),
+            producer_layers: taps.to_vec(),
+            consumer_component: consumer.clone(),
+            consumer_object: format!("{consumer}.{}", ObjectKind::FeatureProjector.name()),
+            block_size: declared_block_size(inventory),
+        }),
+        (None, _) => unresolved.push(UnresolvedInterface {
+            artifact: artifact.to_string(),
+            reason: format!("no component in the set owns layer {max_tap} — producer unresolvable"),
+        }),
+        (Some(_), Some(_)) => unresolved.push(UnresolvedInterface {
+            artifact: artifact.to_string(),
+            reason: "multiple candidate producers — refusing to guess".to_string(),
+        }),
+    }
+}

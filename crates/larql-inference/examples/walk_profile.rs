@@ -98,13 +98,10 @@ impl<'a> CapturingFfn<'a> {
 
 impl<'a> FfnBackend for CapturingFfn<'a> {
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
-        self.forward_with_activation(layer, x).0
-    }
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         if layer < self.num_layers {
             self.captured.borrow_mut()[layer] = x.clone();
         }
-        self.inner.forward_with_activation(layer, x)
+        self.inner.forward(layer, x)
     }
     fn name(&self) -> &str {
         "capturing"
@@ -156,10 +153,7 @@ fn walk_loop(
     let seq_len = x.shape()[0];
     let arch = &*weights.arch;
     let is_gated = arch.ffn_type() == larql_models::FfnType::Gated;
-    let use_gelu = matches!(
-        arch.activation(),
-        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
-    );
+    let use_gelu = arch.activation().uses_gelu_tanh_gate_up();
     let up_view = index.up_layer_matrix(layer).expect("up mmap");
     let down_view = index.down_layer_matrix(layer).expect("down mmap");
 

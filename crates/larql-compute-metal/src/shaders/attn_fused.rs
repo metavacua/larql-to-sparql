@@ -35,6 +35,17 @@
 //!  - tg_red[8]         = 32 B
 //!
 //!  Total ~6 KB — well within 32 KB/TG.
+//!
+//! **No-QK-norm models (GPT-OSS)**: `has_qk_norm = 0` skips phases 1–2's
+//! normalisation (Q/K pass through raw) so architectures without QK-norm
+//! can still take this single-dispatch path — RMS-norming with weight 1
+//! is NOT the identity, so this must be a flag, not a unit-weight bind.
+//! The projection biases (GPT-OSS Q/K/V) ride along the same way:
+//! `has_qkv_bias = 1` adds them on load, before norm/RoPE — the same
+//! point the CPU reference and the unfused `bias_add` dispatches apply
+//! them — collapsing bias×3 + rope + append/attend into this one kernel.
+//! Both flag slots follow the sinks convention: real (stub) buffers are
+//! always bound; the flag gates the read.
 
 pub const SHADER: &str = r#"
 kernel void attn_fused(
@@ -54,8 +65,18 @@ kernel void attn_fused(
     constant uint&      window_size[[buffer(13)]],
     constant float&     eps        [[buffer(14)]],
     constant float&     qk_offset  [[buffer(15)]],  // 1.0 on Gemma 2/3, 0.0 on Gemma 4
-    constant float&     rope_base  [[buffer(16)]],
+    device const float* inv_freq   [[buffer(16)]], // [rotary_dim/2], host-computed
     constant uint&      rotary_dim [[buffer(17)]],
+    constant float*     sinks      [[buffer(18)]],  // per-Q-head attention sink logits
+    constant uint&      has_sinks  [[buffer(19)]],
+    constant float&     amplitude  [[buffer(20)]],  // cos/sin scalar (YaRN); 1.0 otherwise  // 0 = no sinks (slot is a placeholder)
+    constant uint&      abs_pos    [[buffer(21)]],  // ABSOLUTE stream position for RoPE
+    constant float&     softcap    [[buffer(22)]],  // 0.0 = disabled
+    constant uint&      has_qk_norm[[buffer(23)]],  // 0 = raw Q/K (no-QK-norm archs)
+    device const float* q_bias     [[buffer(24)]],  // [num_q  * head_dim]
+    device const float* k_bias     [[buffer(25)]],  // [num_kv * head_dim]
+    device const float* v_bias     [[buffer(26)]],  // [num_kv * head_dim]
+    constant uint&      has_qkv_bias[[buffer(27)]], // 0 = slots are placeholders
     uint tg_id  [[threadgroup_position_in_grid]],
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]],
@@ -65,6 +86,12 @@ kernel void attn_fused(
     uint head = tg_id;
     if (head >= num_q) return;
     uint kv_head = head / (num_q / num_kv);
+    // Cache ROW is occupancy-indexed (matches kv_cache_append's row
+    // choice); the RoPE ANGLE uses the absolute stream position. They
+    // are equal only until a sliding window evicts — deriving the
+    // angle from T (as `T - 1`) roped at a rewound position after
+    // compaction while every other decode path used abs_position
+    // (capability audit F11).
     uint pos = T - 1u;
 
     threadgroup float tg_q[256];
@@ -78,40 +105,61 @@ kernel void attn_fused(
     // ── Phase 1: parallel RMS for Q[head] AND K[kv_head] in one pass ──
     // Each thread accumulates two squares (one for Q, one for K). We use
     // simdgroup reduction and re-use tg_red as a tiny buffer for both.
-    float partial_q = 0.0f;
-    float partial_k = 0.0f;
-    for (uint d = tid; d < head_dim; d += tg_sz) {
-        float vq = Q_in[head    * head_dim + d];
-        float vk = K_in[kv_head * head_dim + d];
-        partial_q += vq * vq;
-        partial_k += vk * vk;
-    }
-    // Reduce Q
-    {
-        float sg = simd_sum(partial_q);
-        if (lane == 0) tg_red[sg_id] = sg;
+    // Projection biases (has_qkv_bias) join on load, BEFORE the norm —
+    // the same order as the CPU reference and the unfused bias_add path.
+    // `has_qk_norm`/`has_qkv_bias` are uniform constants, so the barriers
+    // inside the conditional are uniformly executed across the TG.
+    float inv_rms_q = 1.0f;
+    float inv_rms_k = 1.0f;
+    if (has_qk_norm != 0u) {
+        float partial_q = 0.0f;
+        float partial_k = 0.0f;
+        for (uint d = tid; d < head_dim; d += tg_sz) {
+            float vq = Q_in[head    * head_dim + d];
+            float vk = K_in[kv_head * head_dim + d];
+            if (has_qkv_bias != 0u) {
+                vq += q_bias[head    * head_dim + d];
+                vk += k_bias[kv_head * head_dim + d];
+            }
+            partial_q += vq * vq;
+            partial_k += vk * vk;
+        }
+        // Reduce Q
+        {
+            float sg = simd_sum(partial_q);
+            if (lane == 0) tg_red[sg_id] = sg;
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+        float ss_q = tg_red[0];
+        for (uint i = 1u; i < n_sg; i++) ss_q += tg_red[i];
         threadgroup_barrier(mem_flags::mem_threadgroup);
+        // Reduce K
+        {
+            float sg = simd_sum(partial_k);
+            if (lane == 0) tg_red[sg_id] = sg;
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+        float ss_k = tg_red[0];
+        for (uint i = 1u; i < n_sg; i++) ss_k += tg_red[i];
+        inv_rms_q = 1.0f / sqrt(ss_q / float(head_dim) + eps);
+        inv_rms_k = 1.0f / sqrt(ss_k / float(head_dim) + eps);
     }
-    float ss_q = tg_red[0];
-    for (uint i = 1u; i < n_sg; i++) ss_q += tg_red[i];
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    // Reduce K
-    {
-        float sg = simd_sum(partial_k);
-        if (lane == 0) tg_red[sg_id] = sg;
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-    }
-    float ss_k = tg_red[0];
-    for (uint i = 1u; i < n_sg; i++) ss_k += tg_red[i];
-    float inv_rms_q = 1.0f / sqrt(ss_q / float(head_dim) + eps);
-    float inv_rms_k = 1.0f / sqrt(ss_k / float(head_dim) + eps);
 
-    // ── Phase 2: write normed Q,K to TG memory ──
+    // ── Phase 2: write (biased,) normed Q,K to TG memory ──
     for (uint d = tid; d < head_dim; d += tg_sz) {
         float vq = Q_in[head    * head_dim + d];
         float vk = K_in[kv_head * head_dim + d];
-        tg_q[d]        = (vq * inv_rms_q) * (qk_offset + q_weight[d]);
-        tg_k_normed[d] = (vk * inv_rms_k) * (qk_offset + k_weight[d]);
+        if (has_qkv_bias != 0u) {
+            vq += q_bias[head    * head_dim + d];
+            vk += k_bias[kv_head * head_dim + d];
+        }
+        if (has_qk_norm != 0u) {
+            tg_q[d]        = (vq * inv_rms_q) * (qk_offset + q_weight[d]);
+            tg_k_normed[d] = (vk * inv_rms_k) * (qk_offset + k_weight[d]);
+        } else {
+            tg_q[d]        = vq;
+            tg_k_normed[d] = vk;
+        }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -121,10 +169,9 @@ kernel void attn_fused(
     // rope passes.
     uint cache_off = pos * num_kv * head_dim + kv_head * head_dim;
     for (uint d = tid; d < hdim; d += tg_sz) {
-        float freq  = 1.0f / pow(rope_base, float(2u * d) / float(rdim));
-        float angle = float(pos) * freq;
-        float cos_a = cos(angle);
-        float sin_a = sin(angle);
+        float angle = float(abs_pos) * inv_freq[d];
+        float cos_a = cos(angle) * amplitude;
+        float sin_a = sin(angle) * amplitude;
 
         // Q rope: in-place
         float qr = tg_q[d];
@@ -145,10 +192,18 @@ kernel void attn_fused(
 
     // ── Phase 4: stream V[kv_head] to V_cache[pos][kv_head] ──
     for (uint d = tid; d < head_dim; d += tg_sz) {
-        V_cache[cache_off + d] = V_in[kv_head * head_dim + d];
+        float vv = V_in[kv_head * head_dim + d];
+        if (has_qkv_bias != 0u) {
+            vv += v_bias[kv_head * head_dim + d];
+        }
+        V_cache[cache_off + d] = vv;
     }
 
-    threadgroup_barrier(mem_flags::mem_device);
+    // Orders BOTH memory spaces: phase 5 reads K from device
+    // (K_cache) and Q from threadgroup (tg_q). mem_device alone
+    // synchronised execution but did not fence the tg_q writes
+    // (capability audit F11).
+    threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
 
     // ── Phase 5: scores. Reads Q from tg_q, K from K_cache. ──
     uint t_start = (window_size > 0u && T > window_size) ? T - window_size : 0u;
@@ -163,6 +218,12 @@ kernel void attn_fused(
         }
         for (uint d = (head_dim & ~3u); d < head_dim; d++) dot += tg_q[d] * k[d];
         dot *= scale;
+        // Gemma-2-style logit softcapping (clamped: Apple tanh NaNs
+        // past |y| ~ 44). A fused path must not silently drop a
+        // semantic feature its fallbacks apply (audit F8).
+        if (softcap > 0.0f) {
+            dot = softcap * tanh(clamp(dot / softcap, -15.0f, 15.0f));
+        }
         tg_scores[t - t_start] = dot;
         local_max = max(local_max, dot);
     }
@@ -174,6 +235,9 @@ kernel void attn_fused(
     }
     float global_max = tg_red[0];
     for (uint i = 1u; i < n_sg; i++) global_max = max(global_max, tg_red[i]);
+    // The sink competes in the softmax, so it must join the max or
+    // exp(sink - max) overflows when the sink dominates.
+    if (has_sinks != 0u) global_max = max(global_max, sinks[head]);
 
     // ── Phase 6: softmax numerator + sum ──
     float local_sum = 0.0f;
@@ -184,12 +248,21 @@ kernel void attn_fused(
     }
 
     {
+        // tg_red still holds the per-simdgroup maxima read above; a
+        // fast simdgroup must not overwrite a slot a slow one has not
+        // read. This is the same read->write reuse race fixed in
+        // kv_attention and kv_append_attend_fused — this kernel never
+        // received that fix (capability audit F11).
+        threadgroup_barrier(mem_flags::mem_threadgroup);
         float sg_sum = simd_sum(local_sum);
         if (lane == 0) tg_red[sg_id] = sg_sum;
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
     float global_sum = tg_red[0];
     for (uint i = 1u; i < n_sg; i++) global_sum += tg_red[i];
+    // Denominator only: the sink has no output slot, so the emitted
+    // weights deliberately sum to less than one.
+    if (has_sinks != 0u) global_sum += exp(sinks[head] - global_max);
     float inv_sum = 1.0f / global_sum;
 
     for (uint t = t_start + tid; t < T; t += tg_sz) {

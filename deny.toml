@@ -1,0 +1,125 @@
+# cargo-deny configuration for the larql workspace.
+#
+# Checked in CI by `.github/workflows/quality.yml`. Four independent checks run:
+#   advisories — RustSec database scan (vulnerabilities are hard failures)
+#   licenses   — SPDX allow-list; anything outside it fails
+#   bans       — duplicate-version and banned-crate policy
+#   sources    — registries and git remotes crates may come from
+#
+# Schema targets cargo-deny 0.20.x.
+
+[graph]
+# Evaluate every target the workspace actually supports, so a Windows-only or
+# Linux-only dependency cannot smuggle in an unreviewed licence or advisory.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+
+[output]
+feature-depth = 1
+
+# ---------------------------------------------------------------------------
+# Advisories
+# ---------------------------------------------------------------------------
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Vulnerabilities and unmaintained/unsound notices are all errors by default in
+# 0.20; everything we cannot act on is listed explicitly below with a reason.
+yanked = "deny"
+
+ignore = [
+    # --- unmaintained, pinned by upstream crates we do not control -----------
+    # number_prefix <- indicatif 0.17. No maintained fork; indicatif has not
+    # cut a release that drops it. Formatting-only crate, no untrusted input.
+    { id = "RUSTSEC-2025-0119", reason = "number_prefix is pulled by indicatif 0.17; no upstream release drops it yet" },
+    # paste <- tokenizers 0.21, metal 0.29, macro_rules_attribute. Proc-macro
+    # that expands at compile time only; nothing of it survives into a binary.
+    { id = "RUSTSEC-2024-0436", reason = "paste is a compile-time proc-macro pulled by tokenizers/metal; no runtime surface" },
+    # rustls-pemfile <- axum-server 0.7. Superseded by rustls-pki-types, which
+    # axum-server has not migrated to.
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is pulled by axum-server 0.7; upstream has not migrated to rustls-pki-types" },
+
+    # NOTE: RUSTSEC-2026-0205 (scc 2.4.0, unsound `Array::insert`) is *not*
+    # listed here. cargo-deny's dependency graph does not reach it, so an
+    # ignore entry would only produce an `advisory-not-detected` warning.
+    # `cargo audit`, which scans Cargo.lock entry-by-entry, does report it as
+    # a warning. It stays a warning deliberately: scc arrives solely as a
+    # dev-dependency of serial_test, which pins `scc ^2` while the fix landed
+    # in scc 3.x. It is never linked into a shipped artefact.
+]
+
+# ---------------------------------------------------------------------------
+# Licenses
+# ---------------------------------------------------------------------------
+# The workspace itself ships under Apache-2.0. Everything below is either
+# permissive or (MPL-2.0) file-level copyleft that we satisfy by not modifying
+# the upstream files.
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",          # clipboard-win, error-code, ryu (as an OR alternative)
+    "CC0-1.0",          # dunce (offered alongside MIT-0/Apache-2.0)
+    "Unlicense",        # offered alongside MIT by the `byteorder` family
+    "Unicode-3.0",      # the ICU4X crates behind idna/url
+    "CDLA-Permissive-2.0", # webpki-roots: a certificate *data* set, not code
+    "MPL-2.0",          # colored, option-ext — see note below
+]
+# `confidence-threshold` governs fuzzy matching of licence *files* for crates
+# that ship text rather than an SPDX expression. Every crate in the current
+# graph declares an expression, so this only guards future additions.
+confidence-threshold = 0.93
+
+# On MPL-2.0, the only non-permissive licence in the allow-list above.
+# It is file-level copyleft: the obligation to publish source attaches to
+# modified MPL-licensed *files*, not to anything that links against them.
+# The two crates carrying it — `colored` (terminal colour codes) and
+# `option-ext` (an Option extension trait, via dirs-sys) — are consumed
+# unmodified from crates.io, so Apache-2.0 distribution of larql is
+# unaffected. If either is ever vendored and patched, that patch must ship
+# under MPL-2.0.
+#
+# No `[[licenses.clarify]]` entries are needed: every crate in the graph
+# declares an SPDX expression in its manifest, so there is nothing to
+# disambiguate from licence-file text.
+
+# ---------------------------------------------------------------------------
+# Bans
+# ---------------------------------------------------------------------------
+[bans]
+multiple-versions = "warn"      # informational: the graph legitimately carries
+                                # several windows-sys / syn generations
+highlight = "all"
+
+# `wildcards` is "warn", not "deny", and that is a deliberate, temporary
+# setting. The workspace's own crates depend on each other by bare `path`
+# with no `version` key, which cargo-deny counts as a wildcard. Its
+# `allow-wildcard-paths` escape hatch does not apply here because it only
+# exempts crates marked `publish = false`, and all but larql-demos are
+# publishable. The real fix is to give each intra-workspace path dependency
+# a `version` alongside its `path` — required anyway before any of these can
+# be published to crates.io, and therefore owned by the release work in
+# ADR-0026 rather than by this security pass. Flip this to "deny" once that
+# lands.
+wildcards = "warn"
+
+# ---------------------------------------------------------------------------
+# Sources
+# ---------------------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

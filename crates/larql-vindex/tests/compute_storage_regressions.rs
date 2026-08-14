@@ -192,6 +192,7 @@ fn moe_model_config() -> VindexModelConfig {
         attention_k_eq_v: false,
         num_kv_shared_layers: None,
         per_layer_embed_dim: None,
+        layer_rope_theta: None,
         rope_local_base: None,
         query_pre_attn_scalar: None,
         final_logit_softcapping: None,
@@ -199,6 +200,7 @@ fn moe_model_config() -> VindexModelConfig {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     }
 }
 
@@ -497,7 +499,14 @@ fn layer_weight_quant_helpers_cover_dense_and_moe_shapes() {
         LayerWeightFormat::F32,
     )
     .unwrap();
-    assert_eq!(dense.gate_up.len(), 8 * F32_BYTES);
+    // Gate/up ROWS are padded to the super-block boundary exactly as down
+    // columns are (2026-08-09) — hidden 2 stores as 256 columns per row, so
+    // per-row integer kernels can index non-block-multiple models
+    // (GPT-OSS's 2880→3072). 2 gate rows + 2 up rows at 256 cols each.
+    assert_eq!(
+        dense.gate_up.len(),
+        4 * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS * F32_BYTES
+    );
     assert_eq!(
         dense.down.len(),
         2 * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS * F32_BYTES
@@ -515,7 +524,12 @@ fn layer_weight_quant_helpers_cover_dense_and_moe_shapes() {
     )
     .unwrap();
     assert_eq!(moe.len(), NUM_EXPERTS);
-    assert_eq!(moe[0].gate_up.len(), 2 * LAYER_HIDDEN * F32_BYTES);
+    // Same row-padding rule on the packed-BF16 writer: 2 fused rows
+    // (inter = 1) padded from LAYER_HIDDEN to one super-block each.
+    assert_eq!(
+        moe[0].gate_up.len(),
+        2 * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS * F32_BYTES
+    );
 }
 
 #[test]

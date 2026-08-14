@@ -159,9 +159,12 @@ fn q4k_ffn_gate_up_gemma4_26b_a4b_moe_shape() {
 
 #[test]
 fn q4k_ffn_gate_up_max_k_boundary_4096() {
-    // Right at the shader's Q4K_GU_MAX_K=4096 shared-memory cap. Should
-    // pass — the threadgroup tile fits exactly. Anything past this is
-    // out-of-bounds shared-memory access (Metal UB).
+    // Historical boundary: the shader once staged X in a shared-memory
+    // tile capped by Q4K_GU_MAX_K = 4096. That tile (and the constant)
+    // are gone — the kernel now streams X from device memory — but the
+    // geometry stays pinned as a regression guard for any future
+    // reintroduction of a K cap (audit F22: the old comment described
+    // a constant that no longer exists).
     assert_q4k_ffn_gate_up_matches_per_matrix("at MAX_K (4096)", 32, 4096);
 }
 
@@ -249,4 +252,76 @@ fn q4k_ffn_gate_up_zero_input() {
         !up_metal.iter().any(|v| v.is_nan()),
         "q4k_ffn_gate_up zero-input: up output contains NaN"
     );
+}
+
+/// Numerical parity for the OPT-IN cooperative variant
+/// (`q4k_ffn_gate_up_coop`, `LARQL_GATE_UP_COOP=1`) against the CPU
+/// reference — written while auditing capability finding F12 (divergent
+/// threadgroup barriers on odd `K/256` and `N % 4 != 0`), because the
+/// kernel had smoke coverage only and its cooperative scale staging
+/// mixes superblock parities in one 8-slot array, which reads as wrong
+/// for every lane whose sub-block parity differs from its superblock
+/// parity. Both geometries matter: even superblock count (barrier-safe
+/// trip counts) isolates pure numerics; odd count adds the divergent
+/// barrier.
+#[test]
+fn q4k_ffn_gate_up_coop_parity_even_and_odd_superblocks() {
+    let metal = get_metal();
+    let cpu = larql_compute::cpu::CpuBackend;
+    use larql_compute_metal::shaders::q4k_ffn_gate_up_coop as guc;
+
+    for (label, inter, hidden) in [
+        ("even superblocks (K=512)", 64usize, 512usize),
+        ("odd superblocks (K=768)", 64usize, 768usize),
+    ] {
+        let gate = synth_matrix(inter, hidden, 0.21);
+        let up = synth_matrix(inter, hidden, 0.83);
+        let x = synth_input(hidden, 0.41);
+        let gate_q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(&gate);
+        let up_q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(&up);
+        let gate_cpu = cpu.q4k_matvec(&gate_q4k, &x, inter, hidden).unwrap();
+        let up_cpu = cpu.q4k_matvec(&up_q4k, &x, inter, hidden).unwrap();
+
+        let gate_w_buf = metal.bufs().get_bytes(&gate_q4k);
+        let up_w_buf = metal.bufs().get_bytes(&up_q4k);
+        let x_buf = metal.bufs().transient_from_f32(&x);
+        let gate_out_buf = metal.bufs().output((inter * 4) as u64);
+        let up_out_buf = metal.bufs().output((inter * 4) as u64);
+        let n_val = inter as u32;
+        let k_val = hidden as u32;
+        let n_tgs_per_mat = (inter as u64).div_ceil(guc::ROWS_PER_TG);
+
+        let cmd = metal.queue().new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&metal.ffn.q4k_ffn_gate_up_coop_pipeline.state);
+        enc.set_buffer(0, Some(&gate_w_buf), 0);
+        enc.set_buffer(1, Some(&up_w_buf), 0);
+        enc.set_buffer(2, Some(&x_buf), 0);
+        enc.set_buffer(3, Some(&gate_out_buf), 0);
+        enc.set_buffer(4, Some(&up_out_buf), 0);
+        enc.set_bytes(5, 4, &n_val as *const u32 as *const std::ffi::c_void);
+        enc.set_bytes(6, 4, &k_val as *const u32 as *const std::ffi::c_void);
+        enc.dispatch_thread_groups(
+            metal::MTLSize::new(n_tgs_per_mat * 2, 1, 1),
+            metal::MTLSize::new(guc::THREADS_PER_TG, 1, 1),
+        );
+        enc.end_encoding();
+        cmd.commit();
+        cmd.wait_until_completed();
+
+        let gate_metal = larql_compute_metal::buffers::read_buffer_f32(&gate_out_buf, inter);
+        let up_metal = larql_compute_metal::buffers::read_buffer_f32(&up_out_buf, inter);
+        let gate_cos = cos_sim(&gate_cpu, &gate_metal);
+        let up_cos = cos_sim(&up_cpu, &up_metal);
+        let gate_diff = max_diff(&gate_cpu, &gate_metal);
+        let up_diff = max_diff(&up_cpu, &up_metal);
+        assert!(
+            gate_cos > 0.999 && gate_diff < 0.5,
+            "coop {label} GATE: cos={gate_cos:.6} max_abs={gate_diff:.3e}"
+        );
+        assert!(
+            up_cos > 0.999 && up_diff < 0.5,
+            "coop {label} UP: cos={up_cos:.6} max_abs={up_diff:.3e}"
+        );
+    }
 }

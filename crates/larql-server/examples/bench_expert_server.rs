@@ -624,7 +624,10 @@ fn main() {
         num_experts,
         top_k,
         intermediate_size: moe_inter,
-        activation,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(activation),
         expert_data_format: bench_format,
     };
     bench_remote(

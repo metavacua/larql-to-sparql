@@ -24,7 +24,14 @@ pub(super) struct DecodeLoopOutcome {
     /// Per-step wall time in ms.
     pub decode_ms: Vec<f64>,
     pub t_embed: f64,
+    /// Wall time around the GPU call, CPU encode and readback included.
     pub t_gpu: f64,
+    /// Time the GPU was actually executing. Only populated under
+    /// `profile_split`; the gap against `t_gpu` is CPU-side cost.
+    pub t_gpu_only: f64,
+    /// Command buffers submitted across the run.
+    pub n_cmd_buffers: u64,
+    pub t_attn: f64,
     pub t_gate_up: f64,
     pub t_down: f64,
     pub t_norm: f64,
@@ -72,6 +79,10 @@ where
     let profile_split = runtime.profile_split;
     let mut t_embed = 0.0f64;
     let mut t_gpu = 0.0f64;
+    // Split detail, populated only when `profile_split` is on.
+    let mut t_attn = 0.0f64;
+    let mut t_gpu_only = 0.0f64;
+    let mut n_cmd_buffers = 0u64;
     let mut t_gate_up = 0.0f64;
     let mut t_down = 0.0f64;
     let mut t_norm = 0.0f64;
@@ -185,8 +196,17 @@ where
         t_gpu += gpu_ms;
         if profile_split {
             if let Some(pt) = backend.take_split_timings() {
+                // `attn_ms` was previously dropped here: the backend measured
+                // it, the loop discarded it, and a third of the GPU split
+                // never reached any report.
+                t_attn += pt.attn_ms;
                 t_gate_up += pt.gate_up_ms;
                 t_down += pt.down_ms;
+                // How much of the token was on the GPU at all. Without this
+                // the caller can only see wall time and will attribute all of
+                // it to the GPU.
+                t_gpu_only += pt.gpu_ms;
+                n_cmd_buffers += u64::from(pt.cmd_buffers);
             }
         }
         t_norm += norm_ms;
@@ -215,6 +235,9 @@ where
         decode_ms,
         t_embed,
         t_gpu,
+        t_gpu_only,
+        n_cmd_buffers,
+        t_attn,
         t_gate_up,
         t_down,
         t_norm,

@@ -16,14 +16,25 @@ pub struct ShowArgs {
 
 pub fn run(args: ShowArgs) -> Result<(), Box<dyn std::error::Error>> {
     let path = cache::resolve_model(&args.model)?;
-    let cfg = larql_vindex::load_vindex_config(&path)?;
 
     println!("Model:      {}", args.model);
     println!("Path:       {}", path.display());
-    println!("Layers:     {}", cfg.num_layers);
-    println!("Hidden:     {}", cfg.hidden_size);
-    println!("Dtype:      {:?}", cfg.dtype);
-    println!("Quant:      {:?}", cfg.quant);
+
+    // Dispatch on the container's own discriminator, then let each generation
+    // describe itself in its own vocabulary. Normalising VINDEX3 back into a
+    // VINDEX2-shaped summary would drop exactly what a VINDEX3 user needs to
+    // see — programme id, storage key, manifest validity.
+    match larql_vindex::format::generation::detect_generation(&path)? {
+        larql_vindex::format::generation::ContainerGeneration::V3 => show_v3(&path)?,
+        larql_vindex::format::generation::ContainerGeneration::V2 => {
+            let cfg = larql_vindex::load_vindex_config(&path)?;
+            println!("Generation: VINDEX2");
+            println!("Layers:     {}", cfg.num_layers);
+            println!("Hidden:     {}", cfg.hidden_size);
+            println!("Dtype:      {:?}", cfg.dtype);
+            println!("Quant:      {:?}", cfg.quant);
+        }
+    }
 
     println!("\nFiles:");
     let mut entries: Vec<_> = std::fs::read_dir(&path)?
@@ -35,6 +46,84 @@ pub fn run(args: ShowArgs) -> Result<(), Box<dyn std::error::Error>> {
         let name = entry.file_name().to_string_lossy().to_string();
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
         println!("  {:<32} {:>12}", name, human_size(size));
+    }
+    Ok(())
+}
+
+/// Describe a VINDEX3 container in its own terms.
+///
+/// The per-layer lines are the ones with no VINDEX2 equivalent: which
+/// programme interprets the bank, and which storage key it resolves to. Those
+/// are what a binding failure is diagnosed from, so `show` is where they
+/// belong.
+fn show_v3(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let container = larql_vindex::format::vindex3::Vindex3Container::open(path)?;
+    let index = container.index();
+    println!("Generation: VINDEX3 (index.json schema {})", index.version);
+    println!("Layers:     {}", index.num_layers);
+    println!("Hidden:     {}", index.hidden_size);
+    println!("Family:     {}", index.family);
+    println!("Profiles:   {}", index.profile_names().join(", "));
+    println!(
+        "Manifest:   {}",
+        index
+            .moe_manifest
+            .as_deref()
+            .unwrap_or("(no MoE programme)")
+    );
+
+    // §9.1: show what each profile actually selects, not just that it exists.
+    // A container that carries alternative packs is exactly the one where
+    // "which bytes does this profile run" stops being obvious.
+    if !index.variants.is_empty() {
+        println!("\nVariants:");
+        for region_set in index.variants.region_sets() {
+            let set = index
+                .variants
+                .get(&region_set)
+                .expect("region_sets() lists catalogued keys");
+            println!(
+                "  {region_set}: {} (baseline {})",
+                set.present().join(", "),
+                set.baseline
+            );
+        }
+        for name in index.profile_names() {
+            // `open` proved every declared profile resolves.
+            let resolved = container.select_profile(name)?;
+            println!("\nProfile '{name}' selects:");
+            for (region_set, stored) in resolved.entries() {
+                println!(
+                    "  {region_set} -> {} [{}]",
+                    stored.storage,
+                    stored.fidelity.name()
+                );
+            }
+        }
+    }
+
+    println!("\nMoE layers:");
+    for layer in &container.manifest().layers {
+        let bank = &layer.routed_bank;
+        let known = if bank.resolve_programme().is_some() {
+            ""
+        } else {
+            "  [programme not implemented by this binary]"
+        };
+        println!(
+            "  layer {:<3} {:<24} experts {:<4} storage {}{}",
+            layer.layer, bank.programme, bank.experts, bank.storage, known
+        );
+    }
+
+    let defects = container.verify();
+    if defects.is_empty() {
+        println!("\nStructure:  bindable (no defects)");
+    } else {
+        println!("\nStructure:  {} defect(s)", defects.len());
+        for d in &defects {
+            println!("  - {d}");
+        }
     }
     Ok(())
 }

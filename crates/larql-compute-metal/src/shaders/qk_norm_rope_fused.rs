@@ -46,9 +46,10 @@ kernel void qk_norm_rope_fused(
     constant uint&      num_q      [[buffer(5)]],
     constant float&     eps        [[buffer(6)]],
     constant float&     offset     [[buffer(7)]],
-    constant float&     rope_base  [[buffer(8)]],
+    device const float* inv_freq   [[buffer(8)]],  // [rotary_dim/2], host-computed
     constant uint&      pos        [[buffer(9)]],
     constant uint&      rotary_dim [[buffer(10)]],
+    constant float&     amplitude  [[buffer(11)]],
     uint h_idx [[threadgroup_position_in_grid]],
     uint tid   [[thread_position_in_threadgroup]],
     uint tg_w  [[threads_per_threadgroup]])
@@ -92,10 +93,9 @@ kernel void qk_norm_rope_fused(
     uint rdim = (rotary_dim == 0u) ? head_dim : min(rotary_dim, head_dim);
     uint hdim = rdim / 2u;
     for (uint d = tid; d < hdim; d += tg_w) {
-        float freq  = 1.0f / pow(rope_base, float(2u * d) / float(rdim));
-        float angle = float(pos) * freq;
-        float cos_a = cos(angle);
-        float sin_a = sin(angle);
+        float angle = float(pos) * inv_freq[d];
+        float cos_a = cos(angle) * amplitude;
+        float sin_a = sin(angle) * amplitude;
 
         float re = buf[base + d];
         float im = buf[base + d + hdim];

@@ -15,7 +15,8 @@
 //! 2. `sliding_window_pattern` field (every Nth layer is full)
 //! 3. Default pattern of 6 (every 6th layer is full)
 
-use crate::config::{Activation, ExpertFormat, ModelArchitecture, ModelConfig};
+use crate::config::{Activation, ExpertFormat, GateUpLayout, ModelArchitecture, ModelConfig};
+use crate::tensor_keys::qk_norm;
 
 /// Layer type string used in Gemma 4 `layer_types` config field.
 const LAYER_TYPE_FULL: &str = "full_attention";
@@ -176,17 +177,11 @@ impl ModelArchitecture for Gemma4Arch {
     // ── QK norm (inherited from Gemma 3) ──
 
     fn attn_q_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.q_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.k_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::k(&self.layer_prefix(layer))
     }
 
     // ── Gemma-family behavior ──
@@ -246,6 +241,12 @@ impl ModelArchitecture for Gemma4Arch {
         ExpertFormat::PackedBF16
     }
 
+    /// Stacked `[num_experts, 2 * moe_intermediate, hidden]` with the gate
+    /// rows first — the layout the packed f32 expert path already assumes.
+    fn gate_up_layout(&self) -> Option<GateUpLayout> {
+        Some(GateUpLayout::ContiguousHalves)
+    }
+
     fn num_experts(&self) -> usize {
         self.config.num_experts.unwrap_or(0)
     }
@@ -261,11 +262,11 @@ impl ModelArchitecture for Gemma4Arch {
         self.config.moe_intermediate_size.unwrap_or(0)
     }
 
-    fn moe_router_type(&self) -> &str {
+    fn moe_router_kind(&self) -> crate::MoeRouterKind {
         if self.config.enable_moe_block {
-            "gemma4_top_k_softmax"
+            crate::MoeRouterKind::Gemma4Hybrid
         } else {
-            "top_k_softmax"
+            crate::MoeRouterKind::TopKSoftmax
         }
     }
 

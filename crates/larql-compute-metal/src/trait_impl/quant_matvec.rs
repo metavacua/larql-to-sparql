@@ -249,17 +249,25 @@ impl QuantMatVec for MetalBackend {
         num_rows: usize,
         hidden: usize,
     ) -> Option<Vec<f32>> {
-        use crate::shaders::q6k_matvec as q6k;
+        // Geometry from the bound `KernelHandle`, never from a shader
+        // module's constants: `q6k_matvec_pipeline` resolves to the 8sg
+        // variant (8 rows/TG, 256 threads) under `LARQL_Q6K_8SG=1`, and
+        // dispatching it with the 4sg module constants launches half
+        // the threadgroups — rows `8t+4..8t+7` are never written and
+        // the output buffer serves stale pool data for them. The q4k
+        // twin above documents the same hazard; this site was left
+        // behind when that one was fixed. Capability audit F5.
+        let kh = &self.quant.q6k_matvec_pipeline;
         let buf_w = self.bufs.get_bytes(q6k_data);
         let buf_x = self.bufs.transient_from_f32(x);
         let buf_out = self.bufs.output((num_rows * 4) as u64);
         let n = num_rows as u32;
         let k = hidden as u32;
-        let num_tgs = (num_rows as u64).div_ceil(q6k::ROWS_PER_TG);
+        let num_tgs = (num_rows as u64).div_ceil(kh.rows_per_tg);
 
         let cmd = self.queue.new_command_buffer();
         let enc = cmd.new_compute_command_encoder();
-        enc.set_compute_pipeline_state(&self.quant.q6k_matvec_pipeline.state);
+        enc.set_compute_pipeline_state(&kh.state);
         enc.set_buffer(0, Some(&buf_w), 0);
         enc.set_buffer(1, Some(&buf_x), 0);
         enc.set_buffer(2, Some(&buf_out), 0);
@@ -267,7 +275,7 @@ impl QuantMatVec for MetalBackend {
         enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
         enc.dispatch_thread_groups(
             metal::MTLSize::new(num_tgs, 1, 1),
-            metal::MTLSize::new(q6k::THREADS_PER_TG, 1, 1),
+            metal::MTLSize::new(kh.threads_per_tg, 1, 1),
         );
         enc.end_encoding();
         cmd.commit();

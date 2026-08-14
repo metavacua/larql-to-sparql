@@ -76,9 +76,9 @@ matters more than "is this the absolute fastest implementation?"
   codebase or any other. Reference implementations carry their
   forensics.
 - Marking shipped work with **measurements attached** in
-  `ROADMAP.md → Completed` (cos-similarity, tok/s, RSS, latency
-  histograms) is the same instinct: a number someone can reproduce
-  is harder to dismiss than a bullet point.
+  `CHANGELOG.md → Completed milestones` (cos-similarity, tok/s, RSS,
+  latency histograms) is the same instinct: a number someone can
+  reproduce is harder to dismiss than a bullet point.
 
 ### Demonstrability beats feature scope.
 
@@ -130,8 +130,8 @@ attached* — points in this direction. Lean further into it.
 
 - `README.md` — developer-facing entry point. Describes what the
   server does and how to use it.
-- `ROADMAP.md` — current state, parity vs paradigm tracks, completed
-  work with measurements.
+- `ROADMAP.md` — current state, parity vs paradigm tracks, open work.
+- `CHANGELOG.md` — completed work with measurements attached, dated.
 - `docs/server-spec.md` — wire-format and endpoint reference (for
   anyone porting endpoints to another stack).
 - `~/chris-source/chris-experiments/SHANNON_SYNTHESIS.md` — research thesis at the

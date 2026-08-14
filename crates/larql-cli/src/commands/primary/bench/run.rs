@@ -416,7 +416,7 @@ pub fn run(mut args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
 fn vindex_is_hybrid_moe(dir: &std::path::Path) -> bool {
     let mut cb = larql_vindex::SilentLoadCallbacks;
     larql_vindex::load_model_weights_kquant(dir, &mut cb)
-        .map(|w| w.arch.is_hybrid_moe())
+        .map(|w| w.arch.is_moe() || w.arch.is_hybrid_moe())
         .unwrap_or(false)
 }
 

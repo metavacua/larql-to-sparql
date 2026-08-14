@@ -133,7 +133,14 @@ pub(super) fn ensure_prompt_fits(seq_len: usize) -> Result<(), GenerateError> {
 pub(super) fn reset_and_preallocate_kv_cache(weights: &ModelWeights, backend: &dyn ComputeBackend) {
     backend.reset_kv_cache();
     let kv_shapes = kv_cache_shapes_for_arch(weights);
-    backend.preallocate_kv_cache_per_layer(&kv_shapes, DEFAULT_GPU_KV_CACHE_MAX_SEQ);
+    // Sliding layers are sized for what they can reach plus compaction
+    // slack, not for the global default — on Gemma 3 4B that is 29 of 34
+    // layers at 2048 rows instead of 4096. Global layers are unchanged.
+    let kv_capacities = larql_compute::pipeline_layer::kv_capacities_for_arch(
+        weights,
+        DEFAULT_GPU_KV_CACHE_MAX_SEQ,
+    );
+    backend.preallocate_kv_cache_per_layer_with_capacity(&kv_shapes, &kv_capacities);
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -1,13 +1,29 @@
-//! Q6_K matrix-vector multiply — LARQL linear Q6_K layout.
+//! Q6_K matrix-vector multiply — ggml's planar Q6_K layout.
 //!
 //! Q6_K super-block layout (256 values = 210 bytes):
-//!   [0..127]    128 bytes: ql — lo4 bits, 2 per byte: ql[b] covers elements 2b and 2b+1
-//!   [128..191]   64 bytes: qh — hi2 bits, 4 per byte: qh[b] covers elements 4b..4b+3
+//!   [0..127]    128 bytes: ql — lo4 bits, 2 per byte
+//!   [128..191]   64 bytes: qh — hi2 bits, 4 per byte
 //!   [192..207]   16 bytes: int8 scales, one per 16-element group
 //!   [208..209]    2 bytes: f16 super-block scale d
 //!
-//! Element i: lo4 = (ql[i/2] >> 4*(i&1)) & 0xF;  hi2 = (qh[i/4] >> 2*(i%4)) & 0x3
-//! Weight: d * sc[i/16] * (lo4 | hi2<<4) - 32
+//! **The nibbles are planar, not sequential.** A super-block is two halves of
+//! 128 elements; within half `h` (element base `e = 128h`), for `l` in 0..32:
+//!
+//!   ql[64h + l]      low nibble → element e+l      high nibble → element e+l+64
+//!   ql[64h + l + 32] low nibble → element e+l+32   high nibble → element e+l+96
+//!   qh[32h + l]      bits 0/2/4/6 → elements e+l, e+l+32, e+l+64, e+l+96
+//!
+//! So one `l` yields four elements at *stride 32* from three bytes, and the
+//! scale index is still `element/16`. This mirrors `quantize_row_q6_K_ref`,
+//! and it is what `larql_compute::cpu::ops::q4_common::quantize_q6_k` emits.
+//!
+//! Weight: d * sc[i/16] * ((lo4 | hi2<<4) - 32)
+//!
+//! Until 2026-08-07 these kernels decoded a private *interleaved* layout
+//! (`lo4 = ql[i/2] >> 4*(i&1)`, `hi2 = qh[i/4] >> 2*(i%4)`), which agreed with
+//! the CPU side only because the CPU shared the same private convention. When
+//! the CPU moved to ggml conformance the two halves silently disagreed — see
+//! `test_kernel_vindex_integration::stage_quant_matvec_routes_format_to_correct_shader`.
 //!
 //! **Key optimisations vs the previous all-lanes-per-superblock approach:**
 //!
@@ -27,9 +43,16 @@
 //!    pressure vs the previous 256-thread design, allowing 2× more concurrent
 //!    TGs on M3 Max for better LPDDR5X latency hiding.
 //!
-//! Each tid (0..15) within an ix-group handles 4 passes × 4 elements = 16
-//! elements per superblock at bases {tid*4, tid*4+64, tid*4+128, tid*4+192}.
-//! All 16 tids together cover all 256 elements. ✓
+//! Each tid (0..15) within an ix-group handles 4 units × 4 elements = 16
+//! elements per superblock. A unit is one `(half, l)` pair with
+//! `l = tid + 16j`, so the four units are `(h,j) = (0,0) (0,1) (1,0) (1,1)`
+//! and all 16 tids together cover all 256 elements. ✓
+//!
+//! Deferred scaling (note 3) does **not** survive the planar layout: a unit's
+//! four elements sit in four different 16-element scale groups
+//! (`8h + j + 2·plane`), so each takes its own `sc[]` lookup. `d` still
+//! factors out once per unit. A 16-element scale group is contiguous in `l`,
+//! which means it spans *threads*, not the elements one thread holds.
 
 pub const SHADER: &str = r#"
 constant uint Q6K_ROWS_PER_TG = 4;
@@ -57,10 +80,10 @@ kernel void q6k_matvec(
     const uint ix  = lane & 1u;   // 0 or 1
     const uint tid = lane >> 1u;  // 0..15
 
-    // Base element index for this tid within a superblock.
-    // 4 consecutive elements share one qh byte and one scale entry.
-    const uint base    = tid << 2u;      // 0,4,8,...,60
-    const uint sc_base = tid >> 2u;      // 0 for tid=0..3, 1 for 4..7, ..., 3 for 12..15
+    // This tid owns nibble-plane column `l` of each half, for l = tid and
+    // l = tid+16. One (half, l) unit is 3 bytes → 4 elements at stride 32.
+    const uint l0 = tid;         // j = 0
+    const uint l1 = tid + 16u;   // j = 1
 
     float acc = 0.0f;
 
@@ -74,71 +97,62 @@ kernel void q6k_matvec(
         ushort d_bits = ushort(block[208]) | (ushort(block[209]) << 8u);
         float  d = decode_f16_metal(d_bits);
 
-        // Preload all 16 X values for the 4 passes before reading any weight
+        // Preload all 16 X values for the 4 units before reading any weight
         // bytes. Explicit preload lets the GPU pipeline X fetches in parallel
-        // with the upcoming ql/qh/sc reads.
-        const uint xb = i * 256u + base;
+        // with the upcoming ql/qh/sc reads. Planar means these run at stride
+        // 32 within a half, not contiguously.
+        const uint xb = i * 256u;
+        const uint x0 = xb + l0;          // half 0, j 0
+        const uint x1 = xb + l1;          // half 0, j 1
+        const uint x2 = xb + 128u + l0;   // half 1, j 0
+        const uint x3 = xb + 128u + l1;   // half 1, j 1
         float xl[16];
-        xl[ 0] = X[xb      ]; xl[ 1] = X[xb +  1u];
-        xl[ 2] = X[xb +  2u]; xl[ 3] = X[xb +  3u];
-        xl[ 4] = X[xb + 64u]; xl[ 5] = X[xb + 65u];
-        xl[ 6] = X[xb + 66u]; xl[ 7] = X[xb + 67u];
-        xl[ 8] = X[xb +128u]; xl[ 9] = X[xb +129u];
-        xl[10] = X[xb +130u]; xl[11] = X[xb +131u];
-        xl[12] = X[xb +192u]; xl[13] = X[xb +193u];
-        xl[14] = X[xb +194u]; xl[15] = X[xb +195u];
+        xl[ 0] = X[x0]; xl[ 1] = X[x0 + 32u]; xl[ 2] = X[x0 + 64u]; xl[ 3] = X[x0 + 96u];
+        xl[ 4] = X[x1]; xl[ 5] = X[x1 + 32u]; xl[ 6] = X[x1 + 64u]; xl[ 7] = X[x1 + 96u];
+        xl[ 8] = X[x2]; xl[ 9] = X[x2 + 32u]; xl[10] = X[x2 + 64u]; xl[11] = X[x2 + 96u];
+        xl[12] = X[x3]; xl[13] = X[x3 + 32u]; xl[14] = X[x3 + 64u]; xl[15] = X[x3 + 96u];
 
-        // 4 passes, each handling 4 consecutive elements at stride 64.
-        // Per pass: 2 ql bytes + 1 qh byte → 4 dequant values.
-        // Scale applied once per 4-element group (deferred, 4× cheaper).
-        // sc_base + {0,4,8,12} are the 4 group scale indices.
+        // 4 units, each 2 ql bytes + 1 qh byte → 4 elements at stride 32.
+        // Scale index is 8*half + j + 2*plane; `d` factors out per unit.
 
-        // Pass 0: elements base+0..3 (scale group sc_base+0)
+        // Unit 0: half 0, l = tid       (elements l, l+32, l+64, l+96)
         {
-            const uint b = base;
-            uchar la = ql[b >> 1u], lb = ql[(b >> 1u) + 1u], hi = qh[b >> 2u];
-            float _sc = d * float(sc[sc_base + 0u]);
-            acc += _sc * (
-                float((char)((la & 0x0Fu) | ((hi & 0x03u) << 4u)) - 32) * xl[ 0] +
-                float((char)(((la >> 4u) & 0x0Fu) | ((hi & 0x0Cu) << 2u)) - 32) * xl[ 1] +
-                float((char)((lb & 0x0Fu) | ((hi & 0x30u))) - 32) * xl[ 2] +
-                float((char)(((lb >> 4u) & 0x0Fu) | ((hi & 0xC0u) >> 2u)) - 32) * xl[ 3]);
+            uchar la = ql[l0], lb = ql[l0 + 32u], hi = qh[l0];
+            acc += d * (
+                float(sc[0u]) * float((char)((la & 0x0Fu) | ((hi & 0x03u) << 4u)) - 32) * xl[ 0] +
+                float(sc[2u]) * float((char)((lb & 0x0Fu) | ((hi & 0x0Cu) << 2u)) - 32) * xl[ 1] +
+                float(sc[4u]) * float((char)(((la >> 4u) & 0x0Fu) | (hi & 0x30u)) - 32) * xl[ 2] +
+                float(sc[6u]) * float((char)(((lb >> 4u) & 0x0Fu) | ((hi & 0xC0u) >> 2u)) - 32) * xl[ 3]);
         }
 
-        // Pass 1: elements base+64..67 (scale group sc_base+4)
+        // Unit 1: half 0, l = tid + 16
         {
-            const uint b = base + 64u;
-            uchar la = ql[b >> 1u], lb = ql[(b >> 1u) + 1u], hi = qh[b >> 2u];
-            float _sc = d * float(sc[sc_base + 4u]);
-            acc += _sc * (
-                float((char)((la & 0x0Fu) | ((hi & 0x03u) << 4u)) - 32) * xl[ 4] +
-                float((char)(((la >> 4u) & 0x0Fu) | ((hi & 0x0Cu) << 2u)) - 32) * xl[ 5] +
-                float((char)((lb & 0x0Fu) | ((hi & 0x30u))) - 32) * xl[ 6] +
-                float((char)(((lb >> 4u) & 0x0Fu) | ((hi & 0xC0u) >> 2u)) - 32) * xl[ 7]);
+            uchar la = ql[l1], lb = ql[l1 + 32u], hi = qh[l1];
+            acc += d * (
+                float(sc[1u]) * float((char)((la & 0x0Fu) | ((hi & 0x03u) << 4u)) - 32) * xl[ 4] +
+                float(sc[3u]) * float((char)((lb & 0x0Fu) | ((hi & 0x0Cu) << 2u)) - 32) * xl[ 5] +
+                float(sc[5u]) * float((char)(((la >> 4u) & 0x0Fu) | (hi & 0x30u)) - 32) * xl[ 6] +
+                float(sc[7u]) * float((char)(((lb >> 4u) & 0x0Fu) | ((hi & 0xC0u) >> 2u)) - 32) * xl[ 7]);
         }
 
-        // Pass 2: elements base+128..131 (scale group sc_base+8)
+        // Unit 2: half 1, l = tid
         {
-            const uint b = base + 128u;
-            uchar la = ql[b >> 1u], lb = ql[(b >> 1u) + 1u], hi = qh[b >> 2u];
-            float _sc = d * float(sc[sc_base + 8u]);
-            acc += _sc * (
-                float((char)((la & 0x0Fu) | ((hi & 0x03u) << 4u)) - 32) * xl[ 8] +
-                float((char)(((la >> 4u) & 0x0Fu) | ((hi & 0x0Cu) << 2u)) - 32) * xl[ 9] +
-                float((char)((lb & 0x0Fu) | ((hi & 0x30u))) - 32) * xl[10] +
-                float((char)(((lb >> 4u) & 0x0Fu) | ((hi & 0xC0u) >> 2u)) - 32) * xl[11]);
+            uchar la = ql[64u + l0], lb = ql[96u + l0], hi = qh[32u + l0];
+            acc += d * (
+                float(sc[ 8u]) * float((char)((la & 0x0Fu) | ((hi & 0x03u) << 4u)) - 32) * xl[ 8] +
+                float(sc[10u]) * float((char)((lb & 0x0Fu) | ((hi & 0x0Cu) << 2u)) - 32) * xl[ 9] +
+                float(sc[12u]) * float((char)(((la >> 4u) & 0x0Fu) | (hi & 0x30u)) - 32) * xl[10] +
+                float(sc[14u]) * float((char)(((lb >> 4u) & 0x0Fu) | ((hi & 0xC0u) >> 2u)) - 32) * xl[11]);
         }
 
-        // Pass 3: elements base+192..195 (scale group sc_base+12)
+        // Unit 3: half 1, l = tid + 16
         {
-            const uint b = base + 192u;
-            uchar la = ql[b >> 1u], lb = ql[(b >> 1u) + 1u], hi = qh[b >> 2u];
-            float _sc = d * float(sc[sc_base + 12u]);
-            acc += _sc * (
-                float((char)((la & 0x0Fu) | ((hi & 0x03u) << 4u)) - 32) * xl[12] +
-                float((char)(((la >> 4u) & 0x0Fu) | ((hi & 0x0Cu) << 2u)) - 32) * xl[13] +
-                float((char)((lb & 0x0Fu) | ((hi & 0x30u))) - 32) * xl[14] +
-                float((char)(((lb >> 4u) & 0x0Fu) | ((hi & 0xC0u) >> 2u)) - 32) * xl[15]);
+            uchar la = ql[64u + l1], lb = ql[96u + l1], hi = qh[32u + l1];
+            acc += d * (
+                float(sc[ 9u]) * float((char)((la & 0x0Fu) | ((hi & 0x03u) << 4u)) - 32) * xl[12] +
+                float(sc[11u]) * float((char)((lb & 0x0Fu) | ((hi & 0x0Cu) << 2u)) - 32) * xl[13] +
+                float(sc[13u]) * float((char)(((la >> 4u) & 0x0Fu) | (hi & 0x30u)) - 32) * xl[14] +
+                float(sc[15u]) * float((char)(((lb >> 4u) & 0x0Fu) | ((hi & 0xC0u) >> 2u)) - 32) * xl[15]);
         }
     }
 

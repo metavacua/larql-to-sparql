@@ -26,7 +26,8 @@ pub fn warmup_hnsw_unit_cache(model: &LoadedModel) -> Result<(usize, usize, usiz
     }
     let weights = model.get_or_load_weights()?;
     let arch = &*weights.arch;
-    if !arch.is_hybrid_moe() {
+    // Pure MoE as well as hybrid — same per-layer expert store.
+    if !(arch.is_moe() || arch.is_hybrid_moe()) {
         return Ok((0, 0, 0));
     }
     let num_layers = model.config.num_layers;
@@ -99,7 +100,8 @@ pub fn warmup_metal_expert_cache(model: &LoadedModel) -> Result<usize, String> {
 
     let weights = model.get_or_load_weights()?;
     let arch = &*weights.arch;
-    if !arch.is_hybrid_moe() || !weights.has_per_layer_ffn() {
+    // Pure MoE as well as hybrid — same per-layer expert store.
+    if !(arch.is_moe() || arch.is_hybrid_moe()) || !weights.has_per_layer_ffn() {
         return Ok(0);
     }
 

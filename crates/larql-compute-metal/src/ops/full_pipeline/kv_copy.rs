@@ -15,6 +15,72 @@ use crate::decode::DEFAULT_KV_CACHE_MAX_SEQ;
 use crate::ops::kv_cache::{KVCache, LayerKVCache};
 use larql_compute::FullPipelineLayer;
 
+/// Rows a layer must persist out of prefill.
+///
+/// A windowed layer's attention reads at most `sliding_window` rows, and
+/// prefill's own attention is windowed too (see
+/// `tests/test_prefill_sliding_window.rs`), so once prefill has run
+/// nothing older than the tail can ever be consumed again. Persisting
+/// only that tail is therefore output-neutral, not an approximation.
+///
+/// It persists `W`, not `COMPACTION_SLACK x W`. The slack exists to
+/// amortise *incremental* decode compaction; immediately after prefill
+/// there is no history to amortise. Decode then climbs `W -> 2W` and
+/// compacts back, which is what makes `2W` genuinely capacity rather
+/// than desired occupancy — see
+/// [`docs/kv-residency-contract.md`](../../../../../docs/kv-residency-contract.md).
+///
+/// A window of `0` means unbounded (the global-layer sentinel), so the
+/// whole prefix is persisted.
+pub(super) fn persisted_rows(seq_len: usize, sliding_window: usize) -> usize {
+    if sliding_window == 0 {
+        seq_len
+    } else {
+        seq_len.min(sliding_window)
+    }
+}
+
+/// Copy the persisted tail of one layer's scratch K/V into its cache.
+///
+/// `current_len` becomes the number of rows retained, while
+/// `abs_position` stays at the full prompt length — the split that lets
+/// RoPE keep climbing while occupancy is bounded. After this,
+/// **physical row index no longer equals absolute position** for a
+/// windowed layer; read the tail, not a position (the same transition
+/// issue #200 made on the engine path).
+fn copy_persisted_tail(
+    cache: &mut LayerKVCache,
+    k_src: *const f32,
+    v_src: *const f32,
+    seq_len: usize,
+    sliding_window: usize,
+) {
+    let row = cache.num_kv_heads * cache.head_dim;
+    let keep = persisted_rows(seq_len, sliding_window);
+    let skipped = seq_len - keep;
+    let n = keep * row;
+    // SAFETY: caller has committed + waited, so the source buffers are
+    // GPU-finished and hold `seq_len * row` floats; `skipped + keep ==
+    // seq_len` keeps the read in bounds. The destination is allocated
+    // for `max_seq * row` and `keep <= seq_len <= max_seq`.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            k_src.add(skipped * row),
+            cache.k_cache.contents() as *mut f32,
+            n,
+        );
+        std::ptr::copy_nonoverlapping(
+            v_src.add(skipped * row),
+            cache.v_cache.contents() as *mut f32,
+            n,
+        );
+    }
+    cache.current_len = keep;
+    // Prefill wrote positions 0..seq_len, so the stream is at seq_len
+    // regardless of how many rows were kept.
+    cache.abs_position = seq_len;
+}
+
 /// Copy one layer's K/V scratch into the persistent KV cache.
 /// Called inside the per-layer MoE commit loop so the cache is current
 /// before the CPU MoE callback reads `h_post_attn` and writes to `new_h`.
@@ -32,18 +98,15 @@ pub(super) fn populate_kv_one_layer(
         kv.layers
             .push(LayerKVCache::new(bufs, DEFAULT_KV_CACHE_MAX_SEQ, lnkv, lhd));
     }
-    let total_kv = seq_len * lnkv * lhd;
     let k_src = lb.k_out[layer_idx].contents() as *const f32;
     let v_src = lb.v_out[layer_idx].contents() as *const f32;
-    let k_dst = kv.layers[layer_idx].k_cache.contents() as *mut f32;
-    let v_dst = kv.layers[layer_idx].v_cache.contents() as *mut f32;
-    // SAFETY: caller commit + wait before invocation. Destination
-    // pre-allocated for max_seq * lnkv * lhd; copy bounded by max_seq.
-    unsafe {
-        std::ptr::copy_nonoverlapping(k_src, k_dst, total_kv);
-        std::ptr::copy_nonoverlapping(v_src, v_dst, total_kv);
-    }
-    kv.layers[layer_idx].current_len = seq_len;
+    copy_persisted_tail(
+        &mut kv.layers[layer_idx],
+        k_src,
+        v_src,
+        seq_len,
+        layer.sliding_window,
+    );
 }
 
 /// Copy each layer's K/V scratch (post-RoPE) into the persistent KV
@@ -66,20 +129,15 @@ pub(super) fn populate_kv_after_commit(
             kv.layers
                 .push(LayerKVCache::new(bufs, DEFAULT_KV_CACHE_MAX_SEQ, lnkv, lhd));
         }
-        let total_kv = seq_len * lnkv * lhd;
         let k_src = lb.k_out[l].contents() as *const f32;
         let v_src = lb.v_out[l].contents() as *const f32;
-        let k_dst = kv.layers[l].k_cache.contents() as *mut f32;
-        let v_dst = kv.layers[l].v_cache.contents() as *mut f32;
-        // SAFETY: caller commit + wait_until_completed before this is
-        // invoked, so source buffers are GPU-finished. Destinations
-        // are pre-allocated for `max_seq * lnkv * lhd` floats; we copy
-        // up to `seq_len * lnkv * lhd` which is bounded by max_seq.
-        unsafe {
-            std::ptr::copy_nonoverlapping(k_src, k_dst, total_kv);
-            std::ptr::copy_nonoverlapping(v_src, v_dst, total_kv);
-        }
-        kv.layers[l].current_len = seq_len;
+        copy_persisted_tail(
+            &mut kv.layers[l],
+            k_src,
+            v_src,
+            seq_len,
+            layer.sliding_window,
+        );
     }
 }
 
@@ -99,12 +157,14 @@ mod tests {
     ) -> FullPipelineLayer<'static> {
         let q4 = Box::leak(vec![0u8; 32 * 18].into_boxed_slice());
         let norm = Box::leak(vec![1.0f32; 32].into_boxed_slice());
-        let q4w = || QuantWeight {
-            data: q4,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        };
+        let q4w = || QuantWeight::new(QuantFormat::Q4_K, q4, larql_compute::QuantAux::None);
         FullPipelineLayer {
+            attn_sinks: None,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
+            attn_o_bias: None,
+            attn_softcap: 0.0,
             wq: q4w(),
             wk: q4w(),
             wv: q4w(),
@@ -131,6 +191,11 @@ mod tests {
             num_kv_heads,
             rope_base: larql_compute::pipeline::ROPE_BASE_DEFAULT,
             rotary_dim: 0,
+            rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+                head_dim,
+                0_usize,
+                larql_compute::pipeline::ROPE_BASE_DEFAULT as f64,
+            ),
             sliding_window: 0,
             has_v_norm: false,
             layer_scalar: 0.0,
@@ -231,6 +296,148 @@ mod tests {
         assert_eq!(l0_v_got, l0_v, "L0 V cache mismatch");
         assert_eq!(l1_k_got, l1_k, "L1 K cache mismatch");
         assert_eq!(l1_v_got, l1_v, "L1 V cache mismatch");
+    }
+
+    // ── persistent-tail prefill ──────────────────────────────────────
+    //
+    // Does a sliding layer need every prefill row materialised in the
+    // persistent cache, or only the terminal tail? These decide it. The
+    // reference arm is a layer with `sliding_window = 0` (persist
+    // everything, the previous behaviour); the candidate is the same
+    // prefill through a windowed layer.
+
+    /// A window comfortably smaller than the prompt, so most rows fall
+    /// outside it. A fixture where the two behaviours coincide would be
+    /// an absent test, not a weak one.
+    const EXP_WINDOW: usize = 8;
+    const EXP_SEQ_LEN: usize = 48;
+
+    #[test]
+    fn persisted_rows_keeps_the_window_or_everything() {
+        // Unbounded sentinel — global layers persist the whole prefix.
+        assert_eq!(persisted_rows(48, 0), 48);
+        // A window wider than the prompt cannot bind.
+        assert_eq!(persisted_rows(8, 64), 8);
+        // The case that matters.
+        assert_eq!(persisted_rows(48, 8), 8);
+        // Persist W, not COMPACTION_SLACK * W — prefill has no history
+        // to amortise, so the slack is capacity rather than occupancy.
+        assert_eq!(persisted_rows(48, 8), EXP_WINDOW);
+    }
+
+    /// The decisive comparison: the rows attention will read after
+    /// prefill are byte-identical whether the whole prefix or only the
+    /// tail was persisted, and the stream position agrees.
+    ///
+    /// Rows are stamped with their absolute position, so this asserts
+    /// the two arms hold the *same absolute positions in the same
+    /// order* — the same reduction of the parity claim used for the
+    /// residency contract.
+    #[test]
+    fn tail_only_prefill_leaves_attention_reading_identical_rows() {
+        let Some(metal) = MetalBackend::new() else {
+            return;
+        };
+        let bufs = metal.bufs();
+        let (head_dim, num_kv_heads) = (64usize, 4usize);
+        let row = num_kv_heads * head_dim;
+        let total = EXP_SEQ_LEN * row;
+
+        // Stamp every scratch row with its absolute position.
+        let stamp = |base: f32| -> Vec<f32> {
+            (0..total)
+                .map(|i| base + (i / row) as f32)
+                .collect::<Vec<f32>>()
+        };
+        let k_pattern = stamp(0.0);
+        let v_pattern = stamp(1000.0);
+
+        // Run one prefill through a layer with the given window and
+        // return (visible K rows, visible V rows, current_len, abs_position),
+        // where "visible" is the newest EXP_WINDOW rows — what a decode
+        // step's `attention_span` will read.
+        let run = |window: usize| {
+            let mut layer = synth_layer(8, num_kv_heads, head_dim);
+            layer.sliding_window = window;
+            let layers = vec![layer];
+            let lb = LayerBuffers::allocate(
+                bufs,
+                &layers,
+                &[0.0; 64],
+                64,
+                256,
+                EXP_SEQ_LEN,
+                8 * head_dim,
+            );
+            write_metal_f32(&lb.k_out[0], &k_pattern);
+            write_metal_f32(&lb.v_out[0], &v_pattern);
+
+            let mut kv = KVCache::new(bufs, 1, DEFAULT_KV_CACHE_MAX_SEQ, num_kv_heads, head_dim);
+            populate_kv_after_commit(Some(&mut kv), bufs, &lb, &layers, EXP_SEQ_LEN);
+
+            let len = kv.layers[0].current_len;
+            let start = (len - EXP_WINDOW) * row;
+            let k_all = read_metal_f32(&kv.layers[0].k_cache, len * row);
+            let v_all = read_metal_f32(&kv.layers[0].v_cache, len * row);
+            (
+                k_all[start..].to_vec(),
+                v_all[start..].to_vec(),
+                len,
+                kv.layers[0].abs_position,
+            )
+        };
+
+        let (ref_k, ref_v, ref_len, ref_pos) = run(0);
+        let (tail_k, tail_v, tail_len, tail_pos) = run(EXP_WINDOW);
+
+        assert_eq!(ref_len, EXP_SEQ_LEN, "the reference persists everything");
+        assert_eq!(tail_len, EXP_WINDOW, "the candidate persists only the tail");
+        assert_eq!(
+            ref_pos, tail_pos,
+            "abs_position is the prompt length on both arms — it is what RoPE reads"
+        );
+        assert_eq!(ref_pos, EXP_SEQ_LEN);
+
+        assert_eq!(
+            ref_k, tail_k,
+            "attention would read different K rows after a tail-only prefill"
+        );
+        assert_eq!(
+            ref_v, tail_v,
+            "attention would read different V rows after a tail-only prefill"
+        );
+
+        // And they are the newest EXP_WINDOW absolute positions, in order —
+        // not merely equal to each other.
+        let expected_first_pos = (EXP_SEQ_LEN - EXP_WINDOW) as f32;
+        assert_eq!(tail_k[0], expected_first_pos);
+        assert_eq!(tail_k[tail_k.len() - row], (EXP_SEQ_LEN - 1) as f32);
+    }
+
+    /// A global layer is untouched: window `0` still persists the whole
+    /// prefix, so the change cannot silently truncate global history.
+    #[test]
+    fn a_global_layer_still_persists_the_whole_prefix() {
+        let Some(metal) = MetalBackend::new() else {
+            return;
+        };
+        let bufs = metal.bufs();
+        let (head_dim, num_kv_heads) = (64usize, 4usize);
+        let layers = vec![synth_layer(8, num_kv_heads, head_dim)];
+        assert_eq!(layers[0].sliding_window, 0, "synth layer is global");
+        let lb = LayerBuffers::allocate(
+            bufs,
+            &layers,
+            &[0.0; 64],
+            64,
+            256,
+            EXP_SEQ_LEN,
+            8 * head_dim,
+        );
+        let mut kv = KVCache::new(bufs, 1, DEFAULT_KV_CACHE_MAX_SEQ, num_kv_heads, head_dim);
+        populate_kv_after_commit(Some(&mut kv), bufs, &lb, &layers, EXP_SEQ_LEN);
+        assert_eq!(kv.layers[0].current_len, EXP_SEQ_LEN);
+        assert_eq!(kv.layers[0].abs_position, EXP_SEQ_LEN);
     }
 
     /// Cache empty (or shorter than num_layers) → grows on demand to

@@ -442,45 +442,26 @@ fn decode_token_q4k_moe_with_real_moe_layer_drives_gpu_dispatch() {
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation: Activation::GeluTanh,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::GeluTanh),
     };
 
     let layer = FullPipelineLayer {
-        wq: QuantWeight {
-            data: &wq,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        },
-        wk: QuantWeight {
-            data: &wk,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        },
-        wv: QuantWeight {
-            data: &wv,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        },
-        wo: QuantWeight {
-            data: &wo,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        },
-        gate: QuantWeight {
-            data: &gate,
-            scales: None,
-            format: QuantFormat::Q4_0,
-        },
-        up: QuantWeight {
-            data: &up,
-            scales: None,
-            format: QuantFormat::Q4_0,
-        },
-        down: QuantWeight {
-            data: &down,
-            scales: None,
-            format: QuantFormat::Q4_0,
-        },
+        attn_sinks: None,
+        attn_q_bias: None,
+        attn_k_bias: None,
+        attn_v_bias: None,
+        attn_o_bias: None,
+        attn_softcap: 0.0,
+        wq: QuantWeight::new(QuantFormat::Q4_K, &wq, larql_compute::QuantAux::None),
+        wk: QuantWeight::new(QuantFormat::Q4_K, &wk, larql_compute::QuantAux::None),
+        wv: QuantWeight::new(QuantFormat::Q4_K, &wv, larql_compute::QuantAux::None),
+        wo: QuantWeight::new(QuantFormat::Q4_K, &wo, larql_compute::QuantAux::None),
+        gate: QuantWeight::new(QuantFormat::Q4_0, &gate, larql_compute::QuantAux::None),
+        up: QuantWeight::new(QuantFormat::Q4_0, &up, larql_compute::QuantAux::None),
+        down: QuantWeight::new(QuantFormat::Q4_0, &down, larql_compute::QuantAux::None),
         input_norm: &norm_w,
         post_attn_norm: &norm_w,
         pre_ffn_norm: None,
@@ -498,6 +479,11 @@ fn decode_token_q4k_moe_with_real_moe_layer_drives_gpu_dispatch() {
         num_kv_heads,
         rope_base: 10_000.0,
         rotary_dim: 0,
+        rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+            head_dim,
+            0_usize,
+            10_000.0_f64,
+        ),
         sliding_window: 0,
         has_v_norm: false,
         layer_scalar: 0.0,
@@ -544,4 +530,233 @@ fn decode_token_q4k_moe_with_real_moe_layer_drives_gpu_dispatch() {
     let out = out.expect("decode_token_q4k_moe should return Some when MoE layer present");
     assert_eq!(out.len(), hidden);
     assert!(out.iter().all(|v| v.is_finite()));
+}
+
+/// Zero-copy expert dispatch vs the staged path — bit-level parity.
+///
+/// Same expert bytes, same input, same kernels; the only difference is the
+/// binding (region buffer + byte offset vs staged memcpy into scratch).
+/// The bytes live in an anonymous mmap — page-aligned by construction,
+/// exactly the production contract (`register_weight_region` over a
+/// layer-weights mmap). Controls: before registration the resolve MUST
+/// miss (staged arm is real), after registration it MUST hit (zero-copy
+/// arm is real) — without these, `A == B` could be two staged runs.
+#[test]
+fn zero_copy_expert_dispatch_matches_staged_path() {
+    use larql_compute::{
+        Activation, MoeLayerWeights, MoeRoutingPolicy, MoeWeightLayout, QuantFormat,
+    };
+    let metal = get_metal();
+    let hidden = 256usize;
+    let inter = 256usize;
+    let top_k = 2usize;
+    let num_experts = 4usize;
+
+    let (expert_gu, expert_down) = make_q4k_experts(hidden, inter, num_experts);
+
+    // Lay the experts out in one anonymous mmap: [gu0 | dn0 | gu1 | dn1 | …].
+    let total: usize = expert_gu
+        .iter()
+        .zip(expert_down.iter())
+        .map(|(g, d)| g.len() + d.len())
+        .sum();
+    let mut region = memmap2::MmapMut::map_anon(total).expect("anon mmap");
+    let mut offsets = Vec::with_capacity(num_experts);
+    let mut cursor = 0usize;
+    for (g, d) in expert_gu.iter().zip(expert_down.iter()) {
+        region[cursor..cursor + g.len()].copy_from_slice(g);
+        let g_off = cursor;
+        cursor += g.len();
+        region[cursor..cursor + d.len()].copy_from_slice(d);
+        offsets.push((g_off, g.len(), cursor, d.len()));
+        cursor += d.len();
+    }
+    let region = region.make_read_only().expect("read-only mmap");
+
+    let router_w: Vec<f32> = (0..num_experts * hidden)
+        .map(|i| (i as f32 * 0.0003).sin() * 0.05)
+        .collect();
+    let pre_norm_w: Vec<f32> = (0..hidden).map(|i| 1.0 + (i as f32 * 0.0005)).collect();
+    let router_scale: Vec<f32> = vec![1.0f32; hidden];
+    let router_per_expert_scale: Vec<f32> = vec![1.0f32; num_experts];
+    let moe = MoeLayerWeights {
+        experts_gate_up: expert_gu.iter().map(|v| v.as_slice()).collect(),
+        experts_down: expert_down.iter().map(|v| v.as_slice()).collect(),
+        routing_policy: MoeRoutingPolicy::default(),
+        weight_layout: MoeWeightLayout::default(),
+        expert_data_format: QuantFormat::Q4_K,
+        router_proj: &router_w,
+        router_scale: &router_scale,
+        router_per_expert_scale: &router_per_expert_scale,
+        router_norm: &[],
+        router_norm_parameter_free: true,
+        router_input_scalar: 1.0,
+        pre_experts_norm: &pre_norm_w,
+        post_ffn1_norm: &pre_norm_w,
+        post_experts_norm: &pre_norm_w,
+        num_experts,
+        top_k,
+        intermediate_size: inter,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::GeluTanh),
+    };
+
+    let scratch = MoeScratch::new_public(&metal, top_k, hidden, inter);
+    let h_post_attn = synth_values(hidden, 0.9, 0.5);
+    let get_expert = |e: usize| -> Option<(&[u8], &[u8])> {
+        let (g_off, g_len, d_off, d_len) = offsets[e];
+        Some((&region[g_off..g_off + g_len], &region[d_off..d_off + d_len]))
+    };
+
+    // Control: unregistered → resolve misses → this run is the STAGED arm.
+    assert!(
+        metal.bufs().resolve_region(&region[..64]).is_none(),
+        "region resolved before registration — staged control arm is not staged"
+    );
+    let staged = metal.moe_block_for_layer(&h_post_attn, &moe, 1e-6, &scratch, get_expert);
+
+    // Register, control that resolution now hits → ZERO-COPY arm.
+    assert!(metal.bufs().register_region(&region[..]));
+    assert!(
+        metal.bufs().resolve_region(&region[..64]).is_some(),
+        "region did not resolve after registration — zero-copy arm is staged"
+    );
+    let zero_copy = metal.moe_block_for_layer(&h_post_attn, &moe, 1e-6, &scratch, get_expert);
+
+    assert_eq!(staged.len(), zero_copy.len());
+    for (i, (a, b)) in staged.iter().zip(zero_copy.iter()).enumerate() {
+        assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "element {i}: staged={a} zero_copy={b} — the binding must not change the math"
+        );
+    }
+    assert!(
+        staged.iter().any(|v| v.abs() > 0.0),
+        "both arms produced all zeros — vacuous parity"
+    );
+}
+
+/// Q6_K variant of the staged-vs-zero-copy parity — this is the arm that
+/// exercises the GROUPED expert kernel (`q6k_grouped_experts`), whose
+/// contract is that its reduction body is byte-identical to `q6k_matvec`:
+/// outputs must match the staged path's all-K contiguous dispatch exactly,
+/// not to a tolerance. Same resolve-miss/hit control arms as the Q4_K test.
+#[test]
+fn zero_copy_grouped_q6k_dispatch_matches_staged_path() {
+    use larql_compute::cpu::ops::q4_common::quantize_q6_k;
+    use larql_compute::{
+        Activation, MoeLayerWeights, MoeRoutingPolicy, MoeWeightLayout, QuantFormat,
+    };
+    let metal = get_metal();
+    let hidden = 256usize;
+    let inter = 256usize;
+    let top_k = 2usize;
+    let num_experts = 4usize;
+
+    // Q6_K experts: [gate || up] fused halves + block-padded down rows.
+    let mut expert_gu: Vec<Vec<u8>> = Vec::with_capacity(num_experts);
+    let mut expert_down: Vec<Vec<u8>> = Vec::with_capacity(num_experts);
+    for e in 0..num_experts {
+        let gate = synth_values(inter * hidden, 0.21 + e as f32 * 0.13, 0.18);
+        let up = synth_values(inter * hidden, 0.51 + e as f32 * 0.17, 0.16);
+        let mut gu = Vec::with_capacity(2 * inter * hidden);
+        gu.extend_from_slice(&gate);
+        gu.extend_from_slice(&up);
+        expert_gu.push(quantize_q6_k(&gu));
+        let raw_down = synth_values(hidden * inter, 0.83 + e as f32 * 0.07, 0.11);
+        let (down_padded, _) = pad_rows_to_256(&raw_down, hidden, inter);
+        expert_down.push(quantize_q6_k(&down_padded));
+    }
+
+    let total: usize = expert_gu
+        .iter()
+        .zip(expert_down.iter())
+        .map(|(g, d)| g.len() + d.len())
+        .sum();
+    let mut region = memmap2::MmapMut::map_anon(total).expect("anon mmap");
+    let mut offsets = Vec::with_capacity(num_experts);
+    let mut cursor = 0usize;
+    for (g, d) in expert_gu.iter().zip(expert_down.iter()) {
+        region[cursor..cursor + g.len()].copy_from_slice(g);
+        let g_off = cursor;
+        cursor += g.len();
+        region[cursor..cursor + d.len()].copy_from_slice(d);
+        offsets.push((g_off, g.len(), cursor, d.len()));
+        cursor += d.len();
+    }
+    let region = region.make_read_only().expect("read-only mmap");
+
+    let router_w: Vec<f32> = (0..num_experts * hidden)
+        .map(|i| (i as f32 * 0.0004).cos() * 0.05)
+        .collect();
+    let pre_norm_w: Vec<f32> = (0..hidden).map(|i| 1.0 + (i as f32 * 0.0005)).collect();
+    let router_scale: Vec<f32> = vec![1.0f32; hidden];
+    let router_per_expert_scale: Vec<f32> = vec![1.0f32; num_experts];
+    let moe = MoeLayerWeights {
+        experts_gate_up: expert_gu.iter().map(|v| v.as_slice()).collect(),
+        experts_down: expert_down.iter().map(|v| v.as_slice()).collect(),
+        routing_policy: MoeRoutingPolicy::default(),
+        weight_layout: MoeWeightLayout::default(),
+        expert_data_format: QuantFormat::Q6_K,
+        router_proj: &router_w,
+        router_scale: &router_scale,
+        router_per_expert_scale: &router_per_expert_scale,
+        router_norm: &[],
+        router_norm_parameter_free: true,
+        router_input_scalar: 1.0,
+        pre_experts_norm: &pre_norm_w,
+        post_ffn1_norm: &pre_norm_w,
+        post_experts_norm: &pre_norm_w,
+        num_experts,
+        top_k,
+        intermediate_size: inter,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::GeluTanh),
+    };
+
+    let scratch = MoeScratch::new_public_with_format(
+        &metal,
+        top_k,
+        hidden,
+        inter,
+        QuantFormat::Q6_K,
+        moe.gate_up_cols(hidden),
+    );
+    let h_post_attn = synth_values(hidden, 0.9, 0.5);
+    let get_expert = |e: usize| -> Option<(&[u8], &[u8])> {
+        let (g_off, g_len, d_off, d_len) = offsets[e];
+        Some((&region[g_off..g_off + g_len], &region[d_off..d_off + d_len]))
+    };
+
+    assert!(
+        metal.bufs().resolve_region(&region[..64]).is_none(),
+        "region resolved before registration — staged control arm is not staged"
+    );
+    let staged = metal.moe_block_for_layer(&h_post_attn, &moe, 1e-6, &scratch, get_expert);
+
+    assert!(metal.bufs().register_region(&region[..]));
+    assert!(
+        metal.bufs().resolve_region(&region[..64]).is_some(),
+        "region did not resolve after registration — zero-copy arm is staged"
+    );
+    let zero_copy = metal.moe_block_for_layer(&h_post_attn, &moe, 1e-6, &scratch, get_expert);
+
+    assert_eq!(staged.len(), zero_copy.len());
+    for (i, (a, b)) in staged.iter().zip(zero_copy.iter()).enumerate() {
+        assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "element {i}: staged={a} grouped-zero-copy={b} — the grouped kernel's \
+             reduction body must match q6k_matvec exactly"
+        );
+    }
+    assert!(
+        staged.iter().any(|v| v.abs() > 0.0),
+        "both arms produced all zeros — vacuous parity"
+    );
 }

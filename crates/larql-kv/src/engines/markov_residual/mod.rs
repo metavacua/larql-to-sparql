@@ -8,12 +8,15 @@ pub mod compute;
 pub(crate) mod dispatch;
 pub mod engine;
 pub(crate) mod helpers;
+pub mod prefill;
+pub mod step;
+mod step_attention;
 pub mod store;
 pub mod walk;
 
-pub use compute::{
-    kv_memory_bytes_for_seq, recompute_kv, rs_decode_step, rs_prefill, RsPrefillResult,
-};
+pub use compute::{kv_memory_bytes_for_seq, recompute_kv};
 pub use engine::MarkovResidualEngine;
+pub use prefill::{rs_prefill, RsPrefillResult};
+pub use step::rs_decode_step;
 pub use store::RsStore;
 pub use walk::ensure_attn_tensors_dequantised;

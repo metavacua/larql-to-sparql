@@ -36,5 +36,7 @@ mod vocab;
 pub(crate) use clustering::{run_clustering_pipeline, ClusterData};
 pub(crate) use gate_tops::compute_gate_top_tokens;
 pub(crate) use offset::compute_offset_direction;
-pub(crate) use timestamp::chrono_now;
+#[cfg(test)]
+pub(crate) use timestamp::iso8601_from_unix;
+pub(crate) use timestamp::{chrono_now, iso8601_z_from_unix};
 pub(crate) use vocab::build_whole_word_vocab;

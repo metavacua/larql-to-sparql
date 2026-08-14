@@ -78,8 +78,14 @@
 pub const SHADER: &str = r#"
 constant uint Q4K_GUC_ROWS_PER_TG = 4;
 constant uint Q4K_GUC_BLOCK_SIZE  = 144;
-// 16 floats per simdgroup (8 scales + 8 mins), ROWS_PER_TG simdgroups.
-constant uint Q4K_GUC_COEFFS_PER_SG = 16u;
+// 32 floats per simdgroup — (8 scales + 8 mins) x 2 superblock
+// parities — ROWS_PER_TG simdgroups. The original 16-slot layout mixed
+// the two parities' scales in one array: writer lane k staged sub-block
+// k of ITS OWN parity's superblock, and a reader whose sub-block index
+// j had the opposite parity to its lane consumed the wrong superblock's
+// scale — cos ~0.52 against the CPU reference (pinned by
+// q4k_ffn_gate_up_coop_parity_even_and_odd_superblocks).
+constant uint Q4K_GUC_COEFFS_PER_SG = 32u;
 
 kernel void q4k_ffn_gate_up_coop(
     device const uchar*  Wg    [[buffer(0)]],
@@ -98,14 +104,17 @@ kernel void q4k_ffn_gate_up_coop(
     uint mat_tg = is_up ? (tg_id - tgs_per_mat) : tg_id;
 
     uint row_idx = mat_tg * Q4K_GUC_ROWS_PER_TG + sg_id;
-    if (row_idx >= N) return;
+    // No early return: this kernel barriers inside its loop, and a
+    // simdgroup that exits while its siblings wait is undefined
+    // behaviour (audit F12). Out-of-range rows stay live but masked.
+    const bool row_live = row_idx < N;
 
     device const uchar* W       = is_up ? Wu : Wg;
     device float*       out_buf = is_up ? U_out : G_out;
 
     const uint superblocks   = K / 256u;
     const uint bytes_per_row = superblocks * Q4K_GUC_BLOCK_SIZE;
-    device const uchar* row_w = W + row_idx * bytes_per_row;
+    device const uchar* row_w = W + min(row_idx, N - 1u) * bytes_per_row;
 
     // Lane partition (matches production):
     //   ix  = lane & 1   → super-block parity
@@ -126,42 +135,58 @@ kernel void q4k_ffn_gate_up_coop(
 
     float acc = 0.0f;
 
-    for (uint sb = ix; sb < superblocks; sb += 2u) {
-        device const uchar* block = row_w + sb * Q4K_GUC_BLOCK_SIZE;
+    // Uniform trip count for every lane and every simdgroup: iterate
+    // superblock PAIRS. The previous `for (sb = ix; sb < superblocks;
+    // sb += 2)` gave ix=0 lanes one more iteration than ix=1 lanes
+    // whenever `superblocks` was odd, so the in-loop barrier was
+    // divergent — undefined behaviour hit by real shapes
+    // (hidden 2816 -> 11 superblocks, 5376 -> 21; audit F12).
+    const uint sb_pairs = (superblocks + 1u) / 2u;
+    for (uint p = 0u; p < sb_pairs; p++) {
+        const uint sb = 2u * p + ix;
+        const bool sb_live = row_live && (sb < superblocks);
+        device const uchar* block = row_w + min(sb, superblocks - 1u) * Q4K_GUC_BLOCK_SIZE;
 
-        // ── Cooperative scale/min decode on lanes 0..7 ──
-        // Each of those lanes also decodes d/dmin themselves (8×
-        // redundant vs production's 32×; negligible cost). Avoids a
-        // `simd_broadcast` round-trip that earlier prototypes found
-        // re-orders the inner FMA chain enough to flip rank-1 on
+        // ── Cooperative scale/min decode on lanes 0..15 ──
+        // Lane w = (w_k, w_par): sub-block w_k of THIS PAIR's parity
+        // w_par superblock, staged into that parity's half of the
+        // per-simdgroup coeffs slice. Writers also decode d/dmin
+        // themselves (redundant vs production's 32x; negligible cost) —
+        // avoids a `simd_broadcast` round-trip that earlier prototypes
+        // found re-orders the inner FMA chain enough to flip rank-1 on
         // close-call tokens at the LM head.
-        if (lane < 8u) {
-            uint k = lane;
+        {
+            const uint w_par = lane & 1u;
+            const uint w_k   = lane >> 1u;
+            const uint w_sb  = 2u * p + w_par;
+            if (lane < 16u && row_live && w_sb < superblocks) {
+                device const uchar* wblock = row_w + w_sb * Q4K_GUC_BLOCK_SIZE;
+                ushort d_bits    = ushort(wblock[0]) | (ushort(wblock[1]) << 8u);
+                ushort dmin_bits = ushort(wblock[2]) | (ushort(wblock[3]) << 8u);
+                float d    = decode_f16_metal(d_bits);
+                float dmin = decode_f16_metal(dmin_bits);
 
-            ushort d_bits    = ushort(block[0]) | (ushort(block[1]) << 8u);
-            ushort dmin_bits = ushort(block[2]) | (ushort(block[3]) << 8u);
-            float d    = decode_f16_metal(d_bits);
-            float dmin = decode_f16_metal(dmin_bits);
-
-            device const uchar* sb_bytes = block + 4u;
-            uint sc, mn;
-            if (k < 4u) {
-                sc = uint(sb_bytes[k])      & 0x3Fu;
-                mn = uint(sb_bytes[k + 4u]) & 0x3Fu;
-            } else {
-                sc = (uint(sb_bytes[k + 4u]) & 0x0Fu) | ((uint(sb_bytes[k - 4u]) >> 6u) << 4u);
-                mn = (uint(sb_bytes[k + 4u]) >> 4u)    | ((uint(sb_bytes[k])      >> 6u) << 4u);
+                device const uchar* sb_bytes = wblock + 4u;
+                uint sc, mn;
+                if (w_k < 4u) {
+                    sc = uint(sb_bytes[w_k])      & 0x3Fu;
+                    mn = uint(sb_bytes[w_k + 4u]) & 0x3Fu;
+                } else {
+                    sc = (uint(sb_bytes[w_k + 4u]) & 0x0Fu) | ((uint(sb_bytes[w_k - 4u]) >> 6u) << 4u);
+                    mn = (uint(sb_bytes[w_k + 4u]) >> 4u)    | ((uint(sb_bytes[w_k])      >> 6u) << 4u);
+                }
+                uint wbase = sg_id * Q4K_GUC_COEFFS_PER_SG + w_par * 16u;
+                coeffs[wbase + w_k]      = d    * float(sc);
+                coeffs[wbase + 8u + w_k] = dmin * float(mn);
             }
-            uint base = sg_id * Q4K_GUC_COEFFS_PER_SG;
-            coeffs[base + k]      = d    * float(sc);
-            coeffs[base + 8u + k] = dmin * float(mn);
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        // All lanes read their owned sub-block's scale/mmin.
-        uint base = sg_id * Q4K_GUC_COEFFS_PER_SG;
+        // Each lane reads its own parity's staged scale/mmin.
+        uint base = sg_id * Q4K_GUC_COEFFS_PER_SG + ix * 16u;
         float scale = coeffs[base + j];
         float mmin  = coeffs[base + 8u + j];
+        if (sb_live) {
 
         // ── Inner work: identical to production `q4k_ffn_gate_up` ──
         // Preload 16 X values into registers BEFORE loading weight bytes.
@@ -188,10 +213,14 @@ kernel void q4k_ffn_gate_up_coop(
         }
         // Q4_K deferred form: scale * Σ(nib*x) - dmin_min * Σ(x).
         acc += scale * dot_acc - mmin * sumy;
+        }
+        // Protect the next iteration's staging writes from any thread
+        // still reading this iteration's coeffs.
+        threadgroup_barrier(mem_flags::mem_threadgroup);
     }
 
     acc = simd_sum(acc);
-    if (lane == 0u) out_buf[row_idx] = acc;
+    if (row_live && lane == 0u) out_buf[row_idx] = acc;
 }
 "#;
 

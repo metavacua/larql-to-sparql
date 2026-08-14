@@ -6,6 +6,262 @@ The format follows the conventions of [Keep a Changelog](https://keepachangelog.
 with dated entries (`YYYY-MM-DD`) instead of semantic versions during the
 pre-1.0 phase. Forward-looking work lives in [`ROADMAP.md`](ROADMAP.md).
 
+## [2026-07-25] — Windows: non-zero anon mmap length for `make_read_only`
+
+Unbroke `test - windows-latest`, which had failed for **44 consecutive runs**
+since 2026-06-19 (last green `f647b0aa`) on a single test —
+`extract::build::tests::dense_only_vindex_loads_without_gate_vectors` —
+while macOS, Linux and the ubuntu coverage leg stayed green throughout.
+
+### Mechanism
+
+Not what the error line suggests. `VectorIndex::load_vindex_with_range` built
+the attention-only client-slice gate buffer as
+`MmapMut::map_anon(0)?.make_read_only()?`, and the failure surfaced as:
+
+```
+Io(Os { code: 87, kind: InvalidInput, message: "The parameter is incorrect." })
+```
+
+`map_anon(0)` is **not** the failing call — memmap2 0.9.11 clamps the underlying
+Windows mapping to one byte (`windows.rs:365`), so it succeeds. But it records
+the *requested* length of 0, so the chained `make_read_only()` reaches
+`virtual_protect`, which computes `aligned_len = self.len + alignment = 0` and
+calls `VirtualProtect(ptr, 0, PAGE_READONLY, …)` — Windows rejects a zero
+`dwSize`. memmap2's early-out for empty maps keys on a sentinel pointer used
+only by *file-backed* zero-length maps, which an anonymous mapping never has.
+Unix performs no protection change at all, hence green everywhere else.
+
+### Fix
+
+`mmap_util::map_anon_min_one(len)` maps `len.max(1)`, keeping the recorded
+length non-zero so the conversion stays legal. Applied at both sites:
+
+- `format/load.rs:125` — the attention-only client slice
+  (`larql slice --preset client`), which carries no gate data at all. This is
+  what the failing test builds.
+- `format/load.rs:302` — `synthesize_gate_from_q4k`, which carried the
+  **identical latent bug**: it also ends in `make_read_only()`, and
+  `total_bytes` is 0 whenever the layer range owns no features. Never reached
+  by CI, but it sits on the range-restricted-vindex path the DEC funnel uses.
+
+Safe because every consumer bounds-checks against the mapping length before
+reading, and the buffer is described as empty by its all-zero `GateLayerSlice`s
+— the extra byte is unreachable. Other `map_anon` call sites were audited: all
+are `#[cfg(test)]` helpers or non-empty payloads.
+
+Three tests in `mmap_util` pin the contract on every platform (zero length
+accepted, non-zero lengths pass through unchanged, zero length survives
+`make_read_only`). 1106 lib tests green, clippy clean at `-D warnings`.
+
+## [2026-05-28] — Hardening findings from the whole-codebase review
+
+From the whole-codebase review ([`docs/audits/codebase-review-2026-05-28.md`](../../docs/audits/codebase-review-2026-05-28.md)):
+
+- **P1 — NaN `partial_cmp().unwrap()`** at `router:107`, `lm_head:322`, `gate_store:330`. Route through a shared NaN-safe top-K/sort helper (workspace-wide cleanup, ~10 sites across vindex/core/cli/python).
+- **Low — implicit 4-byte alignment** in the `*const f32` reinterprets in `decode_floats` / `decode_gate_vector`; invariant is enforced only by caller offset arithmetic, not the helper.
+
+Both recorded, not fixed. Still open — see [`ROADMAP.md`](ROADMAP.md) §"Open
+defects".
+
+## [2026-05-16] — `gate_knn` optimization pass
+
+**2026-05-16 `gate_knn` optimization pass** (driven by the Exp 53
+shard service's bench gap): empty-base short-circuit when the
+layer has no native features, O(overrides²) → O(overrides) merge
+via `HashMap<feat, hit_idx>`, `argmax` instead of sort at
+`top_k = 1`, sort-skip when only deletions modified hits, lazy
+per-layer contiguous gate-override matrix with per-layer
+invalidation. Wins: vindex↔cache gap closed from ~20% to ~7% on
+the steady-state shard-query bench; cross-layer mutation cost
+cut by ~17% (218.8 → 181.9 µs at n=256/d=1024) because mutating
+layer B no longer evicts layer A's cache. See
+`crates/larql-server/benches/shard_query.rs`.
+
+Coverage at this point: aggregate 90.86% lines, 105 of 147 files at the 90%
+default, 42 debt baselines. The `patch/overlay.rs` baseline (82%) was the one
+entry this pass touched — added LayerGateCache code paths plus targeted unit
+tests; the file moved to 88.61%.
+
+## [2026-05-10] — `VindexStorage` trait abstraction closed (7-step migration)
+
+Migrated here from `ROADMAP.md` on 2026-08-04. The section had carried its own
+note that it "will move to CHANGELOG.md next time a P0 item displaces it".
+
+**Impact**: Lets Redis / S3 / GPU-residency backends plug in
+**Effort**: Medium
+**Status**: ✅ Closed 2026-05-10 — all 7 migration steps shipped;
+walk kernels, Metal dispatch, KNN, and overlay all consume the
+trait. Future Redis / S3 backends land as parallel `VindexStorage`
+impls without touching this code. Detail kept here as the migration
+record; the section will move to `CHANGELOG.md` next time a P0 item
+displaces it.
+
+The substore extraction (`GateStore`, `FfnStore`, `ProjectionStore`,
+`MetadataStore`) got most of the way there. Formalise a sealed
+`VindexStorage` trait (mmap-agnostic row accessor) so Q4_K row reads
+can route through Redis-cached or S3-buffered backends without
+walk-kernel changes.
+
+**Why now**: the per-layer FFN format (Phase 2, closed today) made
+"give me the bytes for layer L, component C, feature F" the canonical
+addressing contract. That's exactly the right granularity for a
+storage trait — every concrete backend can satisfy it. The current
+mmap path becomes one impl among several.
+
+**Acceptance bar**:
+- A sealed `VindexStorage` trait whose surface is defined by the
+  current walk-kernel and decode hot-paths (`q4k_ffn_row_*`,
+  `gate_*`, `down_features_*`, `attn_*_layer_data`).
+- One impl: `MmapStorage` reproducing today's behavior bit-for-bit
+  (no measurable decode regression on the cool-machine 4B/26B
+  baselines).
+- Walk kernels and Metal dispatch consume only the trait, not
+  concrete `Mmap` types.
+- Coverage: every trait method has a test against `MmapStorage`;
+  the trait-object boxing path has at least one round-trip test.
+
+**Out of scope for this round**: Redis / S3 backends (those land on
+top of the trait once it's stable). Same for GPU-resident storage —
+the trait surface should leave room for it but we don't implement.
+
+**Migration steps:**
+
+- [x] Step 1 — sealed trait skeleton in
+  `index/storage/vindex_storage/mod.rs`. 14 byte-yielding methods
+  covering hot-path substore reaches; FP4 + DownMeta deliberately
+  not behind the trait (richer per-feature decoders).
+- [x] Step 2 — `MmapStorage` parity impl
+  (`from_substores(&FfnStore, &GateStore, &ProjectionStore, hidden)`).
+- [x] Step 3 — Criterion perf gate
+  (`benches/vindex_storage_dispatch.rs`). Initial `Bytes`-returning
+  shape paid 6 atomic ops per fetch (12× direct); redesigned
+  per-layer accessors to return `BytesView<'a>` with
+  `as_slice() -> &'a [u8]` zero-atomic / `to_owned_bytes()` opt-in.
+  Final: `Arc<dyn>` within ~5% of direct on both layer-fetch and
+  per-row.
+- [x] Step 4 — `storage: Arc<dyn VindexStorage>` field on
+  `VectorIndex`, populated by `refresh_storage()` at the end of
+  every loader that mutates substore mmaps. Per-layer
+  byte-yielding accessors forward through `self.storage`
+  (`attn_q4k_layer_data` / `attn_q8_layer_data` /
+  `attn_q4_layer_slices` / `interleaved_q4k_layer_data` /
+  `down_features_q4k_layer_data` / `gate_q4_data`). Whole-buffer
+  accessors (`attn_q4_data`, `interleaved_q4*_mmap_ref`) deferred
+  to step 5 — they need an API-shape decision once substore mmap
+  fields drop.
+- [x] Step 5 (partial) — `storage` field is now
+  `Arc<MmapStorage>` (concrete, mutable via `Arc::make_mut`).
+  Loaders rewritten to use `set_*()` setters; `refresh_storage()`
+  removed. 12 setters + 11 `has_*` + 6 `*_view()` helpers added.
+  Read sites migrated for `lm_head/knn.rs`, `interleaved_q4.rs`,
+  `gate_accessors.rs` `is_some()` checks, `is_mmap()`,
+  `attn_q4_data`. `MmapStorage` field visibility tightened to
+  `pub(crate)` for test ergonomics.
+- [x] Step 6 — gate KNN compute paths (`gate_accessors.rs`,
+  `compute/gate_knn/*`, `gate_store.rs`, `mutate/mod.rs`,
+  `patch/overlay.rs`) migrated to `self.storage.gate_layer_view(layer)`;
+  trait-covered `Arc<Mmap>` substore fields dropped from
+  `FfnStore` / `GateStore`. `ProjectionStore` deleted entirely (its
+  9 fields all moved to `MmapStorage`). `MmapStorage::release_pages()`
+  added — tracks `Arc<Mmap>` handles per setter; replaces the
+  per-substore-field madvise loop in `release_mmap_pages`. Heap
+  fields (`gate_vectors`, decode caches, HNSW caches, FP4 storage)
+  stay on substores.
+- [x] Step 7 — f32 native FFN paths (`up_features`,
+  `down_features`, `interleaved_f32`) migrated to `MmapStorage`.
+  `FfnStore` shrunk to caches + FP4 storage only.
+  `release_mmap_pages` collapsed to a single
+  `self.storage.release_pages()` call.
+
+See `CHANGELOG.md` 2026-05-10 entry for the full step 1-3 writeup
+plus bench numbers.
+
+## [2026-05-10] — Residual large-file debt closed (round-6 splits)
+
+**Impact**: Code navigability + future split cost
+**Effort**: Small–Medium per file
+**Status**: ✅ Closed 2026-05-10 — all 7 listed files split or
+documented as won't-split.
+
+Round-6 splits (2026-05-10):
+
+- [x] `walker/vector_extractor.rs` (1213 L) → 7 siblings under
+  `walker/vector_extractor/` (largest 373 L). All siblings ≥94.8%
+  line coverage.
+- [x] `extract/build_helpers.rs` (848 L) → 6 siblings + test_support
+  under `extract/build_helpers/` (largest 264 L). All ≥98%.
+- [x] `format/huggingface/download.rs` (941 L) → minimal 2-way
+  split (`download/mod.rs` 676 L, `download/helpers.rs` 270 L).
+  Pure helpers at 100%; the network-bound mod.rs inherits the 74%
+  baseline as `download/mod.rs:64.0` (HF API hard to mock without
+  significant test infrastructure). `mod.rs` still over 600 LOC by
+  user direction.
+- [x] `format/huggingface/publish/lfs.rs` (905 L) → 4 siblings +
+  test_support under `publish/lfs/` (largest 281 L). All ≥91%; old
+  `lfs.rs:97` debt baseline removed (every sibling at default 90%).
+- [x] `format/huggingface/discovery.rs` (800 L) → 3 siblings +
+  test_support under `discovery/` (largest 386 L). All ≥94%.
+- [x] `index/types/ffn_row.rs` (875 L) → 3 siblings under
+  `index/types/ffn_row/` (largest 444 L). Trait declaration in
+  `mod.rs` (87.1%, debt baseline added), shared `Stub` fixture in
+  `test_support.rs` (84.9%, debt baseline added), tests in
+  `tests.rs`. Production coverage was always at 87% — split made it
+  visible by removing dilution from co-located tests.
+- [x] `index/storage/gate_accessors.rs` (845 L) → 3 siblings under
+  `gate_accessors/` (mod.rs 347 L, accessor_tests.rs 445 L,
+  release_pages_tests.rs 53 L). Production-only mod.rs at 92.3%
+  (up from old 70.5% combined-file baseline).
+- [x] `index/storage/vindex_storage/mmap_storage.rs` (1182 L) —
+  **kept as a single file by design**: 12-method trait impl, dense
+  per-substore mmap storage. Splitting by trait method fragments
+  without modularity gain.
+
+**Outcome**: workspace coverage 90.30% (was 90.17% at start of
+round); 104 files at 90% default (was 86); 42 debt baselines (was
+40 — net +2 from ffn_row split). 932 lib tests + 19 integration
+suites pass; clippy clean. No file outside the won't-split list is
+≥800 LOC.
+
+> **Superseded 2026-08-04.** The closing claim "No file outside the won't-split
+> list is ≥800 LOC" no longer holds. Re-measured: `patch/overlay.rs` (1071 L),
+> `extract/build/mod.rs` (862 L), and `format/weights/write_f32_tests.rs`
+> (815 L) have crossed the line, and `download/mod.rs` grew from 676 L to
+> 1329 L. Reopened in [`ROADMAP.md`](ROADMAP.md) §"Residual large-file debt —
+> reopened".
+
+## [2026-05-10] — Production-path `unwrap`/`expect` triage
+
+**Impact**: Crash-safety on I/O failures
+**Effort**: Small
+**Status**: ✅ Closed 2026-05-10 — 6 hotspot files audited (56
+production sites total); only `extract/build_from_vectors.rs`
+needed real fixes (9 sites converted, 3 new error-path tests).
+The other 47 sites are defensible idioms — left as-is.
+
+Triage outcome:
+
+| File | Sites | Verdict |
+|---|---|---|
+| `extract/build_from_vectors.rs` | 9 | **Fixed** — JSONL field-access panics on missing/malformed records converted to `VindexError::Parse` via two helpers (`parse_u64_field`, `parse_f32_vector`). 3 new error-path regression tests. |
+| `index/storage/gate_store.rs` | 12 | Defensible — 5× mutex/RwLock locks, 4× shape ops with static invariants, 1× `as_slice` on owned-from-vec Array2, 2× cache slot just-assigned. The review's "concrete target" line 391 was inside `#[cfg(test)] mod gate_cache_lru_tests` (starts line 373) — false positive. |
+| `index/compute/gate_knn/hnsw_lifecycle.rs` | 12 | Defensible — 9× mutex locks, 3× shape ops with caller-side invariants. Optional cleanup: line 56 could mirror the sibling at line 82 which uses `.ok()?`. |
+| `index/compute/gate_knn/scores_batch.rs` | 9 | Defensible — 3× lock guards, 5× shape ops bounds-checked or invariant, 1× cache slot just-assigned. |
+| `patch/knn_store.rs` | 8 | Defensible — 7× mutex locks, 1× `partial_cmp().unwrap_or()` fallback. |
+| `index/storage/ffn_store/q4k_cache.rs` | 6 | Defensible — 6× mutex locks. |
+
+Lesson: the review's "~120 sites" framing over-stated the
+fix surface. The signal-to-noise was ~10% — `Mutex::lock().unwrap()`
+and `ArrayView2::from_shape().unwrap()` with static shapes are
+idiomatic Rust, not crash hazards. Future audits should pre-filter
+these patterns before counting.
+
+**Acceptance bar (met)**: every production `.unwrap()` in the six
+hotspot files is either a mutex/RwLock lock, a statically-provable
+shape op, a just-assigned cache slot, or has been converted to `?`
+with a typed error. 922 lib tests + all integration suites pass;
+clippy clean.
+
 ## [2026-05-10] — Coverage push after the migration
 
 Lifted the post-step-6/7 debt baselines back up. Migration shrunk

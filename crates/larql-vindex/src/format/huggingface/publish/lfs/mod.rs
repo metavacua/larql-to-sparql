@@ -14,6 +14,7 @@
 mod batch;
 mod finalize;
 mod multipart;
+mod retry;
 mod stream;
 #[cfg(test)]
 mod test_support;

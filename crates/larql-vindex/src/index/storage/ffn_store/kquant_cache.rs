@@ -16,7 +16,6 @@
 
 use std::sync::Arc;
 
-use super::FFN_DOWN;
 use crate::index::core::VectorIndex;
 
 impl VectorIndex {
@@ -134,31 +133,15 @@ impl VectorIndex {
         if intermediate == 0 {
             return None;
         }
-        let hidden = self.hidden_size;
-        let n = intermediate * hidden;
-        let padded = n.div_ceil(larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS)
-            * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
-        let info = crate::quant::registry::lookup(format)?;
-        let decoded = (info.dequantize)(bytes, padded).ok()?;
-        // Gate and up are stored row-major [intermediate, hidden] — row
-        // `feat` already contains that feature's weight vector.
-        //
-        // Down is stored row-major [hidden, intermediate] (the native PyTorch
-        // nn.Linear(intermediate, hidden) orientation). To give callers a
-        // feature-major view matching gate/up, we transpose here: after the flip
-        // arc[feat*hidden..(feat+1)*hidden] is feature `feat`'s down vector.
-        let final_data: Vec<f32> = if component == FFN_DOWN {
-            let mut t = vec![0.0f32; n];
-            for h in 0..hidden {
-                let src_row = &decoded[h * intermediate..(h + 1) * intermediate];
-                for (i, &v) in src_row.iter().enumerate() {
-                    t[i * hidden + h] = v;
-                }
-            }
-            t
-        } else {
-            decoded.into_iter().take(n).collect()
-        };
+        // Layout (row padding, down transpose) is owned by the shared
+        // decoder — see `kquant_decode.rs`.
+        let final_data = super::kquant_decode::decode_component_feature_major(
+            bytes,
+            format,
+            intermediate,
+            self.hidden_size,
+            component,
+        )?;
         let arc = std::sync::Arc::new(final_data);
         {
             let mut cache = self.ffn.kquant_ffn_cache.lock().unwrap();
@@ -232,28 +215,15 @@ impl VectorIndex {
             if intermediate == 0 {
                 return None;
             }
-            let hidden = self.hidden_size;
-            let n = intermediate * hidden;
-            let padded = n.div_ceil(larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS)
-                * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
-            let info = crate::quant::registry::lookup(format)?;
-            let decoded = (info.dequantize)(bytes, padded).ok()?;
-
-            let final_data: Vec<f32> = if component == FFN_DOWN {
-                // Transpose on-disk [hidden, intermediate] → feature-major
-                // [intermediate, hidden] so callers can use activation.dot(&view)
-                // directly (matches layout produced by kquant_ffn_layer).
-                let mut t = vec![0.0f32; n];
-                for h in 0..hidden {
-                    let src_row = &decoded[h * intermediate..(h + 1) * intermediate];
-                    for (i, &v) in src_row.iter().enumerate() {
-                        t[i * hidden + h] = v;
-                    }
-                }
-                t
-            } else {
-                decoded.into_iter().take(n).collect()
-            };
+            // Same feature-major layout as `kquant_ffn_layer` — both go
+            // through the shared row-padding-aware decoder.
+            let final_data = super::kquant_decode::decode_component_feature_major(
+                bytes,
+                format,
+                intermediate,
+                self.hidden_size,
+                component,
+            )?;
             Some(std::sync::Arc::new(final_data))
         });
 
@@ -452,6 +422,110 @@ mod tests {
     }
 
     // ── kquant_ffn_layer_once early returns ───────────────────────────
+
+    // ── row-padded slab regression (non-256-aligned dims) ────────────
+
+    /// Write a one-layer interleaved_kquant.bin + manifest to `dir` the
+    /// way the production writer does, and return the logical matrices.
+    /// gate/up rows are per-feature constants, down columns per-feature
+    /// constants, so any stride error shows up as wildly wrong values
+    /// rather than small quant noise.
+    fn write_non_aligned_q4k_layer(
+        dir: &std::path::Path,
+        intermediate: usize,
+        hidden: usize,
+    ) -> std::io::Result<()> {
+        use super::super::kquant_decode::q4k_row_padded_for_tests;
+        use crate::format::filenames::{INTERLEAVED_KQUANT_BIN, INTERLEAVED_KQUANT_MANIFEST_JSON};
+        use larql_models::quant::ggml::k_quant_padded_cols;
+
+        let gate: Vec<f32> = (0..intermediate)
+            .flat_map(|r| std::iter::repeat_n((r + 1) as f32 * 0.5, hidden))
+            .collect();
+        let up = gate.clone();
+        // down is stored [hidden, intermediate]; cell [h][i] = (i+1)*0.25.
+        let down: Vec<f32> = (0..hidden)
+            .flat_map(|_| (0..intermediate).map(|i| (i + 1) as f32 * 0.25))
+            .collect();
+
+        let mut bin: Vec<u8> = Vec::new();
+        let mut manifest = Vec::new();
+        for (key, data, rows, cols) in [
+            ("gate", &gate, intermediate, hidden),
+            ("up", &up, intermediate, hidden),
+            ("down", &down, hidden, intermediate),
+        ] {
+            let bytes = q4k_row_padded_for_tests(data, rows, cols);
+            manifest.push(serde_json::json!({
+                "key": key,
+                "shape": [rows, k_quant_padded_cols(cols)],
+                "format": "Q4_K",
+                "offset": bin.len(),
+                "length": bytes.len(),
+            }));
+            bin.extend_from_slice(&bytes);
+        }
+        std::fs::write(dir.join(INTERLEAVED_KQUANT_BIN), &bin)?;
+        std::fs::write(
+            dir.join(INTERLEAVED_KQUANT_MANIFEST_JSON),
+            serde_json::to_vec(&manifest).unwrap(),
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn q4k_ffn_layer_decodes_row_padded_non_aligned_slabs() {
+        use super::super::kquant_decode::Q4K_TEST_TOLERANCE;
+
+        // hidden=320 (padded 512) and intermediate=3 (padded 256): both
+        // gate/up and the down transpose exercise the padded stride.
+        // Before the fix, rows past row 0 read padding zeros / shifted
+        // data and this test fails with values far outside tolerance.
+        let (intermediate, hidden) = (3usize, 320usize);
+        let dir = tempfile::tempdir().unwrap();
+        write_non_aligned_q4k_layer(dir.path(), intermediate, hidden).unwrap();
+
+        let mut v = VectorIndex::empty(1, hidden);
+        v.gate.gate_vectors[0] = Some(Array2::<f32>::zeros((intermediate, hidden)));
+        v.load_interleaved_kquant(dir.path()).unwrap();
+
+        // gate (component 0): row r ≈ (r+1)*0.5 everywhere.
+        let gate = v.kquant_ffn_layer(0, 0).expect("gate decodes");
+        assert_eq!(gate.len(), intermediate * hidden);
+        for r in 0..intermediate {
+            let expect = (r + 1) as f32 * 0.5;
+            for (c, &val) in gate[r * hidden..(r + 1) * hidden].iter().enumerate() {
+                assert!(
+                    (val - expect).abs() < Q4K_TEST_TOLERANCE,
+                    "gate row {r} col {c}: got {val}, want ~{expect}"
+                );
+            }
+        }
+
+        // down (feature-major after transpose):
+        // feature i ≈ (i+1)*0.25 across all hidden positions.
+        let down = v
+            .kquant_ffn_layer(0, super::super::FFN_DOWN)
+            .expect("down decodes");
+        assert_eq!(down.len(), intermediate * hidden);
+        for i in 0..intermediate {
+            let expect = (i + 1) as f32 * 0.25;
+            for (h, &val) in down[i * hidden..(i + 1) * hidden].iter().enumerate() {
+                assert!(
+                    (val - expect).abs() < Q4K_TEST_TOLERANCE,
+                    "down feature {i} h {h}: got {val}, want ~{expect}"
+                );
+            }
+        }
+
+        // The lock-free twin must produce the identical layout.
+        let once = v.kquant_ffn_layer_once(0, 0).expect("once-path decodes");
+        assert_eq!(
+            once.as_slice(),
+            gate.as_slice(),
+            "once path diverges from LRU path"
+        );
+    }
 
     #[test]
     fn q4k_ffn_layer_once_invalid_component_returns_none() {

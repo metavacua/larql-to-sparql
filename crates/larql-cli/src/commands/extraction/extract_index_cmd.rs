@@ -125,6 +125,32 @@ fn parse_quant(s: &str) -> Result<larql_vindex::QuantFormat, String> {
     }
 }
 
+/// Resolve the effective extract level from the flags that can raise it.
+///
+/// Two things upgrade to `All`:
+///   * `--include-weights` — the pre-`--level` spelling, kept for compat.
+///   * `--quant q4k` — its help has always said it implies `--level all`,
+///     but until 2026-08-07 nothing acted on that, so the level fell through
+///     to the `inference` default and got written into `index.json`. The
+///     claim was right about the *bytes*: `write_kquant` runs the
+///     norms → ple → lm_head trio unconditionally, so a q4k vindex already
+///     contains everything an `all` vindex would. Only the recorded metadata
+///     was wrong — and it under-reported the vindex's contents to every
+///     consumer that reads `extract_level`.
+///
+/// Never *lowers* an explicitly requested level.
+fn resolve_extract_level(
+    include_weights: bool,
+    quant: larql_vindex::QuantFormat,
+    requested: larql_vindex::ExtractLevel,
+) -> larql_vindex::ExtractLevel {
+    if include_weights || quant == larql_vindex::QuantFormat::Q4K {
+        larql_vindex::ExtractLevel::All
+    } else {
+        requested
+    }
+}
+
 fn parse_extract_level(s: &str) -> Result<larql_vindex::ExtractLevel, String> {
     match s.to_lowercase().as_str() {
         "browse" => Ok(larql_vindex::ExtractLevel::Browse),
@@ -202,12 +228,7 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut callbacks = CliBuildCallbacks::new();
     let build_start = Instant::now();
 
-    // Resolve extract level: --include-weights upgrades to All (backwards compat)
-    let level = if args.include_weights {
-        larql_vindex::ExtractLevel::All
-    } else {
-        args.level
-    };
+    let level = resolve_extract_level(args.include_weights, args.quant, args.level);
 
     // Dtype resolution:
     //   --f16                → F16
@@ -541,4 +562,50 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod level_resolution_tests {
+    use super::resolve_extract_level;
+    use larql_vindex::{ExtractLevel, QuantFormat};
+
+    #[test]
+    fn quant_q4k_implies_all_as_its_help_has_always_claimed() {
+        // The regression this pins: `--quant q4k` with the default level
+        // recorded `inference` while the writer had emitted an `all` vindex.
+        assert_eq!(
+            resolve_extract_level(false, QuantFormat::Q4K, ExtractLevel::Inference),
+            ExtractLevel::All
+        );
+        // Also from the lowest level — the writer's output does not depend
+        // on what was asked for, so neither should the recorded level.
+        assert_eq!(
+            resolve_extract_level(false, QuantFormat::Q4K, ExtractLevel::Browse),
+            ExtractLevel::All
+        );
+    }
+
+    #[test]
+    fn include_weights_still_upgrades() {
+        assert_eq!(
+            resolve_extract_level(true, QuantFormat::None, ExtractLevel::Browse),
+            ExtractLevel::All
+        );
+    }
+
+    #[test]
+    fn without_either_flag_the_requested_level_is_untouched() {
+        for lvl in [
+            ExtractLevel::Browse,
+            ExtractLevel::Attention,
+            ExtractLevel::Inference,
+            ExtractLevel::All,
+        ] {
+            assert_eq!(
+                resolve_extract_level(false, QuantFormat::None, lvl),
+                lvl,
+                "unquantised extract must record exactly the level asked for"
+            );
+        }
+    }
 }

@@ -35,10 +35,10 @@ pub(super) struct DecodeScratch {
     pub wk_bufs: Vec<Buffer>,
     pub wv_bufs: Vec<Buffer>,
     pub wo_bufs: Vec<Buffer>,
-    pub wq_scale_bufs: Vec<Buffer>,
-    pub wk_scale_bufs: Vec<Buffer>,
-    pub wv_scale_bufs: Vec<Buffer>,
-    pub wo_scale_bufs: Vec<Buffer>,
+    pub wq_scale_bufs: Vec<Option<Buffer>>,
+    pub wk_scale_bufs: Vec<Option<Buffer>>,
+    pub wv_scale_bufs: Vec<Option<Buffer>>,
+    pub wo_scale_bufs: Vec<Option<Buffer>>,
     pub gate_bufs: Vec<Buffer>,
     pub up_bufs: Vec<Buffer>,
     pub down_bufs: Vec<Buffer>,
@@ -124,21 +124,21 @@ impl DecodeScratch {
         // Stable across decode calls → cache by slice identity. Skips ~136
         // per-token Metal-buffer allocations for scales/norms on 34-layer
         // Gemma 3. `get_f32` hits the cache from the second decode onward.
-        let wq_scale_bufs: Vec<_> = layers
+        let wq_scale_bufs: Vec<Option<Buffer>> = layers
             .iter()
-            .map(|l| bufs.get_f32(l.wq.scales.unwrap_or(&[])))
+            .map(|l| l.wq.external_scales().map(|s| bufs.get_f32(s)))
             .collect();
-        let wk_scale_bufs: Vec<_> = layers
+        let wk_scale_bufs: Vec<Option<Buffer>> = layers
             .iter()
-            .map(|l| bufs.get_f32(l.wk.scales.unwrap_or(&[])))
+            .map(|l| l.wk.external_scales().map(|s| bufs.get_f32(s)))
             .collect();
-        let wv_scale_bufs: Vec<_> = layers
+        let wv_scale_bufs: Vec<Option<Buffer>> = layers
             .iter()
-            .map(|l| bufs.get_f32(l.wv.scales.unwrap_or(&[])))
+            .map(|l| l.wv.external_scales().map(|s| bufs.get_f32(s)))
             .collect();
-        let wo_scale_bufs: Vec<_> = layers
+        let wo_scale_bufs: Vec<Option<Buffer>> = layers
             .iter()
-            .map(|l| bufs.get_f32(l.wo.scales.unwrap_or(&[])))
+            .map(|l| l.wo.external_scales().map(|s| bufs.get_f32(s)))
             .collect();
         let gate_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.gate.data)).collect();
         let up_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.up.data)).collect();
@@ -157,32 +157,71 @@ impl DecodeScratch {
         // Pre-allocate scratch buffers reused across layers.
         // GPU processes layers sequentially within one cmd buffer, so
         // these buffers are never read and written simultaneously.
+        //
+        // The QKV and O-projection kernels read their input at the
+        // STORE's row width, which may be padded past the logical dim
+        // (GPT-OSS: hidden 2880 → 3072-wide rows). Size those inputs to
+        // the max stored width across layers and zero them once — the
+        // padded weight columns dequantise to exactly zero, so the
+        // zeroed slack is mathematically inert (the F17 analog of the
+        // F16 gate/up fix below).
+        let max_qkv_k = layers
+            .iter()
+            .map(|l| l.wq.stored_cols(l.num_q_heads * l.head_dim, hidden))
+            .max()
+            .unwrap_or(hidden)
+            .max(hidden);
+        let max_o_k = layers
+            .iter()
+            .map(|l| l.wo.stored_cols(hidden, l.num_q_heads * l.head_dim))
+            .max()
+            .unwrap_or(max_q_dim)
+            .max(max_q_dim);
+        let zeroed_f32 = |buf: &metal::Buffer, n: usize| {
+            let ptr = buf.contents() as *mut f32;
+            // SAFETY: freshly-allocated shared-storage Metal buffer with
+            // `n * 4` bytes; zeroed before any dispatch writes the live
+            // columns, so the trailing slack stays zero for the decode.
+            unsafe { std::ptr::write_bytes(ptr, 0, n) };
+        };
         let q_out = bufs.output((max_q_dim * 4) as u64);
         let k_out = bufs.output((max_kv_dim * 4) as u64);
         let v_out = bufs.output((max_kv_dim * 4) as u64);
-        let norm_f32_buf = bufs.output((hidden * 4) as u64);
-        let attn_out_buf = bufs.output((max_q_dim * 4) as u64);
+        let norm_f32_buf = bufs.output((max_qkv_k * 4) as u64);
+        zeroed_f32(&norm_f32_buf, max_qkv_k);
+        let attn_out_buf = bufs.output((max_o_k * 4) as u64);
+        zeroed_f32(&attn_out_buf, max_o_k);
         let o_out_buf = bufs.output((hidden * 4) as u64);
         let h_post_attn = bufs.output((hidden * 4) as u64);
         let ffn_norm_out = bufs.output((hidden * 4) as u64);
         let ffn_q8 = bufs.output(hidden as u64);
-        let ffn_q8s = bufs.output((hidden / LEGACY_BLOCK_ELEMS * 4) as u64);
-        let up_out = bufs.output((inter * 4) as u64);
-        let act_buf = bufs.output((inter_padded * 4) as u64);
-        {
-            let ptr = act_buf.contents() as *mut f32;
-            // SAFETY: `act_buf` is a freshly-allocated shared-storage
-            // Metal buffer with `inter_padded * 4` bytes. We zero its
-            // entire f32 capacity before any layer writes the live
-            // `inter` columns; the trailing `inter_padded - inter`
-            // columns stay zero for the remainder of the decode.
+        let ffn_q8s = bufs.output((hidden.div_ceil(LEGACY_BLOCK_ELEMS) * 4) as u64);
+        // `up_out`, `act_buf` and `gate_out_scratch` are all sized (and
+        // tail-zeroed) at `inter_padded`, not `inter`: the fused Q4_K
+        // GEGLU+down kernel reads gate/up over K = inter_padded, so
+        // `inter`-sized buffers were an out-of-bounds read for any
+        // model with inter % 256 != 0 (capability audit F16 — latent,
+        // since all shipped shapes are 256-aligned). The zeroed tail is
+        // mathematically inert: gelu(0) (or silu(0)) × 0 contributes
+        // nothing to the down matvec.
+        let zeroed_padded = |buf: &metal::Buffer| {
+            let ptr = buf.contents() as *mut f32;
+            // SAFETY: freshly-allocated shared-storage Metal buffer with
+            // `inter_padded * 4` bytes; zeroed before any layer writes
+            // the live `inter` columns, so the trailing columns stay
+            // zero for the remainder of the decode.
             unsafe { std::ptr::write_bytes(ptr, 0, inter_padded) };
-        }
+        };
+        let up_out = bufs.output((inter_padded * 4) as u64);
+        zeroed_padded(&up_out);
+        let act_buf = bufs.output((inter_padded * 4) as u64);
+        zeroed_padded(&act_buf);
         let down_out = bufs.output((hidden * 4) as u64);
-        let gate_out_scratch = bufs.output((inter * 4) as u64);
+        let gate_out_scratch = bufs.output((inter_padded * 4) as u64);
+        zeroed_padded(&gate_out_scratch);
         let normed_scratch = bufs.output((hidden * 4) as u64);
         let o_q8_scratch = bufs.output(max_q_dim as u64);
-        let o_q8s_scratch = bufs.output((max_q_dim / LEGACY_BLOCK_ELEMS * 4) as u64);
+        let o_q8s_scratch = bufs.output((max_q_dim.div_ceil(LEGACY_BLOCK_ELEMS) * 4) as u64);
         let scaled_scratch = bufs.output((hidden * 4) as u64);
 
         let has_moe = layers.iter().any(|l| l.moe.is_some() || l.ffn_is_remote);

@@ -150,11 +150,18 @@ kernel void q4k_geglu_gelu_tanh_down(
                 float nib_hi = float((byte >> 4) & 0x0Fu);
                 uint idx_lo = x_base + sub_lo * 32 + l;
                 uint idx_hi = x_base + sub_hi * 32 + l;
+                // Clamp the tanh argument like `geglu_gelu_tanh` does:
+                // Apple's tanh is (exp(2y)-1)/(exp(2y)+1) and returns NaN
+                // for |y| >~ 44, which real gate values (~±10) reach.
                 float g_lo = gate[idx_lo];
-                float t_lo = tanh(c * (g_lo + 0.044715f * g_lo * g_lo * g_lo));
+                float y_lo = clamp(c * (g_lo + 0.044715f * g_lo * g_lo * g_lo),
+                                   -15.0f, 15.0f);
+                float t_lo = tanh(y_lo);
                 float act_lo = (0.5f * g_lo * (1.0f + t_lo)) * up[idx_lo];
                 float g_hi = gate[idx_hi];
-                float t_hi = tanh(c * (g_hi + 0.044715f * g_hi * g_hi * g_hi));
+                float y_hi = clamp(c * (g_hi + 0.044715f * g_hi * g_hi * g_hi),
+                                   -15.0f, 15.0f);
+                float t_hi = tanh(y_hi);
                 float act_hi = (0.5f * g_hi * (1.0f + t_hi)) * up[idx_hi];
                 dot_lo += nib_lo * act_lo;
                 sum_lo += act_lo;

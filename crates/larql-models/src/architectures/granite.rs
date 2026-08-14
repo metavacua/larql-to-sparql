@@ -68,6 +68,123 @@ impl ModelArchitecture for GraniteArch {
             None
         }
     }
+
+    // ── MoE (granitemoe) ──
+    //
+    // GraniteMoE stacks its experts into three tensors per layer rather than
+    // storing them per-expert, so it uses the PACKED keys — the same shape
+    // convention Gemma 4 uses — and emits no `expert_ffn_*` keys at all:
+    //
+    //   block_sparse_moe.input_linear.weight   [E, 2*inter, hidden]  (gate+up)
+    //   block_sparse_moe.output_linear.weight  [E, hidden, inter]    (down)
+    //   block_sparse_moe.router.layer.weight   [E, hidden]           (router)
+    //
+    // Verified against ibm-granite/granite-3.0-1b-a400m-instruct:
+    // [32, 1024, 1024] / [32, 1024, 512] / [32, 1024] at hidden=1024,
+    // inter=512, E=32.
+    //
+    // Unlike Gemma 4 this is a pure MoE block, not a hybrid — there is no
+    // parallel dense branch — so `is_hybrid_moe()` stays false and the dense
+    // Granite path is untouched (every method here gates on `is_moe()`).
+
+    fn is_moe(&self) -> bool {
+        self.config.num_experts.unwrap_or(0) > 0
+    }
+
+    fn num_experts(&self) -> usize {
+        self.config.num_experts.unwrap_or(0)
+    }
+
+    fn num_experts_per_token(&self) -> usize {
+        self.config
+            .num_experts_per_token
+            .or(self.config.top_k_experts)
+            .unwrap_or(0)
+    }
+
+    /// GraniteMoE has no `moe_intermediate_size`; per-expert width is the
+    /// model's `intermediate_size` (512 for 1B-A400M). Falling back to 0
+    /// would size every expert to nothing.
+    fn moe_intermediate_size(&self) -> usize {
+        if !self.is_moe() {
+            return 0;
+        }
+        self.config
+            .moe_intermediate_size
+            .unwrap_or(self.config.intermediate_size)
+    }
+
+    /// GraniteMoE stacks all experts into one BF16 tensor per projection —
+    /// the same physical layout Gemma 4 26B A4B uses, so the existing
+    /// packed-expert quantiser consumes it unchanged.
+    fn expert_format(&self) -> crate::config::ExpertFormat {
+        if self.is_moe() {
+            crate::config::ExpertFormat::PackedBF16
+        } else {
+            crate::config::ExpertFormat::PerExpert
+        }
+    }
+
+    /// `GraniteMoeTopKGating.forward` selects *then* normalises:
+    ///
+    /// ```text
+    /// top_k_logits, top_k_indices = logits.topk(self.top_k, dim=1)
+    /// top_k_gates = torch.softmax(top_k_logits, dim=1)
+    /// ```
+    ///
+    /// so the chosen experts' weights sum to 1. The inherited default is
+    /// softmax-over-all-then-select, whose weights do not — on this model
+    /// that is a 49.8% bits/char disagreement with the reference, not a
+    /// rounding difference. Selection is unaffected (softmax is monotonic);
+    /// only the weights change.
+    fn moe_router_kind(&self) -> crate::config::MoeRouterKind {
+        crate::config::MoeRouterKind::TopKThenSoftmax
+    }
+
+    /// The reference tier's spelling of the same fact. `granitemoe` ships no
+    /// `norm_topk_prob`, so the config-reading default answers
+    /// `SoftmaxThenSelect` for a model that renormalises.
+    fn expert_routing_policy(&self) -> crate::config::ExpertRoutingPolicy {
+        crate::config::ExpertRoutingPolicy::NormalisedOverSelected
+    }
+
+    /// `GraniteMoeMoE.forward` splits with `hidden_states.chunk(2, dim=-1)`
+    /// — the leading half is gate. Not inferable from `PackedBF16`: GPT-OSS
+    /// is equally packed and interleaved.
+    fn gate_up_layout(&self) -> Option<crate::config::GateUpLayout> {
+        self.is_moe()
+            .then_some(crate::config::GateUpLayout::ContiguousHalves)
+    }
+
+    fn moe_router_key(&self, layer: usize) -> Option<String> {
+        if !self.is_moe() {
+            return None;
+        }
+        Some(format!(
+            "{}block_sparse_moe.router.layer.weight",
+            self.layer_prefix(layer)
+        ))
+    }
+
+    fn packed_experts_gate_up_key(&self, layer: usize) -> Option<String> {
+        if !self.is_moe() {
+            return None;
+        }
+        Some(format!(
+            "{}block_sparse_moe.input_linear.weight",
+            self.layer_prefix(layer)
+        ))
+    }
+
+    fn packed_experts_down_key(&self, layer: usize) -> Option<String> {
+        if !self.is_moe() {
+            return None;
+        }
+        Some(format!(
+            "{}block_sparse_moe.output_linear.weight",
+            self.layer_prefix(layer)
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -87,6 +204,7 @@ mod tests {
             num_kv_heads: 8,
             vocab_size: Some(49152),
             rope_base: 10_000.0,
+            layer_rope_theta: None,
             rope_local_base: None,
             sliding_window: None,
             num_experts: None,
@@ -95,6 +213,8 @@ mod tests {
             enable_moe_block: false,
             top_k_experts: None,
             moe_intermediate_size: None,
+            swiglu_limit: None,
+            norm_topk_prob: None,
             kv_lora_rank: None,
             q_lora_rank: None,
             qk_nope_head_dim: None,
@@ -117,6 +237,21 @@ mod tests {
             per_layer_embed_dim: None,
             num_kv_shared_layers: None,
             has_vision_config: false,
+            tie_word_embeddings: None,
+            qk_scale_factor: None,
+            output_multiplier: None,
+            post_norm_eps: None,
+            attention_bias: None,
+            hidden_act: None,
+            max_position_embeddings: None,
+            image_token_id: None,
+            video_token_id: None,
+            out_hidden_size: None,
+            projector_hidden_size: None,
+            projector_hidden_act: None,
+            target_layer_ids: None,
+            draft_block_size: None,
+            mask_token_id: None,
         }
     }
 

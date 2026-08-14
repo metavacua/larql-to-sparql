@@ -18,11 +18,20 @@ pub fn insert_q4k_layer_tensors(
     let attn = index
         .attn_kquant_layer_data(layer)
         .ok_or_else(|| format!("attn Q4K slices missing for layer {layer}"))?;
-    let ffn = index
-        .interleaved_kquant_layer_data(layer)
-        .ok_or_else(|| format!("ffn Q4K slices missing for layer {layer}"))?;
 
     let arch = &*weights.arch;
+    // Pure MoE (GPT-OSS, GraniteMoE, OLMoE) has no dense FFN slab — its FFN
+    // *is* the expert block, served from the per-layer expert store.
+    // Requiring `interleaved_kquant` here rejected those models before the
+    // forward ever reached its MoE branch (the same gap the
+    // `larql-inference` copy of this function already closed — the two
+    // copies had drifted, and the bench route runs through this one).
+    let needs_dense_ffn = !arch.is_moe() || arch.is_hybrid_moe();
+    let ffn = match index.interleaved_kquant_layer_data(layer) {
+        Some(ffn) => Some(ffn),
+        None if !needs_dense_ffn => None,
+        None => return Err(format!("ffn Q4K slices missing for layer {layer}")),
+    };
     let hidden = weights.hidden_size;
     let num_q = arch.num_q_heads_for_layer(layer);
     let num_kv = arch.num_kv_heads_for_layer(layer);
@@ -55,6 +64,12 @@ pub fn insert_q4k_layer_tensors(
         o_key.clone(),
         dequantize_matrix(attn[3].0, attn[3].1, hidden, q_dim).into_shared(),
     );
+    let Some(ffn) = ffn else {
+        // Pure MoE: attention only. The expert block sources its own
+        // weights from the per-layer store, so no dense gate/up/down keys
+        // are claimed.
+        return Ok(vec![q_key, k_key, v_key, o_key]);
+    };
     scratch.insert(
         gate_key.clone(),
         dequantize_matrix(ffn[0].0, ffn[0].1, intermediate, hidden).into_shared(),

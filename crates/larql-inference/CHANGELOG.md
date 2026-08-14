@@ -9,6 +9,38 @@ pre-1.0 phase. Forward-looking work lives in [`ROADMAP.md`](ROADMAP.md).
 Entries migrated from ROADMAP.md on 2026-05-10; pre-2026-05-10 entries
 preserve the date and voice they were originally written in.
 
+## [2026-05-28] — CPU remote-MoE decode shipped, and its KV-cached follow-up (C1)
+
+- **✅ Shipped (closes #146):** `larql run --moe-shards … ` without `--metal` previously failed with `decode_token_with_moe returned None during prefill` — the CPU backend's `DecodeBackend::decode_token_with_moe` is a GPU-only trait default returning `None`, and the CLI always called the GPU path. Fix: route the CPU branch through the existing `generate_kquant_cpu_remote` (`predict_kquant_hidden(Some(remote))` → `run_moe_layer_cpu` → `forward_moe_seq`), exported at the crate root and wired backend-aware in `run_cmd.rs`. Also added a clean attention-presence guard in `grid/setup.rs` (a bare vindex now errors instead of panicking in `build_pipeline_layers`). Verified end-to-end on the real Gemma-4-26B-A4B vindex (output "Paris", 240 experts/token dispatched). **Caveat: full-recompute per token, no KV cache → 0.1–0.4 tok/s on 26B.**
+- **✅ Follow-up (C1) shipped (2026-05-28):** KV-cached MoE decode now works and is the default. `RemoteMoeFfn` (`{ weights, remote }`, `forward_moe_full_layer` = `moe_ffn_block_cpu`) rides the MoE-aware `kv_*_via_dispatch` path; fixed a prefill-RoPE bug in `attention/gpu.rs::run_attention_with_kv_backend` (was using unscaled `apply_rope_partial` → wrong on Gemma 4 global layers; now `apply_rope_partial_at_full` with the effective base/divisor/llama3, matching the decode-step + full-recompute paths). **Byte-identical to full-recompute, ~10× faster** on Gemma-4-26B-A4B. Full-recompute kept as `LARQL_MOE_FULL_RECOMPUTE=1` escape hatch + PLE fallback. Details: [larql-kv ROADMAP](../larql-kv/ROADMAP.md) §"MoE-aware KV engines (C1)".
+
+## [2026-05-28] — Hardening findings from the whole-codebase review
+
+From the whole-codebase review ([`docs/audits/codebase-review-2026-05-28.md`](../../docs/audits/codebase-review-2026-05-28.md), workspace [`ROADMAP.md`](../../ROADMAP.md) §"Codebase hardening"):
+
+- **P0 — make `FfnBackend::forward` fallible.** The trait method returns an infallible `Array2<f32>`, forcing process-abort on served paths. Three `panic!` sites to convert to `?`-propagation into the existing `GenerateError` channel (sibling `interventions.rs:55` already does this):
+  - ✅ `src/ffn/remote/http.rs:519` — `RemoteWalkBackend::forward` `.unwrap_or_else(|e| panic!())` aborts serving on any remote-shard network blip mid-generation. *(Confirmed by hand; the `from_shape_vec().expect()` at :521 is safe — leave it.)*
+  - `src/vindex/kquant_forward/cached.rs:123,200` and `hidden.rs:38` — Q4K CPU dequant `panic!` on truncated / layer-mismatched / f32-only vindex routed to CPU.
+- Highest-leverage fix in the workspace: the trait signature change also unblocks the `larql-compute` MoE panic sites.
+
+The P0 is **not** fixed. `FfnBackend::forward` (declared in
+`larql-compute/src/ffn.rs:39`) still returns an infallible `Array2<f32>`, and
+`ffn/remote/http.rs` still aborts on a remote-shard blip. Tracked in
+[`ROADMAP.md`](ROADMAP.md) §"Open defects".
+
+## [2026-05-24] — Multi-modal engine seam (ADR-0023)
+
+`KvEngine` gains `supports_multimodal()` + `prefill_from_hidden()`.
+`AnyEngine` enum forwards both. Dispatch helpers in
+`kv_dispatch/helpers.rs` hoist the embed step out of
+`kv_prefill_via_dispatch` (sync + async) into a new
+`kv_prefill_from_hidden_via_dispatch` peer — both paths use the same
+layer-forward loop. `StandardEngine` is the only MM-capable engine
+today; other engines inherit default-false. The embed-step shim in
+`forward/embed.rs` routes through `embed_plan` (the multi-modal-aware
+entry point from Phase 0), preserving bit-identity on text-only
+inputs via a fast path.
+
 ## [2026-05-17] — `DumpConfig` env-var cache drop
 
 Removed the `OnceLock` cache from `forward::dump_config::DumpConfig::get()`;
@@ -32,6 +64,40 @@ alias for back-compat. Four callers (`attention/block.rs`,
 `forward/layer.rs`, `vindex/kquant_forward/hidden.rs` × 2) bind the
 config to a local before calling `.layer_dir()` / `.stage_dir(layer)`
 so the returned `&str` doesn't borrow from a temporary.
+
+## [2026-05-10] — Model architecture independence hardening: A1-A3 (full record)
+
+Migrated from `ROADMAP.md` on 2026-08-04. Complements the shorter A1+A2+A3
+entry below.
+
+**Status**: A1, A2, A3 shipped 2026-05-10 (see CHANGELOG.md). A4 remains
+planned. Original "L5 immediate-EOS" framing turned out to be stale — when
+the work item was reopened, Gemma 4 31B Q4K Metal already generated
+coherent text end-to-end (verified via `larql run gemma4-31b-q4k.vindex`).
+The heterogeneous-attention safety had landed quietly via per-layer reads
+in `metal/decode/setup.rs:DecodeScratch::new` (sized to
+`max(layers[*].q_dim)`), `metal/ops/full_pipeline/buffers.rs` (prefill
+same), and `MetalBackend::ensure_kv_cache_for_layers`. A1-A3 then landed as
+the deferred API/capability cleanup.
+
+Gemma 4 31B Q4K has 60 layers split into two geometry classes: 50
+sliding-attention layers (head_dim=256, num_kv_heads=16,
+sliding_window=1024) and 10 full-attention layers at L5, L11, L17, L23,
+L29, L35, L41, L47, L53, L59 (head_dim=512, num_kv_heads=4). Both classes
+now flow correctly through GPU decode and prefill.
+
+Work items:
+
+| # | Item | Status |
+|---|------|--------|
+| A1 | Add a runtime capability gate for architectures whose attention is not executable by the active path | shipped 2026-05-10 — `Capability::HeterogeneousAttention` + `gpu_setup::ensure_attention_supported` (see CHANGELOG) |
+| A2 | Remove scalar `num_q_heads`, `num_kv_heads`, `head_dim`, `q_dim`, `kv_dim`, and `rope_base` assumptions from decode/prefill call sites | shipped 2026-05-10 — dropped from 10 `DecodeBackend` methods + every `larql-inference` call site; `AttentionGeometry` deleted; bonus: latent `PipelineIntervention` head_dim bug fixed (now per-target-layer) |
+| A3 | Ensure all KV cache allocation paths use `layers[*].num_kv_heads` and `layers[*].head_dim`, not the caller's first-layer geometry fallback | already shipped pre-A1/A2; documented + audited 2026-05-10 — production paths all reach `preallocate_kv_cache_per_layer`; legacy uniform `create_kv_cache` retained only for synthetic tests + `populate_kv_layer` lazy bootstrap |
+| A4 | Add architecture fixtures for heterogeneous geometry and unsupported-attention failures so GPU, CPU, trace, and vindex-backed paths agree | planned |
+
+Acceptance (met for A1-A3): a heterogeneous model runs through every
+selected path using per-layer geometry, or fails before decode/extraction
+with a precise unsupported capability error (`GenerateError::UnsupportedBackend`).
 
 ## [2026-05-10] — A1+A2+A3 model architecture independence hardening
 
@@ -385,6 +451,128 @@ Source surgery + targeted test work that doesn't change behaviour. All public AP
 | MI2: backend-parametric activation patching | Donor capture and recipient intervention helpers. |
 | MI3: trace artifact contract | Complete ordered chains only, exact file length checks, `TRACE SAVE` requires `POSITIONS ALL`. |
 | MI4 partial: dense + custom-backend parity pinned | Final trace residuals project to the same logits as the canonical dense raw-forward path; custom `FfnBackend` trace matches the generic hooked forward runner. WalkFfn/patched-vindex/Q4K/MoE parity still pending. |
+
+## [2026-05-01] — Metal lm_head: stride-32 Q4_K matvec, f16 GEMV fallback
+
+Migrated from `ROADMAP.md` on 2026-08-04. Kept in full because it carries a
+correction to its own diagnosis — the 2026-05-02 follow-up establishes that the
+originally recorded root cause was wrong. That reasoning is the reusable part.
+
+> **2026-05-02 follow-up — the root cause was wrong.** What was diagnosed
+> as a kernel-level reduction-tree drift turned out to be a dispatch
+> geometry mismatch (`MetalBackend::q4k_matvec` hardcoding the 4sg
+> shader's `THREADS_PER_TG=128` while dispatching the 8sg pipeline,
+> production default since 2026-04-28 — same family as 077884b). With
+> the dispatcher fixed to use `pipeline.rows_per_tg` /
+> `pipeline.threads_per_tg`, the production `q4k_matvec` is correct AND
+> ~1.10 ms/tok faster than stride-32. **Stride-32 is now the diagnostic
+> fallback; production default is `lm_head_knn_backend` with
+> `q4k_matvec` first.** End-to-end: 76.3 → 84.0 → **88.1** tok/s on
+> Gemma 3 4B (last step is the 2026-05-09 QKV defuse), gap to ollama
+> 1.30× → 1.18× → **1.17×**. Diagnostic A/B via
+> `LARQL_LM_HEAD_SKIP_Q4K=1`. The historical bisect below is preserved
+> for context.
+
+Gemma 3 4B Metal end-to-end was producing the wrong continuation
+("The Capital of France is:  **") on `"The capital of France is"`
+while CPU produced the correct "**Paris**" answer. Bisected:
+
+- Per-layer hidden parity holds (`test_decode_consistency_gemma3_4b`
+  and the new 2-step variant pass at cos ≥ 0.99995 across all 34
+  layers, 1 and 2 decode steps) — KV cache writes/reads and per-layer
+  Metal kernels are correct.
+- The single-token logits goldens for Metal pinned a top-5 set whose
+  positions 4-5 differed from CPU at the prefill boundary, even though
+  top-1 matched (`top1_logit Δ ≈ 5e-4`).
+- A/B with `LARQL_LM_HEAD_FORCE_CPU=1` confirmed Metal generated
+  "Paris" once the lm_head bypassed the Q4_K matvec path, isolating
+  the drift to that specific kernel.
+
+Root cause: `shaders/q4k_matvec.rs` 32-lane simdgroup parallel
+reduction with a 2-way inter-superblock split (`ix = lane & 1u`)
+accumulates partial sums in a different order than the f32 reference.
+Same f32 precision at every step; the difference is reduction-tree
+associativity. On a 262K × 2560 lm_head matvec this surfaces as
+~1e-3 relative drift on top-1 logits, enough to flip rank-1 on
+close-call tokens (e.g. " Capital" vs " capital" at decode step 1
+of Gemma 3 4B).
+
+**Fix**: `lm_head_topk` (`layer_graph/generate/lm_head.rs`) routes
+through the new `lm_head_knn_backend_skip_q4k` method on `VectorIndex`
+when the active backend is non-CPU. That dispatch chain replaces the
+production `q4k_matvec` first-path with a 3-step ladder:
+
+  1. **Stride-32 Q4_K matvec** (`backend.q4k_matvec_stride32`,
+     `shaders/q4k_matvec_stride32.rs` — new) — same Q4_K bytes as
+     production, same bandwidth (330 MB/tok read), but lane `k`
+     accumulates the dot-product over elements `i % 32 == k` and the
+     final reduction is `simd_sum` across 32 lanes — bit-equivalent
+     reduction tree to `f16_gemv`. Recovers rank-1 stability without
+     paying the f16 fallback's 4× bandwidth penalty.
+  2. **f16 GEMV on `embeddings.bin` mmap** (tied-embed only, ~2×
+     bandwidth of Q4_K) — fallback when the stride-32 kernel isn't
+     dispatchable.
+  3. f32 BLAS fallback (`lm_head_knn`).
+
+**Env vars (post 2026-05-02 dispatch fix):** the production Q4_K path
+is the default; `LARQL_LM_HEAD_SKIP_Q4K=1` routes through this
+stride-32 chain for diagnostic A/B. Within the chain,
+`LARQL_LM_HEAD_STRIDE32=0` disables the stride-32 fallback.
+
+Five attempts on the way to this:
+- v1: route through `CpuBackend` via `index.lm_head_knn_backend` —
+  picks the **scalar** Q4_K reference (`cpu/ops/q4k_matvec.rs::dispatch`,
+  unvectorised), ~510 ms/tok → **1.9 tok/s** end-to-end.
+- v2: route through `CpuBackend` via `backend_lm_head_topk` (CPU BLAS
+  on f32 `weights.lm_head`), ~30 ms/tok → **23.6 tok/s**.
+- v3: route through Metal `backend.f32_gemv` on f32 `weights.lm_head`,
+  ~8 ms/tok → **52.2 tok/s** sustained.
+- v4: Metal `f16_gemv` on the embed `f16_mmap`, ~4 ms/tok →
+  **66.8 tok/s** sustained.
+- **v5 (shipped)**: Metal stride-32 `q4k_matvec` on Q4_K mmap, ~3
+  ms/tok → **71.5 tok/s** sustained.
+
+**Validation**:
+- `arch_gemma3_4b_gpu` now generates `"The capital of France is **Paris**."` (was `"The Capital of France is:  **"`).
+- All 4 `gemma3` logits goldens pass for both backends; pinned values are now equal post-fix (per-backend split kept for future drift detection).
+- 2-step decode parity (`decode_consistency_gemma3_4b_2steps` — new) confirms KV-cache write/read across decode steps is independently correct.
+
+**Bench (Gemma 3 4B, M3 Max, `larql bench gemma3-4b-q4k-v2 --ollama gemma3:4b -n 50 --warmup 5`, sustained / cold-GPU)**:
+
+| Path | Decode tok/s | lm_head ms/tok | GPU fwd ms/tok | vs ollama |
+|---|---|---|---|---|
+| Pre-fix (Metal Q4_K matvec, **wrong output**) | ~78 (historic) | ~1 | ~12 | 1.34× slower |
+| v1: CPU `index.lm_head_knn_backend` (scalar Q4_K) | **1.9** | 509.3 | 18.6 | 55× slower |
+| v2: CPU `backend_lm_head_topk` (BLAS f32) | 23.6 | 30.4 | 12.6 | 4.4× slower |
+| v3: Metal `backend.f32_gemv` on f32 lm_head | 52.2 | 8.0 | 12.0 | 2.0× slower |
+| v4: Metal `f16_gemv` on embed f16_mmap | 66.8 | 3.8 | 11.8 | 1.57× slower |
+| **v5 (shipped)**: Metal stride-32 `q4k_matvec` | **71.5** | 3.0 | 11.7 | **1.44× slower** |
+| ollama gemma3:4b | 102.8 | — | — | 1.00× |
+
+(Watch for thermal noise: back-to-back benches on a hot GPU drop
+sustained tok/s by 25-30%; cool-GPU numbers above match the historic
+~78 baseline structure when adjusting for the 3 ms lm_head cost.)
+
+lm_head is now ~21% of decode (down from 96.5% in v1, 25.5% in v4).
+The stride-32 kernel approaches Q4_K's bandwidth floor (330 MB/tok ÷
+~400 GB/s ≈ 0.8 ms theoretical; we're at 3 ms ≈ 28% of peak). The
+remaining 1.44× gap to ollama (and the ~6 tok/s gap to the historic
+~78 baseline) lives entirely in **GPU forward** (75% of decode @
+11.7 ms), which is a separate roadmap item — `q4k_matvec` 8sg /
+Q4_K matmul for prefill / kernel fusion / encoder coalescing.
+
+**Files**:
+- `crates/larql-compute/src/metal/shaders/q4k_matvec_stride32.rs` — new shader, f16_gemv-style stride-32 reduction
+- `crates/larql-compute/src/metal/shaders/mod.rs` — register the new module + push to merged source
+- `crates/larql-compute/src/metal/mod.rs` — `q4k_matvec_stride32_pipeline` field + KernelHandle init
+- `crates/larql-compute/src/metal/trait_impl/matmul.rs` — `MetalBackend::q4k_matvec_stride32` inherent method
+- `crates/larql-compute/src/metal/trait_impl/quant_matvec.rs` — `QuantMatVec::q4k_matvec_stride32` trait wire-up
+- `crates/larql-compute/src/backend/quant_matvec.rs` — trait method declaration (default returns `None`)
+- `crates/larql-inference/src/layer_graph/generate/lm_head.rs` — `lm_head_topk` `prefer_cpu` branch routes to `index.lm_head_knn_backend_skip_q4k(..., backend)`
+- `crates/larql-vindex/src/index/storage/lm_head.rs` — new `lm_head_knn_backend_skip_q4k` method (path 1 = stride-32 Q4_K, path 2 = f16 GEMV, path 3 = f32 BLAS); `LARQL_LM_HEAD_STRIDE32=0` opt-out
+- `crates/larql-inference/src/residual_diff/capture.rs` — `metal_decode_steps` helper for multi-step parity
+- `crates/larql-inference/tests/test_decode_consistency.rs` — `decode_consistency_gemma3_4b_2steps` test
+- `crates/larql-inference/tests/test_logits_goldens.rs` — Metal pins re-captured for v5 stride-32 path
 
 ## [2026-04-30] — gRPC grid accuracy + dense Metal chat template + Gemma 4 model coverage
 

@@ -168,6 +168,13 @@ macro_rules! vlog {
 
 pub fn run(args: WalkArgs) -> Result<(), Box<dyn std::error::Error>> {
     let verbose = args.verbose;
+    // Validated once, here, because `run` fans out to several forward paths
+    // and only some of them read the spec. Rejecting an unparseable one up
+    // front beats warning and running `standard` anyway: a typo'd engine that
+    // silently exercises the default is the same class of failure as a flag
+    // dropped entirely (issue #199), and the one a caller is least likely to
+    // notice.
+    validate_engine_spec(requested_engine_spec(&args).as_deref())?;
     let load_start = Instant::now();
 
     // Load the index — either from .vindex or from separate NDJSON files
@@ -454,22 +461,11 @@ fn run_with_vindex_weights(
 }
 
 /// Build the Metal compute backend for `--metal`, or a clear error when the
-/// crate was built without the `gpu` feature (or off macOS). Split by `cfg`
-/// so the gpu-off build rejects through a normal `Result` — a diverging
-/// `let backend = { … return Err … }` binding would otherwise mark all
-/// downstream code unreachable and its locals unused in the gpu-off compile.
-#[cfg(all(feature = "gpu", target_os = "macos"))]
+/// binary lacks the backend or the host lacks a device. Delegates to the
+/// shared registry-backed factory in `backend_select`.
 fn metal_backend_box() -> Result<Box<dyn larql_compute::ComputeBackend>, Box<dyn std::error::Error>>
 {
-    let b = larql_compute_metal::MetalBackend::new()
-        .ok_or("Metal backend unavailable — rebuild with `--features gpu` on an M-series Mac.")?;
-    Ok(Box::new(b))
-}
-
-#[cfg(not(all(feature = "gpu", target_os = "macos")))]
-fn metal_backend_box() -> Result<Box<dyn larql_compute::ComputeBackend>, Box<dyn std::error::Error>>
-{
-    Err("`--metal` requires the `gpu` feature on macOS".into())
+    crate::backend_select::backend_for_metal_flag(true)
 }
 
 /// Predict against a Q4_K / Q6_K vindex: dequantise each layer's attn + FFN
@@ -544,6 +540,45 @@ fn run_predict_q4k(
         // CPU Q4K autoregressive: per-step, dequantise layer weights
         // just-in-time (`predict_kquant` does this internally) and loop.
         // Not token-cached, so O(N²) but correct. For speed use --metal.
+        //
+        // This path has no KV cache and therefore no engine to select, so a
+        // named `--engine` cannot be honoured here. Say so instead of running
+        // something else under the caller's chosen label: silently dropping
+        // the flag is what made every engine look identical through
+        // `larql run` (issue #199), since they were all the same path.
+        // Fast path first: a non-PLE hybrid-MoE model can run the resident,
+        // KV-cached route instead of the O(N^2) re-dequantising loop below.
+        //
+        // Measured on gemma4-26b-a4b (M3 Max, 2026-08-08): 1745 ms/token on
+        // the uncached path against 26.8 ms/token here — 65x — for 2.1 GB
+        // more RSS (15.5 -> 17.6 GB). The two compute the same model: same
+        // layers, same experts (which stay Q4_K in both), same lm_head. All
+        // that differs is *when* attention and the dense FFN are dequantised:
+        // once, up front, instead of on every token. `larql bench --cpu` has
+        // always taken this route, which is why its numbers and `larql run`'s
+        // disagreed by a factor nobody could place.
+        // `LARQL_CPU_RESIDENT=0` forces the uncached route so the two can be
+        // A/B'd in one binary under identical conditions. Without it the old
+        // path becomes unreachable on MoE models the moment this lands, and a
+        // before/after measured on two different builds — or, worse, two
+        // different prompts — is not a comparison.
+        let resident_allowed = std::env::var("LARQL_CPU_RESIDENT")
+            .map(|v| v != "0")
+            .unwrap_or(true);
+        if resident_allowed
+            && !arch_needs_per_layer_embeddings(weights)
+            && weights.arch.is_hybrid_moe()
+        {
+            return run_q4k_generate_cpu_resident(weights, tokenizer, &token_ids, args, &index);
+        }
+
+        // Uncached fallback: PLE architectures and dense models. This path has
+        // no KV cache and therefore no engine to select, so a named `--engine`
+        // cannot be honoured — say so instead of running something else under
+        // the caller's chosen label (issue #199).
+        if let Some(spec) = requested_engine_spec(args) {
+            return Err(engine_unsupported_on_uncached_path(&spec).into());
+        }
         return run_q4k_generate_cpu(weights, tokenizer, &token_ids, args, &index);
     }
 
@@ -684,6 +719,8 @@ fn run_predict_q4k_remote(
     );
 
     let start = Instant::now();
+    // A refusal from the shards ends the command. Printing predictions built
+    // without the layer that refused would report a walk the model never ran.
     let result = larql_inference::vindex::predict_kquant_with_ffn(
         weights,
         tokenizer,
@@ -691,7 +728,8 @@ fn run_predict_q4k_remote(
         args.predict_top_k,
         &index,
         &remote,
-    );
+    )
+    .map_err(|refusal| format!("remote FFN refused ({}): {refusal}", refusal.kind()))?;
     let elapsed = start.elapsed();
 
     print_predictions("walk (q4k + ffn remote)", &result.predictions, verbose);
@@ -703,6 +741,89 @@ fn run_predict_q4k_remote(
         );
     }
 
+    Ok(())
+}
+
+/// Whether this architecture applies Per-Layer Embeddings.
+///
+/// The resident engine path does not apply PLE, so those architectures
+/// (Gemma 4 E-series) must keep the full-recompute route — the same guard
+/// `bench`'s in-process MoE runner enforces, kept in both places because a
+/// silent mismatch here is a wrong answer rather than a slow one.
+fn arch_needs_per_layer_embeddings(weights: &ModelWeights) -> bool {
+    weights.arch.per_layer_input_gate_key(0).is_some()
+}
+
+/// CPU Q4K generation over resident attention + dense FFN, with a KV cache.
+///
+/// Dequantises attention and the dense FFN slab to f32 once and keeps them
+/// resident for the whole run; experts stay Q4_K and are read directly by
+/// `LocalMoeFfn`. Identical in what it computes to
+/// [`run_q4k_generate_cpu`] — the difference is that the uncached loop redoes
+/// that dequantisation, and re-runs the entire growing sequence, on every
+/// token.
+fn run_q4k_generate_cpu_resident(
+    weights: &mut ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    initial_ids: &[u32],
+    args: &WalkArgs,
+    index: &VectorIndex,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let start = Instant::now();
+
+    for layer in 0..weights.num_layers {
+        larql_inference::vindex::insert_q4k_layer_tensors_resident(weights, index, layer)
+            .map_err(|e| format!("failed to dequantise layer {layer} to f32: {e}"))?;
+    }
+    let resident_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    // `--engine` is honoured here, unlike on the uncached path: this route
+    // has a real KV engine to select.
+    let engine_spec = requested_engine_spec(args);
+    let spec = engine_spec.as_deref().unwrap_or("standard");
+    let kind = larql_kv::EngineKind::from_name(spec)
+        .ok_or_else(|| format!("--engine {spec:?}: unknown engine"))?;
+    let engine_label = kind.display_name().to_string();
+    let mut engine = kind.build(larql_inference::cpu_engine_backend());
+
+    let weights_ref: &ModelWeights = weights;
+    let moe_ffn = larql_inference::ffn::LocalMoeFfn {
+        weights: weights_ref,
+        index: Some(index),
+    };
+
+    let decode_start = Instant::now();
+    let mut stdout = std::io::stdout();
+    let mut emitted = 0usize;
+    let ids = larql_kv::generation::generate_with_engine_resident(
+        &mut engine,
+        weights_ref,
+        tokenizer,
+        &moe_ffn,
+        index,
+        initial_ids,
+        args.max_tokens,
+        |_id, tok| {
+            print!("{tok}");
+            let _ = stdout.flush();
+            emitted += 1;
+        },
+    );
+    println!();
+
+    if args.verbose {
+        let decode_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
+        let n = ids.len().saturating_sub(initial_ids.len()).max(emitted);
+        eprintln!(
+            "  Q4K CPU generate (resident, {}): {:.2}s  ({} tokens, {:.1} ms/token)",
+            engine_label,
+            decode_ms / 1000.0,
+            n,
+            if n == 0 { 0.0 } else { decode_ms / n as f64 },
+        );
+        eprintln!("  f32-resident dequantisation: {resident_ms:.0} ms (once)");
+    }
     Ok(())
 }
 
@@ -749,6 +870,43 @@ fn run_q4k_generate_cpu(
         );
     }
     Ok(())
+}
+
+/// The engine the caller asked for, if any: `--engine` first, then
+/// `LARQL_KV_ENGINE`. One resolver so the validation in [`run`], the
+/// rejection in [`run_predict_q4k`] and the builder in [`generate_stream`]
+/// cannot disagree about whether an engine was requested.
+fn requested_engine_spec(args: &WalkArgs) -> Option<String> {
+    args.engine
+        .clone()
+        .or_else(|| std::env::var("LARQL_KV_ENGINE").ok())
+}
+
+/// Reject a spec no engine answers to.
+///
+/// Split out as a pure function so the message is testable without a model.
+/// Warning and running `standard` instead — the old behaviour — makes a typo'd
+/// engine indistinguishable from the default, which is the same failure as
+/// dropping the flag entirely (issue #199).
+fn validate_engine_spec(spec: Option<&str>) -> Result<(), String> {
+    match spec {
+        Some(s) if larql_kv::EngineKind::from_name(s).is_none() => Err(format!(
+            "unknown --engine {s:?}; supported: {}",
+            larql_kv::EngineKind::supported_names().join(", ")
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The refusal owed to a caller who named an engine on a path with no KV
+/// cache to put it in.
+fn engine_unsupported_on_uncached_path(spec: &str) -> String {
+    format!(
+        "--engine {spec:?} is not honoured on the CPU Q4K generation path, \
+         which is not token-cached and so has no KV engine to select. \
+         Use --metal for the KV-cached path, or `larql bench --engine` \
+         to compare engines."
+    )
 }
 
 /// Core predict logic shared by model and vindex paths.
@@ -1088,10 +1246,7 @@ fn generate_stream(
     // CLI flag wins over env var; env var wins over `--kv-cache`. See
     // `crates/larql-inference/docs/specs/kv-engine-unification.md` §6.
     use larql_kv::EngineKind;
-    let engine_spec = args
-        .engine
-        .clone()
-        .or_else(|| std::env::var("LARQL_KV_ENGINE").ok());
+    let engine_spec = requested_engine_spec(args);
     let (kind, label) = match engine_spec {
         Some(spec) => {
             let kind = EngineKind::from_name(&spec).unwrap_or_else(|| {
@@ -1107,12 +1262,13 @@ fn generate_stream(
                 } => "engine=standard (windowed)",
                 EngineKind::NoCache => "engine=no-cache",
                 EngineKind::MarkovResidual { .. } => "engine=markov-rs",
-                EngineKind::UnlimitedContext { .. } => "engine=unlimited-context",
+                EngineKind::WindowedCheckpoint { .. } => "engine=windowed-checkpoint",
                 EngineKind::TurboQuant { .. } => "engine=turbo-quant",
                 EngineKind::Apollo { .. } => "engine=apollo",
                 EngineKind::BoundaryKv { .. } => "engine=boundary-kv",
                 EngineKind::MarkovResidualCodec { .. } => "engine=markov-rs-codec",
                 EngineKind::BoundaryPerLayer { .. } => "engine=boundary-per-layer",
+                EngineKind::SemanticPromotion { .. } => "engine=semantic-promotion",
             };
             (kind, label)
         }
@@ -1218,11 +1374,20 @@ fn print_walk_trace(trace: &larql_vindex::WalkTrace, down_top_k: usize) {
                 .collect::<Vec<_>>()
                 .join(", ");
 
+            // Executed-path values (2026-07-30 review, item 17): hits
+            // now come from the runtime trace, so the activation the
+            // walk actually computed is available. Absent on post-hoc
+            // KNN views — print nothing rather than a fake number.
+            let act = hit
+                .activation
+                .map(|a| format!("  act={a:+.3}"))
+                .unwrap_or_default();
             println!(
-                "  {:2}. F{:<5} gate={:+.3}  hears={:15}  c={:.2}  down=[{}]",
+                "  {:2}. F{:<5} gate={:+.3}{}  hears={:15}  c={:.2}  down=[{}]",
                 i + 1,
                 hit.feature,
                 hit.gate_score,
+                act,
                 format!("{:?}", hit.meta.top_token),
                 hit.meta.c_score,
                 down_tokens,
@@ -1247,4 +1412,70 @@ fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>
         }
     }
     Ok(layers)
+}
+
+#[cfg(test)]
+mod engine_spec_tests {
+    //! Issue #199: `--engine` was accepted and silently ignored on the CPU
+    //! Q4K generation path, so every engine driven through `larql run`
+    //! exercised the same code. Anyone A/B-ing engines that way would have
+    //! compared the default against itself.
+
+    use super::{engine_unsupported_on_uncached_path, validate_engine_spec};
+
+    const UNKNOWN: &str = "not-an-engine";
+
+    #[test]
+    fn no_engine_named_is_fine() {
+        assert!(validate_engine_spec(None).is_ok());
+    }
+
+    #[test]
+    fn every_supported_name_validates() {
+        // Guards the pairing between the validator and the help text it
+        // prints: a name advertised as supported must actually parse.
+        for name in larql_kv::EngineKind::supported_names() {
+            assert!(
+                validate_engine_spec(Some(name)).is_ok(),
+                "{name} is advertised as supported but does not validate"
+            );
+        }
+    }
+
+    #[test]
+    fn pre_rename_aliases_still_validate() {
+        // Scripts and baselines predating the WindowedCheckpoint rename must
+        // keep working.
+        for alias in ["unlimited", "windowed-checkpoint", "unlimited_context"] {
+            assert!(validate_engine_spec(Some(alias)).is_ok(), "{alias}");
+        }
+    }
+
+    #[test]
+    fn a_parameterised_spec_validates() {
+        assert!(validate_engine_spec(Some("windowed-checkpoint:window=64")).is_ok());
+    }
+
+    #[test]
+    fn an_unknown_spec_is_rejected_and_says_what_is_supported() {
+        let err = validate_engine_spec(Some(UNKNOWN)).expect_err("must reject");
+        assert!(
+            err.contains(UNKNOWN),
+            "the message must name the spec: {err}"
+        );
+        for name in larql_kv::EngineKind::supported_names() {
+            assert!(err.contains(name), "message omits {name}: {err}");
+        }
+    }
+
+    #[test]
+    fn the_uncached_path_refusal_names_the_spec_and_a_way_forward() {
+        // A refusal that does not say what to do instead is a dead end; the
+        // whole point is that the caller stops getting silent default
+        // behaviour and learns where the engines are actually comparable.
+        let msg = engine_unsupported_on_uncached_path("markov-rs");
+        assert!(msg.contains("markov-rs"), "{msg}");
+        assert!(msg.contains("--metal"), "{msg}");
+        assert!(msg.contains("larql bench"), "{msg}");
+    }
 }

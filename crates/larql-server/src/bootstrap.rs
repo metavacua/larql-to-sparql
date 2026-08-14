@@ -802,6 +802,18 @@ async fn spawn_http3_listener_if_configured(cli: &Cli, app: axum::Router) -> Res
 /// through `clap::Parser::parse_from`.
 pub async fn serve(cli: Cli) -> Result<(), BoxError> {
     info!("larql-server v{}", env!("CARGO_PKG_VERSION"));
+    // No DEC number should ever be recorded on an unlogged scalar
+    // fallback — see docs/audits/dec-readiness-review-2026-07-22.md §1b.
+    info!(
+        "  Q4K/Q6K×Q8K kernel class: {}",
+        larql_compute::cpu::ops::q4k_q8k_dot::kernel_class_summary()
+    );
+    // Same discipline for flag state: every env toggle that changes a
+    // number is logged before any request is served.
+    info!(
+        "  decode options: {}",
+        larql_compute::options::decode_options_summary()
+    );
 
     let mut models: Vec<Arc<LoadedModel>> = Vec::new();
 

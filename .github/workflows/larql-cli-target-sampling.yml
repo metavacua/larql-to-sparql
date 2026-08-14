@@ -1,0 +1,334 @@
+# larql-cli target-sampling — portability analysis, NOT a gate.
+#
+# Builds/tests larql-cli across a sampling of wasm targets to SURFACE
+# breakage as migration data. Failures here are the deliverable, not a
+# regression: every target step is `continue-on-error`, and every job
+# below fmt-check is job-level `continue-on-error`, so the run is green
+# by design. Read the individual step results, not the job status.
+#
+# The `kani` job currently fails on a wasmtime_internal_fiber global-ASM
+# construct Kani's backend doesn't support — known, expected, not a
+# regression. Do not "fix" it by removing the job.
+#
+# clippy --fix output propagates job-to-job as run-scoped diff artifacts
+# and is NEVER committed. See
+# docs/superpowers/specs/2026-08-13-larql-cli-target-sampling-design.md
+name: larql-cli-target-sampling
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  fmt-check:
+    name: fmt-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format check
+        run: cargo fmt -p larql-cli -- --check
+
+  wasm32v1-none:
+    name: wasm32v1-none
+    needs: fmt-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: clippy
+      - uses: taiki-e/install-action@wasmtime
+      - name: Clippy
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32v1-none -- -D warnings
+      - name: Clippy --fix
+        if: steps.clippy.outcome == 'failure'
+        continue-on-error: true
+        run: cargo clippy --fix -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32v1-none --allow-dirty --allow-staged -- -D warnings
+      - name: Capture cumulative diff
+        if: always()
+        run: git diff > wasm32v1-none.patch
+      - name: Upload diff artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diff-wasm32v1-none
+          path: wasm32v1-none.patch
+          retention-days: 7
+      - name: Build
+        if: always()
+        continue-on-error: true
+        run: cargo build -p larql-cli --bins --no-default-features --target wasm32v1-none
+      - name: Test (via wasmtime)
+        if: always()
+        continue-on-error: true
+        run: cargo test -p larql-cli --no-default-features --target wasm32v1-none
+
+  wasm32-unknown-unknown:
+    name: wasm32-unknown-unknown
+    needs: wasm32v1-none
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: diff-wasm32v1-none
+      - name: Apply upstream diff
+        run: |
+          if [ -s wasm32v1-none.patch ]; then
+            git apply --allow-empty wasm32v1-none.patch
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: taiki-e/install-action@wasmtime
+      - name: Clippy
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-unknown-unknown -- -D warnings
+      - name: Clippy --fix
+        if: steps.clippy.outcome == 'failure'
+        continue-on-error: true
+        run: cargo clippy --fix -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-unknown-unknown --allow-dirty --allow-staged -- -D warnings
+      - name: Capture cumulative diff
+        if: always()
+        run: git diff > wasm32-unknown-unknown.patch
+      - name: Upload diff artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diff-wasm32-unknown-unknown
+          path: wasm32-unknown-unknown.patch
+          retention-days: 7
+      - name: Build
+        if: always()
+        continue-on-error: true
+        run: cargo build -p larql-cli --bins --no-default-features --target wasm32-unknown-unknown
+      - name: Test (via wasmtime)
+        if: always()
+        continue-on-error: true
+        run: cargo test -p larql-cli --no-default-features --target wasm32-unknown-unknown
+
+  wasm32-wasip1:
+    name: wasm32-wasip1
+    needs: wasm32-unknown-unknown
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: diff-wasm32-unknown-unknown
+      - name: Apply upstream diff
+        run: |
+          if [ -s wasm32-unknown-unknown.patch ]; then
+            git apply --allow-empty wasm32-unknown-unknown.patch
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+          components: clippy
+      - uses: taiki-e/install-action@wasmtime
+      - name: Clippy
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-wasip1 -- -D warnings
+      - name: Clippy --fix
+        if: steps.clippy.outcome == 'failure'
+        continue-on-error: true
+        run: cargo clippy --fix -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-wasip1 --allow-dirty --allow-staged -- -D warnings
+      - name: Capture cumulative diff
+        if: always()
+        run: git diff > wasm32-wasip1.patch
+      - name: Upload diff artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diff-wasm32-wasip1
+          path: wasm32-wasip1.patch
+          retention-days: 7
+      - name: Build
+        if: always()
+        continue-on-error: true
+        run: cargo build -p larql-cli --bins --no-default-features --target wasm32-wasip1
+      - name: Test (via wasmtime)
+        if: always()
+        continue-on-error: true
+        run: cargo test -p larql-cli --no-default-features --target wasm32-wasip1
+
+  wasm32-wasip2:
+    name: wasm32-wasip2
+    needs: wasm32-unknown-unknown
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: diff-wasm32-unknown-unknown
+      - name: Apply upstream diff
+        run: |
+          if [ -s wasm32-unknown-unknown.patch ]; then
+            git apply --allow-empty wasm32-unknown-unknown.patch
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+          components: clippy
+      - uses: taiki-e/install-action@wasmtime
+      - name: Clippy
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-wasip2 -- -D warnings
+      - name: Clippy --fix
+        if: steps.clippy.outcome == 'failure'
+        continue-on-error: true
+        run: cargo clippy --fix -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-wasip2 --allow-dirty --allow-staged -- -D warnings
+      - name: Capture cumulative diff
+        if: always()
+        run: git diff > wasm32-wasip2.patch
+      - name: Upload diff artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diff-wasm32-wasip2
+          path: wasm32-wasip2.patch
+          retention-days: 7
+      - name: Build
+        if: always()
+        continue-on-error: true
+        run: cargo build -p larql-cli --bins --no-default-features --target wasm32-wasip2
+      - name: Test (via wasmtime)
+        if: always()
+        continue-on-error: true
+        run: cargo test -p larql-cli --no-default-features --target wasm32-wasip2
+
+  wasm32-wasip1-threads:
+    name: wasm32-wasip1-threads
+    needs: wasm32-unknown-unknown
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: diff-wasm32-unknown-unknown
+      - name: Apply upstream diff
+        run: |
+          if [ -s wasm32-unknown-unknown.patch ]; then
+            git apply --allow-empty wasm32-unknown-unknown.patch
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1-threads
+          components: clippy
+      - uses: taiki-e/install-action@wasmtime
+      - name: Clippy
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-wasip1-threads -- -D warnings
+      - name: Clippy --fix
+        if: steps.clippy.outcome == 'failure'
+        continue-on-error: true
+        run: cargo clippy --fix -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-wasip1-threads --allow-dirty --allow-staged -- -D warnings
+      - name: Capture cumulative diff
+        if: always()
+        run: git diff > wasm32-wasip1-threads.patch
+      - name: Upload diff artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diff-wasm32-wasip1-threads
+          path: wasm32-wasip1-threads.patch
+          retention-days: 7
+      - name: Build
+        if: always()
+        continue-on-error: true
+        run: cargo build -p larql-cli --bins --no-default-features --target wasm32-wasip1-threads
+      - name: Test (via wasmtime)
+        if: always()
+        continue-on-error: true
+        run: cargo test -p larql-cli --no-default-features --target wasm32-wasip1-threads
+
+  wasm32-unknown-emscripten:
+    name: wasm32-unknown-emscripten
+    needs: wasm32-unknown-unknown
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: diff-wasm32-unknown-unknown
+      - name: Apply upstream diff
+        run: |
+          if [ -s wasm32-unknown-unknown.patch ]; then
+            git apply --allow-empty wasm32-unknown-unknown.patch
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+          components: clippy
+      - uses: mymindstorm/setup-emsdk@v14
+      - name: Clippy
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-unknown-emscripten -- -D warnings
+      - name: Clippy --fix
+        if: steps.clippy.outcome == 'failure'
+        continue-on-error: true
+        run: cargo clippy --fix -p larql-cli --bins --tests --no-default-features --no-deps --target wasm32-unknown-emscripten --allow-dirty --allow-staged -- -D warnings
+      - name: Capture cumulative diff
+        if: always()
+        run: git diff > wasm32-unknown-emscripten.patch
+      - name: Upload diff artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diff-wasm32-unknown-emscripten
+          path: wasm32-unknown-emscripten.patch
+          retention-days: 7
+      - name: Build
+        if: always()
+        continue-on-error: true
+        run: cargo build -p larql-cli --bins --no-default-features --target wasm32-unknown-emscripten
+
+  kani:
+    name: kani
+    needs: fmt-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install kani-verifier
+        run: cargo install kani-verifier
+
+      - name: kani setup
+        run: cargo kani setup
+
+      - name: Run Kani
+        run: cargo kani -p larql-cli --no-default-features

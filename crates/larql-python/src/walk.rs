@@ -266,6 +266,7 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
         skipped_tensors: Vec::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
+        per_layer_ffn_format: Default::default(),
         embed,
         lm_head,
         position_embed: None,
@@ -283,22 +284,20 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
     Ok((weights, mmaps))
 }
 
-// ── InferState: lazy-loaded mmap'd weights for vindex.infer() ──
+// ── InferState: lazy-loaded inference weights for vindex.infer() ──
 
-/// Mmap'd model weights, reusable across infer() calls.
+/// Format-aware model weights, reusable across infer() calls.
 /// Created lazily on first infer(), held by PyVindex.
 pub struct InferState {
-    pub weights: ModelWeights,
-    _mmaps: Vec<WeightMmap>,
+    pub inference: larql_inference::InferenceWeights,
 }
 
 impl InferState {
-    pub fn load(dir: &Path) -> Result<Self, String> {
-        let (weights, mmaps) = load_mmap_weights(dir)?;
-        Ok(Self {
-            weights,
-            _mmaps: mmaps,
-        })
+    pub fn load(dir: &Path, config: &larql_vindex::VindexConfig) -> Result<Self, String> {
+        let mut cb = larql_vindex::SilentLoadCallbacks;
+        let inference = larql_inference::InferenceWeights::load(dir, config, &mut cb)
+            .map_err(|e| e.to_string())?;
+        Ok(Self { inference })
     }
 }
 

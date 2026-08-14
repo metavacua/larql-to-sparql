@@ -7,8 +7,8 @@
 
 pub use larql_compute::residual::{
     layer_norm, layer_norm_eps, layer_norm_for_arch, rms_norm, rms_norm_eps, rms_norm_for_arch,
-    rms_norm_heads, rms_norm_heads_eps, rms_norm_heads_no_weight, rms_norm_heads_no_weight_eps,
-    DEFAULT_EPS,
+    rms_norm_full_projection_eps, rms_norm_heads, rms_norm_heads_eps, rms_norm_heads_no_weight,
+    rms_norm_heads_no_weight_eps, rms_norm_qk, rms_norm_qk_eps, rms_norm_qk_for_arch, DEFAULT_EPS,
 };
 
 #[cfg(test)]

@@ -112,6 +112,39 @@ pub(super) fn format_stage_breakdown(rows: &[BenchRow]) -> Vec<String> {
             s.gpu_ms_total,
             pct(s.gpu_ms_total)
         ));
+        // "GPU fwd" is wall time *around* the GPU call, not GPU time, so
+        // show what the profile actually measured on the GPU. Read the CPU
+        // share as instrument-relative: profiling costs ~2.5× end to end and
+        // nearly all of that lands on this line, so it is useful for ranking
+        // stages within a profiled run and misleading as a production
+        // CPU/GPU ratio. `gpu_ms` is the number that holds across both.
+        if s.gpu_only_ms_total > 0.0 {
+            let cpu_side = (s.gpu_ms_total - s.gpu_only_ms_total).max(0.0);
+            let cpu_pct = cpu_side / s.gpu_ms_total * 100.0;
+            out.push(format!(
+                "      on GPU  {:>6.3}ms  ({:>4.1}% of GPU fwd)",
+                s.gpu_only_ms_total,
+                100.0 - cpu_pct
+            ));
+            out.push(format!(
+                "      on CPU  {:>6.3}ms  ({cpu_pct:>4.1}% of GPU fwd — encode, \
+                 readback, host-side experts)",
+                cpu_side
+            ));
+            if s.attn_ms_total > 0.0 {
+                out.push(format!(
+                    "      attn    {:>6.3}ms  ({:>4.1}% of on-GPU)",
+                    s.attn_ms_total,
+                    s.attn_ms_total / s.gpu_only_ms_total * 100.0
+                ));
+            }
+            if s.cmd_buffers_total > 0 {
+                out.push(format!(
+                    "      cmd bufs {:>5}  per token",
+                    s.cmd_buffers_total
+                ));
+            }
+        }
     }
     if s.gate_up_ms_total > 0.0 {
         out.push(format!(
@@ -336,6 +369,79 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("CPU fwd")));
         assert!(!lines.iter().any(|l| l.contains("GPU fwd")));
         assert!(lines.iter().any(|l| l.contains("lm_head")));
+    }
+
+    #[test]
+    fn stage_breakdown_splits_gpu_wall_into_gpu_and_cpu() {
+        let mut r = empty_row("metal", 1.0);
+        let stages = larql_inference::layer_graph::generate::StageTimings {
+            gpu_ms_total: 10.0,
+            gpu_only_ms_total: 2.0,
+            attn_ms_total: 0.5,
+            cmd_buffers_total: 34,
+            lm_head_ms_total: 1.0,
+            ..Default::default()
+        };
+        r.stages = Some(stages);
+        let lines = format_stage_breakdown(&[r]);
+        let on_gpu = lines
+            .iter()
+            .find(|l| l.contains("on GPU"))
+            .expect("split must render");
+        let on_cpu = lines
+            .iter()
+            .find(|l| l.contains("on CPU"))
+            .expect("split must render");
+        // 2 of 10ms on the GPU; the other 8 are host-side.
+        assert!(on_gpu.contains("20.0%"), "{on_gpu}");
+        assert!(on_cpu.contains("80.0%"), "{on_cpu}");
+        assert!(on_cpu.contains("8.000ms"), "{on_cpu}");
+        // attn is scored against on-GPU time, not the wall: 0.5 of 2.0.
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("attn") && l.contains("25.0%")),
+            "{lines:?}"
+        );
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("cmd bufs") && l.contains("34")));
+    }
+
+    #[test]
+    fn stage_breakdown_omits_split_when_unprofiled() {
+        // No split recorded → report GPU fwd alone rather than claiming the
+        // GPU did zero work.
+        let mut r = empty_row("metal", 1.0);
+        let stages = larql_inference::layer_graph::generate::StageTimings {
+            gpu_ms_total: 10.0,
+            lm_head_ms_total: 1.0,
+            ..Default::default()
+        };
+        r.stages = Some(stages);
+        let lines = format_stage_breakdown(&[r]);
+        assert!(lines.iter().any(|l| l.contains("GPU fwd")));
+        assert!(!lines.iter().any(|l| l.contains("on GPU")));
+        assert!(!lines.iter().any(|l| l.contains("on CPU")));
+    }
+
+    #[test]
+    fn stage_breakdown_clamps_gpu_exceeding_its_own_wall() {
+        // Command-buffer windows can overlap, so the summed GPU time can
+        // exceed the wall around the call. Report 100% on GPU rather than a
+        // negative CPU share.
+        let mut r = empty_row("metal", 1.0);
+        let stages = larql_inference::layer_graph::generate::StageTimings {
+            gpu_ms_total: 10.0,
+            gpu_only_ms_total: 12.0,
+            lm_head_ms_total: 1.0,
+            ..Default::default()
+        };
+        r.stages = Some(stages);
+        let lines = format_stage_breakdown(&[r]);
+        let on_cpu = lines.iter().find(|l| l.contains("on CPU")).unwrap();
+        assert!(on_cpu.contains("0.000ms"), "{on_cpu}");
+        assert!(on_cpu.contains(" 0.0%"), "{on_cpu}");
     }
 
     #[test]

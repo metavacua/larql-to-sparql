@@ -24,7 +24,11 @@
 //!
 //! ## Retention rationale (ADR-017)
 //!
-//! **Status**: opt-in, not wired into production decode.
+//! **Status**: not in the decode hot path, but LIVE in production —
+//! the vindex lm-head KNN path (`larql-vindex/.../lm_head/knn.rs`)
+//! dispatches it via `MetalBackend` when a Q4_K lm_head mmap is
+//! present (a prior revision of this note said "not wired"; audit
+//! F22).
 //!
 //! **Empirical result (2026-05-09, `project_f16_gemv_wiring_todo.md`)**:
 //! the broader f16-on-Q4_K wiring story is dead — direct f16 LM head is

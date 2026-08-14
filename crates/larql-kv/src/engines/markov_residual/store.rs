@@ -169,19 +169,27 @@ impl RsStore {
         // on overflow). Mirror the same growth logic when provided.
         if let Some(evicted) = evicted_kv {
             if self.cold_kv.is_none() {
-                let buffers: Vec<SharedKV> = evicted
-                    .into_iter()
-                    .map(|(k_new, v_new)| {
-                        let kv_dim = k_new.shape()[1];
-                        let cap = c_new.next_power_of_two().max(8);
-                        let mut k_buf = Array2::<f32>::zeros((cap, kv_dim));
-                        let mut v_buf = Array2::<f32>::zeros((cap, kv_dim));
-                        k_buf.slice_mut(s![..c_new, ..]).assign(&k_new);
-                        v_buf.slice_mut(s![..c_new, ..]).assign(&v_new);
-                        (k_buf, v_buf)
-                    })
-                    .collect();
-                self.cold_kv = Some(buffers);
+                // Lazy init is only aligned when this append IS the whole
+                // cold tier. With prior cold rows (`c_old > 0`) the K/V
+                // for rows `0..c_old` is not available here — seeding a
+                // buffer with the evicted rows at the front would attend
+                // zeros for the old rows and misplace the new ones. Leave
+                // `cold_kv = None`; decode rebuilds from cold_residuals.
+                if c_old == 0 {
+                    let buffers: Vec<SharedKV> = evicted
+                        .into_iter()
+                        .map(|(k_new, v_new)| {
+                            let kv_dim = k_new.shape()[1];
+                            let cap = c_new.next_power_of_two().max(8);
+                            let mut k_buf = Array2::<f32>::zeros((cap, kv_dim));
+                            let mut v_buf = Array2::<f32>::zeros((cap, kv_dim));
+                            k_buf.slice_mut(s![..c_new, ..]).assign(&k_new);
+                            v_buf.slice_mut(s![..c_new, ..]).assign(&v_new);
+                            (k_buf, v_buf)
+                        })
+                        .collect();
+                    self.cold_kv = Some(buffers);
+                }
             } else if let Some(cold_kv) = self.cold_kv.as_mut() {
                 for (layer, (k_new, v_new)) in evicted.into_iter().enumerate() {
                     let cap = cold_kv[layer].0.shape()[0];
@@ -548,6 +556,39 @@ mod tests {
             assert!(k.shape()[0] >= 10);
             assert!(v.shape()[0] >= 10);
         }
+    }
+
+    #[test]
+    fn append_cold_overflow_does_not_seed_cold_kv_over_prior_cold_rows() {
+        // With prior cold rows (`c_old > 0`) and `cold_kv = None`, the
+        // K/V for rows 0..c_old is unavailable — lazily seeding a buffer
+        // from the evicted rows alone would place them at row 0 (they
+        // belong at row c_old) and leave zeros where the older rows'
+        // K/V should be. The append must keep `cold_kv = None`.
+        let mut store = make_store(1, 0, 4);
+        // First overflow with no evicted K/V → cold_len = 2, cold_kv None.
+        let first = vec![Array2::<f32>::from_elem((2, 4), 0.3)];
+        store.append_cold_overflow(first, None);
+        assert_eq!(store.cold_len, 2);
+        assert!(store.cold_kv.is_none());
+
+        // Second overflow WITH evicted K/V — cannot be seeded aligned.
+        let second = vec![Array2::<f32>::from_elem((1, 4), 0.6)];
+        let evicted: Vec<SharedKV> = vec![(
+            Array2::<f32>::from_elem((1, 6), 0.7),
+            Array2::<f32>::from_elem((1, 6), 0.8),
+        )];
+        store.append_cold_overflow(second, Some(evicted));
+        assert_eq!(store.cold_len, 3, "residual tier still grows");
+        assert!(
+            store.cold_kv.is_none(),
+            "cold_kv must not be seeded misaligned over prior cold rows"
+        );
+        // The residual rows are intact and ordered.
+        let view = store.cold_residual_view(0).unwrap();
+        assert_eq!(view[[0, 0]], 0.3);
+        assert_eq!(view[[1, 0]], 0.3);
+        assert_eq!(view[[2, 0]], 0.6);
     }
 
     #[test]
