@@ -1,0 +1,131 @@
+# Experiment: can wasm32-unknown-emscripten output actually run under wasmtime?
+#
+# The consolidated larql-cli-target-sampling.yml currently treats
+# wasm32-unknown-emscripten as build-only, on the assumption that Emscripten
+# output "expects a JS host environment." Researched before writing this
+# file (WebSearch/WebFetch against emscripten.org, the emscripten-core and
+# rust-lang/rust source trees, and real prior-art repos/issues) rather than
+# assumed:
+#
+#   - Emscripten has a real, documented, non-hypothetical mode for this:
+#     STANDALONE_WASM (the *default* when emitting a plain .wasm file, no
+#     -o *.js) plus the stricter, experimental PURE_WASI. Both route stdio,
+#     argv/argc, and env vars through genuine wasi_snapshot_preview1 imports.
+#     Emscripten's own CI builds this combination and runs it under wasmtime
+#     as routine testing (test/decorators.py::also_with_standalone_wasm) --
+#     though that CI job pins a 2021-era wasmtime (v0.33.0), not current.
+#
+#   - Against that: rustc's own platform-support doc for this target already
+#     says "If you want to generate a standalone WebAssembly binary... the
+#     wasm32-unknown-unknown target may be better suited." And when someone
+#     asked this exact question upstream (emscripten-core/emscripten#21647,
+#     C++, not Rust), Emscripten's own maintainer answered: "Even with
+#     -sSTANDALONE_WASM mode it[']s likely the module is not compatible with
+#     wasmtime/WASI due to one or more emscripten-specific imports... The
+#     best way to build wasmtime compatible programs is to use wasi-sdk, not
+#     emscripten." No confirmed case of a Rust wasm32-unknown-emscripten
+#     binary running under wasmtime was found anywhere (prior Rust attempts
+#     either used a hand-written JS shim, not wasmtime, or wasmer's own
+#     proprietary non-WASI Emscripten-emulation layer, not real WASI).
+#
+#   - One thing IS genuinely new since those prior attempts: rust-lang/rust
+#     PR #156928 (merged 2026-06-03) removed the -Z emscripten-wasm-eh=false
+#     escape hatch, so this target now unconditionally uses the native wasm
+#     exception-handling ABI instead of the JS-trampoline scheme -- the
+#     exact JS dependency (`invoke_*`/embind) that broke every prior known
+#     attempt. larql-cli is plain Rust with no Emscripten-specific C/C++
+#     port dependency forcing the old JS-exceptions ABI, unlike every prior
+#     case found in research. That makes this a genuinely untested
+#     combination, not a known-broken one -- worth actually running, per
+#     instruction not to assume it can't be done.
+#
+# This is a standalone technical-choice experiment, not a claim it will
+# work. Every step is continue-on-error and diagnostic steps always run, so
+# a failure here is itself the data (e.g. wasmtime's own instantiation error
+# usually names the exact unresolved import), same "surface, don't avoid,
+# breakage" methodology as the rest of this project's target sampling.
+
+name: experiment-emscripten-wasmtime
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [feat/larql-cli-target-sampling]
+
+jobs:
+  emscripten-wasmtime:
+    name: wasm32-unknown-emscripten via wasmtime (STANDALONE_WASM + PURE_WASI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    env:
+      RUSTFLAGS: "-C link-arg=-sSTANDALONE_WASM -C link-arg=-sPURE_WASI -C panic=abort"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+
+      - name: Install Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+
+      - name: Verify emcc
+        run: emcc --version
+
+      - name: Install wasmtime
+        uses: taiki-e/install-action@wasmtime
+
+      - name: Verify wasmtime
+        run: wasmtime --version
+
+      - name: Build (STANDALONE_WASM + PURE_WASI, panic=abort)
+        id: build
+        continue-on-error: true
+        run: cargo build -p larql-cli --bins --no-default-features --target wasm32-unknown-emscripten
+
+      - name: Locate the built artifact
+        if: always()
+        run: |
+          echo "=== target/wasm32-unknown-emscripten/debug/ ==="
+          ls -la target/wasm32-unknown-emscripten/debug/ 2>&1 || echo "directory missing -- build did not reach link stage"
+          echo "=== every .wasm produced ==="
+          find target/wasm32-unknown-emscripten -maxdepth 4 -name '*.wasm' 2>&1 || true
+
+      - name: Diagnostic -- imported symbol names (no extra tooling assumed)
+        if: always()
+        continue-on-error: true
+        run: |
+          WASM_FILE=$(find target/wasm32-unknown-emscripten -maxdepth 4 -name '*.wasm' | head -1)
+          if [ -z "$WASM_FILE" ]; then
+            echo "No .wasm artifact found -- nothing to inspect."
+            exit 0
+          fi
+          echo "=== Inspecting: $WASM_FILE ==="
+          echo "--- strings | grep for likely import-name fragments (crude but always available) ---"
+          strings "$WASM_FILE" | grep -E 'wasi_snapshot_preview1|^env$|invoke_|dyn_call|emscripten_|embind|_emval_' | sort -u || true
+
+      - name: Attempt to run under wasmtime -- no directory preopen
+        if: always()
+        continue-on-error: true
+        run: |
+          WASM_FILE=$(find target/wasm32-unknown-emscripten -maxdepth 4 -name '*.wasm' | head -1)
+          if [ -z "$WASM_FILE" ]; then
+            echo "No .wasm artifact found -- build did not produce output to run."
+            exit 0
+          fi
+          echo "=== wasmtime run (no preopen) ==="
+          wasmtime run "$WASM_FILE" --version 2>&1 || wasmtime run "$WASM_FILE" 2>&1
+
+      - name: Attempt to run under wasmtime -- with directory preopen
+        if: always()
+        continue-on-error: true
+        run: |
+          WASM_FILE=$(find target/wasm32-unknown-emscripten -maxdepth 4 -name '*.wasm' | head -1)
+          if [ -z "$WASM_FILE" ]; then
+            echo "No .wasm artifact found -- build did not produce output to run."
+            exit 0
+          fi
+          echo "=== wasmtime run --dir=. (preopened cwd) ==="
+          wasmtime run --dir=. "$WASM_FILE" --version 2>&1 || wasmtime run --dir=. "$WASM_FILE" 2>&1
