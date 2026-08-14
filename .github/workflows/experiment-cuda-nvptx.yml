@@ -1,29 +1,27 @@
-# Experiment: clippy + build + test pipeline for larql-cli on nvptx64-nvidia-cuda.
+# Experiment: clippy + build pipeline for larql-cli on nvptx64-nvidia-cuda.
 #
-# Same pattern as every other target job in this project: run clippy, build,
-# and test against larql-cli itself, on the real target, and let it break --
-# the breakage is the analysis data, not something to avoid or route around.
+# For starters: lint and build only, against larql-cli itself, same pattern
+# as every other target job in this project -- run it and let it break, the
+# breakage is the analysis data. Test/execution is deferred pending a
+# separate decision on GPU/CUDA emulation for free-tier runners.
 #
 # Toolchain requirement, confirmed via doc.rust-lang.org and a local test
 # build: nightly + `rust-src` + `llvm-tools` + `llvm-bitcode-linker`
 # components, `-Zbuild-std` (this target ships no prebuilt std at all, for
 # any crate).
 #
-# GPU execution is not available for free anywhere in GitHub Actions today
-# (GitHub's GPU larger runners are billed per-minute, gated to paid
-# Team/Enterprise org plans, no public-repo exemption; third-party services
-# only make the orchestration free, not the GPU compute itself) -- so
-# whatever the Test step actually reports (build failure, missing runner,
-# or something else) is itself real signal about what a wasmtime-style
-# cargo-test runner entry would need for this target, same spirit as the
-# wasm jobs' `.cargo/config.toml` runner entries.
+# On its own branch, not feat/larql-cli-target-sampling: that branch backs
+# open PR #293, so any push to it triggers pull_request:synchronize on
+# every other CI workflow in the repo (larql-compute, larql-core, quality,
+# shannon-verify, etc.), not just this one. Iterating here avoids that
+# cascade entirely -- this branch has no open PR.
 
 name: experiment-cuda-nvptx
 
 on:
   workflow_dispatch: {}
   push:
-    branches: [feat/larql-cli-target-sampling]
+    branches: [experiment/cuda-nvptx-lint-build]
 
 jobs:
   nvptx64-nvidia-cuda:
@@ -51,8 +49,3 @@ jobs:
         id: build
         continue-on-error: true
         run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly build -p larql-cli --bins --no-default-features --target nvptx64-nvidia-cuda -Zbuild-std=std
-
-      - name: Test
-        id: test
-        continue-on-error: true
-        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly test -p larql-cli --no-default-features --target nvptx64-nvidia-cuda -Zbuild-std=std
