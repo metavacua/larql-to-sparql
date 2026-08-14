@@ -62,6 +62,101 @@ on:
     branches: [experiment/cuda-nvptx-lint-build]
 
 jobs:
+  # Fast, pre-compile precondition checks: does the target-resolved
+  # dependency graph contain anything already known to be a hard,
+  # native-toolchain wall, and has anything NEW shown up that hasn't been
+  # manually vetted yet? Runs once (not matrixed on features -- deny-nvptx.
+  # toml uses all-features = true, and the native-link scan's results don't
+  # meaningfully differ between default/no-default here, so running it
+  # twice would just duplicate identical work, the same mistake fixed
+  # earlier in this workflow for the human/JSON build output).
+  nvptx-preconditions:
+    name: nvptx64-nvidia-cuda preconditions (deny + native-link scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Kept identical to the main job's PKGS -- see its own comment for how
+      # this list was derived.
+      PKGS: >-
+        -p larql-boundary -p larql-cli -p larql-compute -p larql-core
+        -p larql-execution -p larql-factory -p larql-inference -p larql-kv
+        -p larql-lql -p larql-models -p larql-router-protocol -p larql-vindex
+        -p larql-vindex-spec
+    steps:
+      - uses: actions/checkout@v7
+
+      # deny-nvptx.toml explicitly bans openssl-sys, protobuf-src,
+      # onig_sys, and ring for this target -- each confirmed as a real
+      # native-compile/native-link dependency by reading its actual
+      # build.rs (see deny-nvptx.toml's own header for why `links`
+      # presence alone isn't trusted: rayon-core and prettyplease both
+      # carry it with zero native compilation behind them). This is
+      # expected to fail for as long as those crates remain in the graph --
+      # that's the honest, correct signal, not a masked one.
+      - name: cargo-deny bans check (nvptx-specific)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          arguments: --config deny-nvptx.toml
+          command: check
+          command-arguments: bans
+
+      - name: Install nightly Rust
+        if: always()
+        uses: dtolnay/rust-toolchain@nightly
+
+      # Informational, not a hard gate: surfaces every crate in larql-cli's
+      # resolved graph for this target that declares a `links` key, cross-
+      # referenced against deny-nvptx.toml's curated, source-verified list.
+      # Anything with `links` set that ISN'T already in that curated list is
+      # a real candidate that hasn't been manually checked yet (read its
+      # build.rs before trusting it either way -- `links` alone is not
+      # sufficient evidence, confirmed the hard way earlier this session).
+      #
+      # Scoped with $PKGS, no --no-default-features: `cargo metadata`
+      # without an explicit -p/--workspace resolves differently across this
+      # virtual-manifest workspace than `-p <pkgs> --no-default-features`
+      # does -- confirmed directly, it pulled in aws-lc-rs/aws-lc-sys (real
+      # dependencies of the out-of-scope larql-python, not of larql-cli) as
+      # false candidates when run unscoped. $PKGS with full features is a
+      # deliberate superset of what Clippy/Build's no-default run touches,
+      # which is the right choice for a catch-anything-new candidate scan.
+      - name: Native-link dependency scan (candidates for manual verification)
+        if: always()
+        run: |
+          cargo +nightly metadata --format-version=1 $PKGS --filter-platform nvptx64-nvidia-cuda > meta.json
+          {
+            echo '### Native-link (`links` field) reachability from larql-cli'
+            echo '```'
+            python3 - << 'PYEOF'
+          import json
+          d = json.load(open("meta.json"))
+          by_id = {n["id"]: n for n in d["resolve"]["nodes"]}
+          pkgs = {p["id"]: p for p in d["packages"]}
+          root = next(i for i in d["workspace_members"] if pkgs[i]["name"] == "larql-cli")
+          confirmed_real = {"openssl-sys", "protobuf-src", "onig_sys", "ring"}
+          confirmed_false_positive = {"rayon-core", "prettyplease"}
+          seen, stack = set(), [root]
+          while stack:
+              cur = stack.pop()
+              if cur in seen:
+                  continue
+              seen.add(cur)
+              stack.extend(dep["pkg"] for dep in by_id[cur]["deps"])
+          for i in sorted(seen, key=lambda i: pkgs[i]["name"]):
+              p = pkgs[i]
+              if not p.get("links"):
+                  continue
+              if p["name"] in confirmed_real:
+                  tag = "banned in deny-nvptx.toml (build.rs verified: real native compile/link)"
+              elif p["name"] in confirmed_false_positive:
+                  tag = "NOT banned (build.rs verified: no real native compilation, links used only as a version-uniqueness guard)"
+              else:
+                  tag = "UNVETTED -- links field present, build.rs not yet manually checked. Read it before assuming either way."
+              print(f"{p['name']} {p['version']} -> links: {p['links']}  [{tag}]")
+          PYEOF
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   nvptx64-nvidia-cuda:
     name: nvptx64-nvidia-cuda (${{ matrix.features }})
     runs-on: ubuntu-latest
@@ -103,13 +198,21 @@ jobs:
       # for this target -- e.g. reqwest's default `default-tls` feature
       # pulling in native-tls -> openssl-sys, which then fails to
       # cross-compile for a target with no host OpenSSL to link against.
-      # Scoped from larql-cli's own root: its tree already contains every
-      # other in-scope crate, so one dump covers the whole set.
+      #
+      # Scoped with $PKGS, matching Clippy/Build exactly -- NOT `-p
+      # larql-cli` alone. Those differ for the no-default case: cargo
+      # applies --no-default-features to every explicitly-selected package
+      # when multiple -p flags are given together, so the real Build/Clippy
+      # invocation (13x -p) also strips larql-core's own default `http`
+      # feature on the no-default run, while `-p larql-cli` alone only ever
+      # strips larql-cli's own default `gpu` feature. A tree scoped to just
+      # larql-cli would show a graph that doesn't match what Build/Clippy
+      # actually attempted in the same job.
       - name: Dependency graph for this target
         run: |
           {
             echo '```'
-            cargo +nightly tree -p larql-cli ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -e normal,build,features
+            cargo +nightly tree $PKGS ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -e normal,build,features
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

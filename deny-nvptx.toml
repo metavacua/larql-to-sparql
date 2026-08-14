@@ -1,0 +1,55 @@
+# cargo-deny configuration for the nvptx64-nvidia-cuda experiment
+# (.github/workflows/experiment-cuda-nvptx.yml) only.
+#
+# Deliberately NOT merged into the main deny.toml: the crates banned below
+# (openssl-sys, protobuf-src, onig_sys, ring) are legitimate, needed
+# dependencies on every target deny.toml actually evaluates (macOS, Linux,
+# Windows) -- banning them there would break real CI, not just this
+# experiment. This file exists so `cargo deny check bans --config
+# deny-nvptx.toml` can fail fast, before any compilation, specifically for
+# this one target.
+#
+# Each entry below was confirmed as a real native-compile/native-link
+# dependency by fetching and reading its actual build.rs from crates.io, not
+# by trusting the presence of a `links` key alone -- two crates that also
+# carry `links` in this same graph (rayon-core, prettyplease) turned out to
+# be false positives: rayon-core's build.rs exists only to enforce "one
+# copy in the final binary," and prettyplease's only emits a version cfg.
+# Neither does any native compilation, so neither is listed here.
+#
+# As of the run that generated this list, none of these are actually
+# reached in practice: `-Zbuild-std=std` fails to build `std` itself for
+# this target first (libstd's `sys` layer has no CUDA branch), before cargo
+# ever gets to attempt any of these dependencies. This file documents the
+# second wall, confirmed by source inspection, waiting behind the first.
+#
+# Schema targets cargo-deny 0.20.x (matches the main deny.toml; the
+# 0.19.9 vs 0.20.x version-skew note there applies here too).
+
+[graph]
+targets = ["nvptx64-nvidia-cuda"]
+all-features = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[[bans.deny]]
+name = "openssl-sys"
+reason = "links against a host OpenSSL build; no OpenSSL exists for a GPU virtual ISA with no OS. Reached via larql-core's default `http` feature (reqwest -> native-tls -> openssl-sys)."
+
+[[bans.deny]]
+name = "protobuf-src"
+reason = "compiles the protobuf C++ library from source via CMake; needs a real C++ toolchain, which does not exist for this target. This is also the crate whose build previously ran away on a local dev machine when attempted outside CI."
+
+[[bans.deny]]
+name = "onig_sys"
+reason = "compiles the Oniguruma C regex library from source; no C toolchain exists for this target."
+
+[[bans.deny]]
+name = "ring"
+reason = "ships hand-written assembly/C compiled per host platform; no native backend exists for a GPU virtual ISA."
+
+[sources]
+unknown-registry = "allow"
+unknown-git = "allow"
