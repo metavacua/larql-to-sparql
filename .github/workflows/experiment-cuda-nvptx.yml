@@ -40,6 +40,21 @@ jobs:
       - name: Install llvm-bitcode-linker
         run: rustup component add llvm-bitcode-linker --toolchain nightly
 
+      # Dependency resolution doesn't require a successful compile, so this
+      # runs unconditionally and captures *why* each crate is in the graph
+      # for this target -- e.g. reqwest's default `default-tls` feature
+      # pulling in native-tls -> openssl-sys, which then fails to
+      # cross-compile for a target with no host OpenSSL to link against.
+      # Without this, diagnosing a Clippy/Build failure means hand-tracing
+      # Cargo.lock after the fact; with it, the cause is already in the log.
+      - name: Dependency graph for this target
+        run: |
+          {
+            echo '```'
+            cargo +nightly tree -p larql-cli --no-default-features --target nvptx64-nvidia-cuda -e normal,build,features
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Clippy
         id: clippy
         continue-on-error: true
