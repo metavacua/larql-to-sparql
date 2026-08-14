@@ -23,10 +23,20 @@
 # crate in the same graph, and `--message-format=json` already tags every
 # diagnostic with the exact package it came from. One combined invocation
 # per feature-set gets the identical per-crate-attributable, exhaustive
-# result as the 13-way fan-out, without repeating setup 13x. The only thing
-# a per-crate job bought was a separate colored checkmark per crate in the
-# Actions UI -- moot here anyway, since continue-on-error already makes
-# per-job conclusions unreliable as a pass/fail signal on this workflow.
+# result as the 13-way fan-out, without repeating setup 13x.
+#
+# No job-level continue-on-error. An earlier iteration had it, which made
+# every job report green regardless of whether Clippy/Build actually
+# failed -- and coding agents are trained hard on green meaning "nothing to
+# see here" and red meaning "look closer." A job that's always green
+# regardless of real outcome trains exactly the wrong lesson, and a target
+# that categorically doesn't build yet (this one) SHOULD read as red, since
+# that's the true, correct, currently-expected state -- not something to be
+# smoothed over into a checkmark. Clippy/Build keep step-level
+# continue-on-error so both still run even if one fails outright, but the
+# final "Assert honest result" step below has none, checks each step's real
+# `outcome`, and deliberately fails the job if either genuinely failed --
+# so the job's own conclusion tells the truth instead of being masked.
 #
 # GitHub-hosted runner time costs nothing at this project's tier, so nothing
 # here is scoped down for speed; it's scoped down only to remove actual
@@ -56,7 +66,6 @@ jobs:
     name: nvptx64-nvidia-cuda (${{ matrix.features }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -113,12 +122,12 @@ jobs:
       - name: Clippy
         id: clippy
         continue-on-error: true
-        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly clippy $PKGS --all-targets ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going --message-format=json -- -D warnings > clippy.json || true
+        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly clippy $PKGS --all-targets ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going --message-format=json -- -D warnings > clippy.json
 
       - name: Build
         id: build
         continue-on-error: true
-        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly build $PKGS --all-targets ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going --message-format=json > build.json || true
+        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly build $PKGS --all-targets ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going --message-format=json > build.json
 
       # Per-crate pass/fail plus the rendered diagnostic text, both derived
       # from the same JSON stream captured above -- no second build needed.
@@ -142,3 +151,19 @@ jobs:
               echo '</details>'
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # No continue-on-error on this one: it's the only step allowed to
+      # decide the job's real conclusion. Clippy/Build's own `outcome` (not
+      # `conclusion` -- outcome is the pre-mask, honest result, and it's
+      # only readable live within this same job, not after the fact via the
+      # REST API) tells us whether either genuinely failed; if so, this step
+      # fails for real and the job goes honestly red instead of being
+      # smoothed over.
+      - name: Assert honest result
+        if: always()
+        run: |
+          if [ "${{ steps.clippy.outcome }}" = "failure" ] || [ "${{ steps.build.outcome }}" = "failure" ]; then
+            echo "::error::Clippy and/or Build genuinely failed for nvptx64-nvidia-cuda (${{ matrix.features }} features) -- see the per-crate summary above. This job is reporting that honestly, not masking it."
+            exit 1
+          fi
+          echo "Clippy and Build both genuinely succeeded for nvptx64-nvidia-cuda (${{ matrix.features }} features)."
