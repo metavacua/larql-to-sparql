@@ -12,18 +12,18 @@
 //! | [`standard`] | Production K/V tensor cache (default) | O(seq) f32 K/V | exact — the reference |
 //! | [`no_cache`] | Full re-forward per step | O(seq) token IDs | exact — correctness fallback |
 //! | [`markov_residual`] | Residual-stream replacement | ~171 MB | exact (KL=0.0) under contract |
-//! | [`unlimited_context`] | Per-window K/V checkpoints | ~193 MB | exact within window |
-//! | [`turbo_quant`] | WHT + Lloyd-Max 3/4-bit codec | ~12.7 GB | cos≈0.991 |
+//! | [`windowed_checkpoint`] | Per-window K/V checkpoints | ~193 MB | exact within window |
+//! | [`turbo_quant`] | WHT + Lloyd-Max 3/4-bit codec | ~12.7 GB | per-row cos≈0.9954 (4-bit, 2026-07-30) |
 //! | [`apollo`] | Boundary store + residual injection | ~11 MB | task accuracy |
 //!
 //! ## Selecting an engine
 //!
 //! ```text
 //! larql bench gemma3-4b-q4k --engine standard
-//! larql bench gemma3-4b-q4k --engine standard:window=1024
+//! larql bench gemma3-4b-q4k --engine standard:window=1024   # keeps the fused path
 //! larql bench gemma3-4b-q4k --engine no-cache
 //! larql bench gemma3-4b-q4k --engine markov-rs:window=512
-//! larql bench gemma3-4b-q4k --engine unlimited-context:window=256
+//! larql bench gemma3-4b-q4k --engine windowed-checkpoint:window=256
 //! larql bench gemma3-4b-q4k --engine turbo-quant:bits=3
 //! larql bench gemma3-4b-q4k --engine apollo:layer=25,coef=8.0
 //! ```
@@ -32,11 +32,61 @@
 //!
 //! ## Architecture notes
 //!
-//! - **Metal Q4K path** (`prefill_quant` / `decode_step_quant`): all four engines
-//!   use the Metal `decode_token` full pipeline when a Q4K VectorIndex and a
-//!   Metal backend are available. This gives 93-95 tok/s — matching or exceeding
-//!   the standard larql-metal path (76 tok/s) because the engine bench uses
-//!   faster Metal lm_head KNN rather than a full vocab matmul.
+//! - **Coarse (fused) path** (`prefill_quant` / `decode_step_quant`): taken
+//!   when a Q4K VectorIndex is present and the backend accepts the engine's
+//!   window. Metal routes through its `decode_token` full pipeline; CPU
+//!   through `cached_prefill_q4k` / `cached_decode_step_q4k`.
+//!
+//!   The engine's own state policy is NOT engaged here — the K/V lives in the
+//!   backend behind a sentinel handle (Metal) or a whole-model handle (CPU),
+//!   so `standard`, `markov-rs`, `markov-rs-codec` and `boundary-per-layer`
+//!   execute the same kernels and measure within ~0.5% of each other.
+//!   **Ranking those four against one another on this path measures nothing.**
+//!
+//!   The engine rows do beat the reference `larql-metal` row, but the reason
+//!   is the KNN lm_head (~1.9ms) replacing a full vocab matmul (~6.6ms), not
+//!   the K/V mechanism. An earlier note credited the engines with a ~93-95 vs
+//!   76 tok/s win; that gap was inflated because the bench timed only the
+//!   forward and left lm_head outside the timer. Both are inside it now, and
+//!   the row note carries the `fwd=` / `head=` split.
+//!
+//! - **Windowed engines keep the coarse path** (since 2026-08). A window is
+//!   requested through `coarse_prefill_windowed` / `coarse_decode_step_windowed`,
+//!   which fail closed: a backend that cannot bound BOTH attention and K/V
+//!   answers `None` and the engine falls back to per-layer. Both `CpuBackend`
+//!   and `MetalBackend` implement them.
+//!
+//!   Each bounds attention and memory by different means, because neither
+//!   mechanism does both jobs. CPU trims the cache to `w - 1` before each step
+//!   (cheap — the cache is host arrays). Metal clamps the attention span every
+//!   step via the layer window, and compacts its K/V buffers only once
+//!   occupancy reaches 2x the window, so the memmove is O(1) amortised rather
+//!   than O(window) per token; the surplus resident rows are never read
+//!   because the kernel attends `[T - window, T)`.
+//!
+//!   Both decline a prompt LONGER than the window: the fused prefill has no
+//!   per-query-position masking, so accepting would attend the whole prompt
+//!   while the engine advertises a bound. That case still takes per-layer.
+//!
+//!   Measured on Gemma 3 4B Q4K, Metal, 80 steps at `window=8`: 11.61ms /
+//!   2.4MB against 12.06ms / 23.6MB unwindowed. Before this, the same config
+//!   cost 115.44ms.
+//!
+//! - **Per-layer path** (a prompt longer than the window, or an arch that
+//!   declines coarse): `MetalBackend`'s `KvDispatch` impl delegates every
+//!   per-layer method (`attention_step`, `attention_step_windowed`,
+//!   `append_kv`, `clip_kv`, …) to `CpuBackend`. An engine on this path runs
+//!   CPU attention **and** CPU FFN while the bench labels the row
+//!   `[metal (GPU)]` — worth ~9x on Gemma 3 4B. The row's dispatch note says
+//!   `[per-layer->host]` when that is what happened.
+//!
+//! - **Cross-backend parity**: Metal and CPU agree to ~5e-7 relative L2 on
+//!   prefill, and per-step decode differs by a stable ~3e-3 that does not
+//!   compound (two Q4K kernels rounding differently). Pinned by
+//!   `tests/gpu_engine_parity`. A divergence on the Gemma-3 arch that was
+//!   open through 2026-08 turned out to be a test fixture declaring
+//!   QK-norm without supplying the weights — real checkpoints always
+//!   carry them, so nothing shipped was affected.
 //!
 //! - **CPU fallback**: when Metal is unavailable, engines fall back to a CPU
 //!   path using dequantised attention tensors (lazily inserted into the
@@ -49,12 +99,18 @@
 pub mod apollo;
 pub mod boundary_kv;
 pub mod boundary_per_layer;
+mod layer_ffn;
 pub mod markov_residual;
 pub mod markov_residual_codec;
 pub mod no_cache;
+pub mod no_expert_route;
+pub mod semantic_promotion;
 pub mod standard;
 pub mod turbo_quant;
-pub mod unlimited_context;
+pub mod windowed_checkpoint;
+
+pub(crate) use layer_ffn::{apply_ple_and_layer_scalar, layer_ffn_or_moe};
+pub(crate) use no_expert_route::refuse_if_moe;
 
 /// Whether W10 mask cascade is active.
 ///
@@ -69,7 +125,7 @@ pub mod unlimited_context;
 /// it's now a no-op since the cascade is on by default.
 ///
 /// Used by the per-engine `dispatch.rs` modules
-/// (markov_residual, markov_residual_codec, unlimited_context,
+/// (markov_residual, markov_residual_codec, windowed_checkpoint,
 /// boundary_per_layer). Engines that treat K/V as canonical state
 /// (turbo_quant) don't call this — their dispatch path stays on
 /// Full mask regardless.
@@ -85,35 +141,6 @@ pub(crate) fn w10_enabled() -> bool {
     }
 }
 
-/// Per-layer FFN dispatch for engine forward loops, MoE-aware.
-///
-/// On a hybrid-MoE arch, when a `moe_ffn` hook is supplied (e.g.
-/// `RemoteMoeFfn` for `--moe-shards`), call its
-/// [`FfnBackend::forward_moe_full_layer`] — it returns the full layer output
-/// (dense `h1` + experts `h2` + combine), dispatching experts to the shards.
-/// Otherwise fall back to the engine's own dense FFN (`dense_ffn`), preserving
-/// prior behaviour for dense models and the no-hook path exactly.
-///
-/// Lets the per-layer / windowed engines (unlimited_context, markov_residual,
-/// turbo_quant, …) ride remote MoE without touching their KV state policy —
-/// only the FFN step changes.
-pub(crate) fn layer_ffn_or_moe(
-    weights: &larql_inference::ModelWeights,
-    h_post_attn: &ndarray::Array2<f32>,
-    layer: usize,
-    dense_ffn: &dyn larql_inference::ffn::FfnBackend,
-    moe_ffn: Option<&dyn larql_inference::ffn::FfnBackend>,
-) -> ndarray::Array2<f32> {
-    if weights.arch.is_hybrid_moe() {
-        if let Some(mf) = moe_ffn {
-            if let Some(h_out) = mf.forward_moe_full_layer(layer, h_post_attn) {
-                return h_out;
-            }
-        }
-    }
-    larql_inference::forward::run_ffn(weights, h_post_attn, layer, dense_ffn, false).0
-}
-
 std::thread_local! {
     /// Per-thread override for [`w10_enabled`]. `Some(true)` simulates
     /// `LARQL_W10_DISABLE=1` (cascade off); `Some(false)` simulates the
@@ -127,79 +154,6 @@ std::thread_local! {
 #[cfg(test)]
 pub(crate) fn set_w10_disabled_override(disabled: Option<bool>) {
     W10_DISABLED_OVERRIDE.with(|o| *o.borrow_mut() = disabled);
-}
-
-#[cfg(test)]
-mod layer_ffn_or_moe_tests {
-    use super::layer_ffn_or_moe;
-    use larql_inference::ffn::FfnBackend;
-    use larql_inference::test_utils::make_test_gemma4_moe_weights;
-    use ndarray::Array2;
-
-    /// FfnBackend whose MoE hook returns a sentinel (all 7.0) so we can tell
-    /// the MoE branch from the dense `run_ffn` fallback.
-    struct SentinelFfn;
-    impl FfnBackend for SentinelFfn {
-        fn forward(&self, _layer: usize, x: &Array2<f32>) -> Array2<f32> {
-            Array2::zeros(x.raw_dim())
-        }
-        fn forward_with_activation(
-            &self,
-            _layer: usize,
-            x: &Array2<f32>,
-        ) -> (Array2<f32>, Array2<f32>) {
-            (Array2::zeros(x.raw_dim()), Array2::zeros((x.nrows(), 1)))
-        }
-        fn name(&self) -> &str {
-            "sentinel"
-        }
-        fn forward_moe_full_layer(
-            &self,
-            _layer: usize,
-            h_post_attn: &Array2<f32>,
-        ) -> Option<Array2<f32>> {
-            Some(Array2::from_elem(h_post_attn.raw_dim(), 7.0))
-        }
-    }
-
-    #[test]
-    fn uses_moe_hook_on_hybrid_moe_arch() {
-        let weights = make_test_gemma4_moe_weights();
-        assert!(weights.arch.is_hybrid_moe());
-        let h = Array2::<f32>::zeros((2, weights.hidden_size));
-        let out = layer_ffn_or_moe(&weights, &h, 0, &SentinelFfn, Some(&SentinelFfn));
-        // Took the MoE hook → sentinel output, not the dense run_ffn path.
-        assert!(
-            out.iter().all(|&v| v == 7.0),
-            "expected MoE-hook sentinel output"
-        );
-    }
-
-    #[test]
-    fn falls_back_to_dense_when_no_hook() {
-        let weights = make_test_gemma4_moe_weights();
-        let h = Array2::<f32>::zeros((2, weights.hidden_size));
-        // No moe_ffn → dense run_ffn even on a MoE arch (no experts dispatched).
-        let out = layer_ffn_or_moe(&weights, &h, 0, &SentinelFfn, None);
-        assert_eq!(out.shape(), &[2, weights.hidden_size]);
-        assert!(
-            out.iter().any(|&v| v != 7.0),
-            "must NOT be the MoE-hook sentinel"
-        );
-        assert!(out.iter().all(|v| v.is_finite()));
-    }
-
-    #[test]
-    fn sentinel_ffn_trait_surface() {
-        // Exercise the FfnBackend methods `layer_ffn_or_moe` doesn't call.
-        let s = SentinelFfn;
-        let x = Array2::<f32>::zeros((2, 4));
-        assert_eq!(s.name(), "sentinel");
-        assert_eq!(s.forward(0, &x).shape(), &[2, 4]);
-        let (o, a) = s.forward_with_activation(0, &x);
-        assert_eq!(o.shape(), &[2, 4]);
-        assert_eq!(a.shape(), &[2, 1]);
-    }
 }
 
 /// Test-only RAII helper to drive the Q4K decode fast-path flags via

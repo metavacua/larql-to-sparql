@@ -92,13 +92,46 @@ fn gpt_oss_attn_keys() {
     assert_eq!(arch.attn_o_key(3), "layers.3.self_attn.o_proj.weight");
 }
 
+/// GPT-OSS's per-expert keys describe **loaded** state, not the checkpoint.
+///
+/// On disk there are no per-expert tensors — everything is packed and fused,
+/// which is why this test previously asserted `is_none()`. But the safetensors
+/// loader dequantises and de-interleaves the experts at load time and stores
+/// each one separately, so a compute backend reading `ModelWeights` does see
+/// per-expert weights. Advertising them is what lets a generic per-expert FFN
+/// backend serve this model without knowing anything about MXFP4 — and until
+/// 2026-07-30 nothing could, which is why `shannon score` could not score it.
+/// Callers that read the *checkpoint* (extraction) still want `packed_*`.
+/// See `docs/k3-funnel.md` §4.7.
 #[test]
-fn gpt_oss_no_per_expert_keys() {
+fn gpt_oss_exposes_dequantised_per_expert_keys() {
     let arch = gpt_oss_arch();
-    // PackedMxfp4 doesn't have per-expert keys
-    assert!(arch.expert_ffn_gate_key(0, 0).is_none());
-    assert!(arch.expert_ffn_up_key(0, 0).is_none());
-    assert!(arch.expert_ffn_down_key(0, 0).is_none());
+    assert_eq!(
+        arch.expert_ffn_gate_key(0, 5).as_deref(),
+        Some("layers.0.block_sparse_moe.experts.5.w1.weight")
+    );
+    assert_eq!(
+        arch.expert_ffn_up_key(0, 5).as_deref(),
+        Some("layers.0.block_sparse_moe.experts.5.w3.weight")
+    );
+    assert_eq!(
+        arch.expert_ffn_down_key(0, 5).as_deref(),
+        Some("layers.0.block_sparse_moe.experts.5.w2.weight")
+    );
+}
+
+/// The packed keys remain the checkpoint's own layout, unchanged by the above.
+#[test]
+fn gpt_oss_still_reports_packed_checkpoint_keys() {
+    let arch = gpt_oss_arch();
+    assert_eq!(
+        arch.packed_gate_up_blocks_key(0).as_deref(),
+        Some("layers.0.mlp.experts.gate_up_proj_blocks")
+    );
+    assert_eq!(
+        arch.expert_format(),
+        larql_models::ExpertFormat::PackedMxfp4
+    );
 }
 
 #[test]
@@ -536,6 +569,93 @@ fn all_architectures_have_attn_keys() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Norm-epsilon fallback — a per-family fact, pinned per family
+// ═══════════════════════════════════════════════════════════════
+
+/// `transformers`' config classes disagree about the `rms_norm_eps` class
+/// default, and a checkpoint that omits the field is served at *its own*
+/// class default. One crate-wide fallback answered for everyone, and OLMoE —
+/// which ships no `rms_norm_eps` at all — ran every norm of every layer an
+/// order of magnitude tight. See `docs/k3-funnel.md` §4.8.
+///
+/// Every family in the support table is listed, so adding an architecture
+/// without deciding its value fails here rather than silently inheriting the
+/// majority. The values are read off the `transformers` config classes, not
+/// guessed.
+#[test]
+fn norm_eps_fallback_is_pinned_per_family() {
+    const EPS_1E6: f32 = 1e-6;
+    const EPS_1E5: f32 = 1e-5;
+    let cases: [(serde_json::Value, f32); 9] = [
+        (
+            serde_json::json!({"model_type": "llama", "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 128, "num_attention_heads": 4, "num_key_value_heads": 2}),
+            EPS_1E6,
+        ),
+        (
+            serde_json::json!({"model_type": "mistral", "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 128, "num_attention_heads": 4, "num_key_value_heads": 2}),
+            EPS_1E6,
+        ),
+        (
+            serde_json::json!({"model_type": "qwen2", "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 128, "num_attention_heads": 4, "num_key_value_heads": 2}),
+            EPS_1E6,
+        ),
+        (
+            serde_json::json!({"model_type": "qwen3_moe", "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 128, "num_attention_heads": 4, "num_key_value_heads": 2, "num_experts": 8, "num_experts_per_tok": 2}),
+            EPS_1E6,
+        ),
+        (
+            serde_json::json!({"model_type": "gemma2", "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 128, "num_attention_heads": 4, "num_key_value_heads": 2}),
+            EPS_1E6,
+        ),
+        (
+            serde_json::json!({"model_type": "gemma3", "text_config": {"model_type": "gemma3_text", "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 128, "num_attention_heads": 4, "num_key_value_heads": 2}}),
+            EPS_1E6,
+        ),
+        // The 1e-5 families. OLMoE is the one that actually fires in practice.
+        (
+            serde_json::json!({"model_type": "olmoe", "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 128, "num_attention_heads": 4, "num_key_value_heads": 4, "num_experts": 8, "num_experts_per_tok": 2, "norm_topk_prob": false}),
+            EPS_1E5,
+        ),
+        (
+            serde_json::json!({"model_type": "gpt_oss", "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 64, "num_attention_heads": 4, "num_key_value_heads": 2, "num_local_experts": 8, "num_experts_per_tok": 2}),
+            EPS_1E5,
+        ),
+        (
+            serde_json::json!({"model_type": "starcoder2", "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 128, "num_attention_heads": 4, "num_key_value_heads": 2}),
+            EPS_1E5,
+        ),
+    ];
+
+    for (config, expected) in &cases {
+        let arch = detect_from_json(config);
+        assert_eq!(
+            arch.default_norm_eps(),
+            *expected,
+            "{}: fallback epsilon must match its own transformers config class \
+             default, not the majority's",
+            arch.family()
+        );
+        // With no eps in the config, `norm_eps()` must *be* the fallback —
+        // otherwise declaring the fallback changes nothing that runs.
+        assert_eq!(arch.norm_eps(), *expected, "{}", arch.family());
+    }
+}
+
+/// An explicit `rms_norm_eps` always wins over the family fallback: the
+/// fallback exists for absence, and must never override a stated value.
+#[test]
+fn explicit_norm_eps_overrides_the_family_fallback() {
+    let arch = detect_from_json(&serde_json::json!({
+        "model_type": "olmoe", "hidden_size": 64, "num_hidden_layers": 2,
+        "intermediate_size": 128, "num_attention_heads": 4, "num_key_value_heads": 4,
+        "num_experts": 8, "num_experts_per_tok": 2, "norm_topk_prob": false,
+        "rms_norm_eps": 1e-7,
+    }));
+    assert_eq!(arch.default_norm_eps(), 1e-5, "the fallback is unchanged");
+    assert_eq!(arch.norm_eps(), 1e-7, "but the config is what runs");
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ModelWeights: drop_ffn_weights
 // ═══════════════════════════════════════════════════════════════
 
@@ -576,6 +696,7 @@ fn drop_ffn_weights_removes_ffn_tensors() {
         skipped_tensors: Vec::new(),
         packed_mmaps: HashMap::new(),
         packed_byte_ranges: HashMap::new(),
+        per_layer_ffn_format: Default::default(),
         embed: small.clone(),
         lm_head: small.clone(),
         position_embed: None,
@@ -658,6 +779,7 @@ fn drop_ffn_weights_removes_moe_experts() {
         skipped_tensors: Vec::new(),
         packed_mmaps: HashMap::new(),
         packed_byte_ranges: HashMap::new(),
+        per_layer_ffn_format: Default::default(),
         embed: small.clone(),
         lm_head: small.clone(),
         position_embed: None,
@@ -730,6 +852,7 @@ fn drop_ffn_weights_removes_starcoder2_ffn_tensors_and_biases() {
         skipped_tensors: Vec::new(),
         packed_mmaps: HashMap::new(),
         packed_byte_ranges: HashMap::new(),
+        per_layer_ffn_format: Default::default(),
         embed: small.clone(),
         lm_head: small.clone(),
         position_embed: None,
@@ -1296,6 +1419,56 @@ fn starcoder2_detection() {
     assert_eq!(arch.config().num_layers, 30);
 }
 
+/// LayerNorm is `γ·x̂ + β`, so a LayerNorm architecture must name its `β`.
+///
+/// Nothing named a norm bias until 2026-07-31: extraction never wrote one and
+/// `build_pipeline_layers` hardcoded `input_norm_bias: None`, so every
+/// vindex-backed and Metal path silently dropped the shift term for GPT-2 and
+/// StarCoder2 — while the Metal `layer_norm` shader implemented `+ bias` and
+/// always selected its no-bias variant.
+#[test]
+fn starcoder2_names_its_layernorm_biases() {
+    let arch = starcoder2_arch();
+    assert_eq!(
+        arch.input_layernorm_bias_key(3).as_deref(),
+        Some("layers.3.input_layernorm.bias")
+    );
+    assert_eq!(
+        arch.post_attention_layernorm_bias_key(3).as_deref(),
+        Some("layers.3.post_attention_layernorm.bias")
+    );
+    assert_eq!(arch.final_norm_bias_key().as_deref(), Some("norm.bias"));
+}
+
+/// An RMSNorm architecture has no `β` at all, so it must claim none —
+/// otherwise the coverage audit would treat a nonexistent tensor as expected
+/// and extraction would ask for a key that can never resolve.
+#[test]
+fn an_rmsnorm_architecture_claims_no_layernorm_bias() {
+    let arch = detect_from_json(&serde_json::json!({
+        "model_type": "llama",
+        "hidden_size": 64, "num_hidden_layers": 2, "intermediate_size": 128,
+        "num_attention_heads": 4, "num_key_value_heads": 4, "vocab_size": 32
+    }));
+    assert_eq!(arch.norm_type(), larql_models::NormType::RmsNorm);
+    assert!(arch.input_layernorm_bias_key(0).is_none());
+    assert!(arch.post_attention_layernorm_bias_key(0).is_none());
+    assert!(arch.final_norm_bias_key().is_none());
+}
+
+/// The bias key is derived from the weight key, so it tracks any architecture
+/// that overrides its norm naming instead of drifting from it.
+#[test]
+fn the_norm_bias_key_tracks_the_weight_key() {
+    let arch = starcoder2_arch();
+    for layer in [0usize, 7] {
+        let weight = arch.input_layernorm_key(layer);
+        let bias = arch.input_layernorm_bias_key(layer).unwrap();
+        assert_eq!(bias, weight.replace(".weight", ".bias"));
+        assert!(bias.ends_with(".bias"));
+    }
+}
+
 #[test]
 fn starcoder2_norm_and_activation() {
     let arch = starcoder2_arch();
@@ -1484,6 +1657,7 @@ fn minimal_weights() -> larql_models::ModelWeights {
         skipped_tensors: Vec::new(),
         packed_mmaps: HashMap::new(),
         packed_byte_ranges: HashMap::new(),
+        per_layer_ffn_format: Default::default(),
         embed: small.clone(),
         lm_head: small.clone(),
         position_embed: None,
@@ -1684,4 +1858,189 @@ fn get_packed_bytes_mmap_range_missing_file_falls_through_to_raw() {
     // mmap file absent → fallback to raw_bytes
     let bytes = w.get_packed_bytes("tensor.key").unwrap();
     assert_eq!(bytes, &[9u8, 8]);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Trait-default + OLMoE sweeps, duplicated from the in-crate unit
+// tests on purpose.
+//
+// `cargo llvm-cov --package larql-models` (the CI coverage gate) merges
+// this binary's instantiation of the crate with the lib-test binary's.
+// A default method exercised only by the unit tests still reports
+// uncovered lines from THIS binary's copy, and the per-file floor is
+// computed on the merged union — so the public-API surface below has to
+// walk the same paths, or `config.rs`/`olmoe.rs` sit under their floors
+// with green tests.
+// ═══════════════════════════════════════════════════════════════
+
+/// OLMoE-1B-7B's real routing shape (64 experts, 8 per token, expert
+/// width in plain `intermediate_size`).
+fn olmoe() -> Box<dyn ModelArchitecture> {
+    detect_from_json(&serde_json::json!({
+        "model_type": "olmoe",
+        "hidden_size": 2048,
+        "intermediate_size": 1024,
+        "num_hidden_layers": 16,
+        "num_attention_heads": 16,
+        "num_key_value_heads": 16,
+        "num_experts": 64,
+        "num_experts_per_tok": 8,
+        "norm_topk_prob": false,
+    }))
+}
+
+#[test]
+fn olmoe_moe_shape_and_keys() {
+    let a = olmoe();
+    assert_eq!(a.family(), "olmoe");
+    assert!(a.is_moe());
+    assert_eq!(a.num_experts(), 64);
+    assert_eq!(a.num_experts_per_token(), 8);
+    // No `moe_intermediate_size` field: expert width comes from
+    // `intermediate_size`, not an `unwrap_or(0)`.
+    assert_eq!(a.moe_intermediate_size(), 1024);
+    // `norm_topk_prob: false` keeps raw softmax probabilities.
+    assert_eq!(
+        a.expert_routing_policy(),
+        larql_models::ExpertRoutingPolicy::SoftmaxThenSelect
+    );
+    let p = a.layer_prefix(2);
+    assert_eq!(a.moe_router_key(2), Some(format!("{p}mlp.gate.weight")));
+    assert_eq!(
+        a.expert_ffn_gate_key(2, 5),
+        Some(format!("{p}mlp.experts.5.gate_proj.weight"))
+    );
+    assert_eq!(
+        a.expert_ffn_up_key(2, 5),
+        Some(format!("{p}mlp.experts.5.up_proj.weight"))
+    );
+    assert_eq!(
+        a.expert_ffn_down_key(2, 5),
+        Some(format!("{p}mlp.experts.5.down_proj.weight"))
+    );
+    assert_eq!(
+        a.attn_q_norm_key(2),
+        Some(format!("{p}self_attn.q_norm.weight"))
+    );
+    assert_eq!(
+        a.attn_k_norm_key(2),
+        Some(format!("{p}self_attn.k_norm.weight"))
+    );
+}
+
+#[test]
+fn olmoe_without_experts_is_dense() {
+    let a = detect_from_json(&serde_json::json!({
+        "model_type": "olmoe",
+        "hidden_size": 64,
+        "intermediate_size": 128,
+        "num_hidden_layers": 1,
+        "num_attention_heads": 4,
+    }));
+    assert!(!a.is_moe());
+    assert_eq!(a.num_experts_per_token(), 0);
+    assert_eq!(a.moe_router_key(0), None);
+    assert_eq!(a.expert_ffn_gate_key(0, 0), None);
+    assert_eq!(a.expert_ffn_up_key(0, 0), None);
+    assert_eq!(a.expert_ffn_down_key(0, 0), None);
+}
+
+/// Walk the `ModelArchitecture` defaults through a family that overrides
+/// almost nothing, so this binary's instantiation of the default bodies
+/// executes. Assertions mirror `config::tests` — see the header comment.
+#[test]
+fn trait_defaults_via_public_api() {
+    let a = detect_from_json(&serde_json::json!({
+        "model_type": "llama",
+        "hidden_size": 64,
+        "intermediate_size": 128,
+        "num_hidden_layers": 2,
+        "num_attention_heads": 4,
+        "num_key_value_heads": 2,
+        "head_dim": 16,
+        "vocab_size": 32,
+    }));
+    // Dense-model MoE surface.
+    assert!(!a.is_moe());
+    assert!(!a.is_hybrid_moe());
+    assert_eq!(a.num_experts(), 0);
+    assert_eq!(a.num_shared_experts(), 0);
+    assert_eq!(a.moe_intermediate_size(), 0);
+    assert_eq!(a.moe_router_type(), "top_k_softmax");
+    assert_eq!(a.expert_format(), ExpertFormat::PerExpert);
+    assert_eq!(
+        a.expert_gate_policy(),
+        larql_models::ExpertGatePolicy::Gated
+    );
+    assert_eq!(
+        a.expert_routing_policy(),
+        larql_models::ExpertRoutingPolicy::SoftmaxThenSelect
+    );
+    for k in [
+        a.moe_router_bias_key(0),
+        a.moe_router_scale_key(0),
+        a.moe_router_per_expert_scale_key(0),
+        a.moe_router_norm_key(0),
+        a.shared_expert_gate_key(0),
+        a.shared_expert_up_key(0),
+        a.shared_expert_down_key(0),
+        a.packed_gate_up_blocks_key(0),
+        a.packed_gate_up_scales_key(0),
+        a.packed_gate_up_bias_key(0),
+        a.packed_down_blocks_key(0),
+        a.packed_down_scales_key(0),
+        a.packed_down_bias_key(0),
+        a.packed_experts_gate_up_key(0),
+        a.packed_experts_down_key(0),
+        a.moe_post_outer_norm_key(0),
+        a.moe_post_ffn1_norm_key(0),
+        a.moe_pre_experts_norm_key(0),
+        a.moe_post_experts_norm_key(0),
+        a.attn_sinks_key(0),
+        a.fused_qkv_key(0),
+        a.fused_qkv_bias_key(0),
+        a.ffn_up_bias_key(0),
+        a.ffn_down_bias_key(0),
+        a.layer_scalar_key(0),
+        a.mla_kv_a_key(0),
+        a.mla_kv_b_key(0),
+        a.mla_q_a_key(0),
+        a.mla_q_b_key(0),
+    ] {
+        assert_eq!(k, None);
+    }
+    assert!(!a.moe_router_norm_parameter_free());
+    assert_eq!(a.moe_router_input_scalar(), None);
+    assert!(!a.moe_has_combined_output_norm());
+    // MLA off means standard GQA.
+    assert!(!a.uses_mla());
+    assert_eq!(a.kv_lora_rank(), 0);
+    assert_eq!(a.q_lora_rank(), 0);
+    assert_eq!(a.mla_qk_nope_head_dim(), None);
+    assert_eq!(a.mla_qk_rope_head_dim(), None);
+    assert_eq!(a.mla_v_head_dim(), None);
+    // Identity multipliers, no softcapping, no PLE, no rope scaling.
+    assert_eq!(a.residual_multiplier(), 1.0);
+    assert_eq!(a.attention_multiplier(), 1.0);
+    assert_eq!(a.logits_scaling(), 1.0);
+    assert_eq!(a.attn_logit_softcapping(), None);
+    assert_eq!(a.final_logit_softcapping(), None);
+    assert!(!a.has_per_layer_embeddings());
+    assert_eq!(a.per_layer_embed_dim(), 0);
+    assert_eq!(a.per_layer_embed_key(), None);
+    assert_eq!(a.per_layer_model_projection_key(), None);
+    assert_eq!(a.per_layer_projection_norm_key(), None);
+    assert_eq!(a.per_layer_input_gate_key(0), None);
+    assert_eq!(a.per_layer_projection_key(0), None);
+    assert_eq!(a.post_per_layer_input_norm_key(0), None);
+    assert_eq!(a.rope_position_divisor_for_layer(0), 1.0);
+    // llama overrides llama3_rope_scaling, so only walk it — the default's
+    // None is asserted by `config::tests` on an override-free arch.
+    let _ = a.llama3_rope_scaling();
+    assert!(a.multimodal().is_none());
+    assert_eq!(a.kv_shared_source_layer(0), None);
+    // Scale falls back to head_dim^-0.5 without query_pre_attn_scalar.
+    assert_eq!(a.attention_scale_for_layer(0), (16.0f64).powf(-0.5));
+    // The markov-residual precondition holds for the default surface.
+    assert!(a.kv_recomputable_from_residuals());
 }

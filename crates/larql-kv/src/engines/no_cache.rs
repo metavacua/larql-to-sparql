@@ -73,8 +73,10 @@ impl KvEngine for NoCacheEngine {
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
-        self.tokens = token_ids.to_vec();
         let view = larql_inference::WeightsView::with_scratch(weights, &self.dequant_scratch);
+        // Assigned after the `?`: the token list is this engine's entire
+        // state, so a refused prefill must leave whatever list was already
+        // there rather than adopt a prompt it never finished.
         let (hidden, _cache) = kv_prefill_run(
             view,
             ffn,
@@ -82,10 +84,8 @@ impl KvEngine for NoCacheEngine {
             None,
             Some(self.backend.as_ref()),
             &mut NoopHook,
-        )
-        .ok_or_else(|| EngineError::BackendFailure {
-            details: "kv_prefill_run returned None".into(),
-        })?;
+        )?;
+        self.tokens = token_ids.to_vec();
         Ok(hidden)
     }
 
@@ -95,19 +95,28 @@ impl KvEngine for NoCacheEngine {
         ffn: &dyn FfnBackend,
         token_id: u32,
     ) -> Result<Array2<f32>, EngineError> {
+        // **Transactional.** The token list is the whole of this engine's
+        // continuation state, and the re-forward needs the new token *in* it —
+        // so the push happens first and is undone if the step does not
+        // complete. Without the pop, a caller who fixed a refusal's cause and
+        // retried would re-forward the same token twice, which is precisely
+        // the failure the strict-refusal contract exists to prevent. There is
+        // no K/V to rewind: `kv_prefill_run`'s cache is discarded every call,
+        // which is what makes this engine the correctness fallback.
         self.tokens.push(token_id);
         let view = larql_inference::WeightsView::with_scratch(weights, &self.dequant_scratch);
-        let (hidden, _cache) = kv_prefill_run(
+        let outcome = kv_prefill_run(
             view,
             ffn,
             &self.tokens,
             None,
             Some(self.backend.as_ref()),
             &mut NoopHook,
-        )
-        .ok_or_else(|| EngineError::BackendFailure {
-            details: "kv_prefill_run returned None during decode_step".into(),
-        })?;
+        );
+        if outcome.is_err() {
+            self.tokens.pop();
+        }
+        let (hidden, _cache) = outcome?;
         Ok(hidden)
     }
 

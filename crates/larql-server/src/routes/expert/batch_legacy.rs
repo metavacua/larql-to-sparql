@@ -48,6 +48,7 @@ pub async fn handle_expert_batch(
     body: Bytes,
 ) -> Result<Response, ServerError> {
     state.bump_requests();
+    let _rif_guard = crate::routes::walk_ffn::types::track_model_request(&state);
     let start = std::time::Instant::now();
 
     // Accept both binary (application/x-larql-expert) and JSON.

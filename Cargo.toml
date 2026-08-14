@@ -8,10 +8,13 @@ members = [
     "crates/larql-core",
     "crates/larql-vindex",
     "crates/larql-vindex-spec",
+    "crates/larql-execution",
+    "crates/larql-factory",
     "crates/larql-inference",
     "crates/larql-kv",
     "crates/larql-lql",
     "crates/larql-cli",
+    "crates/larql-demos",
     "crates/larql-server",
     "crates/larql-router",
     "crates/larql-router-protocol",
@@ -28,10 +31,12 @@ default-members = [
     "crates/larql-core",
     "crates/larql-vindex",
     "crates/larql-vindex-spec",
+    "crates/larql-factory",
     "crates/larql-inference",
     "crates/larql-kv",
     "crates/larql-lql",
     "crates/larql-cli",
+    "crates/larql-demos",
     "crates/larql-server",
     "crates/larql-router",
     "crates/larql-router-protocol",
@@ -40,9 +45,9 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.88"
 authors = []
 license = "Apache-2.0"
 repository = "https://github.com/chrishayuk/chuk-larql-rs"
@@ -71,3 +76,11 @@ debug = false
 [profile.release]
 debug = "line-tables-only"
 split-debuginfo = "packed"
+
+# Distribution builds only (ADR-0026 release binaries) — full strip, no
+# line tables. Kept separate from [profile.release] so local profiling
+# builds are unaffected; CI's release.yml is the only user.
+[profile.release-dist]
+inherits = "release"
+debug = false
+strip = true

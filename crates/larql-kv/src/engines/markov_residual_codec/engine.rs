@@ -6,7 +6,7 @@
 //! - this file: struct + construction + `KvEngine` trait glue
 //! - [`super::walk`] — CPU dense walk path
 //!   (`rs_prefill_codec_walk` / `rs_decode_step_codec_walk`)
-//! - [`super::compute`] — Q4K-native walk path
+//! - [`super::prefill`] / [`super::step`] — Q4K-native walk path
 //!   (`rs_prefill_codec` / `rs_decode_step_codec`)
 //! - [`super::dispatch`] — W1-GPU dispatch fast path with W10 mask
 //!   cascade
@@ -19,9 +19,11 @@ use larql_inference::model::ModelWeights;
 use larql_inference::{cpu_engine_backend, EngineBackend};
 use ndarray::Array2;
 
+use crate::engines::markov_residual::engine::check_residual_recompute_preconditions;
 use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
 use crate::engines::markov_residual_codec::codec::ColdResidualCodec;
-use crate::engines::markov_residual_codec::compute::{rs_decode_step_codec, rs_prefill_codec};
+use crate::engines::markov_residual_codec::prefill::rs_prefill_codec;
+use crate::engines::markov_residual_codec::step::rs_decode_step_codec;
 use crate::engines::markov_residual_codec::store::RsStoreCodec;
 use crate::engines::markov_residual_codec::walk::{
     rs_decode_step_codec_walk, rs_prefill_codec_walk,
@@ -80,8 +82,13 @@ impl MarkovResidualCodecEngine {
         self.codec
     }
 
+    /// Residual store + backend-resident K/V — see
+    /// [`super::super::markov_residual::MarkovResidualEngine::total_memory_bytes`]
+    /// for why the backend term is needed on the W1-GPU path.
     pub fn total_memory_bytes(&self) -> usize {
         self.store.as_ref().map_or(0, |s| s.memory_bytes())
+            + self.kv_handle.as_ref().map_or(0, |h| h.resident_bytes())
+            + self.backend.backend_resident_kv_bytes()
     }
 }
 
@@ -95,6 +102,10 @@ impl MarkovResidualCodecEngine {
 
 impl MarkovResidualCodecEngine {
     /// Shared body for `decode_step` / `decode_step_resident`.
+    ///
+    /// The store is borrowed, never taken: a failed step leaves canonical
+    /// state exactly as it was (see [`super::step`]'s failure invariant), so a
+    /// refusal reports itself and the engine stays usable.
     fn decode_step_impl(
         &mut self,
         weights: &ModelWeights,
@@ -102,25 +113,21 @@ impl MarkovResidualCodecEngine {
         token_id: u32,
         index: Option<&larql_vindex::VectorIndex>,
     ) -> Result<Array2<f32>, EngineError> {
+        let backend = self.backend.as_ref();
         let rs = self
             .store
-            .take()
+            .as_mut()
             .ok_or_else(|| EngineError::InvariantViolation {
                 what: "decode_step called before prefill (store missing)".into(),
             })?;
-        let (hidden, new_rs) = rs_decode_step_codec(
+        rs_decode_step_codec(
             larql_inference::WeightsView::dense(weights),
             token_id,
             rs,
-            self.backend.as_ref(),
+            backend,
             Some(ffn),
             index,
         )
-        .ok_or_else(|| EngineError::BackendFailure {
-            details: "rs_decode_step_codec returned None".into(),
-        })?;
-        self.store = Some(new_rs);
-        Ok(hidden)
     }
 }
 
@@ -153,9 +160,12 @@ impl KvEngine for MarkovResidualCodecEngine {
         ffn: &dyn FfnBackend,
         token_ids: &[u32],
     ) -> Result<Array2<f32>, EngineError> {
+        check_residual_recompute_preconditions(self.name(), weights)?;
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
+        // `?` before the assignment: a refused prefill must not replace the
+        // store an earlier one built.
         let result = rs_prefill_codec(
             larql_inference::WeightsView::dense(weights),
             token_ids,
@@ -163,10 +173,9 @@ impl KvEngine for MarkovResidualCodecEngine {
             self.codec,
             self.backend.as_ref(),
             Some(ffn),
-        );
-        let hidden = result.hidden.clone();
+        )?;
         self.store = Some(result.store);
-        Ok(hidden)
+        Ok(result.hidden)
     }
 
     fn decode_step(
@@ -202,6 +211,17 @@ impl KvEngine for MarkovResidualCodecEngine {
         self.store.as_ref().map_or(0, |s| s.cold_bytes())
     }
 
+    fn dispatch_path(&self) -> Option<larql_inference::kv_engine::DispatchPath> {
+        use larql_inference::kv_engine::DispatchPath;
+        // Same rule as `markov_residual`: `kv_handle` marks the W1-GPU
+        // coarse path, `store` marks "prefill happened at all".
+        match (self.kv_handle.is_some(), self.store.is_some()) {
+            (true, _) => Some(DispatchPath::Coarse),
+            (false, true) => Some(DispatchPath::PerLayer),
+            (false, false) => None,
+        }
+    }
+
     fn prefill_quant(
         &mut self,
         weights: &ModelWeights,
@@ -210,6 +230,7 @@ impl KvEngine for MarkovResidualCodecEngine {
         token_ids: &[u32],
         backend: &dyn larql_compute::ComputeBackend,
     ) -> Result<Array2<f32>, EngineError> {
+        check_residual_recompute_preconditions(self.name(), weights)?;
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
@@ -293,6 +314,7 @@ impl KvEngine for MarkovResidualCodecEngine {
         token_ids: &[u32],
     ) -> Result<Array2<f32>, EngineError> {
         use larql_inference::layer_executor::ExecutorDispatchKind;
+        check_residual_recompute_preconditions(self.name(), weights)?;
         if token_ids.is_empty() {
             return Err(EngineError::EmptyPrompt);
         }
@@ -630,14 +652,6 @@ mod tests {
         fn forward(&self, _layer: usize, x: &ndarray::Array2<f32>) -> ndarray::Array2<f32> {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             ndarray::Array2::zeros((x.shape()[0], self.hidden))
-        }
-        fn forward_with_activation(
-            &self,
-            layer: usize,
-            x: &ndarray::Array2<f32>,
-        ) -> (ndarray::Array2<f32>, ndarray::Array2<f32>) {
-            let out = self.forward(layer, x);
-            (out.clone(), out)
         }
         fn name(&self) -> &str {
             "counting"
@@ -1015,5 +1029,104 @@ mod tests {
         // Prefill evicted 1 row; each of 3 decode steps evicted 1 more.
         assert!(cold[0].n_positions >= 3);
         assert!(engine.window_tokens() <= 2);
+    }
+
+    // ── hot_kv consistency on the executor path ──────────────────────────
+
+    /// Window equal to the prompt so the first executor decode is the
+    /// step that overflows (the out-of-bounds clip on the old code).
+    const EXEC_WINDOW: usize = 2;
+    const EXEC_PROMPT: [u32; 2] = [0, 1];
+
+    #[test]
+    fn decode_via_executor_after_walk_prefill_drops_hot_kv_and_stays_consistent() {
+        // Twin of the markov_residual test: the executor decode discards
+        // `run_decode_layer`'s returned K/V while `hot_len` grows, so a
+        // walk-prefill `hot_kv` carried through unchanged violates the
+        // store invariant and makes `clip_layer_overflow` slice out of
+        // bounds. The fixed path drops the cache; attention never reads
+        // it here, so runs with and without a prefill-seeded hot_kv must
+        // be bit-identical.
+        use larql_inference::ffn::NullFfn;
+        use larql_inference::layer_executor::LocalWalkExecutor;
+        let weights = make_test_weights();
+        let index = larql_inference::test_utils::make_test_vindex(&weights);
+        let backend = larql_compute::cpu_backend();
+        let executor = LocalWalkExecutor::new(&*backend);
+        let ffn = NullFfn;
+
+        let run = |drop_hot_kv_after_prefill: bool| -> ndarray::Array2<f32> {
+            let mut engine =
+                MarkovResidualCodecEngine::new(Some(EXEC_WINDOW), ColdResidualCodec::Bf16);
+            engine
+                .prefill_quant(&weights, &ffn, &index, &EXEC_PROMPT, &*backend)
+                .expect("walk prefill");
+            assert!(engine.store.as_ref().unwrap().hot_kv.is_some());
+            if drop_hot_kv_after_prefill {
+                engine.store.as_mut().unwrap().hot_kv = None;
+            }
+            engine
+                .decode_step_quant_via_executor(&weights, &executor, &ffn, &index, 2)
+                .expect("executor decode 1");
+            let store = engine.store.as_ref().unwrap();
+            assert!(
+                store.hot_kv.is_none(),
+                "executor decode must not carry a hot_kv it did not extend"
+            );
+            engine
+                .decode_step_quant_via_executor(&weights, &executor, &ffn, &index, 3)
+                .expect("executor decode 2")
+        };
+
+        let h_with_seeded_cache = run(false);
+        let h_without_cache = run(true);
+        let a_bits: Vec<u32> = h_with_seeded_cache.iter().map(|v| v.to_bits()).collect();
+        let b_bits: Vec<u32> = h_without_cache.iter().map(|v| v.to_bits()).collect();
+        assert_eq!(
+            a_bits, b_bits,
+            "stale hot_kv leaked into the codec executor decode path"
+        );
+    }
+
+    // ── §4 architecture-precondition gate ─────────────────────────────────
+
+    /// Structural violation stub (MLA) — mirrors the markov_residual
+    /// gate test; the codec engine shares the same precondition check.
+    struct MlaStubArch {
+        config: larql_inference::larql_models::ModelConfig,
+    }
+    impl larql_inference::larql_models::ModelArchitecture for MlaStubArch {
+        fn family(&self) -> &str {
+            "mla-stub"
+        }
+        fn config(&self) -> &larql_inference::larql_models::ModelConfig {
+            &self.config
+        }
+        fn uses_mla(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn prefill_refuses_arch_violating_residual_recompute_preconditions() {
+        use larql_inference::ffn::NullFfn;
+        let mut weights = make_test_weights();
+        weights.arch = Box::new(MlaStubArch {
+            config: weights.arch.config().clone(),
+        });
+        let ffn = NullFfn;
+        let mut engine = MarkovResidualCodecEngine::new(None, ColdResidualCodec::Bf16);
+        let err = engine.prefill(&weights, &ffn, &[0u32, 1]).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                larql_inference::kv_engine::EngineError::InvariantViolation { .. }
+            ),
+            "precondition violation must fail closed, got {err:?}"
+        );
+        assert!(
+            engine.store.is_none(),
+            "no state may be built after refusal"
+        );
     }
 }

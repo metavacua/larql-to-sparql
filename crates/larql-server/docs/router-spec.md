@@ -451,7 +451,7 @@ Tracked in ADR-0003 / ADR-0004:
 - **gRPC transport to backends** — fan-out currently uses HTTP/JSON; a future version
   will use raw f32 bytes over gRPC (ADR-0003 Phase 2)
 
-Already shipped (see `crates/larql-router/ROADMAP.md` for details):
+Already shipped (see `crates/larql-router/CHANGELOG.md` for details):
 Mode B + Phase B2 drain/reassign, stale heartbeat eviction, admin CLI
 (`status` / `gaps` / `drain` / `assign`), dynamic rebalancing including
 hot-shard load-rate replication + two-threshold hysteresis (ADR-0014),

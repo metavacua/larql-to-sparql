@@ -1,6 +1,6 @@
 # FR3 — relation as a clean semantic address: VERDICT
 
-**Date:** 2026-06-07. **Status:** ran (`crates/larql-inference/examples/fr3_relation_address.rs` → `bench/aim-validation/fr3_relation_address_gemma3-4b.json`). Gemma-3-4B Q4K vindex, N=40 countries, layer sweep {6,10,14,20,26}. Dependency-free softmax-regression probe (standardised, L2), judged in synonym-generalisation accuracy (not mean-cosine). Reproduces the mechanism video `address.py` on the production path. Pre-registration: [`docs/fleet-routing-extensions.md`](../fleet-routing-extensions.md) §FR3.
+**Date:** 2026-06-07. **Status:** ran (`chris-experiments/larql_probes/examples/fleet_routing/fr3_relation_address.rs` → `bench/aim-validation/fr3_relation_address_gemma3-4b.json`). Gemma-3-4B Q4K vindex, N=40 countries, layer sweep {6,10,14,20,26}. Dependency-free softmax-regression probe (standardised, L2), judged in synonym-generalisation accuracy (not mean-cosine). Reproduces the mechanism video `address.py` on the production path. Pre-registration: [`docs/fleet-routing-extensions.md`](../fleet-routing-extensions.md) §FR3.
 
 ## Headline
 
@@ -39,7 +39,7 @@
 
 The relation is a **clean semantic address, resolved early (L6) and synonym-robust (1.00)** — the opposite of the fuzzy late-resolving entity (FR1). The two halves of `(relation, entity) → value` measured side-by-side on the production residual confirm the mechanism: **build the relation half as a meaning-keyed index, the entity half as top-k + rank.**
 
-**Artifacts:** `crates/larql-inference/examples/fr3_relation_address.rs`, `bench/aim-validation/fr3_relation_address_gemma3-4b.json`.
+**Artifacts:** `chris-experiments/larql_probes/examples/fleet_routing/fr3_relation_address.rs`, `bench/aim-validation/fr3_relation_address_gemma3-4b.json`.
 
 ---
 

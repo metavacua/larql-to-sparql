@@ -17,8 +17,15 @@ use crate::state::AppState;
 /// CPU expert dispatch with pre_norm hoisted out of the per-expert loop and
 /// allocation-free per-expert compute via `ExpertScratch`.
 ///
-/// Returns the router-weighted sum across the K active experts (length =
-/// hidden). Caller is responsible for applying post-experts norm; this
+/// Returns `(weighted_sum, experts_run)`: the router-weighted sum across the
+/// active experts (length = hidden) plus the count of experts that actually
+/// contributed. Zero-weight pairs are legitimately skipped and count neither
+/// as requested nor as run; an expert whose bytes can't be resolved (unowned
+/// or out-of-range `(layer, expert_id)`) is silently absent from the sum, so
+/// callers MUST compare `experts_run` against their non-zero-weight request
+/// count and turn any shortfall into a loud error — a partial sum is a
+/// silently corrupt number (dec-readiness review, "the number is a lie"
+/// class). Caller is responsible for applying post-experts norm; this
 /// function intentionally stops one step short so the same numbers are
 /// summable across shards.
 pub fn run_experts_cpu_batch(
@@ -27,7 +34,7 @@ pub fn run_experts_cpu_batch(
     h_post_attn: &[f32],
     expert_ids: &[usize],
     expert_weights: &[f32],
-) -> Result<Vec<f32>, ServerError> {
+) -> Result<(Vec<f32>, usize), ServerError> {
     use larql_compute::cpu::ops::moe::{
         pre_experts_norm, quantize_h_norm_for_q4k, run_single_expert_into,
         run_single_expert_q4k_q8k_into, ExpertScratch,
@@ -43,7 +50,7 @@ pub fn run_experts_cpu_batch(
     let arch = &*weights.arch;
     let hidden = h_post_attn.len();
     if hidden == 0 || expert_ids.is_empty() {
-        return Ok(vec![0.0f32; hidden]);
+        return Ok((vec![0.0f32; hidden], 0));
     }
     let inter = arch.moe_intermediate_size();
     let activation = larql_inference::activation_from_arch(arch);
@@ -132,16 +139,20 @@ pub fn run_experts_cpu_batch(
     // forced an 11 KB Vec allocation per expert per layer (≈2.7 MB/token at
     // 30 MoE layers × top-K=8) and serialized the final accumulation on one
     // thread.
+    // Each per-worker accumulator also counts the experts it actually ran,
+    // so an unresolvable (layer, expert_id) — which contributes nothing to
+    // the sum — surfaces as `experts_run < requested` at the caller instead
+    // of silently vanishing into a partial sum.
     use rayon::prelude::*;
-    let out = expert_ids
+    let (out, n_run) = expert_ids
         .par_iter()
         .zip(expert_weights.par_iter())
         .filter(|(_, &w)| w != 0.0)
         .fold(
-            || vec![0.0f32; hidden],
-            |mut acc, (&eid, &w)| {
+            || (vec![0.0f32; hidden], 0usize),
+            |(mut acc, n_run), (&eid, &w)| {
                 let Some((gu_bytes, dn_bytes)) = resolve_bytes(eid) else {
-                    return acc;
+                    return (acc, n_run);
                 };
                 SCRATCH.with(|cell| {
                     let mut borrow = cell.borrow_mut();
@@ -157,27 +168,38 @@ pub fn run_experts_cpu_batch(
                     }
                     let h2 = if let Some(q8k) = h_norm_q8k.as_ref() {
                         run_single_expert_q4k_q8k_into(
-                            scratch, q8k, gu_bytes, dn_bytes, inter, activation,
+                            scratch,
+                            q8k,
+                            gu_bytes,
+                            dn_bytes,
+                            inter,
+                            larql_compute::ExpertMlp::gated(activation),
                         )
                     } else {
                         run_single_expert_into(
-                            scratch, &h_norm, gu_bytes, dn_bytes, inter, format, activation,
+                            scratch,
+                            &h_norm,
+                            gu_bytes,
+                            dn_bytes,
+                            inter,
+                            format,
+                            larql_compute::ExpertMlp::gated(activation),
                         )
                     };
                     for (a, &v) in acc.iter_mut().zip(h2.iter()) {
                         *a += w * v;
                     }
                 });
-                acc
+                (acc, n_run + 1)
             },
         )
         .reduce(
-            || vec![0.0f32; hidden],
-            |mut a, b| {
+            || (vec![0.0f32; hidden], 0usize),
+            |(mut a, na), (b, nb)| {
                 for (x, &y) in a.iter_mut().zip(b.iter()) {
                     *x += y;
                 }
-                a
+                (a, na + nb)
             },
         );
 
@@ -194,19 +216,23 @@ pub fn run_experts_cpu_batch(
             t_start.elapsed().as_secs_f32() * 1000.0,
         );
     }
-    Ok(out)
+    Ok((out, n_run))
 }
 
 /// Expert dispatch with a pre-quantised Q8K activation — skips `pre_experts_norm`
 /// and `quantize_h_norm_for_q4k` because the client already did both.  4× less
 /// upload traffic; server goes straight to the Q4K × Q8K matvec.
+///
+/// Returns `(weighted_sum, experts_run)` — same contract as
+/// [`run_experts_cpu_batch`]: callers must compare `experts_run` against
+/// their non-zero-weight request count and error loudly on any shortfall.
 pub fn run_experts_cpu_batch_q8k_prenormed(
     state: &AppState,
     layer: usize,
     q8k: &Q8KActivation,
     expert_ids: &[usize],
     expert_weights: &[f32],
-) -> Result<Vec<f32>, ServerError> {
+) -> Result<(Vec<f32>, usize), ServerError> {
     use larql_compute::cpu::ops::moe::{run_single_expert_q4k_q8k_into, ExpertScratch};
     use rayon::prelude::*;
 
@@ -217,7 +243,7 @@ pub fn run_experts_cpu_batch_q8k_prenormed(
     let arch = &*weights.arch;
     let hidden = q8k.qs.len();
     if hidden == 0 || expert_ids.is_empty() {
-        return Ok(vec![0.0f32; hidden]);
+        return Ok((vec![0.0f32; hidden], 0));
     }
     let inter = arch.moe_intermediate_size();
     let activation = larql_inference::activation_from_arch(arch);
@@ -234,15 +260,15 @@ pub fn run_experts_cpu_batch_q8k_prenormed(
             const { std::cell::RefCell::new(None) };
     }
 
-    let out = expert_ids
+    let (out, n_run) = expert_ids
         .par_iter()
         .zip(expert_weights.par_iter())
         .filter(|(_, &w)| w != 0.0)
         .fold(
-            || vec![0.0f32; hidden],
-            |mut acc, (&eid, &w)| {
+            || (vec![0.0f32; hidden], 0usize),
+            |(mut acc, n_run), (&eid, &w)| {
                 let Some((gu_bytes, dn_bytes)) = resolve_bytes(eid) else {
-                    return acc;
+                    return (acc, n_run);
                 };
                 SCRATCH.with(|cell| {
                     let mut borrow = cell.borrow_mut();
@@ -252,23 +278,35 @@ pub fn run_experts_cpu_batch_q8k_prenormed(
                         *scratch = ExpertScratch::new(hidden, inter, inter_padded);
                     }
                     let h2 = run_single_expert_q4k_q8k_into(
-                        scratch, q8k, gu_bytes, dn_bytes, inter, activation,
+                        scratch,
+                        q8k,
+                        gu_bytes,
+                        dn_bytes,
+                        inter,
+                        larql_compute::ExpertMlp::gated(activation),
                     );
                     for (a, &v) in acc.iter_mut().zip(h2.iter()) {
                         *a += w * v;
                     }
                 });
-                acc
+                (acc, n_run + 1)
             },
         )
         .reduce(
-            || vec![0.0f32; hidden],
-            |mut a, b| {
+            || (vec![0.0f32; hidden], 0usize),
+            |(mut a, na), (b, nb)| {
                 for (x, &y) in a.iter_mut().zip(b.iter()) {
                     *x += y;
                 }
-                a
+                (a, na + nb)
             },
         );
-    Ok(out)
+    Ok((out, n_run))
+}
+
+/// Number of experts a request actually asked to run: zero-weight pairs are
+/// a legitimate no-op (the dispatchers filter them before resolving bytes)
+/// and must not be counted when comparing against `experts_run`.
+pub(crate) fn count_nonzero_weights(expert_weights: &[f32]) -> usize {
+    expert_weights.iter().filter(|&&w| w != 0.0).count()
 }

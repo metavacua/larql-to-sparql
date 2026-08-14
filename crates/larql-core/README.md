@@ -287,6 +287,13 @@ serialization surface when HTTP is intentionally excluded.
 - `http` (default) — HTTP model provider for ollama/vLLM/llama.cpp
 - `msgpack` (default) — MessagePack serialization
 
+## Documentation
+
+| File | Contents |
+|---|---|
+| [ROADMAP.md](ROADMAP.md) | Current state, open work, non-goals |
+| [CHANGELOG.md](CHANGELOG.md) | Dated history |
+
 ## License
 
 Apache-2.0

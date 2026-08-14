@@ -175,7 +175,10 @@ pub(super) fn try_cached_dequant(
 ) -> Result<ExpertF32, DequantError> {
     if !matches!(
         format,
-        crate::QuantFormat::BF16 | crate::QuantFormat::Q4_K | crate::QuantFormat::F32
+        crate::QuantFormat::BF16
+            | crate::QuantFormat::Q4_K
+            | crate::QuantFormat::Q6_K
+            | crate::QuantFormat::F32
     ) {
         return Err(DequantError::UnsupportedFormat(format));
     }
@@ -192,6 +195,13 @@ pub(super) fn try_cached_dequant(
         crate::QuantFormat::BF16 => super::math::bf16_to_f32(bytes),
         crate::QuantFormat::Q4_K => {
             crate::cpu::ops::q4_common::dequantize_q4_k(bytes, expected_floats)
+        }
+        // Q6_K expert stores exist since the MXFP4→Q6_K lossless transcode
+        // (GPT-OSS); the ggml planar decoder is the same one the rest of
+        // the engine uses.
+        crate::QuantFormat::Q6_K => {
+            larql_models::quant::ggml::q6_k::dequantize_q6_k(bytes, expected_floats)
+                .unwrap_or_else(|e| panic!("Q6_K expert dequant failed: {e}"))
         }
         crate::QuantFormat::F32 => bytes
             .chunks_exact(4)

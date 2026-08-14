@@ -1,0 +1,1024 @@
+# LQL Strategy Matrix — empirical (source × produce-recipe × level) × command experiment.
+#
+# For every CLI-invokable leg (a model + a produce recipe: extract at a level,
+# extract with a quant flag, gguf-to-vindex, or post-hoc quantize), the workflow
+# PRODUCES a vindex on the current binary, records what it structurally is
+# (family/dtype/quant/layers), then runs the full LQL command corpus against it
+# and reports the COMPLETE RAW OUTPUT of every cell.
+#
+# The harness reports; it does not judge. There is no verdict layer: no
+# pass/fail, no conformance oracle, no summarisation of the output into a
+# derived opinion. Reading the results is a separate activity performed on the
+# raw captures, by a human, outside this workflow. Legs are enumerated by
+# scripts/lql_matrix/gen_legs.py (no prediction-pruning — see that file).
+
+name: lql-strategy-matrix
+
+on:
+  # Feature branches trigger via their pull_request only. Listing a branch
+  # here *and* targeting `main` below fires the whole matrix twice per push,
+  # on two events that the concurrency group cannot dedupe (see below).
+  push:
+    branches: [lql-strategy-matrix]
+  # Only fire when something that could change the RESULT changed. A docs or
+  # spec commit on this branch should not spend an hour of runners.
+  pull_request:
+    branches: [lql-strategy-matrix, main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "scripts/lql_matrix/**"
+      - ".github/workflows/lql-strategy-matrix.yml"
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Which parts to run"
+        type: choice
+        default: all
+        options: [all, probe, matrix, quality, compile, none]
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+
+# `github.ref` is refs/heads/<branch> on push but refs/pull/<n>/merge on
+# pull_request, so keying on it puts the two events in different groups and a
+# branch with an open PR runs the whole matrix twice. `head_ref || ref_name`
+# normalises both to the branch name, so one branch means one group.
+#
+# cancel-in-progress stays false: a leg that dies mid-run loses its measured
+# rows, and this workflow is a discovery experiment whose output is the
+# deliverable — unlike the per-crate gates, where a superseded PR run is
+# simply stale and worth cancelling.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RUST_BACKTRACE: "1"
+
+jobs:
+  # Decides what this run does, so a run can be narrowed without editing the
+  # workflow. Three ways in, cheapest first:
+  #
+  #   commit message   [skip matrix] [skip probe] [skip quality] [skip ci]
+  #   dispatch input   scope = all | probe | matrix | quality | none
+  #   paths filter     (above) — a docs-only PR does not trigger at all
+  #
+  # Everything downstream hangs off these three booleans, so a narrowed run
+  # skips whole job trees rather than starting them and exiting early.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      probe: ${{ steps.g.outputs.probe }}
+      compile: ${{ steps.g.outputs.compile }}
+      matrix: ${{ steps.g.outputs.matrix }}
+      quality: ${{ steps.g.outputs.quality }}
+    steps:
+      # head_commit is null on pull_request events, and this branch reaches
+      # this workflow ONLY via pull_request — so reading the marker out of the
+      # webhook payload would make it work on push and silently do nothing
+      # where it is actually needed. Read the real head commit instead.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - id: g
+        env:
+          SCOPE: ${{ github.event.inputs.scope }}
+          TITLE: ${{ github.event.pull_request.title }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          MSG="$(git log -1 --pretty=%B)"
+          set -uo pipefail
+          SCOPE="${SCOPE:-all}"
+          probe=false; matrix=false; quality=false; compile=false
+          case "$SCOPE" in
+            all)     probe=true;  matrix=true;  quality=true; compile=true ;;
+            probe)   probe=true ;;
+            matrix)  matrix=true ;;
+            quality) quality=true ;;
+            compile) compile=true ;;
+            none)    : ;;
+          esac
+          # A skip marker in the commit message or PR title turns a part off
+          # without a dispatch, which is what you want mid-iteration.
+          #
+          # But NOT on workflow_dispatch. A dispatch is a human asking for a
+          # specific scope right now; a marker was written earlier, in a commit
+          # whose message was about something else. Letting the older, weaker
+          # signal win made `scope=compile` unrunnable on a branch whose head
+          # commit happened to say [skip ci] — observed on runs 31306052565 and
+          # 31306096416, where the gate logged `scope=compile -> compile=false`.
+          TEXT="${MSG:-} ${TITLE:-}"
+          if [ "${EVENT:-}" = "workflow_dispatch" ]; then
+            TEXT=""
+            echo "workflow_dispatch: ignoring commit/title skip markers"
+          fi
+          case "$TEXT" in
+            *"[skip ci]"*)      probe=false; matrix=false; quality=false; compile=false ;;
+          esac
+          case "$TEXT" in *"[skip probe]"*)   probe=false ;;   esac
+          case "$TEXT" in *"[skip matrix]"*)  matrix=false ;;  esac
+          case "$TEXT" in *"[skip quality]"*) quality=false ;; esac
+          case "$TEXT" in *"[skip compile]"*) compile=false ;; esac
+          {
+            echo "probe=$probe"; echo "matrix=$matrix"
+            echo "quality=$quality"; echo "compile=$compile"
+          } >> "$GITHUB_OUTPUT"
+          echo "scope=$SCOPE -> probe=$probe matrix=$matrix quality=$quality compile=$compile"
+
+  # Enumerate every leg as JSON → consumed by the matrix via fromJSON. A malformed
+  # plan fails here in seconds, before any leg runs.
+  plan:
+    needs: gate
+    if: needs.gate.outputs.matrix == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      legs: ${{ steps.gen.outputs.legs }}
+      repos: ${{ steps.repos.outputs.repos }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: gen
+        # TEMPORARY (round-trip CI validation): narrow the matrix to the
+        # round-trip-relevant models only. gen_legs.py keeps the full model list;
+        # this env var filters it. Remove the `env:` block to restore full coverage.
+        env:
+          LQL_MATRIX_ONLY: "smol135,smol135base"
+        run: |
+          legs=$(python3 scripts/lql_matrix/gen_legs.py)
+          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+          echo "$legs" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{len(d)} legs planned')"
+
+      # Distinct source repos across the planned legs. The prefetch job fans
+      # out over these, so the hub is contacted once per repo per run instead
+      # of once per leg.
+      # Derived from the leg list ALREADY emitted above, never by re-running the
+      # generator: a second invocation is a second derivation that can disagree
+      # with the first. It did — `LQL_MATRIX_ONLY` is scoped to the `gen` step,
+      # so a sibling step re-running gen_legs.py saw the unfiltered model list
+      # and prefetched all 7 repos instead of the 2 the matrix actually uses.
+      - id: repos
+        env:
+          LEGS: ${{ steps.gen.outputs.legs }}
+        run: |
+          repos=$(python3 -c "
+          import json, os
+          legs = json.loads(os.environ['LEGS'])
+          seen = {}
+          for lg in legs:
+              if lg['source_kind'] != 'safetensors':
+                  continue          # gguf legs stage their own repo (#180/#277)
+              seen.setdefault(lg['hf'], lg['hf'].replace('/', '--'))
+          print(json.dumps([{'repo': r, 'slug': s} for r, s in sorted(seen.items())]))
+          ")
+          echo "repos=$repos" >> "$GITHUB_OUTPUT"
+          echo "$repos" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{len(d)} distinct repos to prefetch:'); [print('  '+r['repo']) for r in d]"
+
+  # Fetch each source repo from the hub EXACTLY ONCE per run, into a cache every
+  # downstream job restores.
+  #
+  # Why: `snapshot_download` calls the repo-metadata API
+  # (/api/models/<repo>/revision/main) on every invocation, before any file
+  # transfer. Calling it once per matrix leg meant 27 anonymous metadata calls
+  # per run at 12-way concurrency from shared GitHub egress IPs, and CloudFront
+  # answered 429. The failure was hard rather than soft because each leg is a
+  # cold runner: snapshot_download's own fallback ("cannot find the appropriate
+  # snapshot folder ... on the local disk") had nothing to fall back to.
+  #
+  # A warm cache fixes both halves — it removes the calls, and it restores the
+  # fallback for any 429 that still happens.
+  prefetch:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.plan.outputs.repos) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      # Saved at job end, so the whole matrix sees a warm cache. Keyed on the
+      # repo alone: these are immutable released snapshots, not moving refs.
+      - name: Cache HF snapshot (${{ matrix.repo.repo }})
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/huggingface
+          key: hf-snapshot-${{ matrix.repo.slug }}-v2
+      - name: Fetch (${{ matrix.repo.repo }})
+        run: |
+          python -m pip install --quiet huggingface_hub
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+          # Subtractive, not an allowlist: excluding a known-unneeded artifact
+          # cannot silently drop a file some architecture needs, whereas an
+          # allowlist can (sentencepiece tokenizer.model, merges.txt, shard
+          # index files, ...). Measured on SmolLM2-135M-Instruct: onnx/ is
+          # 1618.7 MiB against 259.9 MiB of safetensors+config+tokenizer that
+          # the pipeline actually reads — 86% of the fetch, and the reason its
+          # cache entry is 1116 MiB while the base model's is 201 MiB.
+          # gguf is NOT excluded: the convert legs consume it, staged by their
+          # own step.
+          IGNORE = ["onnx/*", "*.onnx", "*.onnx_data"]
+          repo = os.environ["REPO"]
+          # local_files_only first: a cache hit contacts the hub zero times.
+          try:
+              p = snapshot_download(repo, local_files_only=True)
+              print(f"cache hit, no hub request: {p}")
+          except Exception:
+              p = snapshot_download(repo, ignore_patterns=IGNORE)
+              print(f"cache miss, fetched from hub: {p}")
+          PY
+        env:
+          REPO: ${{ matrix.repo.repo }}
+
+  # Compile larql-cli ONCE; every leg downloads the binary.
+  build:
+    needs: gate
+    # The binary is needed by the probe, the matrix, AND the compile evidence
+    # job. Adding a gate scope without adding it here silently skips the new
+    # job — a skipped dependency skips its dependents — which is exactly what
+    # happened to compile-evidence on run 31306052565.
+    if: >-
+      needs.gate.outputs.probe == 'true' ||
+      needs.gate.outputs.matrix == 'true' ||
+      needs.gate.outputs.compile == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lqlmatrix-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-lqlmatrix-
+      - name: Install BLAS (build)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - name: Build larql-cli (release)
+        run: cargo build --release -p larql-cli
+      - name: Upload larql binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: larql-bin
+          path: target/release/larql
+          retention-days: 2
+          if-no-files-found: error
+
+  # Everything in this plan most likely to be WRONG, attempted first, with no
+  # harness code. Three risks: CLI arguments guessed from doc comments; whether
+  # `larql repl` reads non-tty stdin at all (run_repl goes through rustyline and
+  # only falls back to the stdin reader when the editor FAILS to construct); and
+  # a pty.fork read loop. Nothing here asserts. It runs things and uploads what
+  # they printed.
+  probe:
+    needs: [gate, build]
+    if: needs.gate.outputs.probe == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # We are not testing HuggingFace. `pull`, `model pull`, `publish` and
+      # `hf upload` would otherwise put HF's availability, rate limiter and
+      # auth into the measurement, none of which is larql's surface. Pointing
+      # the hub at a closed port makes them fail at the network boundary in
+      # milliseconds, so what the capture shows is how the CLI parsed the argv
+      # and what it did next — which is the whole question this probe asks.
+      #
+      # This is the in-tree mechanism, not a trick: larql-vindex honours
+      # HF_ENDPOINT in format/huggingface/download/mod.rs:283, and its own
+      # test at :576 points it at a non-existent server for exactly this.
+      # hf-hub 0.5 reads it too (api/mod.rs:14).
+      #
+      # KNOWN ESCAPE: k3_ledger/fetch.rs:36 hardcodes https://huggingface.co
+      # and ignores HF_ENDPOINT. `k3-ledger report` should die at clap first
+      # (`report` is not among its subcommands), but if a capture shows hub
+      # traffic anyway, that is a larql finding — a hardcoded URL inconsistent
+      # with the rest of the tree — and NOT a harness defect to route around.
+      HF_ENDPOINT: http://127.0.0.1:1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - name: Prep
+        run: |
+          chmod +x bin/larql
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev util-linux
+          mkdir -p probe
+      - name: REPL — piped stdin
+        run: |
+          # GitHub's default shell is `bash --noprofile --norc -eo pipefail`.
+          # The `set -uo pipefail` in the later steps does NOT clear -e. Left
+          # alone, the first nonzero exit kills the step and every capture
+          # after it is lost — the harness would destroy precisely the data it
+          # exists to collect, and a probe whose whole purpose is to provoke
+          # failures fails on the first one. `|| true` is not the fix (it
+          # converts a failure into a success value); `continue-on-error` is
+          # not either (-e still aborts the script inside the step, it just
+          # paints the job green). Turn -e off and record the code.
+          set +e
+          printf 'SHOW MODELS;\nSTATS;\nexit\n' \
+            | timeout 60 ./bin/larql repl > probe/repl-pipe.out 2> probe/repl-pipe.err
+          # BOTH halves, separately. Under pipefail a pipeline's $? is whichever
+          # member failed. If larql exits without draining stdin — plausible,
+          # and the exact unknown this probe exists to settle — printf takes
+          # SIGPIPE and $? is 141 for PRINTF, which reads as larql having died
+          # on a signal. One lying exit code already cost this project three
+          # reversed claims about COMPILE; do not let the probe mint another.
+          echo "printf_exit=${PIPESTATUS[0]} larql_exit=${PIPESTATUS[1]}" \
+            >> probe/repl-pipe.err
+      - name: REPL — pty via script(1)
+        run: |
+          set +e
+          printf 'SHOW MODELS;\nSTATS;\nexit\n' \
+            | timeout 60 script -q -e -c './bin/larql repl' probe/repl-script.merged \
+              > probe/repl-script.out 2> probe/repl-script.err
+          # script -e propagates the child's exit, so PIPESTATUS[1] is larql's.
+          echo "printf_exit=${PIPESTATUS[0]} script_exit=${PIPESTATUS[1]}" \
+            >> probe/repl-script.err
+      - name: REPL — pty via probe_pty.py (the loop Task 4 will use)
+        run: |
+          set +e
+          printf 'SHOW MODELS;\nSTATS;\nexit\n' \
+            | python3 scripts/lql_matrix/probe_pty.py probe/repl-pty.merged \
+              ./bin/larql repl 2> probe/repl-pty.err
+          # probe_pty.py already prints the child's `exit=` to its own stderr;
+          # this records whether the DRIVER itself survived, which is a
+          # different question and the one Task 4 depends on.
+          echo "printf_exit=${PIPESTATUS[0]} driver_exit=${PIPESTATUS[1]}" \
+            >> probe/repl-pty.err
+      - name: One-shot lql, for comparison
+        run: |
+          set +e
+          timeout 60 ./bin/larql lql 'SHOW MODELS; STATS;' \
+            > probe/lql.out 2> probe/lql.err
+          echo "exit=$?" >> probe/lql.err
+      - name: All 38 subcommands — --help
+        run: |
+          set +e -u
+          for c in run chat pull model link list show slice publish rm bench \
+                   dec-bench k3-ledger accuracy shannon serve repl lql extract \
+                   extract-index build compile convert hf verify diag parity \
+                   moe-locality recipe capabilities card query describe stats \
+                   validate merge filter dev; do
+            timeout 30 ./bin/larql "$c" --help > "probe/help.$c.out" 2> "probe/help.$c.err"
+            echo "$c exit=$?" >> probe/help.index
+          done
+          cat probe/help.index
+      - name: All 38 subcommands — the guessed real invocations
+        run: |
+          set +e -u
+          TMP=$(mktemp -d)
+          # Neither a vindex nor a reachable hub exists in this job. Both
+          # absences are deliberate and they do the same work: they separate
+          # "the argument shape is wrong" from "the input was missing" and
+          # from "the network answered", and all three answers are needed
+          # before Task 7 writes the corpus. See the HF_ENDPOINT note on the
+          # job for why the hub is closed rather than warm.
+          # A bash array, NOT a heredoc. A heredoc body has to sit at column 0
+          # and its terminator likewise, and column 0 ends a YAML block scalar
+          # — the workflow would not parse. Every line here stays inside the
+          # scalar's indentation.
+          CMDS=(
+            "extract|extract $TMP/nomodel -o $TMP/v.vindex --level all"
+            "extract-index|extract-index $TMP/nomodel -o $TMP/v2.vindex --level browse"
+            "convert|convert quantize q4k --input $TMP/v.vindex --output $TMP/q.vindex"
+            "build|build $TMP/Vindexfile -o $TMP/b.vindex"
+            "slice|slice $TMP/v.vindex --output $TMP/s.vindex --kind browse"
+            "compile|compile --base $TMP/nomodel --vindex $TMP/e.vlp --output $TMP/c"
+            "link|link $TMP/v.vindex"
+            "pull|pull chrishayuk/gemma-3-4b-it-vindex"
+            "model|model pull HuggingFaceTB/SmolLM2-135M"
+            "list|list"
+            "show|show $TMP/v.vindex"
+            "verify|verify $TMP/v.vindex"
+            "diag|diag $TMP/v.vindex"
+            "capabilities|capabilities"
+            "run|run $TMP/v.vindex --prompt hi --max-tokens 2"
+            "chat|chat $TMP/v.vindex --max-tokens 1"
+            "serve|serve $TMP/v.vindex --port 18080"
+            "bench|bench $TMP/v.vindex --tokens 2"
+            "dec-bench|dec-bench"
+            "k3-ledger|k3-ledger report"
+            "accuracy|accuracy $TMP/v.vindex"
+            "shannon|shannon score $TMP/v.vindex"
+            "parity|parity $TMP/v.vindex"
+            "moe-locality|moe-locality $TMP/v.vindex"
+            "publish|publish $TMP/v.vindex --repo example/does-not-exist"
+            "hf|hf upload $TMP/v.vindex --repo example/does-not-exist"
+            "recipe|recipe validate $TMP/recipe.yaml"
+            "card|card render $TMP/recipe.yaml"
+            "dev|dev"
+            "repl|repl"
+            "lql|lql \"SHOW MODELS;\""
+            "query|query $TMP/graph.json --entity France"
+            "describe|describe $TMP/graph.json France"
+            "stats|stats $TMP/graph.json"
+            "validate|validate $TMP/graph.json"
+            "merge|merge $TMP/graph.json $TMP/graph.json -o $TMP/m.json"
+            "filter|filter $TMP/graph.json --min-confidence 0.5 -o $TMP/f.json"
+            "rm|rm $TMP/v.vindex"
+          )
+          for line in "${CMDS[@]}"; do
+            id=${line%%|*}; rest=${line#*|}
+            # eval so the row's own quoting survives into argv: the lql row
+            # must arrive as TWO arguments (`lql` and `SHOW MODELS;`), and an
+            # unquoted split would make it three and mask the real behaviour.
+            eval "set -- $rest"
+            timeout 60 ./bin/larql "$@" > "probe/cmd.$id.out" 2> "probe/cmd.$id.err"
+            echo "$id exit=$? argc=$# argv=[$rest]" >> probe/cmd.index
+          done
+          cat probe/cmd.index
+      - name: Show every capture
+        if: always()
+        run: |
+          # set +e rather than `|| true` on the head: same protection against
+          # -e killing the listing part-way, without writing a success value
+          # over a failure anywhere. This step only echoes; the artifact below
+          # is the actual record.
+          set +e
+          for f in probe/*; do
+            echo "───── $f ($(wc -c < "$f") bytes)"
+            head -40 "$f"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe
+          retention-days: 2
+          path: probe/
+
+  # ── EVIDENCE, not argument ─────────────────────────────────────────────────
+  # What does `COMPILE ... INTO MODEL` actually produce? Prior claims about this
+  # path were made by reading source and were wrong repeatedly. This job runs it
+  # and uploads what appeared on disk. It asserts NOTHING; the artifact is the
+  # answer.
+  #
+  # Three questions, each with its own control:
+  #   Q1 Does INTO MODEL work at all when the output directory ALREADY EXISTS?
+  #      (control: a second run into a dir that does NOT exist)
+  #   Q2 Does the FORMAT clause change the output?
+  #      (control: safetensors vs gguf vs no FORMAT at all, same vindex)
+  #   Q3 Is the output the same KIND of thing as the input model?
+  #      (control: the input HF snapshot's own file listing, side by side)
+  compile-evidence:
+    needs: [gate, build]
+    if: needs.gate.outputs.compile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prep
+        run: |
+          chmod +x bin/larql
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev
+          python -m pip install --quiet huggingface_hub
+          mkdir -p ev
+      - name: Fetch the input model and record ITS file list
+        run: |
+          set +e -u
+          python - <<'PY' > ev/input-model.path 2> ev/input-model.err
+          from huggingface_hub import snapshot_download
+          print(snapshot_download("HuggingFaceTB/SmolLM2-135M-Instruct",
+                                  ignore_patterns=["onnx/*", "*.onnx", "*.onnx_data"]))
+          PY
+          SRC=$(cat ev/input-model.path)
+          echo "input snapshot: $SRC" | tee ev/00-input-listing.txt
+          find "$SRC" -type f -printf '%s\t%P\n' | sort -k2 >> ev/00-input-listing.txt
+          cat ev/00-input-listing.txt
+      - name: Extract a vindex to compile from
+        run: |
+          set +e -u
+          timeout 3600 ./bin/larql extract HuggingFaceTB/SmolLM2-135M-Instruct \
+            -o ev/src.vindex --level all > ev/01-extract.out 2> ev/01-extract.err
+          echo "extract exit=$?" | tee -a ev/01-extract.out
+          find ev/src.vindex -type f -printf '%s\t%P\n' | sort -k2 > ev/01-vindex-listing.txt
+          cat ev/01-vindex-listing.txt
+      - name: Q1+Q2 — INTO MODEL, dir pre-created, three FORMAT variants
+        run: |
+          set +e -u
+          SNAP=scripts/lql_matrix/fs-snapshot.sh
+          # Roots, not guessed paths. `ev` because COMPILE builds into a
+          # STAGING directory that is a SIBLING of its target (<base>.tmp.<pid>)
+          # and renames it into place — listing only the target cannot tell
+          # "wrote nothing" from "wrote somewhere I did not look", which is the
+          # error that produced the last two wrong readings of this command.
+          # /tmp and the HF cache because nothing has established that a vindex
+          # is self-contained.
+          ROOTS=(ev /tmp "$HOME/.cache/huggingface")
+
+          run_case() {   # $1 = case id, $2 = FORMAT clause (may be empty)
+            local id="$1" fmt="$2" dir="ev/out-$1"
+            mkdir -p "$dir"          # target exists; staging is a SIBLING of it
+            bash "$SNAP" snap "ev/fs-$id.before" "${ROOTS[@]}" > /dev/null
+            timeout 3600 ./bin/larql lql \
+              "USE \"ev/src.vindex\"; COMPILE CURRENT INTO MODEL \"$dir\" $fmt;" \
+              > "ev/10-$id.out" 2> "ev/10-$id.err"
+            echo "exit=$?" >> "ev/10-$id.err"
+            bash "$SNAP" snap "ev/fs-$id.after" "${ROOTS[@]}" > /dev/null
+            {
+              echo "════════ $id  (clause: '${fmt:-<none>}')"
+              echo "-- target dir contents --"
+              find "$dir" -type f -printf '%s\t%P\n' | sort -k2
+              echo "-- WHOLE-TREE DIFF (this is the evidence) --"
+              bash "$SNAP" diff "ev/fs-$id.before" "ev/fs-$id.after"
+              echo
+            } >> ev/20-listings.txt
+          }
+          run_case safetensors "FORMAT safetensors"
+          run_case gguf        "FORMAT gguf"
+          run_case noformat    ""
+          cat ev/20-listings.txt
+      - name: Q1 control — INTO MODEL into a directory that does NOT exist
+        run: |
+          set +e -u
+          D="ev/out-missingdir/nested"     # deliberately not created
+          bash scripts/lql_matrix/fs-snapshot.sh snap ev/fs-missing.before \
+            ev /tmp "$HOME/.cache/huggingface" > /dev/null
+          timeout 3600 ./bin/larql lql \
+            "USE \"ev/src.vindex\"; COMPILE CURRENT INTO MODEL \"$D\" FORMAT safetensors;" \
+            > ev/11-missingdir.out 2> ev/11-missingdir.err
+          echo "exit=$?" >> ev/11-missingdir.err
+          bash scripts/lql_matrix/fs-snapshot.sh snap ev/fs-missing.after \
+            ev /tmp "$HOME/.cache/huggingface" > /dev/null
+          {
+            echo "════════ missingdir"
+            if [ -d "$D" ]; then find "$D" -type f -printf '%s\t%P\n' | sort -k2
+            else echo "(target directory was not created)"; fi
+            echo "-- WHOLE-TREE DIFF --"
+            bash scripts/lql_matrix/fs-snapshot.sh diff ev/fs-missing.before ev/fs-missing.after
+          } >> ev/20-listings.txt
+          cat ev/11-missingdir.out ev/11-missingdir.err
+      - name: AST — what the parser actually builds (run it, do not read it)
+        run: |
+          set +e -u
+          cargo test -p larql-lql --test ast_dump -- --nocapture \
+            > ev/02-ast.out 2> ev/02-ast.err
+          echo "exit=$?" >> ev/02-ast.err
+          cat ev/02-ast.out
+
+      - name: WHICH file is missing? (strace the failing call)
+        run: |
+          set +e -u
+          sudo apt-get install -y strace
+          echo "=== index.json of the source vindex ===" > ev/12-strace.txt
+          cat ev/src.vindex/index.json >> ev/12-strace.txt
+          echo >> ev/12-strace.txt
+          mkdir -p ev/out-strace
+          strace -f -e trace=openat,stat,mkdir -o ev/strace.raw -- \
+            timeout 3600 ./bin/larql lql \
+            "USE \"ev/src.vindex\"; COMPILE CURRENT INTO MODEL \"ev/out-strace\" FORMAT safetensors;" \
+            > ev/12-strace.out 2> ev/12-strace.err
+          echo "exit=$?" >> ev/12-strace.err
+          echo "=== every ENOENT, in order ===" >> ev/12-strace.txt
+          grep ENOENT ev/strace.raw >> ev/12-strace.txt
+          echo "=== the LAST 40 file syscalls before it died ===" >> ev/12-strace.txt
+          tail -40 ev/strace.raw >> ev/12-strace.txt
+          cat ev/12-strace.txt
+
+      - name: Q2 decisive — do the three FORMAT variants differ AT ALL?
+        run: |
+          set +e -u
+          # Content hashes, not just names. If FORMAT is honoured these differ.
+          for id in safetensors gguf noformat; do
+            echo "── $id"
+            find "ev/out-$id" -type f -exec sha256sum {} \; | sed "s|ev/out-$id/||" | sort -k2
+          done > ev/30-hashes.txt
+          cat ev/30-hashes.txt
+          echo "=== diff safetensors vs gguf ==="
+          diff <(sed -n '/── safetensors/,/── gguf/p' ev/30-hashes.txt | grep -v '──') \
+               <(sed -n '/── gguf/,/── noformat/p' ev/30-hashes.txt | grep -v '──')
+          echo "(diff exit=$? — 0 means the FORMAT clause changed nothing)"
+      - name: Q3 — is the output the same kind of thing as the input?
+        run: |
+          set +e -u
+          echo "=== INPUT model file names ==="   > ev/40-kind.txt
+          cut -f2 ev/00-input-listing.txt | tail -n +2 | sort >> ev/40-kind.txt
+          echo "=== OUTPUT of INTO MODEL (safetensors clause) ===" >> ev/40-kind.txt
+          find ev/out-safetensors -type f -printf '%P\n' | sort >> ev/40-kind.txt
+          echo "=== the vindex we compiled FROM ===" >> ev/40-kind.txt
+          cut -f2 ev/01-vindex-listing.txt | sort >> ev/40-kind.txt
+          cat ev/40-kind.txt
+      - name: Show every capture
+        if: always()
+        run: |
+          set +e
+          for f in ev/*.out ev/*.err ev/*.txt; do
+            echo "───── $f ($(wc -c < "$f") bytes)"
+            cat "$f"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compile-evidence
+          retention-days: 2
+          path: |
+            ev/*.txt
+            ev/*.out
+            ev/*.err
+
+  quality:
+    needs: gate
+    if: needs.gate.outputs.quality == 'true'
+    # Loud, obviously-directed signal on the LQL command stack: fmt + clippy +
+    # tests, run ALONGSIDE the matrix (NOT a dependency of it) so a red check
+    # never skips the matrix — we want both signals on the same run to compare
+    # "unit test passed" against "matrix cell crashed" and localise the defect.
+    # No exemptions: the backlog is included on purpose. The alarm stays on.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Ensure clippy + rustfmt (runner ships stable rust already)
+        run: rustup component add clippy rustfmt
+      - name: Install BLAS
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lqlmatrix-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-lqlmatrix-
+      - name: fmt (loud)
+        id: fmt
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+      - name: clippy — LQL stack (loud, no exemption)
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy -p larql-lql -p larql-cli -p larql-inference -p larql-vindex -p larql-core -p larql-kv -p larql-models --no-default-features -- -D warnings
+      - name: test — LQL stack (comparative signal for the matrix)
+        id: test
+        continue-on-error: true
+        run: cargo test -p larql-lql -p larql-cli -p larql-inference -p larql-vindex -p larql-core -p larql-kv -p larql-models --no-default-features
+      - name: Report + fail loud if any check failed
+        run: |
+          {
+            echo "## Quality — LQL command stack"
+            echo "| check | outcome |"
+            echo "|---|---|"
+            echo "| fmt    | ${{ steps.fmt.outcome }} |"
+            echo "| clippy | ${{ steps.clippy.outcome }} |"
+            echo "| test   | ${{ steps.test.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "${{ steps.fmt.outcome }}" = success ] \
+            && [ "${{ steps.clippy.outcome }}" = success ] \
+            && [ "${{ steps.test.outcome }}" = success ]
+
+  matrix:
+    needs: [gate, plan, prefetch, build]
+    if: needs.gate.outputs.matrix == 'true'
+    strategy:
+      fail-fast: false          # every leg runs even when one breaks — breakage is data
+      max-parallel: 12
+      matrix:
+        leg: ${{ fromJSON(needs.plan.outputs.legs) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      NAME: ${{ matrix.leg.name }}
+      HF: ${{ matrix.leg.hf }}
+      OP: ${{ matrix.leg.op }}
+      LEVEL: ${{ matrix.leg.level }}
+      FLAGS: ${{ matrix.leg.flags }}
+      CORPUS_MODEL: ${{ matrix.leg.corpus_model }}
+      TOKENIZER_REPO: ${{ matrix.leg.tokenizer_repo }}
+      LQL_WITH: ${{ matrix.leg.lql_with }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download larql binary
+        uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - name: Prep
+        run: |
+          chmod +x bin/larql scripts/lql_matrix/run_matrix.sh
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev time
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - id: slug
+        run: echo "slug=${HF//\//--}" >> "$GITHUB_OUTPUT"
+      - name: Restore HF snapshot (${{ matrix.leg.hf }})
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/huggingface
+          key: hf-snapshot-${{ steps.slug.outputs.slug }}-v2
+      - name: Resolve source snapshot (${{ matrix.leg.hf }})
+        run: |
+          python -m pip install --quiet huggingface_hub numpy
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+          IGNORE = ["onnx/*", "*.onnx", "*.onnx_data"]   # keep in step with the prefetch job
+          repo = os.environ["HF"]
+          # The prefetch job warmed this cache, so the normal path makes zero
+          # hub requests. The fallback exists only for a cache eviction between
+          # jobs; it is logged loudly because it is the condition that produced
+          # the 429 storm, and a silent re-download would hide its return.
+          try:
+              print(f"resolved from cache, no hub request: {snapshot_download(repo, local_files_only=True)}")
+          except Exception as e:
+              print(f"::warning::HF cache MISS for {repo} ({type(e).__name__}) - falling back to a hub fetch")
+              print(f"fetched from hub: {snapshot_download(repo, ignore_patterns=IGNORE)}")
+          PY
+
+      - name: Produce vindex (${{ matrix.leg.op }})
+        run: |
+          set +e
+          mkdir -p out
+          LARQL=./bin/larql
+          VINDEX="out/${NAME}.vindex"
+          TIMEF="out/produce-${NAME}.time"
+          O="out/produce-${NAME}.out"; E="out/produce-${NAME}.err"
+          start=$(date +%s%3N)
+          case "$OP" in
+            extract)
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL extract "$HF" -o "$VINDEX" ${LEVEL:+--level $LEVEL} $FLAGS >"$O" 2>"$E" ;;
+            extract-lql)
+              # Same production, driven through the LQL surface instead of the
+              # CLI flag, so the two level lattices can be compared by the
+              # weight-class vector tensor_presence.py derives. LQL_WITH empty
+              # exercises the grammar's own default (Browse), which is NOT the
+              # CLI's default (inference).
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL lql "EXTRACT MODEL \"$HF\" INTO \"$VINDEX\" $LQL_WITH;" >"$O" 2>"$E" ;;
+            gguf-to-vindex)
+              GGUF=$(find ~/.cache/huggingface -name '*.gguf' | head -1)
+              echo "gguf source: $GGUF"
+              # Stage the tokenizer from the base repo beside the .gguf — the -gguf repo
+              # ships none, so gguf-to-vindex fails late without it (#180/#277).
+              if [ -n "$TOKENIZER_REPO" ]; then
+                TOKDIR=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('${TOKENIZER_REPO}', allow_patterns=['tokenizer*','*special_tokens*','config.json','generation_config.json']))")
+                # Staged file-by-file and REPORTED. Was `2>/dev/null || true`,
+                # so a gguf leg could proceed with no tokenizer and fail later
+                # for a reason unrelated to the missing stage (#180/#277).
+                for tf in "$TOKDIR"/tokenizer*.json "$TOKDIR"/special_tokens_map.json; do
+                  if [ -f "$tf" ]; then cp "$tf" "$(dirname "$GGUF")/" && echo "staged: $(basename "$tf")"
+                  else echo "NOT staged (absent in $TOKENIZER_REPO): $(basename "$tf")"; fi
+                done
+                echo "staged tokenizer from $TOKENIZER_REPO into $(dirname "$GGUF")"
+              fi
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL convert gguf-to-vindex "$GGUF" -o "$VINDEX" ${LEVEL:+--level $LEVEL} $FLAGS >"$O" 2>"$E" ;;
+            quantize-q4k)
+              /usr/bin/time -v -o "${TIMEF}.src" timeout 18000 \
+                $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL convert quantize q4k --input "${VINDEX}.src" --output "$VINDEX" >>"$O" 2>>"$E" ;;
+            quantize-fp4)
+              /usr/bin/time -v -o "${TIMEF}.src" timeout 18000 \
+                $LARQL extract "$HF" -o "${VINDEX}.src" --level inference >"$O" 2>"$E"
+              /usr/bin/time -v -o "$TIMEF" timeout 18000 \
+                $LARQL convert quantize fp4 --input "${VINDEX}.src" --output "$VINDEX" >>"$O" 2>>"$E" ;;
+          esac
+          ec=$?
+          end=$(date +%s%3N)
+          # peak RSS = MAX across every command's time file (extract .src + quantize),
+          # not just the last — a fast-failing quantize must not hide a multi-GB extract.
+          # Nothing below sends stderr to /dev/null or substitutes a plausible
+          # value on failure: a swallowed failure is indistinguishable from a
+          # successful empty result, and the harness exists to show what happened.
+          rss=$(python3 scripts/lql_matrix/peak_rss.py "${TIMEF}.src" "$TIMEF" 2>>"$E")
+          vmb=$(du -sm "$VINDEX" 2>>"$E" | cut -f1)
+          printf '{"name":"%s","op":"%s","level":"%s","flags":"%s","exit_code":%d,"duration_ms":%d,"peak_rss_kb":%s,"vindex_mb":%s}\n' \
+            "$NAME" "$OP" "$LEVEL" "$FLAGS" "$ec" "$((end-start))" "${rss:-null}" "${vmb:-null}" \
+            > "out/produce-${NAME}.json"
+          echo "produce ${NAME}: exit=$ec rss=${rss:-?}kb vindex=${vmb:-?}MB"
+
+          # descriptor: what the recipe actually produced. Its stderr is KEPT —
+          # this used to be `2>/dev/null || echo '{"error":"descriptor failed"}'`,
+          # which destroyed the traceback and replaced it with a fixed string, so
+          # a crashed descriptor and a descriptor reporting a problem looked the same.
+          python3 scripts/lql_matrix/descriptor.py "$VINDEX" "$NAME" \
+            > "out/descriptor-${NAME}.json" 2> "out/descriptor-${NAME}.err"
+          echo "descriptor:"
+          if [ -s "out/descriptor-${NAME}.json" ]; then cat "out/descriptor-${NAME}.json"
+          else echo "(descriptor wrote nothing — see descriptor-${NAME}.err)"; fi
+          if [ -s "out/descriptor-${NAME}.err" ]; then
+            echo "descriptor stderr:"; cat "out/descriptor-${NAME}.err"
+          fi
+
+          # weight-family inventory
+          MDIR="out/manifest-${NAME}"; mkdir -p "$MDIR"
+          for f in index.json weight_manifest.json; do
+            if [ -f "$VINDEX/$f" ]; then cp "$VINDEX/$f" "$MDIR/"
+            else echo "absent: $VINDEX/$f" >> "$MDIR/copy.log"; fi
+          done
+          # `if`, not `&&` — safe today only because this is not the step's
+          # last command and the step runs under `set +e`. The hazard is
+          # positional, so an append or reorder would reintroduce the bug that
+          # killed all 21 legs of run 31267330863.
+          if [ -f "$MDIR/copy.log" ]; then cat "$MDIR/copy.log"; fi
+
+          # filename -> size for every vindex file. On failure the stderr is kept
+          # and no `{}` is fabricated: an empty listing must mean "no files", never
+          # "the lister crashed".
+          python3 -c "import json,os,sys; d=sys.argv[1]; print(json.dumps({f: os.path.getsize(os.path.join(d,f)) for f in os.listdir(d)}))" \
+            "$VINDEX" > "$MDIR/listing.json" 2> "$MDIR/listing.err"
+          # `if`, not `[ -s ... ] && {...}`. Under `bash -e {0}` a step's exit
+          # status is its LAST command's, so the && form failed the step
+          # whenever the file was EMPTY — i.e. whenever nothing had gone
+          # wrong. All 21 legs of run 31267330863 died on it. An `if` whose
+          # condition is false returns 0.
+          if [ -s "$MDIR/listing.err" ]; then
+            echo "listing stderr:"; cat "$MDIR/listing.err"
+          fi
+
+      - name: Round-trip compile (${{ matrix.leg.name }})
+        if: ${{ matrix.leg.roundtrip == true }}
+        continue-on-error: true
+        run: |
+          # Cache is already warm from the resolve step above; local_files_only
+          # keeps this second resolution from adding another metadata call.
+          BASE_DIR=$(python3 -c "from huggingface_hub import snapshot_download; print(snapshot_download('${HF}', local_files_only=True))")
+          python3 scripts/lql_matrix/roundtrip_compile.py --name "$NAME" --hf "$HF" \
+            --vindex "out/${NAME}.vindex" --larql-bin ./bin/larql --out-root "$(mktemp -d)" \
+            --produce-out "out/roundtrip-produce-${NAME}.jsonl" --diff-out "out/roundtrip-${NAME}.json"
+
+      - name: Upload round-trip results
+        if: ${{ always() && matrix.leg.roundtrip == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-${{ matrix.leg.name }}
+          retention-days: 2
+          path: |
+            out/roundtrip-${{ matrix.leg.name }}.json
+            out/roundtrip-produce-${{ matrix.leg.name }}.jsonl
+            out/roundtrip-cells-${{ matrix.leg.name }}/
+
+      - name: Run LQL command corpus (${{ matrix.leg.name }})
+        run: |
+          VINDEX="out/${NAME}.vindex"
+          LARQL_BIN=./bin/larql \
+          MODEL_ID="${CORPUS_MODEL}" \
+          TMPROOT="$(mktemp -d)" \
+          CELL_TIMEOUT=900 \
+          scripts/lql_matrix/run_matrix.sh \
+            "${NAME}" "$VINDEX" scripts/lql_matrix/commands.jsonl \
+            "out/results-${NAME}.lql.jsonl" --driver lql
+
+      - name: Upload leg results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.leg.name }}
+          retention-days: 2
+          path: |
+            out/results-${{ matrix.leg.name }}.*.jsonl
+            out/produce-${{ matrix.leg.name }}.json
+            out/produce-${{ matrix.leg.name }}.err
+            out/descriptor-${{ matrix.leg.name }}.json
+            out/descriptor-${{ matrix.leg.name }}.err
+            out/produce-${{ matrix.leg.name }}.out
+            out/manifest-${{ matrix.leg.name }}/
+            out/cells/
+
+  # Model-level lifecycle cells (EXTRACT MODEL / USE MODEL) don't read a produced
+  # vindex — run them ONCE per model instead of once per leg (removes the biggest
+  # duplicated extraction: the per-leg re-extract). Separate `lifecycle-*` artifacts
+  # so the `results-*` globs ignore them.
+  model-lifecycle:
+    needs: [gate, prefetch, build]
+    if: needs.gate.outputs.matrix == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        model:
+          # TEMPORARY (round-trip CI validation): only smol135 is exercised for
+          # the model-lifecycle corpus. Uncomment the others to restore full coverage.
+          - { id: smol135,   hf: "HuggingFaceTB/SmolLM2-135M-Instruct" }
+          # - { id: qwen05,    hf: "Qwen/Qwen2.5-Coder-0.5B-Instruct" }
+          # - { id: smol360,   hf: "HuggingFaceTB/SmolLM2-360M-Instruct" }
+          # - { id: qwen15,    hf: "Qwen/Qwen2.5-1.5B-Instruct" }
+          # - { id: granite1b, hf: "ibm-granite/granite-3.0-1b-a400m-instruct" }
+          # - { id: bitnet2b,  hf: "microsoft/bitnet-b1.58-2B-4T" }
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download larql binary
+        uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - name: Prep
+        run: |
+          chmod +x bin/larql scripts/lql_matrix/run_matrix.sh
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev time
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - id: slug
+        run: echo "slug=${MHF//\//--}" >> "$GITHUB_OUTPUT"
+        env:
+          MHF: ${{ matrix.model.hf }}
+      - name: Restore HF snapshot (${{ matrix.model.hf }})
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/huggingface
+          key: hf-snapshot-${{ steps.slug.outputs.slug }}-v2
+      - name: Resolve snapshot (${{ matrix.model.hf }})
+        run: |
+          python -m pip install --quiet huggingface_hub
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+          IGNORE = ["onnx/*", "*.onnx", "*.onnx_data"]   # keep in step with the prefetch job
+          repo = os.environ["MHF"]
+          try:
+              print(f"resolved from cache, no hub request: {snapshot_download(repo, local_files_only=True)}")
+          except Exception as e:
+              print(f"::warning::HF cache MISS for {repo} ({type(e).__name__}) - falling back to a hub fetch")
+              print(f"fetched from hub: {snapshot_download(repo, ignore_patterns=IGNORE)}")
+          PY
+        env:
+          MHF: ${{ matrix.model.hf }}
+      - name: Run model-level lifecycle corpus (${{ matrix.model.id }})
+        run: |
+          mkdir -p out
+          LARQL_BIN=./bin/larql \
+          MODEL_ID="${{ matrix.model.hf }}" \
+          TMPROOT="$(mktemp -d)" \
+          CELL_TIMEOUT=900 \
+          scripts/lql_matrix/run_matrix.sh \
+            "${{ matrix.model.id }}-lifecycle" "unused.vindex" \
+            scripts/lql_matrix/commands-model.jsonl "out/lifecycle-${{ matrix.model.id }}.jsonl"
+      - name: Upload lifecycle results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-${{ matrix.model.id }}
+          retention-days: 2
+          path: |
+            out/lifecycle-${{ matrix.model.id }}.jsonl
+            out/cells/
+
+  roundtrip:
+    needs: [gate, matrix]
+    # always() so a failed leg still gets collated; the gate term so a run that
+    # never asked for the matrix does not collate nothing.
+    if: always() && needs.gate.outputs.matrix == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Build round-trip catalogue
+        run: |
+          python3 scripts/lql_matrix/roundtrip_aggregate.py \
+            "artifacts/roundtrip-*/roundtrip-*.json" roundtrip-catalogue.json roundtrip-catalogue.md
+          cat roundtrip-catalogue.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload round-trip catalogue
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtrip-catalogue
+          retention-days: 2
+          path: |
+            roundtrip-catalogue.json
+            roundtrip-catalogue.md
+
+  inventory:
+    needs: [gate, matrix]
+    if: always() && needs.gate.outputs.matrix == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Tensor presence
+        run: |
+          python3 scripts/lql_matrix/tensor_presence.py \
+            "artifacts/results-*/manifest-*/listing.json" presence.json
+          cat presence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inventory
+          retention-days: 2
+          path: presence.json

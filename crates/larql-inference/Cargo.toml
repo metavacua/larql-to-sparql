@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Transformer inference engine — forward pass, attention, FFN, layer norm from safetensors weights"
 keywords = ["transformer", "inference", "llm", "interpretability"]
 categories = ["science"]
@@ -22,6 +23,7 @@ larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-core = { path = "../larql-core" }
 larql-vindex = { path = "../larql-vindex" }
+larql-execution = { path = "../larql-execution" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -70,8 +72,8 @@ async-stream = "0.3"
 futures = "0.3"
 
 # WASM expert registry
-wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"] }
-wasmtime-wasi = "29"
+wasmtime = { version = "36.0.7", default-features = false, features = ["cranelift", "runtime"] }
+wasmtime-wasi = "36.0.7"
 anyhow = "1"
 
 
@@ -106,10 +108,6 @@ required-features = ["gpu"]
 
 [[example]]
 name = "decode_vs_prefill"
-required-features = ["gpu"]
-
-[[example]]
-name = "residual_diff"
 required-features = ["gpu"]
 
 [[example]]

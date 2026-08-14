@@ -83,6 +83,18 @@ impl LayerLatencyTracker {
         }
     }
 
+    /// Number of samples currently held in `layer`'s ring buffer (caps at
+    /// the ring capacity). Instrumentation/test hook — lets a caller assert
+    /// that a request actually recorded compute (e.g. the DEC replay
+    /// `top_k=0` L2-cache bypass) without depending on timing values.
+    pub fn recorded_count(&self, layer: u32) -> usize {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|g| g.get(&layer).map(|s| s.ring.len()))
+            .unwrap_or(0)
+    }
+
     /// Snapshot current stats as proto `LayerLatency` values, sorted by layer.
     /// Returns an empty vec when no requests have been recorded yet.
     pub fn snapshot(&self) -> Vec<LayerLatency> {

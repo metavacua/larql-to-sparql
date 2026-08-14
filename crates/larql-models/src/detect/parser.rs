@@ -150,6 +150,12 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         .or_else(|| text_config["rope_local_base_freq"].as_f64());
     let vocab_size = text_config["vocab_size"].as_u64().map(|v| v as usize);
     let sliding_window = text_config["sliding_window"].as_u64().map(|v| v as usize);
+    // Read from the *outer* config too: some families declare it at the top
+    // level next to `architectures` rather than inside `text_config`.
+    let tie_word_embeddings = text_config
+        .get("tie_word_embeddings")
+        .or_else(|| config.get("tie_word_embeddings"))
+        .and_then(|v| v.as_bool());
 
     // MoE fields
     let num_experts = field_u64(text_config, NUM_EXPERTS_KEYS).map(|v| v as usize);
@@ -162,6 +168,14 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
     let moe_intermediate_size = text_config["moe_intermediate_size"]
         .as_u64()
         .map(|v| v as usize);
+    // GPT-OSS clamps both halves of the fused gate/up projection at ±this
+    // value before the GLU. Read rather than hardcoded: it is a published
+    // config field and a future checkpoint may pick a different bound.
+    let swiglu_limit = text_config["swiglu_limit"].as_f64();
+    // Whether the router renormalises its selected top-k probabilities.
+    // Read rather than assumed: the same architecture ships both settings, and
+    // the two differ by a rescale of the whole expert branch.
+    let norm_topk_prob = text_config["norm_topk_prob"].as_bool();
 
     // MLA fields
     let kv_lora_rank = text_config["kv_lora_rank"].as_u64().map(|v| v as usize);
@@ -196,10 +210,15 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
                 llama3_low_freq_factor: None,
                 llama3_high_freq_factor: None,
                 llama3_original_max_position_embeddings: None,
+                yarn_beta_fast: None,
+                yarn_beta_slow: None,
+                yarn_truncate: None,
+                yarn_mscale: None,
+                yarn_mscale_all_dim: None,
                 gemma3_global_only: true,
             });
         }
-        // Flat form (Llama, Mistral, Gemma 1/2, etc.).
+        // Flat form (Llama, Mistral, Gemma 1/2, GPT-OSS, DeepSeek, etc.).
         let scaling_type = rs
             .get("type")
             .or_else(|| rs.get("rope_type"))
@@ -211,12 +230,33 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         let llama3_old_ctx = rs
             .get("original_max_position_embeddings")
             .and_then(|v| v.as_f64());
+        // YaRN band bounds. Absent means "use the paper's defaults" (32 / 1),
+        // which is what `_compute_yarn_parameters` falls back to — so `None`
+        // here is a real value downstream, not a missing one. `truncate`
+        // decides whether the correction range is rounded outward to integer
+        // dimensions; HF defaults it to true and GPT-OSS ships false.
+        let yarn_beta_fast = rs.get("beta_fast").and_then(|v| v.as_f64());
+        let yarn_beta_slow = rs.get("beta_slow").and_then(|v| v.as_f64());
+        let yarn_truncate = rs.get("truncate").and_then(|v| v.as_bool());
+        // DeepSeek's two extra amplitude knobs. They must be parsed even
+        // though no R1 checkpoint uses them: when *both* are present HF
+        // computes the attention factor as a *ratio* that typically collapses
+        // to 1.0, where the single-argument form would give 1.35. Reading
+        // yarn without reading these would newly apply a wrong amplitude to
+        // every DeepSeek layer.
+        let yarn_mscale = rs.get("mscale").and_then(|v| v.as_f64());
+        let yarn_mscale_all_dim = rs.get("mscale_all_dim").and_then(|v| v.as_f64());
         Some(RopeScaling {
             scaling_type,
             factor,
             llama3_low_freq_factor: llama3_low,
             llama3_high_freq_factor: llama3_high,
             llama3_original_max_position_embeddings: llama3_old_ctx,
+            yarn_beta_fast,
+            yarn_beta_slow,
+            yarn_truncate,
+            yarn_mscale,
+            yarn_mscale_all_dim,
             gemma3_global_only: false,
         })
     });
@@ -323,6 +363,9 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         enable_moe_block,
         top_k_experts,
         moe_intermediate_size,
+        swiglu_limit,
+        norm_topk_prob,
         has_vision_config,
+        tie_word_embeddings,
     }
 }

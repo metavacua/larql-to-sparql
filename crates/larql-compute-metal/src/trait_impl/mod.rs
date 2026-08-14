@@ -5,7 +5,9 @@
 //! here; sub-trait impls are in their own files.
 
 mod decode;
+pub mod grouped_experts;
 mod matmul;
+pub mod mxfp4;
 mod quant_matvec;
 
 use super::*;
@@ -22,6 +24,12 @@ impl ComputeBackend for MetalBackend {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn register_weight_region(&self, region: &[u8]) {
+        // Non-page-aligned bases can't alias zero-copy; resolution simply
+        // misses and the MoE dispatch keeps its staged-copy path.
+        let _ = self.bufs.register_region(region);
     }
 
     fn supports(&self, cap: Capability) -> bool {
@@ -197,6 +205,7 @@ mod tests {
             attn_ms: 3.0,
             gate_up_ms: 1.5,
             down_ms: 0.5,
+            ..Default::default()
         };
         crate::decode::profile::store_last_split_timings(written);
         let read = ComputeBackend::take_split_timings(&m).expect("must surface stored timing");

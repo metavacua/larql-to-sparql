@@ -88,6 +88,21 @@ pub trait WeightSource {
     /// Raw BF16 bytes for a packed expert tensor (e.g. Gemma 4 experts.gate_up_proj).
     /// Returns None if the key is absent or the tensor is not BF16.
     fn get_packed_bf16(&self, key: &str) -> Option<Vec<u8>>;
+
+    /// Raw U8 bytes plus shape for a quantised packed tensor (MXFP4
+    /// `*_blocks` / `*_scales`). Returns None if the key is absent or the
+    /// tensor is not U8.
+    ///
+    /// Default `None`: the in-RAM `ModelWeights` source never needs it —
+    /// its loader already dequantised packed experts into per-expert
+    /// tensors that `get_tensor` resolves. The streaming source overrides
+    /// it, because the synthesised per-expert keys name tensors that do
+    /// not exist in any shard, and without this raw access the per-expert
+    /// writer silently wrote no expert store at all (the fourth appearance
+    /// of that failure — see `write_kquant/moe_layers_per_expert.rs`).
+    fn get_raw_u8(&self, _key: &str) -> Option<(Vec<u8>, Vec<usize>)> {
+        None
+    }
 }
 
 // ── ModelWeights implementation ──
@@ -211,6 +226,16 @@ impl<'a> WeightSource for StreamingWeights<'a> {
             return None;
         }
         Some(view.data().to_vec())
+    }
+
+    fn get_raw_u8(&self, key: &str) -> Option<(Vec<u8>, Vec<usize>)> {
+        let (shard_idx, tensor_name) = self.tensor_index.get(key)?;
+        let st = safetensors::SafeTensors::deserialize(self.shard_mmaps[*shard_idx]).ok()?;
+        let view = st.tensor(tensor_name).ok()?;
+        if view.dtype() != safetensors::Dtype::U8 {
+            return None;
+        }
+        Some((view.data().to_vec(), view.shape().to_vec()))
     }
 }
 
@@ -456,10 +481,27 @@ pub fn write_model_weights_with_opts(
                 }
             }
 
-            // QK norms (1D vectors, stored alongside attention)
-            for key in [arch.attn_q_norm_key(layer), arch.attn_k_norm_key(layer)]
-                .iter()
-                .flatten()
+            // 1-D attention vectors stored alongside the projections:
+            // QK norms, projection biases, and attention sinks. Each is
+            // optional per architecture — a `None` key means the model
+            // does not have that tensor, not that it may be skipped.
+            //
+            // Biases and sinks were added 2026-07-29: nothing had ever
+            // asked for `attn_*_bias_key` here, so even architectures
+            // that declared biases (qwen, gpt2, starcoder2) had them
+            // dropped at extraction while the attention kernels went on
+            // requesting them. See `docs/k3-funnel.md` §4.6.1.
+            for key in [
+                arch.attn_q_norm_key(layer),
+                arch.attn_k_norm_key(layer),
+                arch.attn_q_bias_key(layer),
+                arch.attn_k_bias_key(layer),
+                arch.attn_v_bias_key(layer),
+                arch.attn_o_bias_key(layer),
+                arch.attn_sinks_key(layer),
+            ]
+            .iter()
+            .flatten()
             {
                 if let Some(data) = source.get_vector(key) {
                     let bytes = crate::config::dtype::encode_floats(&data, dtype);
@@ -675,12 +717,20 @@ pub fn write_model_weights_with_opts(
             }
         }
 
-        // Final norm (model.norm.weight)
-        if let Some(data) = source.get_vector("norm.weight") {
+        // Final norm, resolved through the accessor rather than a literal.
+        // Every reader (`layer_graph::logits`, `predict`, `trace::vocab`,
+        // `kquant_forward::cached`) uses `arch.final_norm_key()`, so a
+        // hardcoded key here agrees only as long as no architecture
+        // overrides it — at which point the writer would store under one
+        // name and the reader look for another, and the final norm would
+        // vanish silently. Same writer/reader split that lost the
+        // attention biases (`docs/k3-funnel.md` §4.6.1).
+        let final_norm_key = arch.final_norm_key().to_string();
+        if let Some(data) = source.get_vector(&final_norm_key) {
             let bytes = crate::config::dtype::encode_floats(&data, dtype);
             norms_file.write_all(&bytes)?;
             entries.push(WeightEntry {
-                key: "norm.weight".into(),
+                key: final_norm_key.clone(),
                 kind: kind::VECTOR.into(),
                 shape: vec![data.len()],
                 offset: norms_offset,

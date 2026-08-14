@@ -1,45 +1,68 @@
 # larql-core Roadmap
 
-## Hardening — codebase review 2026-05-28
-
-From the whole-codebase review ([`docs/audits/codebase-review-2026-05-28.md`](../../../docs/audits/codebase-review-2026-05-28.md)):
-
-- **P1 — NaN confidence panics a walk.** `partial_cmp().unwrap()` at `graph.rs:278`, `walk.rs:35`, `pagerank.rs:19` panics on NaN confidence loaded from packed/msgpack files. Route through the shared NaN-safe helper (workspace-wide cleanup).
-
 `larql-core` owns the in-memory graph model, graph algorithms, lightweight
 model-provider extraction helpers, and portable graph serialization formats.
 It should stay independent of vindex storage and inference internals: higher
 crates can depend on it, but this crate should remain a small, reusable graph
 engine.
 
----
-
-## Current state
-
-- `Graph` is an indexed directed multigraph over `(subject, relation, object)`
-  facts with confidence, source, metadata, and optional injection hints.
-- Query indexes exist for outgoing edges, incoming edges, exact triples, and
-  keyword search.
-- Algorithms include shortest path/A*, PageRank, BFS/DFS, components, walks,
-  filtering, merging, and diffing.
-- Serialization supports JSON, MessagePack, packed binary, CSV, and append-only
-  checkpoint logs.
-- LLM extraction utilities are provider-agnostic through `ModelProvider`,
-  `TemplateRegistry`, `chain_tokens`, and BFS extraction.
-- Baseline verification: `cargo test -p larql-core` passes.
-- Current coverage: 77.92% line coverage with default features; 79.84% line
-  coverage with `--no-default-features --features msgpack`.
-- Current release benchmark snapshot is recorded in `README.md` from
-  `cargo run --release -p larql-core --example bench_graph`.
-- P1 core API polish has shipped: deterministic accessor ordering, explicit
-  mutation results, and richer exact/multiedge lookup helpers are available.
+For shipped work, see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-## P0 - Correctness and robustness
+## Current state (verified 2026-08-04)
 
-Status: shipped for the original hardening pass. Keep this section as a record
-of covered regressions plus any newly found P0 follow-ups.
+**Shape.** Four modules, no internal dependency on any other `larql-*` crate:
+
+| Module | Contents |
+|---|---|
+| `core` | `edge`, `enums`, `graph`, `node`, `schema` |
+| `algo` | `components`, `diff`, `filter`, `merge`, `pagerank`, `shortest_path`, `traversal`, `walk` |
+| `engine` | `bfs`, `chain`, `http_provider`, `mock_provider`, `provider`, `templates` |
+| `io` | `checkpoint`, `csv`, `format`, `json`, `msgpack`, `packed` |
+
+**What it does.** `Graph` is an indexed directed multigraph over
+`(subject, relation, object)` facts with confidence, source, metadata, and
+optional injection hints. Query indexes cover outgoing edges, incoming edges,
+exact triples, and keyword search. Algorithms include shortest path/A*,
+PageRank, BFS/DFS, components, walks, filtering, merging, and diffing.
+Serialization supports JSON, MessagePack, packed binary, CSV, and append-only
+checkpoint logs. LLM extraction is provider-agnostic through `ModelProvider`,
+`TemplateRegistry`, `chain_tokens`, and BFS extraction.
+
+**Features.** `default = ["http", "msgpack"]`; both are optional, so pure graph
+usage carries zero network and zero MessagePack dependencies. The
+`--no-default-features` build is a supported configuration and is covered
+separately.
+
+**Tests.** 191 tests across 14 binaries (12 integration files in `tests/` plus
+unit tests); `cargo test -p larql-core` passes.
+
+**Coverage.** This crate has **no `coverage-policy.json`** — unlike the twelve
+crates that do, the per-file 90% floor is not enforced here. The last recorded
+measurement was 77.92% lines with default features and 79.84% with
+`--no-default-features --features msgpack`; that figure has not been re-taken
+and should be treated as a stale reference, not a current number.
+
+**Benchmarks.** A criterion harness exists at `benches/graph.rs` with three
+groups (queries, algorithms, serialization) plus a
+`examples/bench_graph.rs` snapshot whose release output backs the numbers in
+`README.md`. What is still missing is a *regression gate* over the criterion
+output, not the harness itself.
+
+**Known open defect.** Confidence is not sanitized at deserialize boundaries,
+and five `partial_cmp().unwrap()` sites will panic on a non-finite value —
+`core/graph.rs:278`, `algo/pagerank.rs:19`, `algo/walk.rs:35`,
+`engine/http_provider.rs:110`, `engine/chain.rs:24`. The 2026-05-28 review
+named the first three; the two `engine` sites are the same defect and are
+listed here so a fix covers all of them. Detail below under P0.
+
+---
+
+## P0 — correctness and robustness
+
+The original hardening pass shipped; one item is still open. The table is kept
+as the record of which regressions are covered.
 
 | Item | Area | Status |
 |---|---|---|
@@ -48,7 +71,7 @@ of covered regressions plus any newly found P0 follow-ups.
 | Replace ad hoc CSV parsing/writing | `io::csv` | Done. CSV supports quoted commas, escaped quotes, CRLF/LF records, and multiline quoted fields. |
 | Diff all edge attributes | `algo::diff` | Done. Same-triple changes now include confidence, source, metadata, and injection. |
 | Clarify traversal edge semantics | `algo::traversal` | Done. `TraversalResult.edges` means edges actually traversed to newly discovered nodes. |
-| Sanitize confidence on deserialize | `core::edge`, `core::graph`, `algo` | Open. `CompactEdge -> Edge` stores confidence directly, bypassing `with_confidence`; NaN or out-of-range values can later panic unwrap-based `partial_cmp` sorts in walk/PageRank paths. Clamp or reject non-finite confidence at graph format boundaries. |
+| Sanitize confidence on deserialize | `core::edge`, `core::graph`, `algo`, `engine` | **Open** (raised 2026-05-28, still present 2026-08-04). `CompactEdge -> Edge` stores confidence directly, bypassing `with_confidence`; NaN or out-of-range values can later panic unwrap-based `partial_cmp` sorts. Clamp or reject non-finite confidence at graph format boundaries, and route the five sort sites through the shared NaN-safe helper: `core/graph.rs:278`, `algo/pagerank.rs:19`, `algo/walk.rs:35`, `engine/http_provider.rs:110`, `engine/chain.rs:24`. |
 
 ---
 
@@ -85,7 +108,7 @@ of covered regressions plus any newly found P0 follow-ups.
 | Memory-efficient string storage | `core::graph` | Edges and indexes clone strings heavily. Consider optional string interning for large graphs while preserving ergonomic `String` APIs. |
 | Streaming readers/writers | `io` | JSON and packed paths operate on whole buffers. Add streaming load/save where format allows, especially for checkpoint compaction and large interchange files. |
 | Packed format versioning plan | `io::packed` | Add explicit flags handling, forward-compatible unknown flag rejection, metadata/injection section lengths, and upgrade tests before `.larql.pak` becomes a durable format. |
-| Bench regression harness | `examples`, benches | Partially done: README claims are backed by `bench_graph` release output with fixed generators. Still open: convert this into a proper `cargo bench` regression harness. |
+| Bench regression harness | `examples`, benches | Partially done: `benches/graph.rs` is a criterion harness with query/algorithm/serialization groups, and README claims are backed by `bench_graph` release output with fixed generators. Still open: a **regression gate** — record a baseline and fail CI on a threshold breach. The harness exists; nothing checks its output. |
 
 ---
 

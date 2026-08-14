@@ -63,7 +63,7 @@ pub fn predict_kquant_prefill(
 /// `state` is `Some`, populates per-layer `h_in` ([seq_len, hidden]),
 /// `k_new` ([seq_len, kv_dim]), `v_new` ([seq_len, kv_dim]) for every
 /// position in the prompt — engines (markov_residual,
-/// unlimited_context, turbo_quant) use this to seed their state policy
+/// windowed_checkpoint, turbo_quant) use this to seed their state policy
 /// from a single prefill pass without a follow-up CPU re-walk. When
 /// `state` is `None`, bit-identical to [`predict_kquant_prefill`].
 pub fn predict_kquant_prefill_with_state(
@@ -716,6 +716,7 @@ mod branch_tests {
             packed_mmaps: HashMap::new(),
             skipped_tensors: Vec::new(),
             packed_byte_ranges: HashMap::new(),
+            per_layer_ffn_format: Default::default(),
             embed,
             lm_head,
             position_embed: None,

@@ -62,12 +62,14 @@ pub mod forward;
 pub mod forward_overrides;
 pub mod kv_dispatch;
 pub mod kv_engine;
+pub mod kv_row_positions;
 pub mod layer_executor;
 pub mod layer_graph;
 pub mod model;
 pub mod prompt;
 pub mod residual;
 pub mod residual_diff;
+pub mod speech;
 pub mod ternary;
 pub mod test_utils;
 pub mod tokenizer;
@@ -183,9 +185,12 @@ pub use chat::{wrap_chat_prompt, wrap_prompt_raw, wrap_with_vindex_template, Cha
 pub use error::InferenceError;
 pub use ffn::graph_backend::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
 pub use ffn::{
-    BackendFfn, FfnBackend, LayerFfnRouter, LayerShardedBackend, MoeRouterWeights, RemoteFfnConfig,
-    RemoteFfnError, RemoteLatencyStats, RemoteMoeBackend, RemoteMoeError, RemoteWalkBackend,
-    ShardConfig, SparseFfn, WeightFfn, WirePreference,
+    decode_q8k_batch_response_entries, decode_single_response, encode_binary_request,
+    encode_binary_request_as, encode_q8k_batch_request, expert_weights_resolvable, BackendFfn,
+    ExpertWeightFfn, FfnBackend, LayerFfnRouter, LayerShardedBackend, MoeRouterWeights,
+    RemoteFfnConfig, RemoteFfnError, RemoteLatencyStats, RemoteMoeBackend, RemoteMoeError,
+    RemoteWalkBackend, ShardConfig, SparseFfn, WeightFfn, WireFormat, WirePreference, BINARY_CT,
+    F16_CT, I8_CT, Q8K_BATCH_CT,
 };
 pub use kv_dispatch::{
     CompressionCodec, EngineBackend, KvDispatch, KvHandle, KvHandleInner, PerLayerDecodeState,
@@ -229,8 +234,9 @@ pub use layer_graph::{
     generate_with_sampling,
     // Expert grid generation
     grid::{
-        generate_with_remote_ffn, generate_with_remote_ffn_batch, generate_with_remote_moe,
-        generate_with_remote_moe_batch,
+        generate_with_remote_ffn, generate_with_remote_ffn_batch,
+        generate_with_remote_ffn_batch_captured, generate_with_remote_moe,
+        generate_with_remote_moe_batch, score_forced_with_remote_ffn, ResidualCaptureSink,
     },
     hybrid::predict_hybrid,
     predict_honest,
@@ -302,7 +308,7 @@ pub mod prelude {
 /// `KvEngine`, `EngineInfo`, and `DecodeStageSummary` are defined in
 /// this crate's [`kv_engine`](crate::kv_engine) module and re-exported
 /// at the crate root. Concrete engine implementations
-/// (`MarkovResidualEngine`, `UnlimitedContextEngine`, `StandardEngine`,
+/// (`MarkovResidualEngine`, `WindowedCheckpointEngine`, `StandardEngine`,
 /// `NoCacheEngine`, `TurboQuantEngine`, `ApolloEngine`) plus
 /// `EngineKind` and accuracy helpers (`compare_hidden`,
 /// `cosine_similarity`, `kl_divergence`, …) live in the `larql-kv`

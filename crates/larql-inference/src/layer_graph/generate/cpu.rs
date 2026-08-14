@@ -212,6 +212,9 @@ fn generate_via_cpu_q4k_cached(
         stage_timings: StageTimings {
             embed_ms_total: 0.0,
             gpu_ms_total: 0.0,
+            gpu_only_ms_total: 0.0,
+            attn_ms_total: 0.0,
+            cmd_buffers_total: 0,
             cpu_fwd_ms_total: t_cpu_fwd,
             gate_up_ms_total: 0.0,
             down_ms_total: 0.0,
@@ -303,6 +306,9 @@ fn generate_via_cpu_q4k_uncached(
         stage_timings: StageTimings {
             embed_ms_total: 0.0,
             gpu_ms_total: 0.0,
+            gpu_only_ms_total: 0.0,
+            attn_ms_total: 0.0,
+            cmd_buffers_total: 0,
             cpu_fwd_ms_total: t_cpu_fwd,
             gate_up_ms_total: 0.0,
             down_ms_total: 0.0,

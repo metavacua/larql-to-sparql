@@ -325,6 +325,7 @@ fn compact_model_config() -> larql_vindex::VindexModelConfig {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     }
 }
 

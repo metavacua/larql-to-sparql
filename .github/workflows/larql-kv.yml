@@ -8,6 +8,16 @@
 
 name: larql-kv
 
+# Least-privilege token: this workflow only needs to read the repo.
+permissions:
+  contents: read
+
+# One live run per workflow per ref; superseded pull_request runs are
+# cancelled (pushes to main / tags / manual dispatches never are).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
@@ -49,6 +59,18 @@ env:
 jobs:
   test:
     name: test - ${{ matrix.os }}
+    # Selective disable. A job-level `if:` cannot shell out to git, so
+    # unlike the strategy matrix's gate these read the PR TITLE only.
+    # The title is empty on push events, where contains() is false and
+    # the job runs exactly as before.
+    #
+    # This is the control that actually works on a long-lived PR: a
+    # `paths` filter on pull_request is evaluated against the WHOLE PR
+    # diff, not the incremental push, so once a PR has touched a crate
+    # every later push re-triggers it however unrelated the change.
+    if: >-
+      !contains(github.event.pull_request.title, '[skip crates]') &&
+      !contains(github.event.pull_request.title, '[skip larql-kv]')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
 
@@ -58,7 +80,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -94,7 +116,7 @@ jobs:
         run: choco install protoc -y --no-progress
 
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -129,11 +151,23 @@ jobs:
 
   coverage:
     name: coverage - ubuntu
+    # Selective disable. A job-level `if:` cannot shell out to git, so
+    # unlike the strategy matrix's gate these read the PR TITLE only.
+    # The title is empty on push events, where contains() is false and
+    # the job runs exactly as before.
+    #
+    # This is the control that actually works on a long-lived PR: a
+    # `paths` filter on pull_request is evaluated against the WHOLE PR
+    # diff, not the incremental push, so once a PR has touched a crate
+    # every later push re-triggers it however unrelated the change.
+    if: >-
+      !contains(github.event.pull_request.title, '[skip crates]') &&
+      !contains(github.event.pull_request.title, '[skip larql-kv]')
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable

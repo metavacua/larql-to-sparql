@@ -88,7 +88,10 @@ fn make_moe_weights<'a>(
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     }
 }
@@ -190,7 +193,10 @@ fn moe_per_expert_scale_applied() {
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
     let out_no_scale = cpu_moe_forward(&h, &moe_no_scale, 0.0, 1e-6);
@@ -214,7 +220,10 @@ fn moe_per_expert_scale_applied() {
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
     let out_scaled = cpu_moe_forward(&h, &moe_scaled, 0.0, 1e-6);
@@ -268,7 +277,10 @@ fn moe_router_scale_vector_applied() {
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
     let out = cpu_moe_forward(&h, &moe, 0.0, 1e-6);
@@ -310,7 +322,10 @@ fn moe_router_input_scalar_nonunit() {
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
     let out = cpu_moe_forward(&h, &moe_scalar, 0.0, 1e-6);
@@ -337,7 +352,10 @@ fn moe_empty_router_proj_returns_zeros() {
         num_experts: 4,
         top_k: 2,
         intermediate_size: 4,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
     let h = vec![1.0f32; hidden];
@@ -370,7 +388,10 @@ fn moe_zero_num_experts_returns_zeros() {
         num_experts: 0, // triggers the early return
         top_k: 2,
         intermediate_size: 4,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
     let h = vec![1.0f32; hidden];
@@ -404,7 +425,10 @@ fn moe_zero_top_k_or_intermediate_returns_zeros() {
         num_experts: 2,
         top_k: 0,
         intermediate_size: 2,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
     assert_eq!(
@@ -453,7 +477,10 @@ fn moe_missing_selected_expert_tables_are_skipped() {
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
     let h = vec![1.0f32; hidden];
@@ -492,7 +519,10 @@ fn moe_post_experts_norm_branch_runs() {
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation: Activation::Silu,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
 
@@ -535,7 +565,10 @@ fn moe_gelu_tanh_activation_in_forward() {
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation: Activation::GeluTanh, // exercises the GeluTanh arm
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(Activation::GeluTanh), // exercises the GeluTanh arm
         expert_data_format: larql_compute::QuantFormat::BF16,
     };
     let h = vec![1.0f32; hidden];
@@ -577,12 +610,14 @@ mod moe_prefill_integration {
         norm: &'a [f32],
         moe: Option<MoeLayerWeights<'a>>,
     ) -> FullPipelineLayer<'a> {
-        let q4w = || QuantWeight {
-            data: q4k,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        };
+        let q4w = || QuantWeight::new(QuantFormat::Q4_K, q4k, larql_compute::QuantAux::None);
         FullPipelineLayer {
+            attn_sinks: None,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
+            attn_o_bias: None,
+            attn_softcap: 0.0,
             wq: q4w(),
             wk: q4w(),
             wv: q4w(),
@@ -609,6 +644,11 @@ mod moe_prefill_integration {
             num_kv_heads: 4,
             rope_base: 10000.0,
             rotary_dim: 0,
+            rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+                64_usize,
+                0_usize,
+                10000.0_f64,
+            ),
             sliding_window: 0,
             has_v_norm: false,
             layer_scalar: 0.0,
@@ -648,7 +688,10 @@ mod moe_prefill_integration {
             num_experts: 0,
             top_k: 1,
             intermediate_size: inter,
-            activation: Activation::Silu,
+            router_bias: &[],
+            experts_gate_up_bias: &[],
+            experts_down_bias: &[],
+            gate_rule: larql_compute::MoeGateRule::Gated(Activation::Silu),
             expert_data_format: larql_compute::QuantFormat::BF16,
         }
     }
@@ -742,17 +785,21 @@ mod moe_prefill_integration {
         let q4k = synth_q4k(hidden.max(inter), hidden);
         let norm = vec![1.0f32; hidden];
         // Build a layer where Q/K/V are Q4_KF but gate/up/down stay Q4_K.
-        let q4kf = QuantWeight {
-            data: &q4k,
-            scales: None,
-            format: QuantFormat::Q4_KF,
-        };
-        let q4w = || QuantWeight {
-            data: q4k.as_slice(),
-            scales: None,
-            format: QuantFormat::Q4_K,
+        let q4kf = QuantWeight::new(QuantFormat::Q4_KF, &q4k, larql_compute::QuantAux::None);
+        let q4w = || {
+            QuantWeight::new(
+                QuantFormat::Q4_K,
+                q4k.as_slice(),
+                larql_compute::QuantAux::None,
+            )
         };
         let layers = vec![FullPipelineLayer {
+            attn_sinks: None,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
+            attn_o_bias: None,
+            attn_softcap: 0.0,
             wq: q4kf,
             wk: q4kf,
             wv: q4kf,
@@ -779,6 +826,11 @@ mod moe_prefill_integration {
             num_kv_heads: 4,
             rope_base: 10000.0,
             rotary_dim: 0,
+            rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+                64_usize,
+                0_usize,
+                10000.0_f64,
+            ),
             sliding_window: 0,
             has_v_norm: false,
             layer_scalar: 0.0,
@@ -818,12 +870,14 @@ mod moe_prefill_integration {
         let seq_len = 1usize;
         let q4k = synth_q4k(hidden.max(inter), hidden);
         let norm = vec![1.0f32; hidden];
-        let q4_view = |fmt| QuantWeight {
-            data: q4k.as_slice(),
-            scales: None,
-            format: fmt,
-        };
+        let q4_view = |fmt| QuantWeight::new(fmt, q4k.as_slice(), larql_compute::QuantAux::None);
         let layers = vec![FullPipelineLayer {
+            attn_sinks: None,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
+            attn_o_bias: None,
+            attn_softcap: 0.0,
             wq: q4_view(QuantFormat::Q4_K),
             wk: q4_view(QuantFormat::Q4_K),
             wv: q4_view(QuantFormat::Q6_K),
@@ -850,6 +904,11 @@ mod moe_prefill_integration {
             num_kv_heads: 4,
             rope_base: 10000.0,
             rotary_dim: 0,
+            rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+                64_usize,
+                0_usize,
+                10000.0_f64,
+            ),
             sliding_window: 0,
             has_v_norm: false,
             layer_scalar: 0.0,
@@ -901,27 +960,30 @@ mod moe_prefill_integration {
         let wv_q8: Vec<u8> = vec![1u8; kv_dim * hidden];
         let wv_scales: Vec<f32> = vec![0.01f32; kv_dim];
 
-        let q4w = |fmt: QuantFormat| QuantWeight {
-            data: q4k.as_slice(),
-            scales: None,
-            format: fmt,
-        };
+        let q4w =
+            |fmt: QuantFormat| QuantWeight::new(fmt, q4k.as_slice(), larql_compute::QuantAux::None);
         let layers = vec![FullPipelineLayer {
-            wq: QuantWeight {
-                data: &wq_q8,
-                scales: Some(&wq_scales),
-                format: QuantFormat::Q8_0,
-            },
-            wk: QuantWeight {
-                data: &wk_q8,
-                scales: Some(&wk_scales),
-                format: QuantFormat::Q8_0,
-            },
-            wv: QuantWeight {
-                data: &wv_q8,
-                scales: Some(&wv_scales),
-                format: QuantFormat::Q8_0,
-            },
+            attn_sinks: None,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
+            attn_o_bias: None,
+            attn_softcap: 0.0,
+            wq: QuantWeight::new(
+                QuantFormat::Q8_0,
+                &wq_q8,
+                larql_compute::QuantAux::ExternalScales(&wq_scales),
+            ),
+            wk: QuantWeight::new(
+                QuantFormat::Q8_0,
+                &wk_q8,
+                larql_compute::QuantAux::ExternalScales(&wk_scales),
+            ),
+            wv: QuantWeight::new(
+                QuantFormat::Q8_0,
+                &wv_q8,
+                larql_compute::QuantAux::ExternalScales(&wv_scales),
+            ),
             wo: q4w(QuantFormat::Q4_K),
             gate: q4w(QuantFormat::Q4_K),
             up: q4w(QuantFormat::Q4_K),
@@ -945,6 +1007,11 @@ mod moe_prefill_integration {
             num_kv_heads,
             rope_base: 10000.0,
             rotary_dim: 0,
+            rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+                64_usize,
+                0_usize,
+                10000.0_f64,
+            ),
             sliding_window: 0,
             has_v_norm: false,
             layer_scalar: 0.0,

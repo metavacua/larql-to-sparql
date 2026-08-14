@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Metal GPU backend for LARQL. Implements `larql_compute::ComputeBackend` on Apple Silicon via `metal-rs` + custom MSL shaders. Decoupled from larql-compute so non-Mac hosts skip the build entirely."
 keywords = ["metal", "gpu", "apple-silicon", "matmul", "quantization"]
 categories = ["science"]

@@ -257,8 +257,9 @@ mod reference_agreement {
         let scale = 1.0 / (head_dim as f64).sqrt();
         let softcap = Some(50.0f32);
 
-        let (fused, _) =
-            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, false, softcap);
+        let (fused, _) = gqa_attention_with_weights(
+            &q, &k, &v, 1, head_dim, 1, scale, seq, false, softcap, None,
+        );
         let naive = reference_attention(&q, &k, &v, 1, head_dim, 1, scale, seq, softcap);
 
         let diff = max_diff(&fused, &naive);
@@ -298,8 +299,9 @@ mod capture {
         let v = synth_matrix(seq, num_heads * head_dim, 72);
         let scale = 1.0 / (head_dim as f64).sqrt();
 
-        let (_, weights) =
-            gqa_attention_with_weights(&q, &k, &v, num_heads, head_dim, 1, scale, seq, true, None);
+        let (_, weights) = gqa_attention_with_weights(
+            &q, &k, &v, num_heads, head_dim, 1, scale, seq, true, None, None,
+        );
 
         let weights = weights.expect("should capture weights");
         assert_eq!(weights.heads.len(), num_heads);
@@ -318,7 +320,7 @@ mod capture {
         let scale = 1.0 / (head_dim as f64).sqrt();
 
         let (_, weights) =
-            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, true, None);
+            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, true, None, None);
 
         let w = &weights.unwrap().heads[0];
         let sum: f32 = w.iter().sum();
@@ -338,7 +340,7 @@ mod capture {
         let v = synth_matrix(seq, head_dim, 92);
 
         let (_, weights) =
-            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, 0.5, seq, true, None);
+            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, 0.5, seq, true, None, None);
 
         let w = &weights.unwrap().heads[0];
         // All weights should be non-negative (softmax output)
@@ -353,7 +355,8 @@ mod capture {
         let k = synth_matrix(3, 4, 101);
         let v = synth_matrix(3, 4, 102);
 
-        let (_, weights) = gqa_attention_with_weights(&q, &k, &v, 1, 4, 1, 0.5, 3, false, None);
+        let (_, weights) =
+            gqa_attention_with_weights(&q, &k, &v, 1, 4, 1, 0.5, 3, false, None, None);
         assert!(weights.is_none());
     }
 
@@ -367,9 +370,9 @@ mod capture {
         let scale = 1.0 / (head_dim as f64).sqrt();
 
         let (out_no_cap, _) =
-            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, false, None);
+            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, false, None, None);
         let (out_cap, _) =
-            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, true, None);
+            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, true, None, None);
 
         let diff = max_diff(&out_no_cap, &out_cap);
         assert!(diff < 1e-6, "capture changed output: diff = {diff}");

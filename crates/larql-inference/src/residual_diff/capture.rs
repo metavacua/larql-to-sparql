@@ -371,13 +371,50 @@ impl ResidualCapture {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Set the named env var to a fresh tempdir, run `f`, return the
-/// tempdir guard so the caller can read files before drop. Restores
-/// the previous env var value on drop (best-effort — Rust env vars
-/// are process-global, so racing `cargo test --test-threads=N` would
-/// stomp; tests in this suite run with `--test-threads=1` upstream).
+/// Serialises every dump-directory env-var window in this module tree.
+///
+/// Shared with [`super::stages::run_with_two_env_vars`] rather than kept
+/// private: both helpers point process-global variables at per-call
+/// tempdirs, and two *different* helpers racing corrupts a capture just
+/// as thoroughly as two calls to the same one. One lock for the whole
+/// mechanism is the only version that is obviously correct.
+///
+/// Env vars are process-global, so two concurrent captures would each
+/// point the *same* variable at their own tempdir. This is not
+/// hypothetical — it produced two distinct failures in
+/// `test_cpu_metal_parity`, which `cargo test` runs as four threads in
+/// one process:
+///
+/// - the loser's dump landed in the winner's directory, so its own
+///   directory was empty → "Metal prefill dump missing for layer 0";
+/// - or the loser read files the winner had written **for a different
+///   model**, giving a residual comparison of cos ≈ 0.005 — an
+///   apparently catastrophic kernel regression that was nothing of the
+///   sort.
+///
+/// The previous version documented the hazard ("racing `cargo test
+/// --test-threads=N` would stomp; tests in this suite run with
+/// `--test-threads=1` upstream") but nothing enforced it, and the
+/// default invocation violates it. The invariant belongs with the
+/// function that owns the global, not with each caller.
+pub(super) static DUMP_DIR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Set the named env var to a fresh tempdir, run `f`, and return the
+/// tempdir guard so the caller can read files before it drops. The
+/// previous value is restored before returning.
+///
+/// The env var is mutated under [`DUMP_DIR_ENV_LOCK`], so concurrent
+/// callers queue rather than redirect each other's dumps. Reads of the
+/// returned directory need no lock: each call gets its own tempdir, and
+/// `f` has finished writing to it by the time this returns.
 fn run_with_dump_dir(env_var: &str, f: impl FnOnce()) -> Result<tempfile::TempDir, String> {
     let dir = tempfile::tempdir().map_err(|e| format!("tempdir: {e}"))?;
+    // A panicking caller poisons the lock; the guarded state is just the
+    // env var, which is restored below either way, so recover rather
+    // than cascade one test's failure into every other test's.
+    let _guard = DUMP_DIR_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let prev = std::env::var(env_var).ok();
     std::env::set_var(env_var, dir.path());
     f();
@@ -458,16 +495,31 @@ mod tests {
 
     #[test]
     fn run_with_dump_dir_restores_prior_env() {
-        std::env::set_var("LARQL_TEST_RESID_DUMP_DIR_RESTORE", "previous");
-        let dir = run_with_dump_dir("LARQL_TEST_RESID_DUMP_DIR_RESTORE", || {}).unwrap();
-        // After f returns the env var is restored — we observe via env::var,
-        // not via the tempdir guard which is still alive here.
+        const ENV: &str = "LARQL_TEST_RESID_DUMP_DIR_RESTORE";
+        std::env::set_var(ENV, "previous");
+
+        // Observe the state *inside* `f` — that is the window the dump hooks
+        // actually run in, and the only place the claim "the tempdir existed
+        // and the var pointed at it" is checkable. The previous version
+        // asserted `dir.path().exists() || !dir.path().exists()`, which is a
+        // tautology: it can never fail, so it pinned nothing. Same shape as
+        // the plausibility-only timestamp tests in `docs/k3-funnel.md` §4.5.
+        let mut seen_var = String::new();
+        let mut existed_during = false;
+        let dir = run_with_dump_dir(ENV, || {
+            seen_var = std::env::var(ENV).unwrap_or_default();
+            existed_during = std::path::Path::new(&seen_var).is_dir();
+        })
+        .unwrap();
+
+        assert!(existed_during, "the tempdir must exist while `f` runs");
         assert_eq!(
-            std::env::var("LARQL_TEST_RESID_DUMP_DIR_RESTORE").unwrap(),
-            "previous"
+            seen_var,
+            dir.path().to_string_lossy(),
+            "`f` must see the var pointing at this call's tempdir"
         );
-        // Sanity: the tempdir actually existed during f.
-        assert!(dir.path().exists() || !dir.path().exists()); // either is fine post-drop
+        // And afterwards the prior value is back.
+        assert_eq!(std::env::var(ENV).unwrap(), "previous");
         std::env::remove_var("LARQL_TEST_RESID_DUMP_DIR_RESTORE");
     }
 
@@ -476,6 +528,174 @@ mod tests {
         std::env::remove_var("LARQL_TEST_RESID_DUMP_DIR_NONE");
         let _ = run_with_dump_dir("LARQL_TEST_RESID_DUMP_DIR_NONE", || {}).unwrap();
         assert!(std::env::var("LARQL_TEST_RESID_DUMP_DIR_NONE").is_err());
+    }
+
+    /// `cpu_prefill` end to end on a synthetic Q4K model.
+    ///
+    /// The four capture constructors were entirely untested: they drive a real
+    /// forward pass and read the resulting `.f32` dumps back, so the only way
+    /// to cover them is to actually run one. The CPU path needs no GPU, so it
+    /// can run everywhere — the three `metal_*` constructors cannot, which is
+    /// why this file sits outside the crate's coverage `include_globs`.
+    ///
+    /// Asserts the shape contract the comparison code depends on: one entry
+    /// per layer, each `seq_len * hidden` floats, all finite.
+    #[test]
+    fn cpu_prefill_captures_every_layer() {
+        let mut weights = crate::test_utils::make_test_q4k_weights();
+        let index = crate::test_utils::make_test_q4k_vindex(&weights);
+        let ids: Vec<u32> = vec![1, 2, 3];
+
+        let capture = ResidualCapture::cpu_prefill(&mut weights, &ids, &index)
+            .expect("cpu prefill capture on the synthetic Q4K fixture");
+
+        assert_eq!(capture.num_layers(), weights.num_layers);
+        assert_eq!(capture.seq_len, ids.len());
+        assert_eq!(capture.hidden_size, weights.hidden_size);
+        for (l, layer) in capture.layers.iter().enumerate() {
+            assert_eq!(
+                layer.len(),
+                ids.len() * weights.hidden_size,
+                "layer {l} has the wrong element count"
+            );
+            assert!(
+                layer.iter().all(|v| v.is_finite()),
+                "layer {l} has non-finite values"
+            );
+        }
+    }
+
+    /// `project_to_last_position` on a real capture must agree with
+    /// `last_position` for every layer — the two are used interchangeably by
+    /// the parity suites when comparing a prefill against a decode step.
+    #[test]
+    fn projecting_a_real_capture_matches_last_position() {
+        let mut weights = crate::test_utils::make_test_q4k_weights();
+        let index = crate::test_utils::make_test_q4k_vindex(&weights);
+        let capture = ResidualCapture::cpu_prefill(&mut weights, &[1, 2, 3], &index)
+            .expect("cpu prefill capture");
+
+        let projected = capture.project_to_last_position();
+        assert_eq!(projected.seq_len, 1);
+        for l in 0..capture.num_layers() {
+            assert_eq!(projected.layers[l], capture.last_position(l).to_vec());
+        }
+    }
+
+    /// `metal_prefill` on the same synthetic Q4K fixture.
+    ///
+    /// Gated on macOS because it needs a real Metal device; the three
+    /// `metal_*` constructors are why this file cannot reach the 90% floor in
+    /// a Linux CI coverage run, and why it sits outside `include_globs`. The
+    /// test still earns its place — it means the constructor is exercised
+    /// somewhere rather than nowhere.
+    #[test]
+    #[cfg(all(feature = "gpu", target_os = "macos"))]
+    fn metal_prefill_captures_every_layer() {
+        let Some(backend) = larql_compute_metal::MetalBackend::new() else {
+            eprintln!("skip: no Metal device");
+            return;
+        };
+        let mut weights = crate::test_utils::make_test_q4k_weights();
+        let index = crate::test_utils::make_test_q4k_vindex(&weights);
+        let ids: Vec<u32> = vec![1, 2, 3];
+
+        let capture = ResidualCapture::metal_prefill(&mut weights, &ids, &index, &backend)
+            .expect("metal prefill capture on the synthetic Q4K fixture");
+
+        assert_eq!(capture.num_layers(), weights.num_layers);
+        assert_eq!(capture.hidden_size, weights.hidden_size);
+        for (l, layer) in capture.layers.iter().enumerate() {
+            assert!(
+                layer.iter().all(|v| v.is_finite()),
+                "layer {l} has non-finite values"
+            );
+        }
+    }
+
+    /// A panic while the dump-dir lock is held must not cascade.
+    ///
+    /// `run_with_dump_dir` recovers from a poisoned lock via
+    /// `into_inner()` rather than unwrapping. The guarded state is just an
+    /// env var, which is restored on every path, so a poisoned lock carries
+    /// no corrupt data — whereas propagating the poison would turn one
+    /// failing test into every subsequent capture failing too, which is
+    /// exactly the cascade this module was fixed to remove.
+    #[test]
+    fn a_poisoned_lock_does_not_cascade() {
+        const ENV: &str = "LARQL_TEST_RESID_DUMP_DIR_POISON";
+
+        // Poison it: panic inside a thread while holding the guard.
+        let poisoned = std::thread::spawn(|| {
+            let _g = DUMP_DIR_ENV_LOCK.lock().unwrap();
+            panic!("deliberate panic to poison the lock");
+        })
+        .join();
+        assert!(poisoned.is_err(), "the helper thread must have panicked");
+        assert!(DUMP_DIR_ENV_LOCK.is_poisoned(), "lock should be poisoned");
+
+        // The next caller still works.
+        let mut saw = String::new();
+        let dir = run_with_dump_dir(ENV, || {
+            saw = std::env::var(ENV).unwrap_or_default();
+        })
+        .expect("a poisoned lock must not stop a capture");
+        assert_eq!(saw, dir.path().to_string_lossy());
+        assert!(std::env::var(ENV).is_err(), "env var restored");
+    }
+
+    /// Concurrent callers must each observe **their own** tempdir for the
+    /// whole of `f`, never a sibling's.
+    ///
+    /// This is the regression that mattered: `cargo test` runs the four
+    /// `test_cpu_metal_parity` cases as threads in one process, and the
+    /// unsynchronised version let one capture's dump directory be
+    /// redirected mid-run by another. The symptoms were a missing dump
+    /// ("Metal prefill dump missing for layer 0") and, worse, a *silent*
+    /// cross-model comparison reported as cos ≈ 0.005 — a parity failure
+    /// that looked exactly like a catastrophic kernel bug.
+    ///
+    /// Note that the two tests above cannot catch this: both are
+    /// single-threaded, and the hazard only exists under concurrency.
+    #[test]
+    fn concurrent_callers_never_see_each_others_dump_dir() {
+        const ENV: &str = "LARQL_TEST_RESID_DUMP_DIR_CONCURRENT";
+        const THREADS: usize = 8;
+
+        let mismatches = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        std::thread::scope(|scope| {
+            for _ in 0..THREADS {
+                let mismatches = std::sync::Arc::clone(&mismatches);
+                scope.spawn(move || {
+                    let dir = run_with_dump_dir(ENV, || {
+                        // Inside `f` the variable must name the directory
+                        // this call created — the window the dump hooks
+                        // actually read it in.
+                        let seen = std::env::var(ENV).unwrap_or_default();
+                        // Re-read after a yield so a racing setter has a
+                        // chance to land, the way a long capture would.
+                        std::thread::yield_now();
+                        let seen_again = std::env::var(ENV).unwrap_or_default();
+                        if seen != seen_again {
+                            mismatches.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        std::fs::write(std::path::Path::new(&seen).join("marker"), b"x").ok();
+                    })
+                    .expect("tempdir");
+                    // The marker this call wrote must be in its own dir.
+                    if !dir.path().join("marker").exists() {
+                        mismatches.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                });
+            }
+        });
+
+        assert_eq!(
+            mismatches.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "a concurrent caller observed another's dump directory"
+        );
+        std::env::remove_var(ENV);
     }
 
     #[test]

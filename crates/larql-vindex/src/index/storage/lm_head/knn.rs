@@ -29,6 +29,64 @@ fn lm_head_stride32_mode() -> Stride32Mode {
     }
 }
 
+/// The query as the Q4_K matvec must receive it: borrowed when the stored
+/// row width equals `hidden`, zero-padded when the store is wider.
+enum PaddedQuery {
+    Borrowed,
+    Padded(Vec<f32>),
+}
+
+impl PaddedQuery {
+    fn as_query<'a>(&'a self, x: &'a [f32]) -> &'a [f32] {
+        match self {
+            Self::Borrowed => x,
+            Self::Padded(v) => v,
+        }
+    }
+}
+
+/// Resolve the Q4_K lm_head store's OWN row width and shape the query to it.
+///
+/// The writer pads every row to a Q4_K super-block boundary
+/// (`pad_rows_to_block`) — GPT-OSS's hidden 2880 stores as 3072 columns —
+/// and the manifest records the padded shape. Running the matvec at
+/// `hidden_size` instead reads every row after the first at a skewed byte
+/// offset: finite, plausible, garbage logits (the "multilingual gibberish"
+/// symptom this file's history already documents for a *format* mismatch;
+/// this is the same failure through a *width* mismatch). The store's width
+/// is derived from its own byte length, so a synthesized unpadded buffer
+/// (`hidden` already a block multiple) passes through untouched.
+///
+/// Returns `None` when the bytes do not divide into whole per-row
+/// super-blocks covering at least `hidden` — a store this function cannot
+/// explain must fall through to the next lm_head source, not be read at a
+/// guessed stride.
+fn q4k_row_query(
+    q4_data: &[u8],
+    x: &[f32],
+    vocab: usize,
+    hidden: usize,
+) -> Option<(usize, PaddedQuery)> {
+    use larql_models::quant::ggml::{Q4_K_BLOCK_BYTES, Q4_K_BLOCK_ELEMS};
+    if vocab == 0 || !q4_data.len().is_multiple_of(vocab) {
+        return None;
+    }
+    let row_bytes = q4_data.len() / vocab;
+    if !row_bytes.is_multiple_of(Q4_K_BLOCK_BYTES) {
+        return None;
+    }
+    let cols = row_bytes / Q4_K_BLOCK_BYTES * Q4_K_BLOCK_ELEMS;
+    if cols < hidden || x.len() != hidden {
+        return None;
+    }
+    if cols == hidden {
+        return Some((cols, PaddedQuery::Borrowed));
+    }
+    let mut padded = vec![0.0f32; cols];
+    padded[..hidden].copy_from_slice(x);
+    Some((cols, PaddedQuery::Padded(padded)))
+}
+
 impl VectorIndex {
     /// KNN against lm_head via a ComputeBackend. Tries paths in order:
     ///   1. Q4 matvec on `lm_head_q4.bin` (when present and backend has q4).
@@ -64,8 +122,12 @@ impl VectorIndex {
                 let hidden = self.hidden_size;
                 if vocab > 0 {
                     if let Some(x) = query.as_slice() {
-                        if let Some(scores_vec) = backend.q4k_matvec(q4_data, x, vocab, hidden) {
-                            return Self::top_k_sorted(scores_vec, top_k);
+                        if let Some((cols, xp)) = q4k_row_query(q4_data, x, vocab, hidden) {
+                            if let Some(scores_vec) =
+                                backend.q4k_matvec(q4_data, xp.as_query(x), vocab, cols)
+                            {
+                                return Self::top_k_sorted(scores_vec, top_k);
+                            }
                         }
                     }
                 }
@@ -191,8 +253,9 @@ impl VectorIndex {
             return None;
         }
         let x = query.as_slice()?;
+        let (cols, xp) = q4k_row_query(q4_data, x, vocab, hidden)?;
         backend
-            .q4k_matvec_stride32(q4_data, x, vocab, hidden)
+            .q4k_matvec_stride32(q4_data, xp.as_query(x), vocab, cols)
             .map(|scores_vec| Self::top_k_sorted(scores_vec, top_k))
     }
 

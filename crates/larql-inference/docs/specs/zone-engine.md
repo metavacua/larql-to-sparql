@@ -14,7 +14,7 @@ empirical zone-to-zone result fits; LayerEngine is what runs *inside*
 a WALK zone.
 
 **Companion specs:**
-- [`state-policy.md`](./state-policy.md) — engine identity taxonomy.
+- [`state-policy.md`](../../../larql-kv/docs/state-policy.md) — engine identity taxonomy.
   ZoneEngine has its own State Policy triple computed from
   constituents.
 - [`engine-state-vs-execution.md`](./engine-state-vs-execution.md) —
@@ -540,7 +540,7 @@ Three levels, mirroring State Policy §6 and LayerEngine §8:
 
 ## 12. Cross-references
 
-- [`state-policy.md`](./state-policy.md) — engine identity taxonomy.
+- [`state-policy.md`](../../../larql-kv/docs/state-policy.md) — engine identity taxonomy.
 - [`engine-state-vs-execution.md`](./engine-state-vs-execution.md) —
   the orthogonal cut; §3.4's refusal contract is the template for
   §4.5's Standard+PREDICT refusal.

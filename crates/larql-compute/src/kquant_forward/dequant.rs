@@ -1,18 +1,20 @@
-//! Dequantise a row-major Q4_K or Q6_K matrix into a dense f32 `Array2`.
+//! Dequantise a row-major k-quant matrix into a dense f32 `Array2`.
 //!
 //! Drops the `larql_vindex::quant::registry` indirection (Step 3c
 //! moved kquant_forward to compute and compute can't depend on
-//! larql-vindex). Inlined to a Q4_K/Q6_K match — the only two formats
-//! the kquant_forward path actually feeds in.
+//! larql-vindex). Per-format dequant selection goes through
+//! [`crate::quant_route::FormatRoute`] — one registry, no local
+//! format match.
 
-use larql_models::quant::ggml::{q4_k, q6_k, K_QUANT_BLOCK_ELEMS};
+use larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
 use ndarray::Array2;
 
-/// Dequantise a row-major Q4_K or Q6_K matrix into a dense f32 `Array2`.
+/// Dequantise a row-major k-quant matrix into a dense f32 `Array2`.
 ///
 /// The on-disk layout (`rows x cols` elements) must be stored
 /// contiguously row-major and padded to a multiple of 256 elements per
-/// the k-quant super-block size. Unknown formats panic; callers have
+/// the k-quant super-block size. A format with no dequant route panics
+/// loudly (unknown-format contract in `quant_route`); callers have
 /// already dispatched on format via the `attn_kquant_layer_data` /
 /// `interleaved_kquant_layer_data` tag.
 pub(crate) fn dequantize_matrix(
@@ -23,12 +25,10 @@ pub(crate) fn dequantize_matrix(
 ) -> Array2<f32> {
     let n = rows * cols;
     let padded = n.div_ceil(K_QUANT_BLOCK_ELEMS) * K_QUANT_BLOCK_ELEMS;
-    let floats = match format {
-        "Q4_K" => q4_k::dequantize_q4_k(bytes, padded),
-        "Q6_K" => q6_k::dequantize_q6_k(bytes, padded),
-        other => panic!("unsupported quant format in vindex: {other}"),
-    }
-    .unwrap_or_else(|e| panic!("{format} dequant failed: {e}"));
+    let dequant = crate::QuantFormat::from_registry_tag(format)
+        .and_then(|f| f.route().dequant_padded)
+        .unwrap_or_else(|| panic!("unsupported quant format in vindex: {format}"));
+    let floats = dequant(bytes, padded).unwrap_or_else(|e| panic!("{format} dequant failed: {e}"));
     let truncated = if floats.len() > n {
         floats[..n].to_vec()
     } else {

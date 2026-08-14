@@ -101,8 +101,8 @@ fn main() {
         let _ = weight_ffn.forward(0, &x);
     });
 
-    bench("FFN forward + activation (seq=6)", 100, || {
-        let _ = weight_ffn.forward_with_activation(0, &x);
+    bench("FFN forward + observed activation (seq=6)", 100, || {
+        let _ = weight_ffn.forward_observed(0, &x);
     });
 
     // ── Full forward pass benchmarks ──

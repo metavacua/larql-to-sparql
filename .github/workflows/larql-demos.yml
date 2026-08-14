@@ -1,0 +1,109 @@
+# larql-demos cross-platform CI
+#
+# The crate holds no logic — every target is an `examples/*.rs` binary —
+# so there is nothing to unit-test or measure coverage on. What CI must
+# guarantee is that the demos still compile against the crates they
+# demonstrate, and that the weight-free ones still run.
+#
+# Demos needing model weights are compiled here but not executed; they
+# are exercised by hand against a real vindex.
+
+name: larql-demos
+
+# Least-privilege token: this workflow only needs to read the repo.
+permissions:
+  contents: read
+
+# One live run per workflow per ref; superseded pull_request runs are
+# cancelled (pushes to main / tags / manual dispatches never are).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-demos/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-demos.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-demos/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-demos.yml'
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }}
+    # Selective disable. A job-level `if:` cannot shell out to git, so
+    # unlike the strategy matrix's gate these read the PR TITLE only.
+    # The title is empty on push events, where contains() is false and
+    # the job runs exactly as before.
+    #
+    # This is the control that actually works on a long-lived PR: a
+    # `paths` filter on pull_request is evaluated against the WHOLE PR
+    # diff, not the incremental push, so once a PR has touched a crate
+    # every later push re-triggers it however unrelated the change.
+    if: >-
+      !contains(github.event.pull_request.title, '[skip crates]') &&
+      !contains(github.event.pull_request.title, '[skip larql-demos]')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # protoc on PATH satisfies the `cfg(windows)` no-op in
+      # `larql-router-protocol`'s build.rs. `larql-demos` depends on
+      # `larql-router-protocol` directly for the server demos.
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-demos-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-demos-
+
+      - name: Format check
+        run: cargo fmt -p larql-demos -- --check
+
+      - name: Check (all targets)
+        run: cargo check -p larql-demos --all-targets
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy -p larql-demos --all-targets --no-deps -- -D warnings
+
+      # The weight-free demos, i.e. exactly the set larql-core and
+      # larql-boundary used to run before these moved here.
+      - name: Run the weight-free demos
+        run: |
+          cargo run -p larql-demos --example edge_demo
+          cargo run -p larql-demos --example graph_demo
+          cargo run -p larql-demos --example algorithm_demo
+          cargo run -p larql-demos --example filter_demo
+          cargo run -p larql-demos --example serialization_demo
+          cargo run -p larql-demos --example encode_decode
+          cargo run -p larql-demos --example gate_decision

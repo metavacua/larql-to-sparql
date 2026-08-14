@@ -250,7 +250,8 @@ cargo run -p larql-models --example demo_tensor_keys
 
 | Doc | Content |
 |-----|---------|
-| [ROADMAP.md](ROADMAP.md) | Planned architectures, trait extensions, loading improvements |
+| [ROADMAP.md](ROADMAP.md) | Current state, planned architectures, trait extensions, loading improvements |
+| [CHANGELOG.md](CHANGELOG.md) | Dated history: multi-modal phases, config-loading correctness pass, milestone table |
 | [docs/adr/](docs/adr/) | 8 architectural decision records (trait design, component names, config parsing, prefix stripping, Gemma 4 layers, norm offsets, config validation, future weight storage APIs) |
 | [docs/architecture-trait.md](docs/architecture-trait.md) | ModelArchitecture trait design and extension guide |
 | [docs/weight-loading.md](docs/weight-loading.md) | Loading pipeline: formats, dtype conversion, prefix stripping |

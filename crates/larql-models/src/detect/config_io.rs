@@ -17,6 +17,10 @@ pub(super) const CONFIG_FILE_NAME: &str = "config.json";
 /// Nested-config wrapper used by multimodal models (Gemma 3 IT, Gemma 4).
 pub(super) const CONFIG_KEY_TEXT_CONFIG: &str = "text_config";
 
+/// Nested-config wrapper used by speech models whose backbone is a text
+/// LM nested under `language_config` (MOSS-TTS-Realtime).
+pub(super) const CONFIG_KEY_LANGUAGE_CONFIG: &str = "language_config";
+
 // JSON keys for required topology fields. These have no defensible
 // architecture-class default — silently substituting a guess masks real
 // "wrong directory" / "incomplete download" failure modes and surfaces
@@ -81,15 +85,18 @@ pub(super) fn read_config_json(config_path: &Path) -> Result<serde_json::Value, 
 }
 
 /// Fail loudly when a parsed config is missing any field whose silent
-/// default would diverge from a real model's topology. Both top-level and
-/// nested `text_config` (multimodal) layouts are accepted; a field counts
-/// as present when *any* of its aliases (e.g. `hidden_size` or `n_embd`)
-/// resolves under either layout.
+/// default would diverge from a real model's topology. Top-level, nested
+/// `text_config` (multimodal) and nested `language_config` (speech)
+/// layouts are all accepted; a field counts as present when *any* of its
+/// aliases (e.g. `hidden_size` or `n_embd`) resolves under any layout.
 pub(super) fn require_config_fields(
     config: &serde_json::Value,
     config_path: &Path,
 ) -> Result<(), ModelError> {
-    let text_config = config.get(CONFIG_KEY_TEXT_CONFIG).unwrap_or(config);
+    let text_config = config
+        .get(CONFIG_KEY_TEXT_CONFIG)
+        .or_else(|| config.get(CONFIG_KEY_LANGUAGE_CONFIG))
+        .unwrap_or(config);
     let model_type = text_config
         .get("model_type")
         .or_else(|| config.get("model_type"))

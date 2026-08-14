@@ -7,6 +7,16 @@
 
 name: larql-compute-metal
 
+# Least-privilege token: this workflow only needs to read the repo.
+permissions:
+  contents: read
+
+# One live run per workflow per ref; superseded pull_request runs are
+# cancelled (pushes to main / tags / manual dispatches never are).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
@@ -33,11 +43,23 @@ on:
 jobs:
   test:
     name: test · macos-14
+    # Selective disable. A job-level `if:` cannot shell out to git, so
+    # unlike the strategy matrix's gate these read the PR TITLE only.
+    # The title is empty on push events, where contains() is false and
+    # the job runs exactly as before.
+    #
+    # This is the control that actually works on a long-lived PR: a
+    # `paths` filter on pull_request is evaluated against the WHOLE PR
+    # diff, not the incremental push, so once a PR has touched a crate
+    # every later push re-triggers it however unrelated the change.
+    if: >-
+      !contains(github.event.pull_request.title, '[skip crates]') &&
+      !contains(github.event.pull_request.title, '[skip larql-compute-metal]')
     runs-on: macos-14
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,7 +67,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -83,3 +105,17 @@ jobs:
         run: |
           cargo install --locked cargo-llvm-cov
           make larql-compute-metal-coverage-summary
+
+      # Line-level detail for diagnosing a failed gate without a local
+      # Metal device: re-emit the run's profdata as lcov and attach it.
+      - name: Emit line-level lcov
+        if: always()
+        run: cargo llvm-cov report --package larql-compute-metal --lcov --output-path metal-coverage.lcov || true
+
+      - name: Upload lcov artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metal-coverage-lcov
+          path: metal-coverage.lcov
+          if-no-files-found: ignore

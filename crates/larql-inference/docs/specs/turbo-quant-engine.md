@@ -4,11 +4,14 @@
 2026-05-17. Decode 19.6 → 33.0 tok/s on Metal post-W1-GPU.
 Append-only codec path across all decode paths (dispatch + CPU +
 legacy) 2026-05-21; 85.0 tok/s on Gemma 3 4B Q4K, 50-token decode.
+Executor-routed decode path made append-only + unit-sigma
+codebooks (per-block-dim scaling) 2026-07-30.
 **Audience:** LARQL contributors.
 
 > **State Policy slot**: `(canonical = quantised K/V (in-place,
-> destructive codec), derivative = ∅, contract = bounded_KL —
-> codec round-trip ≥ cos 0.991)`. K/V is **canonical** here, not
+> destructive codec), derivative = ∅, contract =
+> codec_bounded_state — codec round-trip ≥ cos 0.995 at 4-bit;
+> output KL observed, not bounded)`. K/V is **canonical** here, not
 > derivative — the codec is destructive, so the engine can't drop
 > the K/V shadow under W10. Result: 85.0 tok/s vs `standard`'s
 > 97.6 (-12.9%). This is the empirical evidence that
@@ -33,7 +36,9 @@ stored as a WHT (Walsh-Hadamard Transform) rotation + Lloyd-Max
 scalar quantisation at 3 or 4 bits per coordinate, plus a stored
 scalar norm. The codec is stateless (deterministic transform of
 each vector) and gives ~3.9× compression at 4 bits vs raw f32 K/V
-with cosine similarity ≈ 0.991 on real K/V distributions.
+with per-row round-trip cosine ≈ 0.9954 at 4 bits (Gaussian
+simulation with the unit-sigma codebooks, 2026-07-30; the
+mis-scaled pre-2026-07-30 codebooks measured ≈ 0.991).
 
 Use case: long-context decode on memory-constrained machines where
 the K/V cache is the binding constraint. `TurboQuantEngine`'s hot
@@ -47,20 +52,27 @@ to `StandardEngine` is required. See §2.1 for the actual contract.
 
 ## 2. Contract
 
-### 2.1 Accuracy contract
+### 2.1 Accuracy contract — `codec_bounded_state`
 
 > For any K/V row `(k, v)`, the codec round-trip
-> `decode(encode(k))` satisfies `cosine(k, decoded_k) ≥ 0.88` at
-> 4 bits on unit-norm vectors with random direction; `≥ 0.85` at
-> 3 bits. Real K/V vectors (post-QK-norm) hit cosine ≈ 0.991 at
-> 4 bits and ≈ 0.985 at 3 bits because they're not maximally
-> adversarial.
+> `decode(encode(k))` satisfies `cosine(k, decoded_k) ≥ 0.995` at
+> 4 bits on unit-norm vectors with random direction and block dim
+> ≥ 64; `≥ 0.982` at 3 bits. (Per-vector variance at block dim 32
+> lowers the pinned single-vector floor there to 0.975.) Mean
+> round-trip cosine measured 2026-07-30 with the unit-sigma
+> codebooks: 0.9954 at 4 bits, 0.9830 at 3 bits, stable across
+> block dims 32–256.
 
-This is a **per-row cosine** bound, not a hidden-state cosine bound.
-End-to-end accuracy (KL on the output distribution, hidden-state
-cosine to `StandardEngine`) is observed but not bounded by spec —
-the engine's identity is "WHT + Lloyd-Max with these bit-widths,"
-not "any encoding satisfying KL ≤ X."
+This is the `codec_bounded_state` contract kind
+([state-policy.md §2.3](../../../larql-kv/docs/state-policy.md)):
+a **per-row state-distortion** bound, not a hidden-state or output
+bound. End-to-end accuracy (KL on the output distribution,
+hidden-state cosine to `StandardEngine`) is observed but not
+bounded by spec — the engine's identity is "WHT + Lloyd-Max with
+these bit-widths," not "any encoding satisfying KL ≤ X." That is
+why the slot is not `bounded_KL`: `bounded_KL` requires an
+output-side ε calibrated on a corpus (as `markov-rs-codec` does),
+which this engine has never earned.
 
 ### 2.2 Memory contract
 
@@ -73,19 +85,24 @@ Measured on the 10-token bench (Gemma 3 4B, window=512, bits=4):
 than `markov_residual`'s 10.8 MB. Compression ratio vs raw f32 K/V
 is ~3.9× at 4 bits / ~5.0× at 3 bits.
 
-### 2.3 Per-layer compression cycle
+### 2.3 Per-layer codec cycle (append-only)
 
 Every decode step, for every layer:
 
 1. **Decompress** the layer's stored `CompressedLayer` →
-   `(K_prior, V_prior)` (full prior K/V as f32).
-2. **Append** the new K/V row from the layer's attention block.
-3. **Re-compress** `(K_full, V_full)` → new `CompressedLayer`.
+   `(K_prior, V_prior)` (full prior K/V as f32) for attention.
+2. **Encode only the new K/V row** head-by-head and **append** its
+   packed bytes onto the existing compressed buffers
+   (`CompressedLayer::append_row`).
 
-The decompress + recompress cycle is the inner-loop cost — ~17 ms
-of CPU codec work on Gemma 3 4B per token (Metal kernel +
-per-layer commits add ~12 ms on top, giving 30 ms/token measured =
-33 tok/s).
+Old rows' bytes are never re-encoded. This is a correctness
+invariant, not just a perf one: `encode` stores its input's norm,
+and reconstruction of a unit vector comes back slightly short of
+unit norm, so a decompress → re-encode cycle multiplies every
+stored norm by that ratio and compounds it across steps (the
+executor-routed decode path violated this until 2026-07-30 —
+pinned by `executor_decode_is_append_only_first_row_stable`).
+The per-step decompress is the remaining inner-loop codec cost.
 
 ---
 
@@ -99,7 +116,7 @@ error.
 | Operation | Implementation |
 |---|---|
 | WHT | `crates/larql-kv/src/engines/turbo_quant/rotation.rs` — in-place butterfly, O(d log d) |
-| Codebook | `engines/turbo_quant/codebooks.rs` — pre-computed Lloyd-Max centroids per (dim, bits) |
+| Codebook | `engines/turbo_quant/codebooks.rs` — one unit-sigma (N(0,1)) Lloyd-Max table per bit-width, scaled by 1/√d per block dim at encode/decode (2026-07-30; replaces the per-(dim, bits) tables, whose sigma was √2 too small and which silently fell back to the D256 table for d ∉ {128, 256}) |
 | Bit packing | `engines/turbo_quant/packing.rs` — 3-bit and 4-bit variants |
 
 The codec is **scalar f32** today; SIMD vectorisation (NEON/AVX2)
@@ -136,9 +153,9 @@ work in the inner loop that markov_residual doesn't pay.
 
 ## 6. P1 follow-ups (from ROADMAP)
 
-- **Incremental encode of the new K/V row only** (W3): today the
-  full layer K/V is re-encoded on every step. Only the new row
-  changes — encoding just that row drops ~30× work at long context.
+- ~~**Incremental encode of the new K/V row only** (W3)~~: shipped —
+  every decode path is append-only (§2.3); the executor-routed path
+  was the last holdout (2026-07-30).
 - **SIMD WHT + Lloyd-Max** (W4): scalar f32 today. NEON on Apple
   Silicon, AVX2 on x86_64. ~2-4× on the codec step.
 - **Compressed-domain attention** (research): WHT preserves dot

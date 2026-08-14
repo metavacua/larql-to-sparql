@@ -70,41 +70,31 @@ fn main() {
     };
 
     let layer = FullPipelineLayer {
-        wq: QuantWeight {
-            data: &wq_data,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        },
-        wk: QuantWeight {
-            data: &wk_data,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        },
-        wv: QuantWeight {
-            data: &wv_data,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        },
-        wo: QuantWeight {
-            data: &wo_data,
-            scales: None,
-            format: QuantFormat::Q4_K,
-        },
-        gate: QuantWeight {
-            data: &dummy_gate_q4,
-            scales: None,
-            format: QuantFormat::Q4_0,
-        },
-        up: QuantWeight {
-            data: &dummy_up_q4,
-            scales: None,
-            format: QuantFormat::Q4_0,
-        },
-        down: QuantWeight {
-            data: &dummy_down_q4,
-            scales: None,
-            format: QuantFormat::Q4_0,
-        },
+        attn_sinks: None,
+        attn_q_bias: None,
+        attn_k_bias: None,
+        attn_v_bias: None,
+        attn_o_bias: None,
+        attn_softcap: 0.0,
+        wq: QuantWeight::new(QuantFormat::Q4_K, &wq_data, larql_compute::QuantAux::None),
+        wk: QuantWeight::new(QuantFormat::Q4_K, &wk_data, larql_compute::QuantAux::None),
+        wv: QuantWeight::new(QuantFormat::Q4_K, &wv_data, larql_compute::QuantAux::None),
+        wo: QuantWeight::new(QuantFormat::Q4_K, &wo_data, larql_compute::QuantAux::None),
+        gate: QuantWeight::new(
+            QuantFormat::Q4_0,
+            &dummy_gate_q4,
+            larql_compute::QuantAux::None,
+        ),
+        up: QuantWeight::new(
+            QuantFormat::Q4_0,
+            &dummy_up_q4,
+            larql_compute::QuantAux::None,
+        ),
+        down: QuantWeight::new(
+            QuantFormat::Q4_0,
+            &dummy_down_q4,
+            larql_compute::QuantAux::None,
+        ),
         input_norm: &dummy_norm,
         post_attn_norm: &dummy_norm,
         pre_ffn_norm: None,
@@ -122,6 +112,11 @@ fn main() {
         num_kv_heads: num_kv,
         rope_base: 10000.0,
         rotary_dim: 0,
+        rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+            head_dim,
+            0_usize,
+            10000.0_f64,
+        ),
         sliding_window: 0,
         has_v_norm: false,
         layer_scalar: 0.0,
@@ -243,41 +238,31 @@ fn main() {
     println!("\n--- Test 4: decode_token with norm_offset=1.0 ---");
     {
         let layer4 = FullPipelineLayer {
-            wq: QuantWeight {
-                data: &wq_data,
-                scales: None,
-                format: QuantFormat::Q4_K,
-            },
-            wk: QuantWeight {
-                data: &wk_data,
-                scales: None,
-                format: QuantFormat::Q4_K,
-            },
-            wv: QuantWeight {
-                data: &wv_data,
-                scales: None,
-                format: QuantFormat::Q4_K,
-            },
-            wo: QuantWeight {
-                data: &wo_data,
-                scales: None,
-                format: QuantFormat::Q4_K,
-            },
-            gate: QuantWeight {
-                data: &dummy_gate_q4,
-                scales: None,
-                format: QuantFormat::Q4_0,
-            },
-            up: QuantWeight {
-                data: &dummy_up_q4,
-                scales: None,
-                format: QuantFormat::Q4_0,
-            },
-            down: QuantWeight {
-                data: &dummy_down_q4,
-                scales: None,
-                format: QuantFormat::Q4_0,
-            },
+            attn_sinks: None,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
+            attn_o_bias: None,
+            attn_softcap: 0.0,
+            wq: QuantWeight::new(QuantFormat::Q4_K, &wq_data, larql_compute::QuantAux::None),
+            wk: QuantWeight::new(QuantFormat::Q4_K, &wk_data, larql_compute::QuantAux::None),
+            wv: QuantWeight::new(QuantFormat::Q4_K, &wv_data, larql_compute::QuantAux::None),
+            wo: QuantWeight::new(QuantFormat::Q4_K, &wo_data, larql_compute::QuantAux::None),
+            gate: QuantWeight::new(
+                QuantFormat::Q4_0,
+                &dummy_gate_q4,
+                larql_compute::QuantAux::None,
+            ),
+            up: QuantWeight::new(
+                QuantFormat::Q4_0,
+                &dummy_up_q4,
+                larql_compute::QuantAux::None,
+            ),
+            down: QuantWeight::new(
+                QuantFormat::Q4_0,
+                &dummy_down_q4,
+                larql_compute::QuantAux::None,
+            ),
             input_norm: &dummy_norm,
             post_attn_norm: &dummy_norm,
             pre_ffn_norm: None,
@@ -295,6 +280,11 @@ fn main() {
             num_kv_heads: num_kv,
             rope_base: 10000.0,
             rotary_dim: 0,
+            rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+                head_dim,
+                0_usize,
+                10000.0_f64,
+            ),
             sliding_window: 0,
             has_v_norm: false,
             layer_scalar: 0.0,
@@ -338,41 +328,31 @@ fn main() {
     println!("\n--- Test 5: decode_token with activation=GeluTanh ---");
     {
         let layer5 = FullPipelineLayer {
-            wq: QuantWeight {
-                data: &wq_data,
-                scales: None,
-                format: QuantFormat::Q4_K,
-            },
-            wk: QuantWeight {
-                data: &wk_data,
-                scales: None,
-                format: QuantFormat::Q4_K,
-            },
-            wv: QuantWeight {
-                data: &wv_data,
-                scales: None,
-                format: QuantFormat::Q4_K,
-            },
-            wo: QuantWeight {
-                data: &wo_data,
-                scales: None,
-                format: QuantFormat::Q4_K,
-            },
-            gate: QuantWeight {
-                data: &dummy_gate_q4,
-                scales: None,
-                format: QuantFormat::Q4_0,
-            },
-            up: QuantWeight {
-                data: &dummy_up_q4,
-                scales: None,
-                format: QuantFormat::Q4_0,
-            },
-            down: QuantWeight {
-                data: &dummy_down_q4,
-                scales: None,
-                format: QuantFormat::Q4_0,
-            },
+            attn_sinks: None,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
+            attn_o_bias: None,
+            attn_softcap: 0.0,
+            wq: QuantWeight::new(QuantFormat::Q4_K, &wq_data, larql_compute::QuantAux::None),
+            wk: QuantWeight::new(QuantFormat::Q4_K, &wk_data, larql_compute::QuantAux::None),
+            wv: QuantWeight::new(QuantFormat::Q4_K, &wv_data, larql_compute::QuantAux::None),
+            wo: QuantWeight::new(QuantFormat::Q4_K, &wo_data, larql_compute::QuantAux::None),
+            gate: QuantWeight::new(
+                QuantFormat::Q4_0,
+                &dummy_gate_q4,
+                larql_compute::QuantAux::None,
+            ),
+            up: QuantWeight::new(
+                QuantFormat::Q4_0,
+                &dummy_up_q4,
+                larql_compute::QuantAux::None,
+            ),
+            down: QuantWeight::new(
+                QuantFormat::Q4_0,
+                &dummy_down_q4,
+                larql_compute::QuantAux::None,
+            ),
             input_norm: &dummy_norm,
             post_attn_norm: &dummy_norm,
             pre_ffn_norm: None,
@@ -390,6 +370,11 @@ fn main() {
             num_kv_heads: num_kv,
             rope_base: 10000.0,
             rotary_dim: 0,
+            rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+                head_dim,
+                0_usize,
+                10000.0_f64,
+            ),
             sliding_window: 0,
             has_v_norm: false,
             layer_scalar: 0.0,

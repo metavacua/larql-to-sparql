@@ -371,7 +371,7 @@ CPU path based on the loaded vindex format.
 
 The server and inference client share a small set of env-var knobs for
 tuning the MoE remote-expert path. Most have data-driven defaults from
-the 2026-05-01 perf session — see `ROADMAP.md` for measurement context.
+the 2026-05-01 perf session — see `CHANGELOG.md` for measurement context.
 
 | Var | Effect | Default |
 |---|---|---|
@@ -515,9 +515,9 @@ Reference numbers on M3 Max (single in-process shard, layer 15, top-K=8;
 | UDS + f16 | 0.71 ms | 21.7 ms |
 
 Full perf snapshot (per-layer breakdown, RSS, vindex load time, etc.)
-is in `ROADMAP.md` → "Live perf snapshot → Remote MoE expert path".
+is in `CHANGELOG.md` → 2026-05-07 "Perf snapshot" → "Remote MoE expert path".
 The numbers above are the 2026-05-01 baseline (re-validated post Q1
-cleanup); the ROADMAP also tracks the historical progression
+cleanup); the CHANGELOG also tracks the historical progression
 (4.86 ms → 1.91 ms → 0.78 ms `forward_moe` warm across the 2026-04-26
 + 2026-05-01 sessions).
 
@@ -1416,6 +1416,7 @@ larql-server/
 ├── Cargo.toml
 ├── README.md
 ├── ROADMAP.md
+├── CHANGELOG.md
 ├── examples/
 │   ├── server_demo.rs          Synthetic vindex API demo (no real model)
 │   ├── embed_demo.rs           Synthetic embed/logits/token demo

@@ -1,0 +1,43 @@
+//! Model architecture trait and shared types.
+//!
+//! Every model architecture implements [`ModelArchitecture`]. That trait
+//! describes *what the model is* — tensor key patterns, norm behaviour,
+//! activation functions, scaling — without any compute dependencies.
+//!
+//! Layout, from data to behaviour:
+//!
+//! | module | holds |
+//! |---|---|
+//! | [`model_config`] | [`ModelConfig`], the parsed `config.json` |
+//! | [`rope_types`] / [`layer_types`] | HF selector strings, declared once |
+//! | [`rope`] | the `rope_scaling` block and its per-family parameter sets |
+//! | [`norm`] / [`activation`] / [`experts`] | the behavioural enums |
+//! | [`architecture`] | the [`ModelArchitecture`] trait itself |
+//!
+//! The split exists so a trait default can read a config fact in one short
+//! body. Where a behaviour is stated in `config.json`, it is resolved here for
+//! every architecture rather than overridden per family — see
+//! [`architecture`]'s header for why that ordering is load-bearing.
+
+pub mod activation;
+pub mod architecture;
+pub mod experts;
+pub mod layer_types;
+pub mod model_config;
+pub mod moe_router;
+pub mod norm;
+pub mod rope;
+pub mod rope_types;
+
+pub use activation::{Activation, FfnType};
+pub use architecture::ModelArchitecture;
+pub use experts::{ExpertFormat, ExpertGatePolicy, ExpertRoutingPolicy};
+pub use layer_types::{LAYER_TYPE_FULL_ATTENTION, LAYER_TYPE_SLIDING_ATTENTION};
+pub use model_config::ModelConfig;
+pub use moe_router::MoeRouterKind;
+pub use norm::{NormType, QkNormScope};
+pub use rope::{Llama3RopeScaling, RopeScaling, YarnRopeScaling};
+pub use rope_types::{ROPE_TYPE_DEFAULT, ROPE_TYPE_LINEAR, ROPE_TYPE_LLAMA3, ROPE_TYPE_YARN};
+
+#[cfg(test)]
+mod tests;

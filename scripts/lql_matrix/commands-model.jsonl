@@ -1,0 +1,2 @@
+{"cat":"lifecycle","id":"use.model","lql":["USE MODEL \"{{MODEL}}\";"]}
+{"cat":"lifecycle","id":"extract.into_inference","lql":["EXTRACT MODEL \"{{MODEL}}\" INTO \"{{TMP}}/extract-lql.vindex\" WITH INFERENCE;"]}

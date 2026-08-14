@@ -1,27 +1,55 @@
 # Roadmap — larql-lql
 
-## Hardening — codebase review 2026-05-28
+For shipped work, see [CHANGELOG.md](CHANGELOG.md).
 
-From the whole-codebase review ([`docs/audits/codebase-review-2026-05-28.md`](../../../docs/audits/codebase-review-2026-05-28.md)):
+## Current state (verified 2026-08-04)
 
-- **P1 — four `embed.row()` sites bypass the crate's own safe helper** (`walk:38`, `explain:31`, `insert/plan:122`, `compact:242`); they skip `average_embed_rows`, so an OOV/unbounded token id panics. Route through `average_embed_rows` / a bounds-checked helper.
+**Grammar.** `ast.rs` declares 24 statement forms, all parsed:
 
-## Current state
+| Group | Statements |
+|---|---|
+| Query | `SELECT`, `DESCRIBE`, `EXPLAIN`, `INFER`, `WALK`, `TRACE` |
+| Mutation | `INSERT`, `DELETE`, `UPDATE`, `MERGE`, `REBALANCE` |
+| Lifecycle | `EXTRACT`, `COMPILE`, `DIFF`, `USE`, `STATS`, `COMPACT MAJOR` |
+| Patch | `BEGIN PATCH`, `APPLY PATCH`, `REMOVE PATCH` |
+| Introspection | `SHOW RELATIONS`, `SHOW LAYERS`, `SHOW FEATURES`, `SHOW ENTITIES` |
+| Composition | `PIPE` |
 
-INSERT/SELECT/USE/COMPILE/TRACE grammar fully parsed. INSERT
-supports `MODE KNN` (residual retrieval override, validated at 25K edges)
-and `MODE COMPOSE` (FFN-overlay, ~5–10 facts/layer). `COMPILE INTO VINDEX`
-bakes compose patches into canonical weight files and persists KNN entries as
-`knn_store.bin`; default KNN inserts are therefore packaged as retrieval
-overlays, not yet materialized into FFN features. `COMPILE INTO MODEL` applies
-MEMIT (opt-in via `LARQL_MEMIT_ENABLE=1`). `ALPHA` and `MODE` clauses are
-accepted on `INSERT`; `ALPHA` only affects `MODE COMPOSE`.
+**INSERT modes.** `MODE KNN` (residual retrieval override, validated at 25K
+edges) and `MODE COMPOSE` (FFN-overlay, ~5–10 facts/layer). `ALPHA` and `MODE`
+clauses are accepted on `INSERT`; `ALPHA` only affects `MODE COMPOSE`.
 
-Test coverage stands at **87.7% lines / 86.5% regions / 80.7% functions**
-(679 lib tests, 2026-05-10 — see [`CHANGELOG.md`](CHANGELOG.md)). Two
-real bugs were fixed during the coverage push: DIFF and MERGE were both
-heap-only on down_meta, so they silently no-op'd against any
-production-loaded mmap-backed vindex.
+**COMPILE targets.** `COMPILE INTO VINDEX` bakes compose patches into canonical
+weight files and persists KNN entries as `knn_store.bin` — so default KNN
+inserts are packaged as retrieval overlays, **not** materialized into FFN
+features. `COMPILE INTO MODEL` applies MEMIT (opt-in via
+`LARQL_MEMIT_ENABLE=1`).
+
+**Routing clause.** `INFER … ROUTE VERIFY [FALLBACK] [TOPK n] [EXIT]` is a
+first-class clause (lexer → ast → parser → executor), landed 2026-06-07 as the
+LQL surface over the FR1/FR2 fleet-routing work. Default is `Legacy`, which is
+byte-identical to the pre-clause path.
+
+**Tests.** 1024 tests, all passing (`cargo test -p larql-lql`).
+
+**Coverage.** Enforced: 90% per file, 93% total. Seven files carry ratcheting
+debt baselines (52–81%) — all of them need either a real HuggingFace model
+directory or an interactive REPL to exercise; see the `policy_note` in
+`coverage-policy.json` for why each is genuinely hard rather than merely
+untested.
+
+---
+
+## Open defects
+
+- **P1 — four `embed.row()` sites bypass the crate's own safe helper.** Raised
+  2026-05-28; **all four confirmed still open 2026-08-04** at
+  `executor/query/walk.rs:38`, `executor/query/explain.rs:31`,
+  `executor/mutation/insert/plan.rs:122`, `executor/compact.rs:242`. They skip
+  `average_embed_rows`, so an OOV or unbounded token id panics instead of being
+  skipped. Route through `average_embed_rows` / a bounds-checked helper.
+  (`relations.rs:309` looks like a fifth site but is already guarded by an
+  explicit `id < embed.shape()[0]` check — it does not need changing.)
 
 ---
 

@@ -14,7 +14,7 @@ Don't update on routine code changes that don't touch dispatch or shaders.
 
 ## Workflow
 
-**1. Save baselines on a cool machine.** Thermal artifacts can fake 1.5-3× regressions ([feedback_thermal_perf_artifacts.md](../../../../README.md) memory entry). Run when load avg is low:
+**1. Save baselines on a cool machine.** Thermal artifacts can fake 1.5-3× regressions ([feedback_thermal_perf_artifacts.md](../../../README.md) memory entry). Run when load avg is low:
 
 ```bash
 # Confirm thermals

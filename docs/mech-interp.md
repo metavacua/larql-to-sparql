@@ -191,7 +191,7 @@ cargo run --release -p larql-inference --example mech_interp_demo
 ```
 
 Walks through all seven primitives on synthetic weights (no vindex
-required). Source: `crates/larql-inference/examples/mech_interp_demo.rs`.
+required). Source: `crates/larql-demos/examples/inference/mech_interp_demo.rs`.
 
 ---
 

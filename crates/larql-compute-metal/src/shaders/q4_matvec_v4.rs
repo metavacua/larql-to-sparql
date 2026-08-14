@@ -61,24 +61,34 @@ kernel void q4_matvec_v4(
         // Extract nibbles and compute dot product using integer arithmetic
         int isum = 0;
 
-        // Process w0: 4 bytes → 8 nibbles → 8 Q4 values
         // Extract nibbles from uint32, subtract 8 for signed range, multiply with Q8.
         // Cast to int BEFORE subtraction to avoid uint underflow.
+        //
+        // **ggml planar Q4_0 nibble layout** (`quantize_row_q4_0_ref`): byte j
+        // packs element j in its LOW nibble and element j+16 in its HIGH
+        // nibble — the two halves of the 32-element block, not an adjacent
+        // pair. So a word covering bytes 4k..4k+3 feeds q8 slots
+        // {4k..4k+3} and {4k+16..4k+19}, interleaved low/high.
+        //
+        // Until 2026-08-07 this decoded a private layout (byte j → elements
+        // 2j, 2j+1), which matched the CPU side only because the CPU shared
+        // that private convention. See `q6k_matvec` for the Q6_K half of the
+        // same defect.
         #define NIBBLE(w, shift) (int((w >> shift) & 0xFu) - 8)
         #define PROCESS_WORD(w, base) \
-            isum += NIBBLE(w,  0) * int(q8[base+0]); \
-            isum += NIBBLE(w,  4) * int(q8[base+1]); \
-            isum += NIBBLE(w,  8) * int(q8[base+2]); \
-            isum += NIBBLE(w, 12) * int(q8[base+3]); \
-            isum += NIBBLE(w, 16) * int(q8[base+4]); \
-            isum += NIBBLE(w, 20) * int(q8[base+5]); \
-            isum += NIBBLE(w, 24) * int(q8[base+6]); \
-            isum += NIBBLE(w, 28) * int(q8[base+7]);
+            isum += NIBBLE(w,  0) * int(q8[base+0]);      \
+            isum += NIBBLE(w,  4) * int(q8[base+0+16]);   \
+            isum += NIBBLE(w,  8) * int(q8[base+1]);      \
+            isum += NIBBLE(w, 12) * int(q8[base+1+16]);   \
+            isum += NIBBLE(w, 16) * int(q8[base+2]);      \
+            isum += NIBBLE(w, 20) * int(q8[base+2+16]);   \
+            isum += NIBBLE(w, 24) * int(q8[base+3]);      \
+            isum += NIBBLE(w, 28) * int(q8[base+3+16]);
 
         PROCESS_WORD(w0, 0);
-        PROCESS_WORD(w1, 8);
-        PROCESS_WORD(w2, 16);
-        PROCESS_WORD(w3, 24);
+        PROCESS_WORD(w1, 4);
+        PROCESS_WORD(w2, 8);
+        PROCESS_WORD(w3, 12);
         #undef PROCESS_WORD
 
         acc += float(isum) * combined_scale;
@@ -88,6 +98,13 @@ kernel void q4_matvec_v4(
     if (lane == 0) out[row_idx] = acc;
 }
 "#;
+
+/// Hard input-length ceiling from the threadgroup staging arrays
+/// (`tg_x8[8192]` int8 + 256 block scales): the staging loops write
+/// past both for larger K — threadgroup-memory corruption, not a
+/// graceful failure. Host dispatch sites assert against this
+/// (capability audit F13).
+pub const MAX_K: usize = 8192;
 
 pub const ROWS_PER_TG: u64 = 8;
 pub const THREADS_PER_TG: u64 = 256;

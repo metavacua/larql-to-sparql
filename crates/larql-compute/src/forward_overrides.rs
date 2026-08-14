@@ -109,6 +109,37 @@ pub fn effective_rope_base_for_layer(
     }
 }
 
+/// Per-layer attention window, honouring the `LARQL_FORCE_GLOBAL_LAYERS`
+/// diagnostic override. `None` = attend the full context.
+///
+/// **Single source of truth.** Both the CPU attention path and the Metal
+/// pipeline spec resolve their window through here, because the two
+/// answering this question independently is exactly how they drift: the
+/// CPU path previously had no notion of a per-layer window at all, so a
+/// Gemma-class model attended full history on layers the architecture
+/// declares sliding while Metal masked them, and "GPU/CPU parity" was
+/// undefined past the window.
+///
+/// An architecture that declares a layer sliding but supplies no window
+/// size is answered `None` — full attention. That combination is
+/// incoherent (there is no window to slide) and the only alternatives
+/// are to invent a size or to mask everything; both are worse than
+/// attending the context we actually have. Some test fixtures are in
+/// exactly this state, which is why it must be a deliberate branch
+/// rather than an `unwrap_or(0)` that silently means "no window" in one
+/// place and "empty window" in another.
+pub fn effective_attention_window_for_layer(
+    arch: &dyn larql_models::ModelArchitecture,
+    layer: usize,
+) -> Option<usize> {
+    if layer_forced_global(layer) || !arch.is_sliding_window_layer(layer) {
+        return None;
+    }
+    // A zero-width declared window means the same thing as no window;
+    // normalise it here so callers never see `Some(0)`.
+    arch.sliding_window_size().filter(|&w| w > 0)
+}
+
 /// Diagnostic position scale read from `LARQL_ROPE_POS_DIVISOR=<f64>`. Matches
 /// HF `rope_scaling = {rope_type: linear, factor: <v>}`. Returns `1.0` when
 /// the env var is unset. Applied uniformly to every layer.
@@ -194,6 +225,31 @@ pub fn effective_llama3_rope_scaling(
     arch: &dyn larql_models::ModelArchitecture,
 ) -> Option<larql_models::Llama3RopeScaling> {
     llama3_rope_scaling_override().or_else(|| arch.llama3_rope_scaling())
+}
+
+/// The RoPE frequency family this architecture is served under.
+///
+/// **One resolver, called by every attention path.** The four call sites that
+/// rope Q/K (dense prefill, GPU prefill, Q4K-direct decode, cached kquant
+/// decode) previously each reached for `effective_llama3_rope_scaling`
+/// independently, so a family none of them knew about was ignored four times
+/// over. Resolving the whole decision once is the same shape as the shared
+/// `softmax_in_place` that replaced four byte-identical attention-sink copies
+/// (`docs/k3-funnel.md` §4.6).
+///
+/// Llama-3 wins a tie because its env-var override exists for diagnostics and
+/// must stay able to force a family; no checkpoint declares both.
+pub fn effective_rope_freq_scaling(
+    arch: &dyn larql_models::ModelArchitecture,
+) -> crate::attention::rope::RopeFreqScaling {
+    use crate::attention::rope::RopeFreqScaling;
+    if let Some(s) = effective_llama3_rope_scaling(arch) {
+        return RopeFreqScaling::Llama3(s);
+    }
+    if let Some(s) = arch.yarn_rope_scaling() {
+        return RopeFreqScaling::Yarn(s);
+    }
+    RopeFreqScaling::None
 }
 
 /// Diagnostic norm-epsilon override read from `LARQL_NORM_EPS_OVERRIDE=<f64>`.

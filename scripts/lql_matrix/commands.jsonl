@@ -1,0 +1,64 @@
+{"cat":"lifecycle","id":"use.basic","lql":["USE \"{{VINDEX}}\";"]}
+{"cat":"browse","id":"describe.basic","lql":["USE \"{{VINDEX}}\";","DESCRIBE \"France\";"]}
+{"cat":"browse","id":"describe.all_layers","lql":["USE \"{{VINDEX}}\";","DESCRIBE \"France\" ALL LAYERS;"]}
+{"cat":"browse","id":"describe.brief","lql":["USE \"{{VINDEX}}\";","DESCRIBE \"France\" BRIEF;"]}
+{"cat":"browse","id":"describe.raw","lql":["USE \"{{VINDEX}}\";","DESCRIBE \"France\" RAW;"]}
+{"cat":"browse","id":"describe.syntax","lql":["USE \"{{VINDEX}}\";","DESCRIBE \"France\" SYNTAX;"]}
+{"cat":"browse","id":"describe.output","lql":["USE \"{{VINDEX}}\";","DESCRIBE \"France\" OUTPUT;"]}
+{"cat":"browse","id":"describe.at_layer","lql":["USE \"{{VINDEX}}\";","DESCRIBE \"France\" AT LAYER 12;"]}
+{"cat":"browse","id":"describe.missing_entity","lql":["USE \"{{VINDEX}}\";","DESCRIBE \"Zzzznotanentity\";"]}
+{"cat":"browse","id":"walk.top10","lql":["USE \"{{VINDEX}}\";","WALK \"The capital of France is\" TOP 10;"]}
+{"cat":"browse","id":"walk.notop","lql":["USE \"{{VINDEX}}\";","WALK \"The capital of France is\";"]}
+{"cat":"browse","id":"walk.layers","lql":["USE \"{{VINDEX}}\";","WALK \"The capital of France is\" LAYERS 5-15;"]}
+{"cat":"inference","id":"infer.top5","lql":["USE \"{{VINDEX}}\";","INFER \"The capital of France is\" TOP 5;"]}
+{"cat":"inference","id":"infer.compare","lql":["USE \"{{VINDEX}}\";","INFER \"The capital of France is\" TOP 5 COMPARE;"]}
+{"cat":"inference","id":"infer.route_verify","lql":["USE \"{{VINDEX}}\";","INFER \"The capital of Atlantis is\" ROUTE VERIFY TOP 3;"]}
+{"cat":"inference","id":"infer.route_verify_exit","lql":["USE \"{{VINDEX}}\";","INFER \"The capital of Atlantis is\" ROUTE VERIFY EXIT TOP 3;"]}
+{"cat":"inference","id":"infer.route_fallback","lql":["USE \"{{VINDEX}}\";","INFER \"The capital of Persia is\" ROUTE VERIFY FALLBACK TOPK 8 TOP 3;"]}
+{"cat":"browse","id":"select.all","lql":["USE \"{{VINDEX}}\";","SELECT * FROM EDGES;"]}
+{"cat":"browse","id":"select.limit","lql":["USE \"{{VINDEX}}\";","SELECT * FROM EDGES LIMIT 5;"]}
+{"cat":"browse","id":"select.where_score","lql":["USE \"{{VINDEX}}\";","SELECT * FROM EDGES WHERE score > 0.85;"]}
+{"cat":"browse","id":"select.where_layer_range","lql":["USE \"{{VINDEX}}\";","SELECT * FROM EDGES WHERE layer >= 20 AND layer <= 30;"]}
+{"cat":"browse","id":"select.order_by","lql":["USE \"{{VINDEX}}\";","SELECT * FROM EDGES ORDER BY confidence;"]}
+{"cat":"browse","id":"select.projection","lql":["USE \"{{VINDEX}}\";","SELECT entity, target FROM EDGES WHERE relation = \"capital\" LIMIT 10;"]}
+{"cat":"browse","id":"select.entities","lql":["USE \"{{VINDEX}}\";","SELECT * FROM ENTITIES LIMIT 20;"]}
+{"cat":"browse","id":"select.features","lql":["USE \"{{VINDEX}}\";","SELECT * FROM FEATURES LIMIT 20;"]}
+{"cat":"inference","id":"explain.infer","lql":["USE \"{{VINDEX}}\";","EXPLAIN INFER \"The capital of France is\" TOP 5;"]}
+{"cat":"browse","id":"explain.walk","lql":["USE \"{{VINDEX}}\";","EXPLAIN WALK \"The capital of France is\" LAYERS 5-15;"]}
+{"cat":"browse","id":"stats","lql":["USE \"{{VINDEX}}\";","STATS;"]}
+{"cat":"browse","id":"show.relations","lql":["USE \"{{VINDEX}}\";","SHOW RELATIONS;"]}
+{"cat":"browse","id":"show.relations_examples","lql":["USE \"{{VINDEX}}\";","SHOW RELATIONS WITH EXAMPLES;"]}
+{"cat":"browse","id":"show.layers","lql":["USE \"{{VINDEX}}\";","SHOW LAYERS;"]}
+{"cat":"browse","id":"show.layers_range","lql":["USE \"{{VINDEX}}\";","SHOW LAYERS RANGE 5-15;"]}
+{"cat":"browse","id":"show.features","lql":["USE \"{{VINDEX}}\";","SHOW FEATURES 12 LIMIT 20;"]}
+{"cat":"browse","id":"show.entities","lql":["USE \"{{VINDEX}}\";","SHOW ENTITIES LIMIT 20;"]}
+{"cat":"browse","id":"show.entities_at_layer","lql":["USE \"{{VINDEX}}\";","SHOW ENTITIES AT LAYER 12 LIMIT 50;"]}
+{"cat":"browse","id":"show.models","lql":["USE \"{{VINDEX}}\";","SHOW MODELS;"]}
+{"cat":"patch","id":"show.patches","lql":["USE \"{{VINDEX}}\";","SHOW PATCHES;"]}
+{"cat":"compact","id":"show.compact_status","lql":["USE \"{{VINDEX}}\";","SHOW COMPACT STATUS;"]}
+{"cat":"inference","id":"trace.basic","lql":["USE \"{{VINDEX}}\";","TRACE \"The capital of France is\";"]}
+{"cat":"inference","id":"trace.for","lql":["USE \"{{VINDEX}}\";","TRACE \"The capital of France is\" FOR \"Paris\";"]}
+{"cat":"inference","id":"trace.decompose","lql":["USE \"{{VINDEX}}\";","TRACE \"The capital of France is\" DECOMPOSE LAYERS 5-15;"]}
+{"cat":"lifecycle","id":"diff.current","lql":["USE \"{{VINDEX}}\";","DIFF \"{{VINDEX}}\" CURRENT;"]}
+{"cat":"mutation","id":"insert.auto","lql":["USE \"{{VINDEX}}\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"John Coyle\", \"lives-in\", \"Colchester\");"]}
+{"cat":"mutation","id":"insert.in_patch","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/insert.in_patch.vlp\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"John Coyle\", \"lives-in\", \"Colchester\");","SAVE PATCH;"]}
+{"cat":"mutation","id":"delete.where","lql":["USE \"{{VINDEX}}\";","DELETE FROM EDGES WHERE entity = \"John Coyle\" AND relation = \"lives-in\";"]}
+{"cat":"mutation","id":"update.set","lql":["USE \"{{VINDEX}}\";","UPDATE EDGES SET target = \"London\" WHERE entity = \"John Coyle\" AND relation = \"lives-in\";"]}
+{"cat":"mutation","id":"merge","lql":["USE \"{{VINDEX}}\";","MERGE \"{{VINDEX}}\";"]}
+{"cat":"mutation","id":"rebalance.basic","lql":["USE \"{{VINDEX}}\";","REBALANCE;"]}
+{"cat":"mutation","id":"rebalance.floor_ceiling","lql":["USE \"{{VINDEX}}\";","REBALANCE FLOOR 0.20 CEILING 0.95 MAX 8;"]}
+{"cat":"mutation","id":"rebalance.until_converged","lql":["USE \"{{VINDEX}}\";","REBALANCE UNTIL CONVERGED MAX 16;"]}
+{"cat":"patch","id":"patch.begin","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/patch.begin.vlp\";"]}
+{"cat":"patch","id":"patch.begin_named","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/matrix-test.vlp\";"]}
+{"cat":"patch","id":"patch.begin_insert_save","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/patch.begin_insert_save.vlp\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\");","SAVE PATCH;"]}
+{"cat":"patch","id":"patch.full_lifecycle","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"mlc.vlp\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"MatrixEntity\", \"is-a\", \"Test\");","SAVE PATCH;","SHOW PATCHES;","APPLY PATCH \"mlc.vlp\";","REMOVE PATCH \"mlc.vlp\";"]}
+{"cat":"compact","id":"compact.minor","lql":["USE \"{{VINDEX}}\";","COMPACT MINOR;"]}
+{"cat":"compact","id":"compact.major","lql":["USE \"{{VINDEX}}\";","COMPACT MAJOR;"]}
+{"cat":"compact","id":"compact.major_full","lql":["USE \"{{VINDEX}}\";","COMPACT MAJOR FULL;"]}
+{"cat":"compact","id":"compact.major_lambda","lql":["USE \"{{VINDEX}}\";","COMPACT MAJOR WITH LAMBDA = 0.01;"]}
+{"cat":"compile","id":"compile.into_vindex","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/compile.into_vindex.vlp\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"CompileTest\", \"maps-to\", \"Value\");","SAVE PATCH;","COMPILE CURRENT INTO VINDEX \"{{TMP}}/compiled.vindex\";"]}
+{"cat":"compile","id":"compile.into_model","lql":["USE \"{{VINDEX}}\";","BEGIN PATCH \"{{TMP}}/compile.into_model.vlp\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"CompileTest\", \"maps-to\", \"Value\");","SAVE PATCH;","COMPILE CURRENT INTO MODEL \"{{TMP}}/compiled-model/\" FORMAT safetensors;"]}
+{"cat":"roundtrip","id":"roundtrip.insert_compile_infer","lql":["USE \"{{VINDEX}}\";","INFER \"Glarf is a\" TOP 3;","BEGIN PATCH \"{{TMP}}/roundtrip.insert_compile_infer.vlp\";","INSERT INTO EDGES (entity, relation, target) VALUES (\"Glarf\", \"is-a\", \"Wobble\");","SAVE PATCH;","DESCRIBE \"Glarf\";","COMPILE CURRENT INTO VINDEX \"{{TMP}}/rt.vindex\";","USE \"{{TMP}}/rt.vindex\";","INFER \"Glarf is a\" TOP 3;"]}
+{"cat":"negative","id":"neg.parse_error","lql":["USE \"{{VINDEX}}\";","NOT A VALID STATEMENT;"]}
+{"cat":"negative","id":"neg.unknown_verb","lql":["USE \"{{VINDEX}}\";","FOOBAR;"]}
+{"cat":"negative","id":"neg.show_foobar","lql":["USE \"{{VINDEX}}\";","SHOW FOOBAR;"]}

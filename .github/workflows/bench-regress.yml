@@ -15,11 +15,36 @@
 
 name: bench-regress
 
+# Least-privilege token: this workflow only needs to read the repo.
+permissions:
+  contents: read
+
+# One live run per workflow per ref; superseded pull_request runs are
+# cancelled (pushes to main / tags / manual dispatches never are).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+    # macos-14 minutes are billed at 10x, and `make bench-check` cannot
+    # regress on a change that touches no Rust. Filter on the compile inputs
+    # rather than on the two compute crates alone: a bench cell can regress
+    # from a dependency change, so anything under crates/ still triggers.
+    #
+    # Note this buys little on a long-lived PR: GitHub evaluates a
+    # pull_request paths filter against the whole base..head diff, so a PR
+    # that touched a crate once keeps matching forever. The `if:` on the job
+    # below is what actually stops a run mid-iteration.
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Makefile"
+      - ".github/workflows/bench-regress.yml"
   # Manual trigger so a maintainer can re-baseline after intentional
   # perf changes without waiting for the next merge to main.
   workflow_dispatch: {}
@@ -29,15 +54,27 @@ jobs:
     # macos-14 = Apple Silicon (M1+). Required for the metal cells —
     # without it, drop --features gpu from FEATURES to skip them
     # and run only the CPU surface on any runner.
+    # Selective disable. A job-level `if:` cannot shell out to git, so
+    # unlike the strategy matrix's gate these read the PR TITLE only.
+    # The title is empty on push events, where contains() is false and
+    # the job runs exactly as before.
+    #
+    # This is the control that actually works on a long-lived PR: a
+    # `paths` filter on pull_request is evaluated against the WHOLE PR
+    # diff, not the incremental push, so once a PR has touched a crate
+    # every later push re-triggers it however unrelated the change.
+    if: >-
+      !contains(github.event.pull_request.title, '[skip crates]') &&
+      !contains(github.event.pull_request.title, '[skip bench-regress]')
     runs-on: macos-14
     timeout-minutes: 90
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Cargo deps are big and stable across PRs — separate cache.
       - name: Cache cargo deps
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -51,7 +88,7 @@ jobs:
       # Keyed by the run number so each main push refreshes the cache.
       - name: Cache criterion baseline (main only)
         if: github.ref == 'refs/heads/main'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: target/criterion
           key: ${{ runner.os }}-criterion-baseline-${{ github.run_number }}
@@ -60,7 +97,7 @@ jobs:
 
       - name: Restore criterion baseline (PRs only)
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: target/criterion
           key: ${{ runner.os }}-criterion-baseline-

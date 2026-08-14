@@ -6,9 +6,13 @@
 //! Modules:
 //! - `kmeans`: K-means clustering with BLAS acceleration
 //! - `labeling`: Auto-generate labels from cluster members + curated vocabulary
-//! - `categories`: Curated category vocabulary and stop words
+//! - `categories`: Curated category vocabulary and stop words (data-file backed)
+//! - `entity_patterns`: Labeled word-list classes for pattern labeling (data-file backed)
+//! - `data_files`: The one search chain for the vocabulary data files
 
 pub mod categories;
+pub mod data_files;
+pub mod entity_patterns;
 pub mod kmeans;
 pub mod labeling;
 pub mod pair_matching;

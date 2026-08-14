@@ -43,6 +43,10 @@ use ndarray::Array2;
 
 use crate::cache::KvCache;
 
+mod kv_run;
+
+pub use kv_run::{kv_decode_step_run, kv_prefill_run};
+
 /// Stream autoregressive generation with a KV cache.
 ///
 /// `on_token` receives `(token_id, decoded_string)` for each generated
@@ -438,118 +442,6 @@ where
     generated
 }
 
-/// Prefill phase as a reusable building block: runs a full forward over
-/// `prompt_ids`, populates a fresh [`KvCache`] (bounded if `window` is
-/// `Some`), and returns `(last_hidden_1xD, populated_cache)`.
-///
-/// Returns `None` if the prompt is empty or if any layer's attention
-/// fails. This is the production K/V cache prefill loop, extracted so
-/// `KvEngine::prefill` impls can call it directly.
-///
-/// The caller applies `final_norm + lm_head` to the returned hidden
-/// state to get logits.
-#[allow(clippy::too_many_arguments)]
-pub fn kv_prefill_run(
-    weights: larql_inference::WeightsView,
-    ffn: &dyn FfnBackend,
-    prompt_ids: &[u32],
-    window: Option<usize>,
-    backend: Option<&dyn larql_compute::ComputeBackend>,
-    hook: &mut dyn LayerHook,
-) -> Option<(Array2<f32>, KvCache)> {
-    if prompt_ids.is_empty() {
-        return None;
-    }
-    let num_layers = weights.num_layers;
-    let mut cache = match window {
-        Some(w) => KvCache::with_window(num_layers, w),
-        None => KvCache::with_layers(num_layers),
-    };
-
-    let mut h = embed_tokens_pub(&weights, prompt_ids);
-    // Per-Layer Embedding inputs for Gemma-4 archs. Returns empty Vec
-    // for non-PLE archs (`ple_inputs.get(layer)` then yields `None` and
-    // `apply_per_layer_embedding` is a no-op).
-    let ple_inputs = precompute_per_layer_inputs(&weights, &h, prompt_ids);
-    for layer in 0..num_layers {
-        hook.on_pre_layer(layer, &h);
-
-        let (mut h_post_attn, k_rope, v) =
-            run_attention_with_kv_backend(weights, &h, layer, backend, None)?;
-        cache.layers[layer] = Some((k_rope, v));
-        cache.clip_layer(layer);
-
-        hook.on_post_attention(layer, &mut h_post_attn);
-
-        let (h_post_ffn, _) = run_ffn(&weights, &h_post_attn, layer, ffn, false);
-        let mut h_out =
-            apply_per_layer_embedding(&weights, &h_post_ffn, layer, ple_inputs.get(layer));
-        apply_layer_scalar(&weights, &mut h_out, layer);
-
-        hook.on_post_layer(layer, &mut h_out);
-        h = h_out;
-    }
-    cache.next_position = prompt_ids.len();
-
-    Some((last_row_as_2d(&h), cache))
-}
-
-/// Decode-step phase as a reusable building block: takes one new
-/// `token_id`, runs the autoregressive attention against an existing
-/// populated [`KvCache`], mutates the cache to append the new K/V (and
-/// clip to window), and returns the new token's hidden state (shape
-/// `[1, hidden_dim]`).
-///
-/// Returns `None` if any layer's attention fails. This is the
-/// production decode step extracted so `KvEngine::decode_step` impls
-/// can call it directly.
-#[allow(clippy::too_many_arguments)]
-pub fn kv_decode_step_run(
-    weights: &ModelWeights,
-    ffn: &dyn FfnBackend,
-    cache: &mut KvCache,
-    token_id: u32,
-    backend: Option<&dyn larql_compute::ComputeBackend>,
-    hook: &mut dyn LayerHook,
-) -> Option<Array2<f32>> {
-    let num_layers = weights.num_layers;
-    let h_new = embed_tokens_pub(weights, &[token_id]);
-    let abs_position = cache.next_position;
-    // PLE inputs are per-token. Recompute for this single-token decode
-    // step rather than indexing a prefill-sized slab. Matches the
-    // recipe used by `vindex::kquant_forward::cached` and the GPU
-    // `layer_graph::generate` decode loop.
-    let ple_inputs = precompute_per_layer_inputs(weights, &h_new, &[token_id]);
-    let mut h_step = h_new;
-    for layer in 0..num_layers {
-        hook.on_pre_layer(layer, &h_step);
-
-        let kv_entry = cache.layers[layer].as_ref();
-        let (mut h_post_attn, new_kv) = run_attention_block_decode_step_backend(
-            larql_inference::WeightsView::dense(weights),
-            &h_step,
-            layer,
-            kv_entry,
-            abs_position,
-            backend,
-        )?;
-        cache.layers[layer] = Some(new_kv);
-        cache.clip_layer(layer);
-
-        hook.on_post_attention(layer, &mut h_post_attn);
-
-        let (h_post_ffn, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
-        let mut h_out =
-            apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_inputs.get(layer));
-        apply_layer_scalar(weights, &mut h_out, layer);
-
-        hook.on_post_layer(layer, &mut h_out);
-        h_step = h_out;
-    }
-    cache.next_position += 1;
-    Some(h_step)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn generate_cached_hooked_inner(
     weights: &ModelWeights,
@@ -575,8 +467,8 @@ fn generate_cached_hooked_inner(
         backend,
         hook,
     ) {
-        Some(t) => t,
-        None => return Vec::new(),
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
     };
 
     let first = match argmax_next_token(weights, tokenizer, &last_hidden) {
@@ -597,8 +489,8 @@ fn generate_cached_hooked_inner(
     let mut current_id = first.0;
     for _step in 1..max_new_tokens {
         let h_step = match kv_decode_step_run(weights, ffn, &mut cache, current_id, backend, hook) {
-            Some(h) => h,
-            None => break,
+            Ok(h) => h,
+            Err(_) => break,
         };
         let (id, tok_str) = match argmax_next_token(weights, tokenizer, &h_step) {
             Some(t) => t,
@@ -727,6 +619,9 @@ where
     let mut cache = KvCache::with_layers(num_layers);
 
     let mut h = embed_tokens_pub(weights, prompt_ids);
+    // Per-Layer Embedding inputs for Gemma-4 archs — same per-layer
+    // sequence as `kv_prefill_run` (empty Vec / no-ops elsewhere).
+    let ple_inputs = precompute_per_layer_inputs(weights, &h, prompt_ids);
     for layer in 0..num_layers {
         let (h_post_attn, k_rope, v) = match run_attention_with_kv_backend(
             larql_inference::WeightsView::dense(weights),
@@ -739,7 +634,10 @@ where
             None => return Vec::new(),
         };
         cache.layers[layer] = Some((k_rope, v));
-        let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+        let (h_post_ffn, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+        let mut h_out =
+            apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_inputs.get(layer));
+        apply_layer_scalar(weights, &mut h_out, layer);
         h = h_out;
     }
     cache.next_position = prompt_ids.len();
@@ -762,6 +660,9 @@ where
     for _step in 1..max_new_tokens {
         let h_new = embed_tokens_pub(weights, &[current_id]);
         let abs_position = cache.next_position;
+        // PLE inputs are per-token — recompute for this single-token
+        // decode step, same sequence as `kv_decode_step_run`.
+        let ple_inputs = precompute_per_layer_inputs(weights, &h_new, &[current_id]);
         let mut h_step = h_new;
         for layer in 0..num_layers {
             let kv_entry = cache.layers[layer].as_ref();
@@ -777,7 +678,10 @@ where
                 None => return generated,
             };
             cache.layers[layer] = Some(new_kv);
-            let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+            let (h_post_ffn, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+            let mut h_out =
+                apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_inputs.get(layer));
+            apply_layer_scalar(weights, &mut h_out, layer);
             h_step = h_out;
         }
         cache.next_position += 1;
@@ -890,12 +794,7 @@ mod tests {
                 None,
                 None,
                 &mut NoopHook,
-            )
-            .ok_or_else(|| {
-                larql_inference::kv_engine::EngineError::BackendFailure {
-                    details: "kv_prefill_run returned None".into(),
-                }
-            })?;
+            )?;
             self.cache = Some(cache);
             Ok(hidden)
         }
@@ -918,11 +817,7 @@ mod tests {
                     what: "decode_step called before prefill".into(),
                 }
             })?;
-            kv_decode_step_run(weights, ffn, cache, token_id, None, &mut NoopHook).ok_or_else(
-                || larql_inference::kv_engine::EngineError::BackendFailure {
-                    details: "kv_decode_step_run returned None".into(),
-                },
-            )
+            kv_decode_step_run(weights, ffn, cache, token_id, None, &mut NoopHook)
         }
         // MM support: drive `generate_with_engine_from_hidden`. We can't
         // recover the original tokens from a pre-built hidden state, so the
@@ -952,12 +847,7 @@ mod tests {
                 None,
                 None,
                 &mut NoopHook,
-            )
-            .ok_or_else(|| {
-                larql_inference::kv_engine::EngineError::BackendFailure {
-                    details: "kv_prefill_run returned None".into(),
-                }
-            })?;
+            )?;
             self.cache = Some(cache);
             Ok(hidden)
         }
@@ -1284,9 +1174,9 @@ mod tests {
     /// `kv_prefill_run` must execute cleanly on a PLE arch — the
     /// fixture's PLE keys + projection tensors / norms / gates must be
     /// reachable from the prefill loop without dimension mismatch or
-    /// panic. With zero-valued weights the output is also zero, so the
-    /// assertion is finiteness + correct hidden-dim shape, not a
-    /// specific value.
+    /// panic. Value-level pins live in `tests/dispatch_parity.rs` (PLE
+    /// parity vs the dispatch helpers, bit-exact); this test asserts
+    /// finiteness + correct hidden-dim shape.
     #[test]
     fn kv_prefill_run_works_on_synthetic_e2b_ple_arch() {
         let weights = larql_inference::test_utils::make_synthetic_e2b_like_weights();
@@ -1332,7 +1222,7 @@ mod tests {
 
         for step in 0..3 {
             let h_step = kv_decode_step_run(&weights, &ffn, &mut cache, 0u32, None, &mut NoopHook)
-                .unwrap_or_else(|| panic!("decode step {step} returned None"));
+                .unwrap_or_else(|e| panic!("decode step {step} failed: {e:?}"));
             assert_eq!(h_step.shape(), &[1, weights.hidden_size]);
             assert!(
                 h_step.iter().all(|v| v.is_finite()),
@@ -1340,6 +1230,52 @@ mod tests {
             );
         }
         assert_eq!(cache.next_position, prompt.len() + 3);
+    }
+
+    /// `generate_cached_constrained` carries its own inline prefill +
+    /// decode loops (it cannot reuse `kv_prefill_run` because of the
+    /// mask hook), so those loops must run the same per-layer sequence
+    /// — attention → FFN → PLE → layer_scalar. With a no-op mask the
+    /// token stream must match `generate_cached` (which drives the
+    /// oracle loops) exactly; on the E2B fixture a constrained path
+    /// that drops PLE / layer_scalar computes different logits and
+    /// diverges.
+    #[cfg(not(windows))]
+    #[test]
+    fn generate_cached_constrained_matches_generate_cached_on_ple_arch() {
+        let weights = larql_inference::test_utils::make_synthetic_e2b_like_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let prompt = [0u32, 1, 2];
+        const MAX_NEW_TOKENS: usize = 6;
+
+        let mut toks_oracle: Vec<u32> = Vec::new();
+        generate_cached(
+            &weights,
+            &tokenizer,
+            &ffn,
+            &prompt,
+            MAX_NEW_TOKENS,
+            |id, _| toks_oracle.push(id),
+        );
+        let mut toks_constrained: Vec<u32> = Vec::new();
+        generate_cached_constrained(
+            &weights,
+            &tokenizer,
+            &ffn,
+            &prompt,
+            MAX_NEW_TOKENS,
+            |_, _| {},
+            |id, _| toks_constrained.push(id),
+        );
+        assert!(
+            !toks_oracle.is_empty(),
+            "oracle generation must emit tokens"
+        );
+        assert_eq!(
+            toks_oracle, toks_constrained,
+            "no-op-mask constrained generation must match generate_cached"
+        );
     }
 
     // ─── Phase 1d.3b: generate_with_engine_from_hidden contracts ─────────

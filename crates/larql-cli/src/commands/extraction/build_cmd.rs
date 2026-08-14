@@ -80,7 +80,9 @@ pub fn run(args: BuildArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("\nSaving to {}...", output_dir.display());
 
-    let layer_infos = result.index.save_gate_vectors(&output_dir)?;
+    let layer_infos = result
+        .index
+        .save_gate_vectors_with_config(&output_dir, &result.config)?;
     let dm_count = result.index.save_down_meta(&output_dir)?;
 
     let mut config = result.config;

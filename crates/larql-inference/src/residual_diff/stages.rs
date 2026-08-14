@@ -467,6 +467,19 @@ fn stage_stat(layer: usize, a: &[f32], b: &[f32]) -> LayerStat {
 /// Set two env vars together (a dir-typed one and a layer-index one),
 /// run `f`, restore them. Used because every stage dump is gated by
 /// the *pair* (output dir + which layer to dump).
+///
+/// Serialised on [`super::capture::DUMP_DIR_ENV_LOCK`], the same lock
+/// [`super::capture::run_with_dump_dir`] uses. Both helpers aim
+/// process-global env vars at per-call tempdirs, so without this two
+/// concurrent stage captures redirect each other mid-run: the loser
+/// either finds its directory empty or reads dumps the winner wrote for
+/// a *different model*. `cargo test` runs `test_decode_stage_bisect`'s
+/// four cases as threads in one process, which is exactly that race —
+/// `stage_bisect_mistral_7b` failed while the other three passed.
+///
+/// A second, independent copy of this pattern is also why one lock
+/// covers both helpers rather than each owning its own: the hazard is
+/// the shared global, not the individual function.
 fn run_with_two_env_vars(
     dir_var: &str,
     layer_var: &str,
@@ -474,6 +487,9 @@ fn run_with_two_env_vars(
     f: impl FnOnce(),
 ) -> Result<tempfile::TempDir, String> {
     let dir = tempfile::tempdir().map_err(|e| format!("tempdir: {e}"))?;
+    let _guard = super::capture::DUMP_DIR_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let prev_dir = std::env::var(dir_var).ok();
     let prev_layer = std::env::var(layer_var).ok();
     std::env::set_var(dir_var, dir.path());

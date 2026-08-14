@@ -38,6 +38,9 @@ pub struct AttentionKernels {
     pub kv_append_attend_fused_pipeline: ComputePipelineState,
     /// Default-on; opt out via `LARQL_FUSED_ATTN=0`.
     pub attn_fused_pipeline: ComputePipelineState,
+    /// Element-wise `out += bias` for the attention projection biases
+    /// (GPT-OSS Q/K/V/O). Dispatched only when the layer has the bias.
+    pub bias_add_pipeline: ComputePipelineState,
 
     pub rope_at_pos_pipeline: ComputePipelineState,
     pub rope_at_pos_batched_pipeline: ComputePipelineState,
@@ -74,6 +77,7 @@ impl AttentionKernels {
                 device, library,
             ),
             attn_fused_pipeline: r::<shaders::attn_fused::Kernel>(device, library),
+            bias_add_pipeline: r::<shaders::bias_add::BiasAddKernel>(device, library),
 
             rope_at_pos_pipeline: r::<shaders::rope::RopeAtPosKernel>(device, library),
             rope_at_pos_batched_pipeline: r::<shaders::rope::RopeAtPosBatchedKernel>(

@@ -34,7 +34,7 @@ use larql_models::ModelWeights;
 use ndarray::Array2;
 
 use crate::attention::{
-    decode::{gqa_attention_decode_step, run_attention_block_decode_step_backend},
+    decode::{gqa_attention_decode_step_windowed, run_attention_block_decode_step_backend},
     rope::apply_rope_partial_at_full,
     run_attention_with_kv_backend,
 };
@@ -43,9 +43,12 @@ use crate::forward::layer::apply_layer_scalar;
 use crate::forward::ple::{apply_per_layer_embedding, precompute_per_layer_inputs};
 use crate::forward::run_ffn;
 use crate::forward::{add_bias, apply_norm};
-use crate::residual::{rms_norm_heads, rms_norm_heads_no_weight};
+use crate::residual::{rms_norm_heads_no_weight, rms_norm_qk_for_arch};
 
 use super::tensors::{insert_q4k_attn_tensors, insert_q4k_layer_tensors, remove_layer_tensors};
+
+#[cfg(test)]
+mod tests;
 
 /// Per-layer K/V captured during prefill. One entry per layer; matches
 /// the [`crate::attention::decode::KvCache`] convention so future work
@@ -72,7 +75,9 @@ impl CachedTimings {
 /// attention helper only knows the "this layer has its own K/V" case
 /// today).
 pub fn supports_cached_decode(weights: &ModelWeights) -> bool {
-    if weights.arch.is_hybrid_moe() {
+    // Pure MoE is exactly as unsupported here as hybrid — this loop's FFN
+    // is dense-only.
+    if weights.arch.is_moe() || weights.arch.is_hybrid_moe() {
         return false;
     }
     for layer in 0..weights.num_layers {
@@ -100,7 +105,7 @@ pub fn predict_kquant_prefill(
 /// `state` is `Some`, populates per-layer `h_in` ([seq_len, hidden]),
 /// `k_new` ([seq_len, kv_dim]), `v_new` ([seq_len, kv_dim]) for every
 /// position in the prompt — engines (markov_residual,
-/// unlimited_context, turbo_quant) use this to seed their state policy
+/// windowed_checkpoint, turbo_quant) use this to seed their state policy
 /// from a single prefill pass without a follow-up CPU re-walk. When
 /// `state` is `None`, bit-identical to [`predict_kquant_prefill`].
 pub fn predict_kquant_prefill_with_state(
@@ -301,12 +306,11 @@ fn matvec_q4k_or_q6k_q8k(
         return None;
     }
     // Pre-flight length check only (the actual matvec recomputes this stride
-    // internally). Gate on the two kernel-backed formats and take the packed
-    // row length from the format helper instead of re-spelling `(cols/256)*144`.
+    // internally). Gate on the kernel-backed formats via the `FormatRoute`
+    // registry and take the packed row length from the format helper instead
+    // of re-spelling `(cols/256)*144`.
     let bytes_per_row = match crate::QuantFormat::from_registry_tag(format) {
-        Some(f @ (crate::QuantFormat::Q4_K | crate::QuantFormat::Q6_K)) => {
-            f.packed_matrix_bytes(1, cols)?
-        }
+        Some(f) if f.route().q8k_matvec.is_some() => f.packed_matrix_bytes(1, cols)?,
         _ => return None,
     };
     if bytes.len() < rows * bytes_per_row {
@@ -333,12 +337,17 @@ fn matvec_q4k_or_q6k_q8k(
 /// matvec when this returns true and falls back to the dequant path
 /// otherwise (e.g. Q4_KF layers, padded down projections).
 fn layer_supports_direct_matvec(index: &dyn crate::KvIndex, layer: usize) -> bool {
+    // "Direct-matvec-capable" = the tag resolves to a format with a Q8K
+    // matvec kernel in the `FormatRoute` registry (Q4_K/Q6_K today).
+    let has_q8k_kernel = |tag: &str| {
+        crate::QuantFormat::from_registry_tag(tag).is_some_and(|f| f.route().q8k_matvec.is_some())
+    };
     let attn = match index.attn_kquant_layer_data(layer) {
         Some(a) => a,
         None => return false,
     };
     for (_, fmt) in attn.iter() {
-        if !matches!(*fmt, "Q4_K" | "Q6_K") {
+        if !has_q8k_kernel(fmt) {
             return false;
         }
     }
@@ -347,7 +356,7 @@ fn layer_supports_direct_matvec(index: &dyn crate::KvIndex, layer: usize) -> boo
         None => return false,
     };
     for (_, fmt) in ffn.iter() {
-        if !matches!(*fmt, "Q4_K" | "Q6_K") {
+        if !has_q8k_kernel(fmt) {
             return false;
         }
     }
@@ -378,10 +387,8 @@ pub fn fused_prefill(
     }
     let (q4_ffn_mmap, ffn_is_q4k) = if let Some(m) = index.interleaved_kquant_mmap_ref() {
         (m, true)
-    } else if let Some(m) = index.interleaved_q4_mmap_ref() {
-        (m, false)
     } else {
-        return None;
+        (index.interleaved_q4_mmap_ref()?, false)
     };
     index.attn_kquant_layer_data(0)?;
 
@@ -497,10 +504,8 @@ fn fused_decode_step_inner(
 ) -> Option<Array2<f32>> {
     let (q4_ffn_mmap, ffn_is_q4k) = if let Some(m) = index.interleaved_kquant_mmap_ref() {
         (m, true)
-    } else if let Some(m) = index.interleaved_q4_mmap_ref() {
-        (m, false)
     } else {
-        return None;
+        (index.interleaved_q4_mmap_ref()?, false)
     };
 
     let hidden = weights.hidden_size;
@@ -573,7 +578,7 @@ fn vec_to_2d_row(v: Vec<f32>) -> Array2<f32> {
 /// signature stays format-agnostic.
 ///
 /// Used by `StandardEngine`'s coarse path and by research engines
-/// (`MarkovResidual`, `UnlimitedContext`, `TurboQuant`) that want the
+/// (`MarkovResidual`, `WindowedCheckpoint`, `TurboQuant`) that want the
 /// production decode kernel without inheriting the per-layer dispatch
 /// trait's cached-K/V shape.
 ///
@@ -651,7 +656,7 @@ pub fn attention_decode_step_native(
         .attn_q_norm_key(layer)
         .and_then(|k| weights.vectors.get(&k))
     {
-        Some(norm_w) => rms_norm_heads(&q_full, norm_w, num_q, head_dim, qk_norm_off),
+        Some(norm_w) => rms_norm_qk_for_arch(&q_full, norm_w, num_q, head_dim, qk_norm_off, arch),
         None => q_full,
     };
     // RoPE must match the staged path / prefill exactly: override-aware
@@ -664,7 +669,7 @@ pub fn attention_decode_step_native(
     let rotary_frac = arch.rotary_fraction_for_layer(layer);
     let pos_divisor =
         crate::forward_overrides::effective_rope_position_divisor_for_layer(arch, layer);
-    let llama3 = crate::forward_overrides::effective_llama3_rope_scaling(arch);
+    let rope_scaling = crate::forward_overrides::effective_rope_freq_scaling(arch);
     let q_rope = apply_rope_partial_at_full(
         &q_normed,
         num_q,
@@ -673,7 +678,7 @@ pub fn attention_decode_step_native(
         rotary_frac,
         abs_position,
         pos_divisor,
-        llama3,
+        rope_scaling,
     );
 
     let k_vec = matvec_q4k_or_q6k_q8k(k_bytes, k_fmt, &h_norm_q8k, kv_dim, hidden)?;
@@ -699,7 +704,9 @@ pub fn attention_decode_step_native(
         .attn_k_norm_key(layer)
         .and_then(|k| weights.vectors.get(&k))
     {
-        Some(norm_w) => rms_norm_heads(&k_full_new, norm_w, num_kv, head_dim, qk_norm_off),
+        Some(norm_w) => {
+            rms_norm_qk_for_arch(&k_full_new, norm_w, num_kv, head_dim, qk_norm_off, arch)
+        }
         None => k_full_new,
     };
     let k_new_rope = apply_rope_partial_at_full(
@@ -710,7 +717,7 @@ pub fn attention_decode_step_native(
         rotary_frac,
         abs_position,
         pos_divisor,
-        llama3,
+        rope_scaling,
     );
 
     let (k_concat, v_concat) = match kv_entry {
@@ -736,8 +743,27 @@ pub fn attention_decode_step_native(
     };
 
     let softcap = arch.attn_logit_softcapping();
-    let attn_out = gqa_attention_decode_step(
-        &q_rope, &k_concat, &v_concat, num_q, head_dim, reps, scale, softcap,
+    // Per-layer sliding window, same shared rule the Metal spec uses.
+    // This is the CPU coarse Q4K decode — the path `standard` takes on
+    // CpuBackend — so without it a Gemma-class model attends full history
+    // here while Metal masks.
+    let window = crate::forward_overrides::effective_attention_window_for_layer(arch, layer);
+    let attn_out = gqa_attention_decode_step_windowed(
+        &q_rope,
+        &k_concat,
+        &v_concat,
+        num_q,
+        head_dim,
+        reps,
+        scale,
+        softcap,
+        crate::attention::sinks::resolve(
+            arch.attn_sinks_key(layer),
+            &weights.vectors,
+            num_q,
+            layer,
+        ),
+        window,
     );
     let attn_out_row: &[f32] = attn_out.row(0).to_slice().or_else(|| attn_out.as_slice())?;
 
@@ -862,7 +888,7 @@ fn run_ffn_decode_step_q4k_direct(
     // scalar pass serial on the main thread while the workers slept.
     let mut activated = vec![0.0f32; intermediate];
     {
-        let gelu = matches!(arch.activation(), larql_models::Activation::GeluTanh);
+        let gelu = arch.activation().uses_gelu_tanh_gate_up();
         let sqrt_2_over_pi = (2.0f32 / std::f32::consts::PI).sqrt();
         let gate_ref = &gate_vec[..];
         let up_ref = &up_vec[..];
@@ -896,10 +922,12 @@ fn run_ffn_decode_step_q4k_direct(
     // pad columns multiply zero activations, so the result is exact.
     // (Twin of the same handling in larql-inference's cached.rs — keep in
     // lockstep, see the consolidation hazard in q4k-direct-attention.md.)
-    let down_sb_bytes = match down_fmt {
-        "Q4_K" => 144,
-        "Q6_K" => 210,
-        _ => return None,
+    let down_sb_bytes = match crate::QuantFormat::from_registry_tag(down_fmt)
+        .filter(|f| f.route().q8k_matvec.is_some())
+        .and_then(|f| f.packed_block_layout())
+    {
+        Some((_, block_bytes)) => block_bytes,
+        None => return None,
     };
     let down_bytes_per_row = down_bytes.len() / hidden;
     if down_bytes_per_row == 0 || !down_bytes_per_row.is_multiple_of(down_sb_bytes) {

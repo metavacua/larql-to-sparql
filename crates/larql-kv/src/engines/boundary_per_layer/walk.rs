@@ -13,6 +13,8 @@ use larql_compute::ComputeBackend;
 use larql_inference::attention::{run_attention_with_kv_backend, SharedKV};
 use larql_inference::ffn::FfnBackend;
 use larql_inference::forward::embed_tokens_pub;
+use larql_inference::forward::ple::precompute_per_layer_inputs;
+use larql_inference::kv_engine::EngineError;
 use ndarray::{s, Array2};
 
 use crate::engines::boundary_per_layer::cold_tier::{
@@ -24,6 +26,9 @@ use crate::engines::markov_residual::recompute_kv;
 
 /// Run a full prefill through the dense walk. Returns
 /// `(last_hidden, new_store)` — caller owns the store.
+///
+/// Transactional: the store is built into locals and handed back only on
+/// success, so a refusal leaves an engine's existing store untouched.
 pub(super) fn run_prefill(
     weights: larql_inference::WeightsView,
     ffn: &dyn FfnBackend,
@@ -31,25 +36,32 @@ pub(super) fn run_prefill(
     policy: &BoundaryLayerPolicy,
     window_size: Option<usize>,
     token_ids: &[u32],
-) -> Option<(Array2<f32>, RsStorePerLayer)> {
+) -> Result<(Array2<f32>, RsStorePerLayer), EngineError> {
     let num_layers = weights.num_layers;
     let seq_len = token_ids.len();
     let mut h = embed_tokens_pub(&weights, token_ids);
+    // Empty on non-PLE archs — `ple_inputs.get(layer)` then yields `None`.
+    let ple_inputs = precompute_per_layer_inputs(&weights, &h, token_ids);
     let mut stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
     let be = Some(backend);
 
     for layer in 0..num_layers {
         stored.push(h.clone());
-        let (h_post_attn, _k, _v) =
-            run_attention_with_kv_backend(weights, &h, layer, be, None).expect("attention failed");
-        let h_out = crate::engines::layer_ffn_or_moe(
+        let (h_post_attn, _k, _v) = run_attention_with_kv_backend(weights, &h, layer, be, None)
+            .ok_or_else(|| EngineError::BackendFailure {
+                details: format!(
+                    "attention returned None during boundary-per-layer prefill at layer {layer}"
+                ),
+            })?;
+        h = crate::engines::layer_ffn_or_moe(
             weights.canonical(),
             &h_post_attn,
             layer,
             ffn,
             Some(ffn),
-        );
-        h = h_out;
+            ple_inputs.get(layer),
+        )
+        .map_err(EngineError::Execution)?;
     }
 
     let mut rs = RsStorePerLayer {
@@ -74,7 +86,9 @@ pub(super) fn run_prefill(
             let codec = policy.codec_for(layer);
             let decoded_overflow = roundtrip(overflow, codec);
             let (k, v) = recompute_kv(weights, &decoded_overflow, layer, 0, backend, None)
-                .expect("cold K/V pre-computation failed");
+                .ok_or_else(|| EngineError::BackendFailure {
+                    details: format!("cold K/V pre-computation returned None at layer {layer}"),
+                })?;
             cold_kv.push((k, v));
             let mut enc = PerLayerEncodedColdLayer::empty(codec, weights.hidden_size);
             enc.append(overflow);
@@ -85,24 +99,44 @@ pub(super) fn run_prefill(
         rs.cold_abs_start = 0;
     }
 
-    Some((last_row(&h), rs))
+    Ok((last_row(&h), rs))
 }
 
-/// Run one decode step through the dense walk. Consumes `rs`, returns
-/// the new store alongside the hidden output.
+/// A backend stage that declined, as a typed engine failure.
+///
+/// Named once so every decline in the decode walk reads the same and points
+/// at the layer — a bare `None` here used to reach the engine as one
+/// undifferentiated "run_decode returned None".
+fn declined(stage: &str, layer: usize) -> EngineError {
+    EngineError::BackendFailure {
+        details: format!("{stage} returned None during boundary-per-layer decode at layer {layer}"),
+    }
+}
+
+/// Run one decode step through the dense walk, mutating `rs` in place.
+///
+/// Failure invariant (the reason `rs` is `&mut` and not by-value): on any
+/// `Err` return, the canonical state — `stored`, the cold tiers, and
+/// `next_position` — is untouched, and `rs.hot_kv` is left `None`. The
+/// hot-K/V cache is a droppable derivative of `stored` (see
+/// `RsStorePerLayer::hot_kv`), so a transient backend failure costs one
+/// rebuild on the next successful step; it never bricks the session.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_decode(
     weights: larql_inference::WeightsView,
     ffn: &dyn FfnBackend,
     backend: &dyn ComputeBackend,
     policy: &BoundaryLayerPolicy,
-    mut rs: RsStorePerLayer,
+    rs: &mut RsStorePerLayer,
     token_id: u32,
     index: Option<&larql_vindex::VectorIndex>,
-) -> Option<(Array2<f32>, RsStorePerLayer)> {
+) -> Result<Array2<f32>, EngineError> {
     let num_layers = weights.num_layers;
     let abs_position = rs.next_position;
     let mut h_new = embed_tokens_pub(&weights, &[token_id]);
+    // PLE inputs are per-token — recompute for this single-token decode
+    // step, matching the legacy `kv_decode_step_run` recipe exactly.
+    let ple_inputs = precompute_per_layer_inputs(&weights, &h_new, &[token_id]);
     let mut new_stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
 
     // W2 hot-K/V cache (twin of markov_residual_codec). When unbounded with no
@@ -118,6 +152,9 @@ pub(super) fn run_decode(
     let cache_eligible =
         rs.max_window.is_none() && rs.cold_encoded.is_none() && rs.cold_kv.is_none();
     let mut step_new_kv: Vec<SharedKV> = Vec::with_capacity(num_layers);
+    // Taken up front: every fallible early return below leaves `rs.hot_kv`
+    // as `None` (dropped derivative — see the function docs), because a
+    // partially-appended in-place buffer must not survive into a retry.
     let mut hot_kv_store = rs.hot_kv.take();
     let had_hot_kv = hot_kv_store.is_some();
     let idx_kv: Option<&dyn larql_compute::KvIndex> =
@@ -200,7 +237,8 @@ pub(super) fn run_decode(
                             abs_position,
                             Some(backend),
                             idx_kv,
-                        )?;
+                        )
+                        .ok_or_else(|| declined("attention", layer))?;
                     *k_buf = new_kv.0;
                     *v_buf = new_kv.1;
                     h
@@ -214,7 +252,8 @@ pub(super) fn run_decode(
             let (k_full, v_full) = if let Some(cold_kv) = &rs.cold_kv {
                 let (k_cold, v_cold) = &cold_kv[layer];
                 let (k_hot, v_hot) =
-                    recompute_kv(weights, h_hot, layer, hot_abs_start, backend, None)?;
+                    recompute_kv(weights, h_hot, layer, hot_abs_start, backend, None)
+                        .ok_or_else(|| declined("hot K/V recompute", layer))?;
                 let c = k_cold.shape()[0];
                 let kv_dim = k_cold.shape()[1];
                 let mut k_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
@@ -245,7 +284,8 @@ pub(super) fn run_decode(
                 } else {
                     (h_hot.clone(), hot_abs_start)
                 };
-                recompute_kv(weights, &h_full, layer, full_abs_start, backend, None)?
+                recompute_kv(weights, &h_full, layer, full_abs_start, backend, None)
+                    .ok_or_else(|| declined("cold K/V recompute", layer))?
             };
 
             let (h_post_attn, new_kv) =
@@ -257,21 +297,23 @@ pub(super) fn run_decode(
                     abs_position,
                     Some(backend),
                     idx_kv,
-                )?;
+                )
+                .ok_or_else(|| declined("attention", layer))?;
             if cache_eligible {
                 step_new_kv.push(new_kv);
             }
             h_post_attn
         };
 
-        let h_out = crate::engines::layer_ffn_or_moe(
+        h_new = crate::engines::layer_ffn_or_moe(
             weights.canonical(),
             &h_post_attn,
             layer,
             ffn,
             Some(ffn),
-        );
-        h_new = h_out;
+            ple_inputs.get(layer),
+        )
+        .map_err(EngineError::Execution)?;
     }
 
     // Amortised O(m) per-row append via ndarray::Array2::push_row.
@@ -321,17 +363,25 @@ pub(super) fn run_decode(
                 rs.cold_encoded = Some(layers);
             }
         }
-        extend_cold_kv_with_overflow(
+        if extend_cold_kv_with_overflow(
             weights,
             backend,
             policy,
-            &mut rs,
+            rs,
             &overflow_per_layer,
             cold_abs_pos,
-        );
+        )
+        .is_none()
+        {
+            // Per-layer K/V recompute failed: the helper dropped `cold_kv`
+            // wholesale (atomicity — no layer desync possible), so the next
+            // decode step rebuilds cold K/V from `cold_encoded`. The decode
+            // output itself is already computed and stays valid.
+            debug_assert!(rs.cold_kv.is_none(), "failed extend must drop cold_kv");
+        }
     }
 
-    Some((last_row(&h_new), rs))
+    Ok(last_row(&h_new))
 }
 
 #[cfg(test)]
@@ -394,7 +444,7 @@ mod tests {
         let backend = CpuBackend;
         let ffn = NullFfn;
         let policy = BoundaryLayerPolicy::bf16_uniform("test", weights.num_layers);
-        let (_, rs) = run_prefill(
+        let (_, mut rs) = run_prefill(
             larql_inference::WeightsView::dense(&weights),
             &ffn,
             &backend,
@@ -405,22 +455,22 @@ mod tests {
         .unwrap();
         assert!(rs.cold_encoded.is_none());
 
-        let (hidden, rs_after) = run_decode(
+        let hidden = run_decode(
             larql_inference::WeightsView::dense(&weights),
             &ffn,
             &backend,
             &policy,
-            rs,
+            &mut rs,
             1,
             None,
         )
         .unwrap();
         assert_eq!(hidden.shape(), &[1, weights.hidden_size]);
-        assert_eq!(rs_after.next_position, 2);
-        for slab in &rs_after.stored {
+        assert_eq!(rs.next_position, 2);
+        for slab in &rs.stored {
             assert_eq!(slab.shape()[0], 2);
         }
-        assert!(rs_after.cold_encoded.is_none());
+        assert!(rs.cold_encoded.is_none());
     }
 
     #[test]
@@ -455,12 +505,12 @@ mod tests {
         assert!(rs.cold_encoded.as_ref().unwrap()[0].n_positions > 0);
 
         let _ = ColdResidualCodec::Bf16; // keep import live
-        let (hidden, _) = run_decode(
+        let hidden = run_decode(
             larql_inference::WeightsView::dense(&weights),
             &ffn,
             &backend,
             &policy,
-            rs,
+            &mut rs,
             3,
             None,
         )
@@ -506,19 +556,18 @@ mod tests {
             .unwrap();
             let mut hiddens = Vec::new();
             for tok in 3u32..=12 {
-                let (h, rs2) = run_decode(
+                let h = run_decode(
                     larql_inference::WeightsView::dense(&weights),
                     &ffn,
                     &backend,
                     &policy,
-                    rs,
+                    &mut rs,
                     tok,
                     Some(&index),
                 )
                 .unwrap();
                 assert!(h.iter().all(|v| v.is_finite()));
                 hiddens.push(h.iter().map(|v| v.to_bits()).collect());
-                rs = rs2;
             }
             (hiddens, rs.next_position)
         };
@@ -541,7 +590,7 @@ mod tests {
         let backend = CpuBackend;
         let ffn = NullFfn;
         let policy = BoundaryLayerPolicy::bf16_uniform("test", weights.num_layers);
-        let (_, rs) = run_prefill(
+        let (_, mut rs) = run_prefill(
             larql_inference::WeightsView::dense(&weights),
             &ffn,
             &backend,
@@ -557,23 +606,31 @@ mod tests {
             .unwrap_or(0);
         assert_eq!(initial, 1);
 
-        let (_, rs_after) = run_decode(
+        run_decode(
             larql_inference::WeightsView::dense(&weights),
             &ffn,
             &backend,
             &policy,
-            rs,
+            &mut rs,
             3,
             None,
         )
         .unwrap();
-        let after = rs_after
+        let after = rs
             .cold_encoded
             .as_ref()
             .map(|l| l[0].n_positions)
             .unwrap_or(0);
         assert_eq!(after, 2);
-        assert_eq!(rs_after.next_position, 4);
+        assert_eq!(rs.next_position, 4);
+        // The pre-computed cold K/V cache must track cold_encoded row-for-row
+        // on every layer — a desync here is exactly the state the atomic
+        // extend contract forbids.
+        let cold_kv = rs.cold_kv.as_ref().expect("overflow keeps cold_kv");
+        for (k, v) in cold_kv {
+            assert_eq!(k.shape()[0], 2, "cold K rows must match cold_encoded");
+            assert_eq!(v.shape()[0], 2, "cold V rows must match cold_encoded");
+        }
     }
 
     /// First-overflow cold-tier initialisation. A prefill that fills the
@@ -589,7 +646,7 @@ mod tests {
         let policy = BoundaryLayerPolicy::bf16_uniform("test", weights.num_layers);
 
         // window=2, exactly 2 prompt tokens → fills the window, no overflow.
-        let (_, rs) = run_prefill(
+        let (_, mut rs) = run_prefill(
             larql_inference::WeightsView::dense(&weights),
             &ffn,
             &backend,
@@ -604,24 +661,31 @@ mod tests {
         );
 
         // First decode overflows by one row → initialises cold_encoded.
-        let (_, rs_after) = run_decode(
+        run_decode(
             larql_inference::WeightsView::dense(&weights),
             &ffn,
             &backend,
             &policy,
-            rs,
+            &mut rs,
             2,
             None,
         )
         .unwrap();
         assert!(
-            rs_after.cold_encoded.is_some(),
+            rs.cold_encoded.is_some(),
             "first decode overflow must initialise the cold tier"
         );
         assert_eq!(
-            rs_after.cold_encoded.as_ref().unwrap()[0].n_positions,
+            rs.cold_encoded.as_ref().unwrap()[0].n_positions,
             1,
             "exactly one row evicted to cold"
         );
+        // First overflow also initialises cold_kv (extend's None arm), in
+        // lockstep with cold_encoded.
+        let cold_kv = rs.cold_kv.as_ref().expect("first overflow inits cold_kv");
+        for (k, v) in cold_kv {
+            assert_eq!(k.shape()[0], 1);
+            assert_eq!(v.shape()[0], 1);
+        }
     }
 }

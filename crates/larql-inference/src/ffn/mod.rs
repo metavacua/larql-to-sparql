@@ -15,6 +15,9 @@
 
 pub mod graph_backend;
 pub mod local_moe;
+pub mod moe_backend;
+pub mod moe_bound;
+pub mod moe_container;
 pub mod moe_remote;
 pub mod remote;
 pub mod sparse;
@@ -24,22 +27,33 @@ mod tests;
 pub mod weight;
 
 pub use larql_compute::ffn::{
-    gelu_tanh, gelu_tanh_gate_up, sigmoid, silu_gate_up, FfnBackend, Q4K_Q8K_SUPERBLOCK_ELEMS,
+    expert_weight::resolvable as expert_weights_resolvable, gelu_tanh, gelu_tanh_gate_up, sigmoid,
+    silu_gate_up, ExpertWeightFfn, FfnActivations, FfnBackend, SparseActivations,
+    Q4K_Q8K_SUPERBLOCK_ELEMS,
 };
 
 // ── Re-exports ──
 
 pub use local_moe::LocalMoeFfn;
+pub use moe_backend::{
+    InProcessMoeBackend, MoeBackendError, MoeExpertBackend, MoeFailurePolicy, MoeRoute,
+};
+pub use moe_bound::BoundMoeBackend;
+pub use moe_container::{CompositionError, ContainerRoutedBackend};
 pub use moe_remote::{
-    MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, RemoteMoeFfn, ShardConfig,
+    MoeFfn, MoeRouterWeights, RecordedRefusal, RefusalPolicy, RemoteMoeBackend, RemoteMoeError,
+    RemoteMoeFfn, ShardConfig,
 };
 pub use remote::{
-    LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteLatencyStats, RemoteWalkBackend,
-    WirePreference,
+    decode_q8k_batch_response_entries, decode_single_response, encode_binary_request,
+    encode_binary_request_as, encode_q8k_batch_request, LayerShardedBackend, RemoteFfnConfig,
+    RemoteFfnError, RemoteLatencyStats, RemoteWalkBackend, WireFormat, WirePreference, BINARY_CT,
+    F16_CT, I8_CT, Q8K_BATCH_CT,
 };
 pub use sparse::SparseFfn;
 pub use sparse_compute::{
-    sparse_ffn_forward, sparse_ffn_forward_with_full_overrides, sparse_ffn_forward_with_overrides,
+    sparse_ffn_forward, sparse_ffn_forward_observed, sparse_ffn_forward_with_full_overrides,
+    sparse_ffn_forward_with_full_overrides_observed, sparse_ffn_forward_with_overrides,
     FeatureSlotOverride,
 };
 pub use weight::{dense_ffn_forward_backend, BackendFfn, NullFfn, ViewFfn, WeightFfn};
@@ -95,7 +109,7 @@ mod router_tests {
         let weights = make_test_weights();
         let ffn = WeightFfn { weights: &weights };
         let h = larql_vindex::ndarray::Array2::<f32>::zeros((1, weights.hidden_size));
-        assert!(ffn.forward_moe_full_layer(0, &h).is_none());
+        assert!(ffn.forward_moe_full_layer(0, &h).is_ok_and(|o| o.is_none()));
     }
 
     #[test]

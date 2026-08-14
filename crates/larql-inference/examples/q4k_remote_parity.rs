@@ -165,14 +165,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     remote_index.load_attn_kquant(&vindex_path)?;
 
     let t_remote = Instant::now();
-    let remote_result = predict_kquant_with_ffn(
+    // A refusal is a parity *result*, not a crash: the shards declined to
+    // execute a layer, so there is no remote answer to compare against and
+    // reporting one would be the exact conflation this channel exists to stop.
+    let remote_result = match predict_kquant_with_ffn(
         &mut weights_remote,
         &tokenizer,
         &token_ids,
         top_k,
         &remote_index,
         &remote,
-    );
+    ) {
+        Ok(result) => result,
+        Err(refusal) => {
+            eprintln!(
+                "FAIL — remote route refused ({}): {refusal}",
+                refusal.kind()
+            );
+            std::process::exit(1);
+        }
+    };
     let remote_ms = t_remote.elapsed().as_secs_f64() * 1000.0;
 
     // ── Compare ──

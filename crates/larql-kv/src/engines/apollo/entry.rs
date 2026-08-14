@@ -46,6 +46,16 @@ pub struct InjectionConfig {
     pub inject_coefficient: f32,
     /// Maximum entries to inject per query (top-k after retrieval).
     pub top_k: usize,
+    /// BOS token id to strip from the front of the query when building the
+    /// `window_tokens ++ query_tokens` context (a BOS mid-context is
+    /// nonsense). `None` means "strip nothing" — there is deliberately no
+    /// hardcoded model-specific default; the engine falls back to the
+    /// structural `weights.arch.bos_token_id()` when this is `None`.
+    /// Set via the engine spec (`apollo:bos=2`) for tokenizers that
+    /// prepend BOS themselves (e.g. Gemma 2/3, whose arch hook is `None`
+    /// because larql never needs to prepend for them).
+    #[serde(default)]
+    pub bos_token_id: Option<u32>,
 }
 
 impl Default for InjectionConfig {
@@ -55,6 +65,7 @@ impl Default for InjectionConfig {
             injection_layer: 30,
             inject_coefficient: 10.0,
             top_k: 8,
+            bos_token_id: None,
         }
     }
 }
@@ -69,6 +80,8 @@ mod tests {
         assert_eq!(cfg.injection_layer, 30);
         assert_eq!(cfg.inject_coefficient, 10.0);
         assert_eq!(cfg.top_k, 8);
+        // No hardcoded model-specific BOS: unset means "strip nothing".
+        assert_eq!(cfg.bos_token_id, None);
     }
 
     #[test]

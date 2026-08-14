@@ -45,6 +45,100 @@ mod tests {
 
     // ── walk_ffn.rs ───────────────────────────────────────────────────
 
+    // ── tensors.rs: the pure-MoE arm ─────────────────────────────────
+    //
+    // Pure MoE has no dense FFN slab; requiring `interleaved_kquant`
+    // rejected those models before the forward reached its MoE branch
+    // (the drifted twin of the larql-inference copy). These pin both
+    // sides of the gate.
+
+    /// KvIndex double with attention data only — the shape a pure-MoE
+    /// vindex presents (its `interleaved_kquant.bin` is empty).
+    struct AttnOnlyIndex {
+        attn: Vec<Vec<u8>>,
+    }
+    impl crate::KvIndex for AttnOnlyIndex {
+        fn num_features(&self, _l: usize) -> usize {
+            16
+        }
+        fn attn_kquant_layer_data(&self, _l: usize) -> Option<[(&[u8], &str); 4]> {
+            Some([
+                (self.attn[0].as_slice(), "Q4_K"),
+                (self.attn[1].as_slice(), "Q4_K"),
+                (self.attn[2].as_slice(), "Q4_K"),
+                (self.attn[3].as_slice(), "Q4_K"),
+            ])
+        }
+        fn interleaved_kquant_layer_data(
+            &self,
+            _l: usize,
+        ) -> Option<[(&[u8], &str); crate::FFN_COMPONENTS_PER_LAYER]> {
+            None
+        }
+        fn interleaved_kquant_mmap_ref(&self) -> Option<&[u8]> {
+            None
+        }
+    }
+
+    fn attn_only_fixture() -> (larql_models::ModelWeights, AttnOnlyIndex) {
+        // hidden 16, 4 heads × head_dim 4 → every attn matrix is 16×16
+        // = 256 elements, one Q4_K super-block.
+        let mut weights = larql_models::test_fixtures::make_test_weights();
+        weights.arch = larql_models::detect_from_json(&serde_json::json!({
+            "model_type": "gpt_oss",
+            "hidden_size": 16,
+            "intermediate_size": 16,
+            "num_hidden_layers": 1,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 4,
+            "head_dim": 4,
+            "num_local_experts": 2,
+            "num_experts_per_tok": 1,
+        }));
+        weights.hidden_size = 16;
+        weights.num_layers = 1;
+        let ones = vec![1.0f32; 16 * 16];
+        let q = crate::cpu::ops::q4_common::quantize_q4_k(&ones);
+        let index = AttnOnlyIndex {
+            attn: vec![q.clone(), q.clone(), q.clone(), q],
+        };
+        (weights, index)
+    }
+
+    #[test]
+    fn pure_moe_layer_inserts_attention_only() {
+        let (weights, index) = attn_only_fixture();
+        assert!(weights.arch.is_moe() && !weights.arch.is_hybrid_moe());
+        let mut scratch = larql_models::DequantScratch::new();
+        let keys = insert_q4k_layer_tensors(&mut scratch, &weights, &index, 0)
+            .expect("pure MoE must not require a dense FFN slab");
+        assert_eq!(keys.len(), 4, "attention only: Q/K/V/O");
+        assert!(keys.iter().all(|k| k.contains("self_attn")));
+        for k in &keys {
+            assert!(scratch.contains_key(k), "{k} not inserted");
+        }
+    }
+
+    #[test]
+    fn dense_arch_with_missing_ffn_slices_still_errors() {
+        let (mut weights, index) = attn_only_fixture();
+        // Same index, but a DENSE architecture: the missing slab is now a
+        // defect, not a topology.
+        weights.arch = larql_models::detect_from_json(&serde_json::json!({
+            "model_type": "llama",
+            "hidden_size": 16,
+            "intermediate_size": 16,
+            "num_hidden_layers": 1,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 4,
+            "head_dim": 4,
+        }));
+        let mut scratch = larql_models::DequantScratch::new();
+        let err = insert_q4k_layer_tensors(&mut scratch, &weights, &index, 0)
+            .expect_err("a dense arch without FFN slices is a broken vindex");
+        assert!(err.contains("ffn Q4K slices missing"), "{err}");
+    }
+
     #[test]
     fn walk_ffn_kquant_layer_runs_gelu_tanh_path() {
         // Gemma-3 weights → GeluTanh activation branch.
@@ -159,6 +253,116 @@ mod tests {
         let h_q8k = quantize_x_to_q8k(&h_in);
         let out = kquant_ffn_forward_layer_q8k(&*weights.arch, &idx, 0, &h_q8k);
         assert_eq!(out.shape(), &[1, weights.hidden_size]);
+    }
+
+    /// Regression for docs/audits/dec-readiness-review-2026-07-22.md §1a:
+    /// pins the numerical equivalence the server's batched-GEMM Q8K
+    /// handler (`larql-server/routes/walk_ffn/q8k.rs`) depends on. Same-
+    /// layer entries dequantised to f32 and run through
+    /// `kquant_ffn_forward_layer` as ONE multi-row GEMM must reproduce
+    /// (within f32 rounding) what the single-row `q4k_q8k_matvec_into`
+    /// kernel produces per entry — otherwise batching same-layer rows to
+    /// fix the ~linear-in-B batch curve would silently change the numbers.
+    #[test]
+    fn walk_ffn_kquant_layer_q8k_batched_gemm_matches_per_row_single_kernel() {
+        use crate::cpu::ops::q4k_q8k_dot::quantize_x_to_q8k;
+        let weights = make_test_q4k_weights();
+        let idx = make_q4k_fixture_index(&weights);
+        let hidden = weights.hidden_size;
+
+        let rows: Vec<Vec<f32>> = (0..3)
+            .map(|i| {
+                (0..hidden)
+                    .map(|j| ((i * hidden + j) as f32 * 0.001).sin() * 0.05)
+                    .collect()
+            })
+            .collect();
+
+        // Reference: each row through the single-row Q8K fast kernel,
+        // exactly as a batch-1 request (or the pre-fix code) would.
+        let single_row_outputs: Vec<Vec<f32>> = rows
+            .iter()
+            .map(|r| {
+                let h_q8k = quantize_x_to_q8k(r);
+                kquant_ffn_forward_layer_q8k(&*weights.arch, &idx, 0, &h_q8k)
+                    .into_raw_vec_and_offset()
+                    .0
+            })
+            .collect();
+
+        // Batched: dequantise each row's Q8K activation back to f32 and
+        // run all 3 rows through ONE GEMM, mirroring the server's grouped
+        // handler.
+        let mut dequantised: Vec<f32> = Vec::with_capacity(3 * hidden);
+        for r in &rows {
+            let h_q8k = quantize_x_to_q8k(r);
+            for b in 0..h_q8k.n_blocks() {
+                let d = h_q8k.d[b];
+                for i in 0..256 {
+                    dequantised.push(d * (h_q8k.qs[b * 256 + i] as f32));
+                }
+            }
+        }
+        let x = ndarray::Array2::from_shape_vec((3, hidden), dequantised).unwrap();
+        let batched = kquant_ffn_forward_layer(&*weights.arch, &idx, 0, &x);
+
+        for (row_idx, single) in single_row_outputs.iter().enumerate() {
+            let batched_row = batched.row(row_idx);
+            for (a, &b) in single.iter().zip(batched_row.iter()) {
+                assert!(
+                    (a - b).abs() < 1e-3,
+                    "row {row_idx}: single-kernel {a} vs batched-GEMM {b} diverge"
+                );
+            }
+        }
+    }
+
+    /// Regression for docs/audits/dec-readiness-review-2026-07-22.md §1d:
+    /// the down-projection fast path must consult the down slab's own
+    /// format tag (`ffn[2].1`), not just the block-alignment guard.
+    /// Before the fix, any down slab — regardless of its declared format —
+    /// went straight into the Q4_K-only `q4k_q8k_matvec_into` kernel
+    /// whenever `intermediate` was 256-aligned, silently misreading any
+    /// non-Q4_K byte layout. Here the down component is (still
+    /// Q4_K-encoded bytes, but) tagged with an unsupported format string;
+    /// with the fix, that tag mismatch routes to the format-aware
+    /// `dequantize_matrix` fallback, which loudly rejects an unknown tag
+    /// instead of the fast path silently "succeeding" on the wrong
+    /// assumption.
+    #[test]
+    #[should_panic(expected = "unsupported quant format")]
+    fn walk_ffn_kquant_layer_q8k_rejects_down_slab_with_non_q4k_format_tag() {
+        struct BogusDownFormat<'a> {
+            inner: &'a crate::test_fixtures::Q4kFixtureIndex,
+        }
+        impl crate::KvIndex for BogusDownFormat<'_> {
+            fn num_features(&self, l: usize) -> usize {
+                self.inner.num_features(l)
+            }
+            fn attn_kquant_layer_data(&self, l: usize) -> Option<[(&[u8], &str); 4]> {
+                self.inner.attn_kquant_layer_data(l)
+            }
+            fn interleaved_kquant_layer_data(
+                &self,
+                l: usize,
+            ) -> Option<[(&[u8], &str); crate::FFN_COMPONENTS_PER_LAYER]> {
+                let mut ffn = self.inner.interleaved_kquant_layer_data(l)?;
+                ffn[2].1 = "BOGUS_FORMAT";
+                Some(ffn)
+            }
+            fn interleaved_kquant_mmap_ref(&self) -> Option<&[u8]> {
+                self.inner.interleaved_kquant_mmap_ref()
+            }
+            // No `kquant_ffn_layer_once` — forces the dequant fallback,
+            // which is the only branch that consults the format tag.
+        }
+        use crate::cpu::ops::q4k_q8k_dot::quantize_x_to_q8k;
+        let weights = make_test_q4k_weights();
+        let inner = make_q4k_fixture_index(&weights);
+        let idx = BogusDownFormat { inner: &inner };
+        let h_in: Vec<f32> = vec![0.01; weights.hidden_size];
+        let h_q8k = quantize_x_to_q8k(&h_in);
+        let _ = kquant_ffn_forward_layer_q8k(&*weights.arch, &idx, 0, &h_q8k);
     }
 
     // ── tensors.rs ───────────────────────────────────────────────────
@@ -397,9 +601,14 @@ mod tests {
     fn supports_direct_matvec_decode_inspects_fixture() {
         let weights = make_test_q4k_weights();
         let idx = make_q4k_fixture_index(&weights);
-        // Just exercise the property check; the exact value depends on
-        // fixture layout, but the call must complete without panic.
-        let _: bool = supports_direct_matvec_decode(&weights, &idx);
+        // The fixture is Q4_K throughout with a 256-multiple intermediate,
+        // so it qualifies. This used to bind the result to `let _: bool`
+        // and assert nothing "because the exact value depends on fixture
+        // layout" — but the layout is fixed by `make_q4k_fixture_index`,
+        // so the value is knowable and a routing regression should be
+        // visible here. The refusal side is covered by
+        // `cached::tests::layer_supports_direct_matvec_refuses_padded_intermediate`.
+        assert!(supports_direct_matvec_decode(&weights, &idx));
     }
 
     #[test]

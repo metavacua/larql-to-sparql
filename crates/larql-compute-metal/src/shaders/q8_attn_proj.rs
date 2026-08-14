@@ -34,11 +34,15 @@ kernel void q8_qkv_proj(
 {
     uint total_rows = q_rows + k_rows + v_rows;
     uint global_row = tg_id * QKV_ROWS_PER_TG + sg_id;
-    if (global_row >= total_rows) return;
 
     uint blocks = K / 32;
 
-    // Load Q8 input into threadgroup shared memory (once per TG)
+    // Load Q8 input into threadgroup shared memory (once per TG).
+    // ALL threads participate and reach the barrier — the out-of-range
+    // row check comes after it. An early return here was divergent
+    // whenever total_rows % QKV_ROWS_PER_TG != 0: some simdgroups
+    // returned while the rest waited at the barrier, which is
+    // undefined behaviour in MSL (capability audit F13).
     threadgroup int8_t tg_x8[8192];
     threadgroup float tg_xs[256];
     for (uint i = tid_in_tg; i < K; i += 256)
@@ -46,6 +50,7 @@ kernel void q8_qkv_proj(
     for (uint i = tid_in_tg; i < blocks; i += 256)
         tg_xs[i] = X8s[i];
     threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (global_row >= total_rows) return;
 
     // Determine which projection and local row
     device const uchar* W;
@@ -103,10 +108,11 @@ kernel void q8_proj_rope(
     uint sg_id     [[simdgroup_index_in_threadgroup]])
 {
     uint row = tg_id * QKV_ROWS_PER_TG + sg_id;
-    if (row >= num_rows) return;
 
     uint blocks = K / 32;
 
+    // All threads stage and reach the barrier; row masking follows it
+    // (same divergent-barrier fix as q8_qkv_proj above, audit F13).
     threadgroup int8_t tg_x8[8192];
     threadgroup float tg_xs[256];
     for (uint i = tid_in_tg; i < K; i += 256)
@@ -114,6 +120,7 @@ kernel void q8_proj_rope(
     for (uint i = tid_in_tg; i < blocks; i += 256)
         tg_xs[i] = X8s[i];
     threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (row >= num_rows) return;
 
     device const char* row_data = (device const char*)(W8 + row * K);
     device const float* row_scales = W8s + row * blocks;
@@ -135,6 +142,13 @@ kernel void q8_proj_rope(
     if (lane == 0) out[row] = acc;
 }
 "#;
+
+/// Hard input-length ceiling from the threadgroup staging arrays
+/// (`tg_x8[8192]` int8 + 256 block scales): the staging loops write
+/// past both for larger K — threadgroup-memory corruption, not a
+/// graceful failure. Host dispatch sites assert against this
+/// (capability audit F13).
+pub const MAX_K: usize = 8192;
 
 pub const ROWS_PER_TG: u64 = 8;
 pub const THREADS_PER_TG: u64 = 256;

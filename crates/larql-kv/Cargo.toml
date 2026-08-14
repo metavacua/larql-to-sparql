@@ -10,6 +10,7 @@ description = "Pluggable KV-cache engines for larql-inference (markov-rs, unlimi
 
 [dependencies]
 larql-inference = { path = "../larql-inference" }
+larql-execution = { path = "../larql-execution" }
 larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-vindex = { path = "../larql-vindex" }
@@ -17,13 +18,11 @@ larql-boundary = { path = "../larql-boundary" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "0.10"
 thiserror = { workspace = true }
 
 ndarray = "0.16"
 zip = { version = "2", default-features = false }
-
-rand = "0.8"
-rand_distr = "0.4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
@@ -50,10 +49,11 @@ gpu = ["dep:larql-compute-metal", "larql-inference/gpu"]
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"
+# Test-only: Lloyd-Max codebook regeneration pins (turbo_quant/codebooks.rs).
+rand = "0.8"
+rand_distr = "0.4"
 
 [[bench]]
 name = "engine_decode"
 harness = false
 
-[[example]]
-name = "engine_ladder"

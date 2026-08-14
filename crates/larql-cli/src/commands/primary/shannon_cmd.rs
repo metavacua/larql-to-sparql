@@ -14,11 +14,14 @@ use clap::{Args, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use larql_inference::attention::SharedKV;
 use larql_inference::forward::{apply_norm, dot_proj};
-use larql_inference::{encode_prompt, InferenceModel, ModelWeights, WeightFfn};
+use larql_inference::{
+    encode_prompt, expert_weights_resolvable, ExpertWeightFfn, FfnBackend, InferenceModel,
+    ModelWeights, WeightFfn,
+};
 use ndarray::{s, Array2};
 
 const LN_2: f64 = std::f64::consts::LN_2;
-const DEFAULT_CONTEXT: usize = 512;
+pub(crate) const DEFAULT_CONTEXT: usize = 512;
 const DEFAULT_STRIDE: usize = 256;
 
 // ── Engine identifiers used across `shannon verify` ─────────────────────
@@ -74,6 +77,20 @@ pub enum ShannonCommand {
     /// (subprocesses); prints a delta table and exits non-zero if any pair-wise
     /// delta exceeds `--threshold`. See `scripts/README_shannon_score.md`.
     Verify(VerifyArgs),
+
+    /// Dump every end-of-layer residual of one forward pass as raw f32 planes.
+    /// The *where* half of Gate B — `verify` says two engines disagree, this
+    /// says at which layer. See [`super::shannon_trace`].
+    LayerDump(super::shannon_trace::LayerDumpArgs),
+
+    /// Compare two `layer-dump` directories layer by layer and name the first
+    /// capture that drifts.
+    LayerDiff(super::shannon_trace::LayerDiffArgs),
+
+    /// CPU-vs-Metal parity across the prefill→decode seam. `layer-diff`
+    /// compares this engine to an external reference over a prefill and so
+    /// cannot see a decode-only defect; this one can.
+    DecodeDiff(super::shannon_trace::DecodeDiffArgs),
 }
 
 #[derive(Args)]
@@ -292,6 +309,11 @@ pub fn run(cmd: ShannonCommand) -> Result<(), Box<dyn std::error::Error>> {
         ShannonCommand::Encode(args) => run_encode(args),
         ShannonCommand::Decode(args) => run_decode(args),
         ShannonCommand::Verify(args) => run_verify(args),
+        ShannonCommand::LayerDump(args) => super::shannon_trace::dump::run_layer_dump(args),
+        ShannonCommand::LayerDiff(args) => super::shannon_trace::compare::run_layer_diff(args),
+        ShannonCommand::DecodeDiff(args) => {
+            super::shannon_trace::decode_diff::run_decode_diff(args)
+        }
     }
 }
 
@@ -963,22 +985,11 @@ struct VindexShannonRuntime {
 }
 
 /// Build the Metal compute backend for `--metal`, or a clear error when the
-/// crate was built without the `gpu` feature (or off macOS). Split by `cfg`
-/// so the gpu-off build rejects through a normal `Result` — a diverging
-/// `let backend = { … return Err … }` binding would otherwise mark all
-/// downstream code unreachable and its locals unused in the gpu-off compile.
-#[cfg(all(feature = "gpu", target_os = "macos"))]
+/// binary lacks the backend or the host lacks a device. Delegates to the
+/// shared registry-backed factory in `backend_select`.
 fn metal_backend_box() -> Result<Box<dyn larql_compute::ComputeBackend>, Box<dyn std::error::Error>>
 {
-    let b = larql_compute_metal::MetalBackend::new()
-        .ok_or("Metal backend unavailable — rebuild with `--features gpu` on an M-series Mac.")?;
-    Ok(Box::new(b))
-}
-
-#[cfg(not(all(feature = "gpu", target_os = "macos")))]
-fn metal_backend_box() -> Result<Box<dyn larql_compute::ComputeBackend>, Box<dyn std::error::Error>>
-{
-    Err("`--metal` requires the `gpu` feature on macOS".into())
+    crate::backend_select::backend_for_metal_flag(true)
 }
 
 fn load_vindex_runtime(
@@ -1294,7 +1305,7 @@ fn run_decode_vindex(args: DecodeArgs) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-fn load_model(model: &str) -> Result<InferenceModel, Box<dyn std::error::Error>> {
+pub(crate) fn load_model(model: &str) -> Result<InferenceModel, Box<dyn std::error::Error>> {
     eprintln!("loading {model}...");
     let start = Instant::now();
     let loaded = InferenceModel::load(model)?;
@@ -1307,7 +1318,7 @@ fn load_model(model: &str) -> Result<InferenceModel, Box<dyn std::error::Error>>
     Ok(loaded)
 }
 
-fn read_text(
+pub(crate) fn read_text(
     path: &PathBuf,
     limit_bytes: Option<usize>,
 ) -> Result<String, Box<dyn std::error::Error>> {
@@ -1413,6 +1424,28 @@ fn print_score_summary(summary: &ScoreSummary, bytes: usize, chars: usize) {
     println!("total bits:     {:>10.1}", summary.total_bits);
 }
 
+/// Pick the FFN backend that matches this model's architecture.
+///
+/// The scorer used to hardcode [`WeightFfn`], which resolves the *dense*
+/// `ffn_{gate,up,down}_key`. A mixture-of-experts model has no such tensors,
+/// so scoring one panicked with a misleading "this is a `--compact` vindex"
+/// hint — the tensors were not missing, they never existed for that
+/// architecture. That made `shannon verify` unusable on every MoE model, which
+/// is the entire model class the K3 ladder is built on (GPT-OSS, Kimi Linear,
+/// K3). See `docs/k3-funnel.md` §4.7.
+///
+/// `expert_weights_resolvable` gates on the weights actually being present, so
+/// a MoE architecture whose experts are packed rather than per-expert f32 still
+/// falls through to the dense path and fails with its own error rather than
+/// half-resolving here.
+fn score_ffn(weights: &ModelWeights) -> Box<dyn FfnBackend + '_> {
+    if weights.arch.is_moe() && expert_weights_resolvable(weights, 0) {
+        Box::new(ExpertWeightFfn { weights })
+    } else {
+        Box::new(WeightFfn { weights })
+    }
+}
+
 fn forward_hidden(
     weights: &ModelWeights,
     token_ids: &[u32],
@@ -1420,7 +1453,7 @@ fn forward_hidden(
     if token_ids.is_empty() {
         return Err("empty token window".into());
     }
-    let ffn = WeightFfn { weights };
+    let ffn = score_ffn(weights);
     let mut h = larql_inference::forward::embed_tokens_pub(weights, token_ids);
     let ple_inputs =
         larql_inference::forward::ple::precompute_per_layer_inputs(weights, &h, token_ids);
@@ -1434,7 +1467,7 @@ fn forward_hidden(
             larql_inference::WeightsView::dense(weights),
             &h,
             layer,
-            &ffn,
+            &*ffn,
             false,
             ple_inputs.get(layer),
             shared_kv,
@@ -1448,14 +1481,14 @@ fn forward_hidden(
     Ok(h)
 }
 
-fn forward_hidden_all_layers(
+pub(crate) fn forward_hidden_all_layers(
     weights: &ModelWeights,
     token_ids: &[u32],
 ) -> Result<Vec<Array2<f32>>, Box<dyn std::error::Error>> {
     if token_ids.is_empty() {
         return Err("empty token window".into());
     }
-    let ffn = WeightFfn { weights };
+    let ffn = score_ffn(weights);
     let h0 = larql_inference::forward::embed_tokens_pub(weights, token_ids);
     let ple_inputs =
         larql_inference::forward::ple::precompute_per_layer_inputs(weights, &h0, token_ids);
@@ -1472,7 +1505,7 @@ fn forward_hidden_all_layers(
             larql_inference::WeightsView::dense(weights),
             &h,
             layer,
-            &ffn,
+            &*ffn,
             false,
             ple_inputs.get(layer),
             shared_kv,

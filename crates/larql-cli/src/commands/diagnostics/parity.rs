@@ -12,7 +12,8 @@
 //! v2 (planned) — Metal as a third backend, attention/dense-ffn/layer/forward
 //! components. v3 — HF Python sidecar for ground-truth reference.
 //!
-//! See `crates/larql-cli/ROADMAP.md` P0 → "`larql parity`" for the full design.
+//! What shipped is in `crates/larql-cli/CHANGELOG.md` (2026-05-10); the
+//! remaining open scoping work is `ROADMAP.md` → "P2: parity polish".
 
 // Without the `gpu`+macOS feature the real `run` (and everything it calls —
 // the naive reference impls, MoE helpers, dump utilities) is `#[cfg]`'d out,
@@ -156,10 +157,13 @@ pub fn run(args: ParityArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // lm-head parity is backend-agnostic (Q4_K matvec vs f32 reference) —
-    // works on any vindex that has an lm_head, MoE or dense.
-    if !arch.is_hybrid_moe() && args.component != "lm-head" {
+    // works on any vindex that has an lm_head, MoE or dense. The moe-*
+    // components need an expert store, which pure MoE (GPT-OSS, OLMoE,
+    // GraniteMoE) has exactly as hybrid does — gating on hybrid alone was
+    // the `is_hybrid_moe()`-only assumption this codebase keeps finding.
+    if !(arch.is_moe() || arch.is_hybrid_moe()) && args.component != "lm-head" {
         return Err(format!(
-            "vindex {} is not hybrid-MoE — moe-* components are MoE-only",
+            "vindex {} is not MoE — moe-* components are MoE-only",
             args.model
         )
         .into());
@@ -348,7 +352,7 @@ fn run_moe_expert(
                 arch.norm_weight_offset(),
                 arch.norm_eps(),
                 QuantFormat::Q4_K,
-                activation,
+                larql_compute::ExpertMlp::gated(activation),
             ),
             _ => return Err(format!("backend '{backend}' not yet wired for moe-expert").into()),
         };
@@ -429,7 +433,10 @@ fn run_moe_block(
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(activation),
     };
 
     let mut traces: Vec<(&str, Vec<f32>)> = Vec::new();

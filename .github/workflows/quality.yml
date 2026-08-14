@@ -1,0 +1,257 @@
+# Workspace-level quality and supply-chain gates.
+#
+# The per-crate workflows (larql-*.yml) each cover fmt / check / clippy /
+# test / coverage for one crate. Nothing there looks at the dependency
+# graph as a whole, so until this workflow existed a RUSTSEC advisory
+# against a transitive crate was invisible to CI. See issue #165.
+#
+# Jobs:
+#   audit       — RustSec advisory scan of Cargo.lock            (blocking)
+#   deny        — licences, advisories, sources, bans            (blocking)
+#   msrv        — the declared rust-version really compiles      (blocking)
+#   proto-lint  — buf lint over the four gRPC schemas            (blocking)
+#   doc-links   — every relative Markdown link resolves          (blocking)
+#   mutants     — mutation testing on the PR diff             (informational)
+#
+# NOTE ON `schedule`: this workflow deliberately has no `paths:` filter and
+# runs weekly. Advisories are published against code that has not changed —
+# the wasmtime and pyo3 findings that motivated #165 sat in a Cargo.lock
+# nobody had touched for months. A workflow that only fires when
+# Cargo.lock changes cannot catch that class of problem.
+
+name: quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 06:00 UTC — a fresh advisory-db scan against unchanged code.
+    - cron: '0 6 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      # Vulnerabilities fail the build. Unmaintained/unsound *warnings* do
+      # not: the four currently outstanding (number_prefix, paste,
+      # rustls-pemfile, scc) are all pinned by upstream crates we do not
+      # control, so failing on them would mean a permanently red gate that
+      # people learn to ignore. They are still printed in the log, and the
+      # rationale for each is recorded in deny.toml.
+      - name: Scan Cargo.lock for advisories
+        run: cargo audit --color always
+
+  deny:
+    name: cargo-deny · ${{ matrix.check }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Split so a licence failure and an advisory failure are
+        # distinguishable at a glance in the checks list.
+        check: [advisories, licenses, bans, sources]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: cargo-deny ${{ matrix.check }}
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.check }}
+
+  msrv:
+    # Named without the version: a job-level `name` cannot reference `steps`,
+    # and hardcoding a number here would be a second place to forget to bump.
+    name: MSRV · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      # Split by platform because no single runner can build the whole
+      # workspace. `larql-compute-metal` takes `blas-src` only under
+      # `cfg(target_os = "macos")` while its examples `extern crate blas_src`
+      # unconditionally, so on Linux they fail to resolve at *any* toolchain —
+      # nothing to do with the MSRV. Its own workflow is macOS-only for the
+      # same reason.
+      #
+      # So: Linux checks the workspace minus that crate (covering the
+      # cfg(linux) OpenBLAS paths in larql-compute and larql-inference), and
+      # macOS checks the crate Linux cannot. Between them every member crate
+      # is MSRV-gated with no silent hole.
+      matrix:
+        include:
+          - os: ubuntu-latest
+            args: --workspace --all-targets --exclude larql-compute-metal
+          - os: macos-14
+            args: -p larql-compute-metal --all-targets
+    steps:
+      - uses: actions/checkout@v7
+
+      # Read the declared MSRV out of Cargo.toml rather than hardcoding it
+      # here, so bumping rust-version in one place updates the gate too.
+      - name: Read declared rust-version
+        id: msrv
+        run: |
+          version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ -z "$version" ]; then
+            echo "::error::no rust-version found in workspace Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "declared MSRV: $version"
+
+      - name: Install Rust ${{ steps.msrv.outputs.version }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - name: Install OpenBLAS
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-msrv-${{ steps.msrv.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-msrv-${{ steps.msrv.outputs.version }}-
+
+      # This is `cargo check` at the pinned toolchain rather than
+      # `cargo msrv verify`. cargo-msrv bisects across many toolchains to
+      # *discover* the minimum; we already know what we claim, and the only
+      # question CI needs answered is whether the claim is true. One pinned
+      # check answers it in a fraction of the time.
+      #
+      # `--locked` matters: without it cargo may resolve a newer dependency
+      # than Cargo.lock pins and the job would test a graph nobody ships.
+      - name: Check at declared MSRV
+        run: cargo check ${{ matrix.args }} --locked
+
+  doc-links:
+    name: doc links
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      # Docs move between docs/ and crates/*/docs/ and their links get left
+      # behind: the tree carried 45 dead relative links on 2026-08-07, seven of
+      # them in README.md alone (found by an outside contributor, PR #211).
+      # Nothing fails when a link dies -- the reader just lands nowhere -- so
+      # it needs a gate rather than review attention.
+      - name: Check relative documentation links
+        run: python3 scripts/check_doc_links.py
+
+  proto-lint:
+    name: buf lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install buf
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+
+      - name: Lint gRPC schemas
+        run: buf lint
+
+      # Catches a malformed schema that lint alone would not (bad imports,
+      # duplicate field numbers, unresolvable types).
+      - name: Build descriptor set
+        run: buf build --output /dev/null
+
+  mutants:
+    name: cargo-mutants (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # PR-only: --in-diff needs a base to diff against, and a full-workspace
+    # mutation run is many hours of compute.
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@cargo-mutants
+
+      - name: Install OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Compute PR diff
+        run: |
+          git diff "origin/${{ github.base_ref }}...HEAD" > /tmp/pr.diff
+          echo "diff is $(wc -l < /tmp/pr.diff) lines"
+
+      # This job is a signal, not a gate, and it is capped twice over:
+      # `--in-diff` restricts mutants to lines the PR touched, and
+      # `timeout-minutes: 45` bounds the job.
+      #
+      # Read a *timed-out* run as "incomplete", never as "clean". If the job
+      # hits the wall clock the runner kills this step and the summary below
+      # never prints — the only evidence is the job's own timeout status.
+      # `--no-shuffle` at least makes the mutants it did get through a
+      # deterministic prefix rather than a random sample, and the report
+      # upload runs `if: always()` so partial results survive.
+      - name: Mutation-test the diff
+        run: |
+          set +e
+          cargo mutants --in-diff /tmp/pr.diff --timeout 120 --no-shuffle
+          echo "cargo-mutants exit status: $?"
+
+          # Summarise from the per-outcome text files rather than
+          # outcomes.json — these filenames are cargo-mutants' stable
+          # surface, and one line per mutant is what a reviewer wants in
+          # the log anyway.
+          echo "--- mutation summary ---"
+          for f in caught missed timeout unviable; do
+            path="mutants.out/$f.txt"
+            if [ -f "$path" ]; then
+              printf '%5d  %s\n' "$(wc -l < "$path")" "$f"
+            fi
+          done
+
+          if [ -s mutants.out/missed.txt ]; then
+            echo
+            echo "Mutants that survived — the tests did not notice these edits:"
+            cat mutants.out/missed.txt
+          fi
+          exit 0
+
+      - name: Upload mutants report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutants-report
+          path: mutants.out/
+          if-no-files-found: ignore

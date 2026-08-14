@@ -77,6 +77,7 @@ mod tests {
             attn_ms: 4.0,
             gate_up_ms: 2.0,
             down_ms: 0.5,
+            ..Default::default()
         };
         store_last_split_timings(written);
         let read = take_last_split_timings().expect("stored timing should be present");

@@ -24,18 +24,27 @@
 //!   cargo run --release --features metal -p larql-inference \
 //!     --example decode_vs_prefill -- <vindex-dir> [prompt]
 
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 extern crate blas_src;
 
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 use std::path::PathBuf;
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 use std::time::Instant;
 
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 use larql_compute::{ComputeBackend, DecodeBackend};
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 use larql_inference::layer_graph::generate::generate;
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 use larql_inference::layer_graph::CachedLayerGraph;
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 use larql_inference::wrap_chat_prompt;
 
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 const DEFAULT_EXAMPLE_KV_CACHE_MAX_SEQ: usize = 4096;
 
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let vindex_path = PathBuf::from(
@@ -322,6 +331,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 fn build_layers<'a>(
     weights: &'a larql_inference::model::ModelWeights,
     index: &'a larql_vindex::VectorIndex,
@@ -358,6 +368,7 @@ fn build_layers<'a>(
     )
 }
 
+#[cfg(all(feature = "gpu", target_os = "macos"))]
 fn compare(a: &[f32], b: &[f32]) -> (f32, f32, f32, f32) {
     let mut dot = 0.0f64;
     let mut an = 0.0f64;
@@ -380,4 +391,9 @@ fn compare(a: &[f32], b: &[f32]) -> (f32, f32, f32, f32) {
         0.0
     };
     (cos, max_abs, an.sqrt() as f32, bn.sqrt() as f32)
+}
+
+#[cfg(not(all(feature = "gpu", target_os = "macos")))]
+fn main() {
+    eprintln!("decode_vs_prefill requires `--features metal` on macOS.");
 }

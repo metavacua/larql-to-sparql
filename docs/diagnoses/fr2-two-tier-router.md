@@ -1,6 +1,6 @@
 # FR2 — two-tier router (symbolic-primary → activation-fuzzy fallback): VERDICT
 
-**Date:** 2026-06-07. **Status:** ran (`crates/larql-inference/examples/fr2_two_tier_router.rs` → `bench/aim-validation/fr2_two_tier_router_gemma3-4b.json`). Gemma-3-4B Q4K vindex, store over 115 canonical countries, 10 historical/alternate-name aliases, layers {24,26}. Reproduces fleet E16's alias slice on the production path. Pre-registration: [`docs/fleet-routing-extensions.md`](../fleet-routing-extensions.md) §FR2. Depends on FR1.
+**Date:** 2026-06-07. **Status:** ran (`chris-experiments/larql_probes/examples/fleet_routing/fr2_two_tier_router.rs` → `bench/aim-validation/fr2_two_tier_router_gemma3-4b.json`). Gemma-3-4B Q4K vindex, store over 115 canonical countries, 10 historical/alternate-name aliases, layers {24,26}. Reproduces fleet E16's alias slice on the production path. Pre-registration: [`docs/fleet-routing-extensions.md`](../fleet-routing-extensions.md) §FR2. Depends on FR1.
 
 ## Headline
 
@@ -35,7 +35,7 @@ A two-tier dispatch in the override (and surfaced in LQL): **exact-string (`entr
 
 Exact-string is the precise primary (1.0 on names); the activation key is the alias/paraphrase fallback that recovers what exact-match misses (0/10 → 10/10 on famous aliases, ~0.9 top-5 in general). Sequenced two-tier with the FR1 verifier bounding mis-routes, this is the resolved routing architecture — **build greenlit**, with the general-rate and confident-wrong caveats stated.
 
-**Artifacts:** `crates/larql-inference/examples/fr2_two_tier_router.rs`, `bench/aim-validation/fr2_two_tier_router_gemma3-4b.json`.
+**Artifacts:** `chris-experiments/larql_probes/examples/fleet_routing/fr2_two_tier_router.rs`, `bench/aim-validation/fr2_two_tier_router_gemma3-4b.json`.
 
 ---
 
