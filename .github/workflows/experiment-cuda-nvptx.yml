@@ -1,9 +1,17 @@
-# Experiment: clippy + build pipeline for larql-cli on nvptx64-nvidia-cuda.
+# Experiment: exhaustive clippy + build attempts for every workspace crate
+# on nvptx64-nvidia-cuda -- same pattern as every other target job in this
+# project -- run it and let it break, the breakage is the analysis data.
+# Test/execution is deferred pending a separate decision on GPU/CUDA
+# emulation for free-tier runners.
 #
-# For starters: lint and build only, against larql-cli itself, same pattern
-# as every other target job in this project -- run it and let it break, the
-# breakage is the analysis data. Test/execution is deferred pending a
-# separate decision on GPU/CUDA emulation for free-tier runners.
+# Matrixed across all 19 workspace crates x {default, no-default} features
+# (38 jobs, fail-fast disabled) rather than just larql-cli: GitHub-hosted
+# runner time costs nothing at this project's tier, so there is no reason to
+# predict which crates would fail from dependency-graph analysis alone when
+# CI can just attempt every one of them for real and get ground truth
+# instead of a guess. `--keep-going` on both Clippy and Build so a single
+# failing crate within a job's own dependency graph doesn't hide every other
+# independent error that job could otherwise have surfaced in the same run.
 #
 # Toolchain requirement, confirmed via doc.rust-lang.org and a local test
 # build: nightly + `rust-src` + `llvm-tools` + `llvm-bitcode-linker`
@@ -25,10 +33,34 @@ on:
 
 jobs:
   nvptx64-nvidia-cuda:
-    name: nvptx64-nvidia-cuda
+    name: nvptx64-nvidia-cuda (${{ matrix.crate }}, ${{ matrix.features }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - larql-models
+          - larql-compute
+          - larql-compute-metal
+          - larql-core
+          - larql-vindex
+          - larql-vindex-spec
+          - larql-execution
+          - larql-factory
+          - larql-inference
+          - larql-kv
+          - larql-lql
+          - larql-cli
+          - larql-demos
+          - larql-server
+          - larql-router
+          - larql-router-protocol
+          - larql-python
+          - larql-boundary
+          - model-compute
+        features: [default, no-default]
     steps:
       - uses: actions/checkout@v7
 
@@ -39,6 +71,15 @@ jobs:
 
       - name: Install llvm-bitcode-linker
         run: rustup component add llvm-bitcode-linker --toolchain nightly
+
+      - name: Set feature flag
+        id: feat
+        run: |
+          if [ "${{ matrix.features }}" = "no-default" ]; then
+            echo "flag=--no-default-features" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
 
       # Dependency resolution doesn't require a successful compile, so this
       # runs unconditionally and captures *why* each crate is in the graph
@@ -51,16 +92,16 @@ jobs:
         run: |
           {
             echo '```'
-            cargo +nightly tree -p larql-cli --no-default-features --target nvptx64-nvidia-cuda -e normal,build,features
+            cargo +nightly tree -p ${{ matrix.crate }} ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -e normal,build,features
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Clippy
         id: clippy
         continue-on-error: true
-        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly clippy -p larql-cli --bins --tests --no-default-features --no-deps --target nvptx64-nvidia-cuda -Zbuild-std=std -- -D warnings
+        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly clippy -p ${{ matrix.crate }} --all-targets ${{ steps.feat.outputs.flag }} --no-deps --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going -- -D warnings
 
       - name: Build
         id: build
         continue-on-error: true
-        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly build -p larql-cli --bins --no-default-features --target nvptx64-nvidia-cuda -Zbuild-std=std
+        run: RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly build -p ${{ matrix.crate }} --all-targets ${{ steps.feat.outputs.flag }} --target nvptx64-nvidia-cuda -Zbuild-std=std --keep-going
