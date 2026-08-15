@@ -535,12 +535,30 @@ jobs:
       # `crates/*/Cargo.toml` in this ephemeral checkout (not just the
       # matrix target), since the dependency chain runs through crates
       # other than whichever one is currently under test.
+      # Pattern too narrow the first time: only matched the exact string
+      # `serde = { workspace = true }`, missing `serde = { workspace =
+      # true, features = ["derive"] }` (used by larql-cli, larql-demos,
+      # larql-router, larql-lql, larql-server -- confirmed via grep across
+      # every crates/*/Cargo.toml). Cargo unifies a dependency's features
+      # across the WHOLE workspace lockfile for any -p-scoped build run
+      # from inside the workspace, not just the selected package, so those
+      # 5 unpatched crates' still-default serde polluted every other
+      # crate's build -- exactly why larql-vindex-spec's own (correctly
+      # patched) serde line still produced an identical cascade: the
+      # isolated serde-nostd-probe job (fully outside this workspace, no
+      # other consumers to unify against) passed cleanly, proving the
+      # de::value module itself works fine; only builds run from inside
+      # the workspace, where the 5 unpatched crates were still present in
+      # the same lockfile, kept failing. `[^}]*` matches any trailing
+      # content after `workspace = true` so both variants are caught.
       - name: "Stage B2: patch std-defaulting dependency features"
         run: |
-          sed -i \
-            's/serde = { workspace = true }/serde = { version = "1", default-features = false, features = ["derive", "alloc"] }/' \
+          sed -i -E \
+            's/serde = \{ workspace = true[^}]*\}/serde = { version = "1", default-features = false, features = ["derive", "alloc"] }/' \
             crates/*/Cargo.toml
           grep -rn 'default-features = false, features = \["derive", "alloc"\]' crates/*/Cargo.toml || true
+          echo "--- remaining unpatched serde lines (should be none, or already std-free) ---"
+          grep -rn '^serde = ' crates/*/Cargo.toml | grep -v 'default-features = false' || true
 
       # Root cause found, not guessed: the diagnostic's first run (before
       # this fix) showed `serde feature "default"` active, pulled in by
