@@ -74,14 +74,6 @@ jobs:
     name: nvptx64-nvidia-cuda preconditions (deny + native-link scan)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # Kept identical to the main job's PKGS -- see its own comment for how
-      # this list was derived.
-      PKGS: >-
-        -p larql-boundary -p larql-cli -p larql-compute -p larql-core
-        -p larql-execution -p larql-factory -p larql-inference -p larql-kv
-        -p larql-lql -p larql-models -p larql-router-protocol -p larql-vindex
-        -p larql-vindex-spec
     steps:
       - uses: actions/checkout@v7
 
@@ -112,18 +104,19 @@ jobs:
       # build.rs before trusting it either way -- `links` alone is not
       # sufficient evidence, confirmed the hard way earlier this session).
       #
-      # Scoped with $PKGS, no --no-default-features: `cargo metadata`
-      # without an explicit -p/--workspace resolves differently across this
-      # virtual-manifest workspace than `-p <pkgs> --no-default-features`
-      # does -- confirmed directly, it pulled in aws-lc-rs/aws-lc-sys (real
-      # dependencies of the out-of-scope larql-python, not of larql-cli) as
-      # false candidates when run unscoped. $PKGS with full features is a
-      # deliberate superset of what Clippy/Build's no-default run touches,
-      # which is the right choice for a catch-anything-new candidate scan.
+      # `cargo metadata` has no -p/--package flag at all (confirmed via
+      # `cargo metadata --help`) -- it always resolves the whole workspace
+      # graph; there is no way to scope the command itself the way
+      # build/clippy/tree can be scoped with -p. All scoping here comes
+      # from the Python reachability traversal below, which walks real
+      # dependency edges starting from the larql-cli root -- that's what
+      # correctly excludes aws-lc-rs/aws-lc-sys (real dependencies of the
+      # out-of-scope larql-python, not of larql-cli) even though they're
+      # present in this same whole-workspace metadata dump.
       - name: Native-link dependency scan (candidates for manual verification)
         if: always()
         run: |
-          cargo +nightly metadata --format-version=1 $PKGS --filter-platform nvptx64-nvidia-cuda > meta.json
+          cargo +nightly metadata --format-version=1 --filter-platform nvptx64-nvidia-cuda > meta.json
           {
             echo '### Native-link (`links` field) reachability from larql-cli'
             echo '```'
@@ -234,6 +227,14 @@ jobs:
 
       # Per-crate pass/fail plus the rendered diagnostic text, both derived
       # from the same JSON stream captured above -- no second build needed.
+      #
+      # Rendered-diagnostics dump capped at 200KB: GitHub's step summary has
+      # a hard 1024KB limit and silently drops the ENTIRE summary if
+      # exceeded (confirmed the hard way -- a later job in this same
+      # workflow tried to upload ~5995KB and lost its whole summary, not
+      # just the overflow). The full, untruncated JSON is uploaded as a
+      # real artifact below specifically so nothing is actually lost to
+      # this cap -- only the inline convenience view is capped.
       - name: Per-crate summary
         if: always()
         run: |
@@ -246,14 +247,24 @@ jobs:
               jq -r 'select(.reason=="compiler-message" and .message.level=="error") | .target.name' "$f" 2>/dev/null \
                 | sort | uniq -c | sort -rn
               echo '```'
-              echo "<details><summary>$f -- rendered diagnostics</summary>"
+              echo "<details><summary>$f -- rendered diagnostics (capped at 200KB; full data in the uploaded artifact)</summary>"
               echo ''
               echo '```'
-              jq -r 'select(.reason=="compiler-message") | .message.rendered' "$f" 2>/dev/null
+              jq -r 'select(.reason=="compiler-message") | .message.rendered' "$f" 2>/dev/null | head -c 200000
               echo '```'
               echo '</details>'
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload full diagnostic JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvptx-${{ matrix.features }}-diagnostics
+          path: |
+            clippy.json
+            build.json
+          if-no-files-found: ignore
 
       # No continue-on-error on this one: it's the only step allowed to
       # decide the job's real conclusion. Clippy/Build's own `outcome` (not
@@ -333,6 +344,14 @@ jobs:
   # produce, not a bug in the pipeline.
   nostd-fix-attempt:
     name: no_std fix attempt (${{ matrix.crate }}, ${{ matrix.profile }})
+    needs: [nvptx-preconditions, nvptx64-nvidia-cuda]
+    # needs: implies an implicit success() gate by default -- but
+    # nvptx64-nvidia-cuda is EXPECTED to honestly fail (std doesn't build
+    # for this target, confirmed, that's the correct current state), so
+    # without this override this job would never run at all. !cancelled()
+    # (not always()) still lets an actual user-initiated cancellation
+    # propagate instead of spinning this job up anyway.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -372,11 +391,58 @@ jobs:
           cargo +nightly clippy -p ${{ matrix.crate }} --lib --message-format=json -- \
             -D clippy::print_stdout -D clippy::print_stderr -D clippy::exit -D clippy::dbg_macro > hygiene.json
 
+      # Naive prepend broke files that start with their own `//!` module
+      # doc comment (larql-execution: 48x "expected outer doc comment") --
+      # inner attributes and inner doc comments may interleave freely at
+      # the top of a file, but `extern crate alloc;` is a real item, and
+      # once a real item appears, no further `//!` may follow it. Confirmed
+      # by reading the actual crate sources before writing this fix, not
+      # assumed. Inserted after the file's existing leading `//!`/`#![`/
+      # blank-line block instead of before it.
       - name: "Stage B: inject #![no_std] scaffold"
         run: |
           LIB="crates/${{ matrix.crate }}/src/lib.rs"
-          printf '#![no_std]\nextern crate alloc;\n%s\n' "$(cat "$LIB")" > "$LIB.new"
-          mv "$LIB.new" "$LIB"
+          python3 - "$LIB" << 'PYEOF'
+          import sys
+          path = sys.argv[1]
+          with open(path) as f:
+              lines = f.readlines()
+          i = 0
+          while i < len(lines):
+              s = lines[i].strip()
+              if s.startswith('//!') or s.startswith('#![') or s == '':
+                  i += 1
+              else:
+                  break
+          lines[i:i] = ['#![no_std]\n', 'extern crate alloc;\n']
+          with open(path, 'w') as f:
+              f.writelines(lines)
+          PYEOF
+
+      # Stage B2: the previous run confirmed a REAL blocker distinct from
+      # anything Stage A/B address: the workspace's serde dependency
+      # (`serde = { version = "1", features = ["derive"] }`, no
+      # `default-features = false`) keeps its default `std` feature active.
+      # larql-vindex-spec and larql-boundary depend on it directly;
+      # larql-models inherits it via larql-vindex-spec; larql-compute
+      # inherits it via larql-models. Only larql-execution (zero
+      # dependencies, confirmed by reading its Cargo.toml) was unaffected --
+      # which is why it was the one crate with a small, real Stage C signal
+      # instead of a multi-thousand-line cascade of "cannot find X in this
+      # scope" for basically the entire core prelude. No CLI flag fixes
+      # this (`--no-default-features` on the crate itself doesn't touch a
+      # dependency's own defaults unless the crate's Cargo.toml already
+      # opts that dependency out, which none of these do) -- it needs an
+      # actual Cargo.toml edit. Patched workspace-wide across every
+      # `crates/*/Cargo.toml` in this ephemeral checkout (not just the
+      # matrix target), since the dependency chain runs through crates
+      # other than whichever one is currently under test.
+      - name: "Stage B2: patch std-defaulting dependency features"
+        run: |
+          sed -i \
+            's/serde = { workspace = true }/serde = { version = "1", default-features = false, features = ["derive", "alloc"] }/' \
+            crates/*/Cargo.toml
+          grep -rn 'default-features = false, features = \["derive", "alloc"\]' crates/*/Cargo.toml || true
 
       # Stage C -- the only stage whose dead_code/unused_*/unsafe_code
       # signal is honest for this target. -D on the mechanical lints too:
@@ -408,10 +474,39 @@ jobs:
             jq -r 'select(.reason=="compiler-message" and .message.level=="error") | .message.message' nostd_check.json 2>/dev/null \
               | sort | uniq -c | sort -rn
             echo '```'
-            echo "<details><summary>Stage C rendered diagnostics</summary>"
+            echo "<details><summary>Stage C rendered diagnostics (capped at 200KB; full data in the uploaded artifact)</summary>"
             echo ''
             echo '```'
-            jq -r 'select(.reason=="compiler-message") | .message.rendered' nostd_check.json 2>/dev/null
+            jq -r 'select(.reason=="compiler-message") | .message.rendered' nostd_check.json 2>/dev/null | head -c 200000
             echo '```'
             echo '</details>'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload full diagnostic JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nostd-fix-${{ matrix.crate }}-${{ matrix.profile }}-diagnostics
+          path: |
+            hygiene.json
+            nostd_check.json
+          if-no-files-found: ignore
+
+      # Same honest-result discipline as nvptx64-nvidia-cuda's own final
+      # step, applied here too -- Stage C used continue-on-error so the
+      # summary step above still runs regardless, but nothing had unmasked
+      # the job's own conclusion yet, which would have silently repeated
+      # the exact green-camouflage bug fixed earlier in this workflow.
+      # Green here means something real: this crate, on this profile,
+      # currently compiles cleanly against nvptx64-nvidia-cuda under
+      # core+alloc. Red means it doesn't yet, which is the true, expected
+      # state for most cells right now (3 of 5 candidates are already known
+      # to use std::collections::HashMap, a hard, non-mechanical blocker).
+      - name: Assert honest result
+        if: always()
+        run: |
+          if [ "${{ steps.nostd_check.outcome }}" = "failure" ]; then
+            echo "::error::${{ matrix.crate }} (${{ matrix.profile }}) does not yet compile cleanly against nvptx64-nvidia-cuda under -Zbuild-std=core,alloc -- see Stage C in the summary above."
+            exit 1
+          fi
+          echo "${{ matrix.crate }} (${{ matrix.profile }}) compiles cleanly against nvptx64-nvidia-cuda under -Zbuild-std=core,alloc."
