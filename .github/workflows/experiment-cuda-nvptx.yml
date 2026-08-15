@@ -62,6 +62,104 @@ on:
     branches: [experiment/cuda-nvptx-lint-build]
 
 jobs:
+  # Narrow, isolated question: does ANY serde feature combination compile
+  # cleanly against nvptx64-nvidia-cuda under -Zbuild-std=core,alloc? Found
+  # by tracing the real Stage C error for larql-boundary (a single-serde-
+  # dependency crate) to its actual source location: serde_core-1.0.228's
+  # own de::value.rs references bare Result/Option without importing them
+  # -- not larql-boundary's own code, and not fixed by the
+  # default-features=false + ["derive","alloc"] combo already tried
+  # (Stage B2). Isolated in a throwaway probe crate rather than tested via
+  # larql-boundary/vindex-spec/models/compute directly, specifically to
+  # separate "does serde itself support this target" from "does our own
+  # scaffold/patch pipeline work" -- those are different questions, and
+  # conflating them was exactly what made the first diagnosis (this
+  # session's serde-default-features theory) only half right.
+  serde-nostd-probe:
+    name: "serde no_std probe (features: ${{ matrix.serde_features }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        serde_features: ['alloc', 'derive,alloc']
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src, llvm-tools
+
+      - name: Install llvm-bitcode-linker
+        run: rustup component add llvm-bitcode-linker --toolchain nightly
+
+      - name: Scaffold probe crate
+        run: |
+          mkdir -p /tmp/serde-probe/src
+          IFS=',' read -ra FEATS <<< "${{ matrix.serde_features }}"
+          QUOTED=$(printf '"%s", ' "${FEATS[@]}")
+          QUOTED="${QUOTED%, }"
+          cat > /tmp/serde-probe/Cargo.toml << EOF
+          [package]
+          name = "serde-probe"
+          version = "0.0.0"
+          edition = "2021"
+          publish = false
+
+          [lib]
+
+          [dependencies]
+          serde = { version = "1", default-features = false, features = [$QUOTED] }
+          EOF
+          # References serde::de::value directly rather than going through
+          # #[derive] -- that's the exact module the real larql-boundary
+          # failure traced back to (serde_core-1.0.228/src/de/value.rs),
+          # so this tests the same code path regardless of whether the
+          # "derive" feature is even present in this matrix cell.
+          # A bare type reference is enough to force serde_core's de::value
+          # module to actually compile -- deliberately not calling any
+          # methods on it, since their exact signatures can't be verified
+          # without a local compile, and a typo there would be
+          # indistinguishable from a real target failure in the result.
+          cat > /tmp/serde-probe/src/lib.rs << 'EOF'
+          #![no_std]
+          extern crate alloc;
+          use serde::de::value::Error as ValueError;
+
+          pub fn probe(e: ValueError) -> ValueError {
+              e
+          }
+          EOF
+          cat /tmp/serde-probe/Cargo.toml
+
+      - name: Probe build against nvptx64-nvidia-cuda (core+alloc)
+        id: probe
+        continue-on-error: true
+        working-directory: /tmp/serde-probe
+        run: |
+          RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly build --target nvptx64-nvidia-cuda -Zbuild-std=core,alloc --keep-going --message-format=json > probe.json
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### serde probe: features = [${{ matrix.serde_features }}]"
+            echo '```'
+            jq -r 'select(.reason=="compiler-message" and .message.level=="error") | .message.message' /tmp/serde-probe/probe.json 2>/dev/null \
+              | sort | uniq -c | sort -rn
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Assert honest result
+        if: always()
+        run: |
+          if [ "${{ steps.probe.outcome }}" = "failure" ]; then
+            echo "::error::serde with features=[${{ matrix.serde_features }}] does not compile cleanly against nvptx64-nvidia-cuda under -Zbuild-std=core,alloc."
+            exit 1
+          fi
+          echo "serde with features=[${{ matrix.serde_features }}] compiles cleanly against nvptx64-nvidia-cuda under -Zbuild-std=core,alloc."
+
   # Fast, pre-compile precondition checks: does the target-resolved
   # dependency graph contain anything already known to be a hard,
   # native-toolchain wall, and has anything NEW shown up that hasn't been
