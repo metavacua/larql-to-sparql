@@ -542,35 +542,40 @@ jobs:
             crates/*/Cargo.toml
           grep -rn 'default-features = false, features = \["derive", "alloc"\]' crates/*/Cargo.toml || true
 
-      # Evidence, not another guess: the isolated serde-nostd-probe job
-      # (same feature set, same target, same -Zbuild-std=core,alloc)
-      # compiles cleanly standalone, so serde_core's de::value module is
-      # NOT fundamentally incompatible with this target -- meaning
-      # Stage B2's patch not moving Stage C's result must come from
-      # something specific to this crate's actual build context, not from
-      # serde itself. This shows serde's REAL resolved feature set for the
-      # exact build Stage C is about to attempt, before speculating further
-      # about why it differs from the probe.
+      # Root cause found, not guessed: the diagnostic's first run (before
+      # this fix) showed `serde feature "default"` active, pulled in by
+      # criterion (a dev-dependency, used for benchmarks) -> ciborium ->
+      # serde's own default std feature. Stage C's `--lib` flag limits what
+      # gets COMPILED, but Cargo still unifies dev-dependency feature
+      # requirements into the same resolution by default, silently merging
+      # criterion's std-requiring serde with larql-boundary's own
+      # no-std-patched serde and overriding Stage B2's patch entirely.
+      # -Z avoid-dev-deps is a real, long-standing nightly flag built
+      # specifically for this: skip resolving dev-dependencies when they
+      # aren't needed for the requested build. Verified accepted (exit 0,
+      # no "unknown -Z flag" error) before adding it here.
       - name: "Diagnostic: serde's actual resolved features for this build"
         if: always()
         run: |
           {
             echo "### serde feature resolution for ${{ matrix.crate }} (${{ matrix.profile }})"
             echo '```'
-            cargo +nightly tree -p ${{ matrix.crate }} --target nvptx64-nvidia-cuda -Zbuild-std=core,alloc -e features -i serde 2>&1
+            cargo +nightly tree -p ${{ matrix.crate }} --target nvptx64-nvidia-cuda -Zbuild-std=core,alloc -Z avoid-dev-deps -e features -i serde 2>&1
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Stage C -- the only stage whose dead_code/unused_*/unsafe_code
       # signal is honest for this target. -D on the mechanical lints too:
       # anything Stage A's fixer couldn't rewrite becomes a visible, named
-      # error here instead of an opaque unresolved-path error.
+      # error here instead of an opaque unresolved-path error. -Z
+      # avoid-dev-deps added per the diagnostic above -- single, minimal
+      # change, one hypothesis, testing before layering on anything else.
       - name: "Stage C: target-relative check against nvptx64-nvidia-cuda"
         id: nostd_check
         continue-on-error: true
         run: |
           RUSTFLAGS='-Ctarget-cpu=sm_89' cargo +nightly clippy -p ${{ matrix.crate }} --lib \
-            --target nvptx64-nvidia-cuda -Zbuild-std=core,alloc --keep-going --message-format=json -- \
+            --target nvptx64-nvidia-cuda -Zbuild-std=core,alloc -Z avoid-dev-deps --keep-going --message-format=json -- \
             -W dead_code -W unused_imports -W unused_variables -W unsafe_code \
             -W improper_ctypes -W improper_ctypes_definitions \
             -D clippy::std_instead_of_core -D clippy::std_instead_of_alloc > nostd_check.json
