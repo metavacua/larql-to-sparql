@@ -560,6 +560,56 @@ jobs:
           echo "--- remaining unpatched serde lines (should be none, or already std-free) ---"
           grep -rn '^serde = ' crates/*/Cargo.toml | grep -v 'default-features = false' || true
 
+      # Stage B2 patches every crate's OWN Cargo.toml, but Cargo still
+      # unifies a given dependency's features across every member listed in
+      # the root [workspace].members -- including the 6 crates entirely
+      # outside larql-cli's own tree (larql-server, larql-router,
+      # larql-python, larql-demos, larql-compute-metal, model-compute),
+      # none of which Stage B2 touches. larql-server alone pulls in a full
+      # HTTP stack; larql-python pulls in pyo3 -- almost certainly still
+      # requesting serde/other deps with default (std) features regardless
+      # of anything patched so far. Trimming the workspace's own member
+      # list down to larql-cli's real 13-crate tree removes those 6 from
+      # Cargo's feature-unification scope entirely, without vendoring or
+      # losing the real Cargo.lock version pins -- ephemeral, this checkout
+      # only, never committed.
+      - name: "Stage B3: trim workspace members to larql-cli's real tree"
+        run: |
+          python3 - << 'PYEOF'
+          import re
+          keep = {
+              "larql-boundary", "larql-cli", "larql-compute", "larql-core",
+              "larql-execution", "larql-factory", "larql-inference", "larql-kv",
+              "larql-lql", "larql-models", "larql-router-protocol", "larql-vindex",
+              "larql-vindex-spec",
+          }
+          with open("Cargo.toml") as f:
+              text = f.read()
+          def make_filt(key):
+              def filt(m):
+                  lines = m.group(1).splitlines()
+                  out = []
+                  for line in lines:
+                      s = line.strip().strip(',')
+                      if s.startswith('#') or not s:
+                          continue
+                      path = s.strip('"')
+                      name = path.rsplit('/', 1)[-1]
+                      if name in keep:
+                          out.append(line)
+                  return f'{key} = [\n' + '\n'.join(out) + '\n]'
+              return filt
+          # Both arrays filtered the same way: default-members referencing a
+          # crate no longer in members is an invalid manifest, and we never
+          # rely on default-members ourselves (always pass explicit -p), so
+          # keeping the two lists consistent is the only requirement here.
+          for key in ("members", "default-members"):
+              text = re.sub(rf'{key} = \[(.*?)\]', make_filt(key), text, count=1, flags=re.S)
+          with open("Cargo.toml", "w") as f:
+              f.write(text)
+          PYEOF
+          sed -n '/^\[workspace\]/,/^\]/p' Cargo.toml
+
       # Root cause found, not guessed: the diagnostic's first run (before
       # this fix) showed `serde feature "default"` active, pulled in by
       # criterion (a dev-dependency, used for benchmarks) -> ciborium ->
