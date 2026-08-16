@@ -632,6 +632,31 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Real evidence, not inference: Stage A's own output for this crate
+      # showed "error: errors present after applying fixes" (a
+      # std_instead_of_alloc rewrite to `use alloc::collections::BTreeMap;`
+      # written at a point in the pipeline where the crate isn't `#![no_std]`
+      # yet, so `alloc` wasn't a resolvable crate name when clippy wrote it)
+      # -- but four Cargo/dependency-level fixes in a row had zero effect on
+      # Stage C, which doesn't fit "a dependency is still std-tainted." This
+      # dumps the crate's actual source files exactly as Stage C is about to
+      # see them, so the real state is observed directly instead of inferred
+      # from error message text again.
+      - name: "Diagnostic: crate source as Stage C will see it"
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.crate }} source files immediately before Stage C"
+            for f in crates/${{ matrix.crate }}/src/*.rs; do
+              echo "<details><summary>$f</summary>"
+              echo ''
+              echo '```rust'
+              cat "$f"
+              echo '```'
+              echo '</details>'
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       # Stage C -- the only stage whose dead_code/unused_*/unsafe_code
       # signal is honest for this target. -D on the mechanical lints too:
       # anything Stage A's fixer couldn't rewrite becomes a visible, named
