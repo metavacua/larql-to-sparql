@@ -139,7 +139,13 @@ explicitly-labeled-as-curated (L2) source, never the sole source of truth.
 **Target-capability probes** (per target, crate-independent — one job per target
 regardless of how many crates get tested against it): `target-spec-json` (full
 structured JSON — `std`, `only-cdylib`, `panic-strategy`, `tier`, `os`, `arch`),
-`--print cfg --target T`, `--print target-list | grep -qx T` as a sanity check.
+`--print cfg --target T`, `--print target-list | grep -qx T` as a sanity check, and
+`--print supported-crate-types --target T` — the real, per-target, empirically
+authoritative crate-type list, discovered while writing this spec: it does *not*
+match what `only-cdylib: true`'s name suggests. For `nvptx64-nvidia-cuda` it reports
+`bin, cdylib, lib, rlib, staticlib` — not "only cdylib." No field-name inference is
+trusted over this print option again; the build-attempt probes below use its output
+directly, per target, rather than any crate-type list decided in advance.
 
 **Dependency-graph probes** (per crate × target × feature-config): `cargo metadata
 --filter-platform`, `cargo tree` (`-e features`, `-i`, `--duplicates`) *and*
@@ -155,14 +161,14 @@ curated/L2, checkable against the raw scan.
 
 **Build-attempt probes**: every plausible `-Zbuild-std` mode (`none`/prebuilt, `std`,
 `core,alloc`, `core`) × `{check, clippy, build}` × `{default-features,
---no-default-features}` × crate-type (`--lib` *and* `--crate-type cdylib`), all
-attempted unconditionally for every target regardless of what `target-spec-json`
-claims about `only-cdylib` or `std` — same reasoning both axes: the actual attempt's
-result is real L1 data even where the outcome is predictable, and this project's own
-nvptx build attempts ignored the `only-cdylib: true` constraint throughout the
-investigation specifically because nothing had ever attempted the alternative to
-notice. All modes × configs, `--keep-going`, full uncapped `--message-format=json` to
-an artifact (never truncated
+--no-default-features}` × every crate-type the target-capability probe's
+`--print supported-crate-types --target T` actually listed for that target — not a
+crate-type list chosen in advance from reading a field name, and not narrowed to
+whichever subset seems relevant. All attempted unconditionally regardless of what
+`target-spec-json` claims about `std` either, for the same reason: the actual
+attempt's result is real L1 data even where the outcome is predictable. All modes ×
+configs × crate-types, `--keep-going`, full uncapped `--message-format=json` to an
+artifact (never truncated
 to fit a step-summary size limit — that's what silently dropped ~5MB of real Stage C
 output once already). Clippy's lint set is comprehensive (`clippy::all`, `pedantic`,
 `nursery`, `cargo`, rustc's own full set), not a hand-picked subset.
