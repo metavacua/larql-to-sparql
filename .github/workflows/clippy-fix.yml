@@ -93,7 +93,7 @@ jobs:
       TARGET: ${{ inputs.target }}
       FEATURES: ${{ inputs.features }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -183,7 +183,7 @@ jobs:
       TARGET: ${{ inputs.target }}
       FEATURES: ${{ inputs.features }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Single named-artifact download extracts flat to the working
       # directory by default on v8 too (same as v4) -- confirmed against
