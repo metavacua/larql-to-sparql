@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Structural extraction for the indexing job: error counts by cargo target
+name, the unexpected-clean-std-build contradiction rule (Standing Principle
+5 — the nvptx canary), and artifact-completeness checking (Standing
+Principle 9 — the indexing job fails loudly on any missing expected
+artifact rather than silently indexing whatever showed up)."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+from scripts.target_analysis_common import error_sites
+
+
+def count_errors_by_target(compiler_messages: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in compiler_messages:
+        if entry.get("reason") != "compiler-message":
+            continue
+        if entry.get("message", {}).get("level") != "error":
+            continue
+        name = entry.get("target", {}).get("name", "")
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def unexpected_clean_std_build(target_spec: dict[str, Any], std_mode_errors: list[Any]) -> bool:
+    return target_spec.get("std") is False and len(std_mode_errors) == 0
+
+
+def missing_artifacts(expected: set[str], actual: set[str]) -> set[str]:
+    return expected - actual
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--compiler-messages-file", required=True, type=Path)
+    parser.add_argument("--target-spec-file", required=True, type=Path)
+    parser.add_argument("--std-mode-errors-file", required=True, type=Path)
+    parser.add_argument("--expected-artifacts-file", required=True, type=Path)
+    parser.add_argument("--actual-artifacts-file", required=True, type=Path)
+    args = parser.parse_args()
+
+    compiler_messages = json.loads(args.compiler_messages_file.read_text(encoding="utf-8"))
+    target_spec = json.loads(args.target_spec_file.read_text(encoding="utf-8"))
+    std_mode_errors = json.loads(args.std_mode_errors_file.read_text(encoding="utf-8"))
+    expected = set(json.loads(args.expected_artifacts_file.read_text(encoding="utf-8")))
+    actual = set(json.loads(args.actual_artifacts_file.read_text(encoding="utf-8")))
+
+    missing = missing_artifacts(expected, actual)
+    result = {
+        "error_counts_by_target": count_errors_by_target(compiler_messages),
+        "contradictions": {
+            "unexpected_clean_std_build": unexpected_clean_std_build(target_spec, std_mode_errors),
+        },
+        "missing_artifacts": sorted(missing),
+    }
+    print(json.dumps(result, indent=2))
+    return 1 if missing else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
