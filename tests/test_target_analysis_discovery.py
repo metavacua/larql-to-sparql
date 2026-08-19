@@ -1,8 +1,14 @@
 import json
+import sys
 
 import pytest
 
-from scripts.target_analysis_discovery import parse_target_list, resolve_target_matrix
+from scripts.target_analysis_discovery import (
+    chunk_targets,
+    main,
+    parse_target_list,
+    resolve_target_matrix,
+)
 
 RAW = "aarch64-apple-darwin\nnvptx64-nvidia-cuda\nwasm32v1-none\nx86_64-unknown-linux-gnu\n"
 
@@ -34,9 +40,6 @@ def test_resolve_target_matrix_with_invalid_request_raises():
 
 
 def test_main_treats_empty_string_requested_target_as_none(tmp_path, capsys):
-    from scripts.target_analysis_discovery import main
-    import sys
-
     target_list_file = tmp_path / "target-list.txt"
     target_list_file.write_text(RAW, encoding="utf-8")
     sys.argv = [
@@ -47,9 +50,6 @@ def test_main_treats_empty_string_requested_target_as_none(tmp_path, capsys):
     assert main() == 0
     out = capsys.readouterr().out
     assert json.loads(out) == parse_target_list(RAW)
-
-
-from scripts.target_analysis_discovery import chunk_targets
 
 
 def test_chunk_targets_empty_list_returns_empty():
@@ -82,15 +82,11 @@ def test_chunk_targets_default_max_size_is_256():
 
 
 def test_chunk_targets_rejects_non_positive_max_size():
-    import pytest
     with pytest.raises(ValueError, match="max_size must be positive"):
         chunk_targets(["a"], max_size=0)
 
 
-def test_main_writes_batches_and_batch_indices_to_github_output(tmp_path):
-    from scripts.target_analysis_discovery import main
-    import sys
-
+def test_main_writes_matrix_batches_and_batch_indices_to_github_output(tmp_path):
     target_list_file = tmp_path / "target-list.txt"
     target_list_file.write_text("\n".join(f"t{i}" for i in range(300)), encoding="utf-8")
     github_output = tmp_path / "github_output.txt"
@@ -102,9 +98,12 @@ def test_main_writes_batches_and_batch_indices_to_github_output(tmp_path):
     ]
     assert main() == 0
     output_text = github_output.read_text(encoding="utf-8")
+    matrix_line = next(line for line in output_text.splitlines() if line.startswith("matrix="))
     batches_line = next(line for line in output_text.splitlines() if line.startswith("batches="))
     batch_indices_line = next(line for line in output_text.splitlines() if line.startswith("batch-indices="))
+    matrix = json.loads(matrix_line[len("matrix="):])
     batches = json.loads(batches_line[len("batches="):])
     batch_indices = json.loads(batch_indices_line[len("batch-indices="):])
+    assert matrix == [f"t{i}" for i in range(300)]
     assert len(batches) == 2
     assert batch_indices == [0, 1]

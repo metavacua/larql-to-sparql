@@ -13,16 +13,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from scripts.target_analysis_common import load_json
+from scripts.target_analysis_common import error_level_messages, load_json
 
 
 def count_errors_by_target(compiler_messages: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for entry in compiler_messages:
-        if entry.get("reason") != "compiler-message":
-            continue
-        if entry.get("message", {}).get("level") != "error":
-            continue
+    for entry, _message in error_level_messages(compiler_messages):
         name = entry.get("target", {}).get("name", "")
         counts[name] = counts.get(name, 0) + 1
     return counts

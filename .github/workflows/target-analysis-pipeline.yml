@@ -34,8 +34,7 @@ jobs:
             --target-list-file target-list.txt \
             --requested-target "$REQUESTED_TARGET" \
             --max-batch-size 12 \
-            --github-output "$GITHUB_OUTPUT" > matrix-stdout.json
-          echo "matrix=$(cat matrix-stdout.json)" >> "$GITHUB_OUTPUT"
+            --github-output "$GITHUB_OUTPUT" > /dev/null
       - name: Upload raw target-list
         uses: actions/upload-artifact@v4
         with:
@@ -60,10 +59,11 @@ jobs:
         run: |
           mkdir -p out
           echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          rustup run nightly rustc --print target-list > full-target-list.txt
           FAILED=0
           while IFS= read -r TARGET; do
             echo "=== target: $TARGET ==="
-            if ! rustup run nightly rustc --print target-list | grep -qx "$TARGET"; then
+            if ! grep -qx "$TARGET" full-target-list.txt; then
               echo "::error::$TARGET not found in rustc --print target-list — discovery/capability disagreement"
               FAILED=1
               continue

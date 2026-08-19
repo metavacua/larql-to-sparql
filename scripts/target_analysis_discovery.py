@@ -49,6 +49,7 @@ def main() -> int:
     print(json.dumps(matrix))
     if args.github_output is not None:
         with args.github_output.open("a", encoding="utf-8") as handle:
+            handle.write(f"matrix={json.dumps(matrix)}\n")
             handle.write(f"batches={json.dumps(batches)}\n")
             handle.write(f"batch-indices={json.dumps(batch_indices)}\n")
     return 0

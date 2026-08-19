@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 def load_json(path: Path) -> Any:
@@ -22,14 +22,27 @@ def unit_graph_units_named(unit_graph: dict[str, Any], name: str) -> list[dict[s
     ]
 
 
-def error_sites(compiler_messages: list[dict[str, Any]]) -> set[tuple[str, int, str]]:
-    sites: set[tuple[str, int, str]] = set()
+def error_level_messages(
+    compiler_messages: list[dict[str, Any]],
+) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
+    """Yield (entry, message) pairs for error-level compiler-message entries.
+
+    The single definition of "counts as an error" that error_sites() and
+    count_errors_by_target() both need — kept in one place so the two never
+    drift out of sync on what qualifies.
+    """
     for entry in compiler_messages:
         if entry.get("reason") != "compiler-message":
             continue
         message = entry.get("message", {})
         if message.get("level") != "error":
             continue
+        yield entry, message
+
+
+def error_sites(compiler_messages: list[dict[str, Any]]) -> set[tuple[str, int, str]]:
+    sites: set[tuple[str, int, str]] = set()
+    for _entry, message in error_level_messages(compiler_messages):
         code = (message.get("code") or {}).get("code") or message.get("message", "")[:60]
         for span in message.get("spans", []):
             if span.get("is_primary"):
