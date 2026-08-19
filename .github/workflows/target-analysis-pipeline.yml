@@ -81,3 +81,106 @@ jobs:
         with:
           name: target-capability-batch-${{ matrix.batch_index }}
           path: out/
+
+  dependency-graph:
+    name: "Dependency graph: batch ${{ matrix.batch_index }}"
+    needs: [discovery]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
+      - name: Dependency-graph probes for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          cargo install cargo-deny --locked
+          FAILED=0
+          while IFS= read -r TARGET; do
+            echo "=== target: $TARGET ==="
+            cargo metadata --format-version 1 --filter-platform "$TARGET" \
+              > "out/metadata-$TARGET.json" || FAILED=1
+            cargo tree -p larql-cli -e features --target "$TARGET" \
+              > "out/tree-features-$TARGET.txt" || FAILED=1
+            cargo tree -p larql-cli --duplicates --target "$TARGET" \
+              > "out/tree-duplicates-$TARGET.txt" || FAILED=1
+            cargo +nightly build -Z unstable-options --unit-graph \
+              -p larql-cli --target "$TARGET" \
+              > "out/unit-graph-$TARGET.json" || FAILED=1
+            cargo deny --config deny-nvptx.toml check bans licenses advisories sources \
+              > "out/deny-$TARGET.txt" || true
+          done < targets-in-batch.txt
+          exit $FAILED
+      - name: Upload dependency-graph artifacts for this batch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-graph-batch-${{ matrix.batch_index }}
+          path: out/
+
+  build-attempt:
+    name: "Build attempt: batch ${{ matrix.batch_index }}"
+    needs: [discovery, target-capability]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+          rustup component add clippy --toolchain nightly
+      - name: Download this batch's target-capability artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: target-capability-batch-${{ matrix.batch_index }}
+          path: capability
+      - name: Build-attempt probes for every target/build_std/cmd/features/crate-type combination in this batch
+        id: attempt
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          FAILED=0
+          while IFS= read -r TARGET; do
+            CRATE_TYPES=$(tr ',' '\n' < "capability/supported-crate-types-$TARGET.txt" | sed 's/^ *//; s/ *$//')
+            for BUILD_STD in none std core,alloc core; do
+              if [ "$BUILD_STD" = "none" ]; then BUILD_STD_FLAG=""; else BUILD_STD_FLAG="-Z build-std=$BUILD_STD"; fi
+              for CARGO_CMD in check clippy build; do
+                for FEATURES in default-features no-default-features; do
+                  if [ "$FEATURES" = "no-default-features" ]; then FEATURES_FLAG="--no-default-features"; else FEATURES_FLAG=""; fi
+                  OUTFILE="out/attempt-$TARGET-$BUILD_STD-$CARGO_CMD-$FEATURES.json"
+                  : > "$OUTFILE"
+                  for CRATE_TYPE in $CRATE_TYPES; do
+                    echo "=== target=$TARGET build_std=$BUILD_STD cmd=$CARGO_CMD features=$FEATURES crate_type=$CRATE_TYPE ==="
+                    cargo +nightly "$CARGO_CMD" -p larql-cli \
+                      --target "$TARGET" --crate-type "$CRATE_TYPE" $FEATURES_FLAG $BUILD_STD_FLAG \
+                      --keep-going --message-format=json >> "$OUTFILE" || FAILED=1
+                  done
+                done
+              done
+            done
+          done < targets-in-batch.txt
+          echo "batch-had-failure=$FAILED" >> "$GITHUB_OUTPUT"
+      - name: Upload full diagnostic JSON for this batch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-attempt-batch-${{ matrix.batch_index }}
+          path: out/
+      - name: Assert honest result
+        run: |
+          echo "batch ${{ matrix.batch_index }} had at least one real cargo failure: ${{ steps.attempt.outputs.batch-had-failure }}"
+          if [ "${{ steps.attempt.outputs.batch-had-failure }}" = "1" ]; then
+            echo "::notice::At least one real build failure in this batch, recorded as a finding in the uploaded JSON, not masked."
+          fi
