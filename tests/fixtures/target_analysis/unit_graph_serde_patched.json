@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "units": [
+    {
+      "pkg_id": "serde 1.0.210",
+      "target": {"kind": ["lib"], "name": "serde"},
+      "features": ["alloc", "derive"]
+    },
+    {
+      "pkg_id": "larql-cli 0.1.0",
+      "target": {"kind": ["bin"], "name": "larql-cli"},
+      "features": []
+    }
+  ],
+  "roots": [1]
+}

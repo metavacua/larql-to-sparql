@@ -1,0 +1,8 @@
+{
+  "workspace_members": [
+    "larql-cli 0.1.0 (path+file:///repo/crates/larql-cli)",
+    "larql-boundary 0.1.0 (path+file:///repo/crates/larql-boundary)",
+    "larql-python 0.1.0 (path+file:///repo/crates/larql-python)",
+    "larql-vindex-spec 0.1.0 (path+file:///repo/crates/larql-vindex-spec)"
+  ]
+}
