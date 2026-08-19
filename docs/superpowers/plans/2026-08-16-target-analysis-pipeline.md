@@ -4,7 +4,7 @@
 
 **Goal:** Replace the ad hoc `experiment-cuda-nvptx.yml` workflow with a target-parameterized, fully autonomous GitHub Actions pipeline that, given a target triple, produces a complete map of every place gating or fixing is necessary to build and runtime-test for that target — and implements the mutually-recursive Primary(observe)/Secondary(mutate) loop with a precisely defined, mechanical promotion rule.
 
-**Architecture:** A Discovery job feeds target/crate matrices to four Primary-layer probe job families (target-capability, dependency-graph, build-attempt, runtime-test) via `fromJSON()`. An Indexing job structurally aggregates every probe's raw artifact with loud-failure-on-missing-artifact completeness checking. A Secondary-layer job runs the existing four-stage mutation pipeline (generalized from crate/target-specific to parameterized), captures before/after Primary-layer diffs per stage, and applies a mechanical promotion/depth-advancement rule to decide what folds into the next round's shared baseline.
+**Architecture:** A Discovery job resolves the real target list and batches it (GitHub Actions caps `strategy.matrix` at 256 jobs; the real target count is 331) into `batch_index` matrices consumed via `fromJSON()` by four Primary-layer probe job families (target-capability, dependency-graph, build-attempt, runtime-test), each internally looping over its batch's targets in a shell loop rather than fanning `strategy.matrix` directly over every target. An Indexing job structurally aggregates every probe's raw per-target files (now nested inside per-batch artifacts) with loud-failure-on-missing-file completeness checking. A single, target-independent Secondary-layer mutation job runs the existing four-stage pipeline (Stages A/B/B2/B3 are all target-independent) exactly once, producing one patch; a batched Stage C job downloads and applies that patch before checking each target, captures before/after Primary-layer diffs per stage, and applies a mechanical promotion/depth-advancement rule to decide what folds into the next round's shared baseline.
 
 **Tech Stack:** GitHub Actions YAML (`needs:`, `strategy.matrix` + `fromJSON()`, `background`/`wait` steps, `actions/upload-artifact`), Python 3 (stdlib only — `json`, `argparse`, `pathlib`), pytest for script unit tests, existing Rust/Cargo/rustc toolchain invocations already proven in `experiment-cuda-nvptx.yml`.
 
@@ -29,7 +29,7 @@
 
 ## File Structure
 
-- `.github/workflows/target-analysis-pipeline.yml` — the new, generalized pipeline: `discovery`, `target-capability`, `dependency-graph`, `build-attempt`, `runtime-test`, `indexing`, `secondary-stage-a-b`, `secondary-stage-b2-b3`, `secondary-stage-c`, `secondary-promotion` jobs.
+- `.github/workflows/target-analysis-pipeline.yml` — the new, generalized pipeline: `discovery` (also computes batches, Task 6), `target-capability`, `dependency-graph`, `build-attempt`, `runtime-test` (all four batched over `batch_index`, Tasks 7-9), `indexing` (Task 10), `secondary-mutate` (Stages A/B/B2/B3, single job, target-independent, Task 11), `secondary-stage-c-and-promotion` (batched, applies the mutation patch, Task 12), `next-round-baseline` (Task 13), `secondary-layer-self-test` (Task 14).
 - `scripts/target_analysis_common.py` — shared, dependency-free helpers: JSON loading, `--message-format=json` compiler-message parsing into `(file, line, code)` error-site tuples, `--unit-graph` unit lookup by crate name.
 - `scripts/target_analysis_discovery.py` — turns raw `rustc --print target-list` output (plus an optional single requested target) into the target matrix consumed by downstream jobs' `fromJSON()`.
 - `scripts/target_analysis_indexing.py` — structural extraction (error counts by target name), the `unexpected-clean-std-build` contradiction rule, and artifact-completeness checking.
@@ -190,7 +190,7 @@ git commit -m "feat: add shared JSON parsing helpers for target-analysis pipelin
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `parse_target_list(raw: str) -> list[str]`; `resolve_target_matrix(all_targets: list[str], requested: str | None) -> list[str]` (raises `ValueError` if `requested` is not in `all_targets` — this is the sanity check Standing Principle 8 requires before any downstream job trusts a `workflow_dispatch` input). Task 8 (Discovery job wiring) invokes this script's CLI to emit the matrix JSON that `fromJSON()` consumes.
+- Produces: `parse_target_list(raw: str) -> list[str]`; `resolve_target_matrix(all_targets: list[str], requested: str | None) -> list[str]` (raises `ValueError` if `requested` is not in `all_targets` — this is the sanity check Standing Principle 8 requires before any downstream job trusts a `workflow_dispatch` input). Task 9 (Discovery job wiring) invokes this script's CLI to emit the matrix JSON that `fromJSON()` consumes.
 
 - [ ] **Step 1: Write the fixture**
 
@@ -314,7 +314,7 @@ git commit -m "feat: add target-matrix resolution script for the discovery job"
 
 **Interfaces:**
 - Consumes: `load_json`, `error_sites` from `scripts/target_analysis_common.py` (Task 1).
-- Produces: `count_errors_by_target(compiler_messages: list[dict]) -> dict[str, int]`; `unexpected_clean_std_build(target_spec: dict, std_mode_errors: list) -> bool`; `missing_artifacts(expected: set[str], actual: set[str]) -> set[str]`. Task 9 (Indexing job wiring) calls this script's CLI to build the navigation index and fails the job if `missing_artifacts(...)` is non-empty.
+- Produces: `count_errors_by_target(compiler_messages: list[dict]) -> dict[str, int]`; `unexpected_clean_std_build(target_spec: dict, std_mode_errors: list) -> bool`; `missing_artifacts(expected: set[str], actual: set[str]) -> set[str]`. Task 10 (Indexing job wiring) calls this script's CLI to build the navigation index and fails the job if `missing_artifacts(...)` is non-empty.
 
 - [ ] **Step 1: Write the fixture**
 
@@ -858,295 +858,509 @@ Push to a branch matching `experiment/target-analysis-*`. Fetch the run's `disco
 
 ---
 
-### Task 6: Target-capability probe job
+### Task 6: Batch the target matrix for GitHub Actions' 256-job cap
+
+Task 5's real CI run empirically discovered 331 targets from `rustc --print
+target-list` — independently reconfirmed by that task's reviewer via a downloaded
+artifact, not assumed. GitHub Actions hard-caps `strategy.matrix` at 256 jobs, and
+separately caps any single job's wall-clock at 6 hours. A `strategy.matrix: target:
+fromJSON(needs.discovery.outputs.target-matrix)` fanning directly over the real,
+unbatched 331-target list — as Tasks 7-9 and 13 originally would have — fails to
+schedule. Worse, Task 8's build-attempt job crosses each target against 4
+`build_std` modes × 3 `cargo_cmd`s × 2 feature configs × (typically ~5) crate types
+— roughly 120 `cargo` invocations per target — so even a 256-target batch for that
+specific job risks exceeding the 6-hour per-job limit. This task adds the batching
+mechanism every later matrix-over-targets job needs, sized conservatively (12
+targets per batch, uniformly across every batch-consuming job) so the heaviest job
+(build-attempt) stays safely under both caps; Task 8's own real-run verification
+step re-checks this estimate against actual job duration, since it's a reasoned
+estimate, not a verified fact, until a real run confirms it.
+
+This does not change `target-matrix` itself — Task 10's indexing job and Task 14's
+next-round-baseline job keep consuming the unbatched form directly inside a Python
+loop, which has no 256-element restriction.
+
+**Files:**
+- Modify: `scripts/target_analysis_discovery.py` (add `chunk_targets`, extend `main()`)
+- Modify: `tests/test_target_analysis_discovery.py` (add tests for `chunk_targets` and the extended CLI)
+- Modify: `.github/workflows/target-analysis-pipeline.yml` (extend the `discovery` job's outputs and "Resolve target matrix" step)
+
+**Interfaces:**
+- Consumes: nothing new from earlier tasks.
+- Produces: `chunk_targets(targets: list[str], max_size: int = 256) -> list[list[str]]`; job outputs `needs.discovery.outputs.batches` (JSON array of arrays, each ≤12 entries once the workflow step passes `--max-batch-size 12`) and `needs.discovery.outputs.batch-indices` (JSON array of ints `[0, 1, ...]`, one per chunk). Tasks 7, 8, 9, and 13 consume both of these instead of fanning `strategy.matrix` directly over `target-matrix`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `tests/test_target_analysis_discovery.py`, below the existing tests:
+```python
+from scripts.target_analysis_discovery import chunk_targets
+
+
+def test_chunk_targets_empty_list_returns_empty():
+    assert chunk_targets([], max_size=3) == []
+
+
+def test_chunk_targets_smaller_than_max_size_is_one_chunk():
+    assert chunk_targets(["a", "b"], max_size=3) == [["a", "b"]]
+
+
+def test_chunk_targets_exactly_max_size_is_one_chunk():
+    assert chunk_targets(["a", "b", "c"], max_size=3) == [["a", "b", "c"]]
+
+
+def test_chunk_targets_splits_into_multiple_chunks_with_remainder():
+    targets = ["a", "b", "c", "d", "e", "f", "g"]
+    assert chunk_targets(targets, max_size=3) == [
+        ["a", "b", "c"],
+        ["d", "e", "f"],
+        ["g"],
+    ]
+
+
+def test_chunk_targets_default_max_size_is_256():
+    targets = [f"t{i}" for i in range(300)]
+    chunks = chunk_targets(targets)
+    assert len(chunks) == 2
+    assert len(chunks[0]) == 256
+    assert len(chunks[1]) == 44
+
+
+def test_chunk_targets_rejects_non_positive_max_size():
+    import pytest
+    with pytest.raises(ValueError, match="max_size must be positive"):
+        chunk_targets(["a"], max_size=0)
+
+
+def test_main_writes_batches_and_batch_indices_to_github_output(tmp_path):
+    from scripts.target_analysis_discovery import main
+    import sys
+
+    target_list_file = tmp_path / "target-list.txt"
+    target_list_file.write_text("\n".join(f"t{i}" for i in range(300)), encoding="utf-8")
+    github_output = tmp_path / "github_output.txt"
+    sys.argv = [
+        "target_analysis_discovery.py",
+        "--target-list-file", str(target_list_file),
+        "--requested-target", "",
+        "--github-output", str(github_output),
+    ]
+    assert main() == 0
+    output_text = github_output.read_text(encoding="utf-8")
+    batches_line = next(line for line in output_text.splitlines() if line.startswith("batches="))
+    batch_indices_line = next(line for line in output_text.splitlines() if line.startswith("batch-indices="))
+    batches = json.loads(batches_line[len("batches="):])
+    batch_indices = json.loads(batch_indices_line[len("batch-indices="):])
+    assert len(batches) == 2
+    assert batch_indices == [0, 1]
+```
+`import json` is already at the top of this test file (added in Task 5's Step 2) — do not add it twice.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_target_analysis_discovery.py -v`
+Expected: FAIL — `ImportError: cannot import name 'chunk_targets'` for the first 6 new tests; the CLI test also fails (it exercises `main()`, which doesn't yet accept `--github-output` or emit `batches`).
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add to `scripts/target_analysis_discovery.py`, above `main()`:
+```python
+def chunk_targets(targets: list[str], max_size: int = 256) -> list[list[str]]:
+    if max_size <= 0:
+        raise ValueError("max_size must be positive")
+    return [targets[i : i + max_size] for i in range(0, len(targets), max_size)]
+```
+
+Replace `main()` (currently, from Task 5):
+```python
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--target-list-file", required=True, type=Path)
+    parser.add_argument("--requested-target", default=None)
+    args = parser.parse_args()
+
+    raw = args.target_list_file.read_text(encoding="utf-8")
+    all_targets = parse_target_list(raw)
+    requested = args.requested_target or None
+    matrix = resolve_target_matrix(all_targets, requested)
+    print(json.dumps(matrix))
+    return 0
+```
+with:
+```python
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--target-list-file", required=True, type=Path)
+    parser.add_argument("--requested-target", default=None)
+    parser.add_argument("--max-batch-size", type=int, default=256)
+    parser.add_argument("--github-output", type=Path, default=None)
+    args = parser.parse_args()
+
+    raw = args.target_list_file.read_text(encoding="utf-8")
+    all_targets = parse_target_list(raw)
+    requested = args.requested_target or None
+    matrix = resolve_target_matrix(all_targets, requested)
+    batches = chunk_targets(matrix, max_size=args.max_batch_size)
+    batch_indices = list(range(len(batches)))
+
+    print(json.dumps(matrix))
+    if args.github_output is not None:
+        with args.github_output.open("a", encoding="utf-8") as handle:
+            handle.write(f"batches={json.dumps(batches)}\n")
+            handle.write(f"batch-indices={json.dumps(batch_indices)}\n")
+    return 0
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pytest tests/test_target_analysis_discovery.py -v`
+Expected: 12 passed (5 existing from Tasks 2 and 5, plus 6 `chunk_targets` tests, plus 1 CLI test)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/target_analysis_discovery.py tests/test_target_analysis_discovery.py
+git commit -m "feat: add target-matrix batching for GitHub Actions' 256-job matrix cap"
+```
+
+- [ ] **Step 6: Extend the Discovery job's workflow step and declare the new outputs**
+
+Modify `.github/workflows/target-analysis-pipeline.yml`'s `discovery` job to exactly:
+```yaml
+  discovery:
+    name: Discover target matrix
+    runs-on: ubuntu-latest
+    outputs:
+      target-matrix: ${{ steps.resolve.outputs.matrix }}
+      batches: ${{ steps.resolve.outputs.batches }}
+      batch-indices: ${{ steps.resolve.outputs.batch-indices }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
+      - name: rustc --print target-list
+        run: rustup run nightly rustc --print target-list > target-list.txt
+      - name: Resolve target matrix
+        id: resolve
+        env:
+          REQUESTED_TARGET: ${{ inputs.target }}
+        run: |
+          python3 scripts/target_analysis_discovery.py \
+            --target-list-file target-list.txt \
+            --requested-target "$REQUESTED_TARGET" \
+            --max-batch-size 12 \
+            --github-output "$GITHUB_OUTPUT" > matrix-stdout.json
+          echo "matrix=$(cat matrix-stdout.json)" >> "$GITHUB_OUTPUT"
+      - name: Upload raw target-list
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery-target-list
+          path: target-list.txt
+```
+What changed from Task 5's merged state: the script's `--github-output "$GITHUB_OUTPUT"` flag now writes `batches=`/`batch-indices=` directly (append-mode, per Step 3's implementation); the `matrix=` value is now captured to a file first (`> matrix-stdout.json`) rather than via `$(...)` command substitution, since the script writes to `$GITHUB_OUTPUT` as a side effect and stdout is now used only for the `matrix` value — then that file's content is written to `$GITHUB_OUTPUT` exactly as before. `--max-batch-size 12` is deliberately smaller than the 256-job cap itself, sized for Task 8's build-attempt job specifically (see this task's opening rationale) and applied uniformly to every batch-consuming job for simplicity, even though target-capability/dependency-graph/runtime-test could each tolerate much larger batches on their own.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add .github/workflows/target-analysis-pipeline.yml
+git commit -m "feat: wire batches/batch-indices outputs into the discovery job"
+```
+
+- [ ] **Step 8: Push and verify on a real runner**
+
+Push a follow-up commit to the same branch Task 5 pushed to (`experiment/target-analysis-pipeline`) — not a new branch. Fetch the real run's `discovery` job log and confirm: `steps.resolve.outputs.batches` is a JSON array of arrays, each of length ≤12 (given the real 331-target count from Task 5's run, expect `ceil(331/12) = 28` batches, the last one shorter — reconfirm the exact target count on this run too, since it could have changed by even one entry since Task 5 ran), and `steps.resolve.outputs.batch-indices` is `[0, 1, ..., 27]` (or whatever the real count implies). Confirm `target-matrix`'s value is unchanged in shape from Task 5's run (still the full unbatched array) — Tasks 10 and 14 still need it that way.
+
+---
+
+### Task 7: Target-capability probe job
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add the `target-capability` job)
 
 **Interfaces:**
-- Consumes: `needs.discovery.outputs.target-matrix` (Task 5).
-- Produces: per-target artifact `target-capability-<target>` containing `target-spec.json`, `cfg.txt`, `supported-crate-types.txt` — consumed by Task 7 (build-attempt matrix) and Task 9 (indexing).
+- Consumes: `needs.discovery.outputs.batches`, `needs.discovery.outputs.batch-indices` (Task 6).
+- Produces: per-batch artifact `target-capability-batch-<batch_index>`, containing one `target-spec-<target>.json` / `cfg-<target>.txt` / `supported-crate-types-<target>.txt` triple per target in that batch — consumed by Task 8 (build-attempt job) and Task 10 (indexing). Batching the artifact (not the target) is the direct consequence of Task 6's ruling: `actions/upload-artifact` is a `uses:` step and cannot itself be invoked in a per-target shell loop, so per-target granularity moves to the filename inside one per-batch artifact instead of to the artifact name itself — every file is still individually named and addressable, just grouped by batch at the artifact level.
 
 - [ ] **Step 1: Add the job**
 
 ```yaml
   target-capability:
-    name: "Target capability: ${{ matrix.target }}"
+    name: "Target capability: batch ${{ matrix.batch_index }}"
     needs: [discovery]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(needs.discovery.outputs.target-matrix) }}
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly Rust
         run: rustup toolchain install nightly --profile minimal
-      - name: Sanity check target exists in target-list
+      - name: Probe every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
-          rustup run nightly rustc --print target-list | grep -qx "${{ matrix.target }}"
-      - name: target-spec-json
-        run: |
-          rustup run nightly rustc --print target-spec-json -Z unstable-options \
-            --target "${{ matrix.target }}" > target-spec.json
-      - name: cfg
-        run: |
-          rustup run nightly rustc --print cfg --target "${{ matrix.target }}" > cfg.txt
-      - name: supported-crate-types
-        run: |
-          rustup run nightly rustc --print supported-crate-types --target "${{ matrix.target }}" \
-            > supported-crate-types.txt
-      - name: Upload capability artifacts
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          FAILED=0
+          while IFS= read -r TARGET; do
+            echo "=== target: $TARGET ==="
+            if ! rustup run nightly rustc --print target-list | grep -qx "$TARGET"; then
+              echo "::error::$TARGET not found in rustc --print target-list — discovery/capability disagreement"
+              FAILED=1
+              continue
+            fi
+            rustup run nightly rustc --print target-spec-json -Z unstable-options \
+              --target "$TARGET" > "out/target-spec-$TARGET.json" || FAILED=1
+            rustup run nightly rustc --print cfg --target "$TARGET" > "out/cfg-$TARGET.txt" || FAILED=1
+            rustup run nightly rustc --print supported-crate-types --target "$TARGET" \
+              > "out/supported-crate-types-$TARGET.txt" || FAILED=1
+          done < targets-in-batch.txt
+          exit $FAILED
+      - name: Upload capability artifacts for this batch
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: target-capability-${{ matrix.target }}
-          path: |
-            target-spec.json
-            cfg.txt
-            supported-crate-types.txt
+          name: target-capability-batch-${{ matrix.batch_index }}
+          path: out/
 ```
+
+Filenames embed the target triple directly (e.g. `out/target-spec-nvptx64-nvidia-cuda.json`); rustc target names are restricted to `[a-zA-Z0-9_.-]`, so no escaping is needed. `if: always()` on the upload step means a batch with one bad target still uploads the rest of that batch's good data (Standing Principle 7 — over-collection is correctable, under-collection is not; one target's probe failure must never silently drop an entire batch).
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: add target-capability probe job"
+git commit -m "feat: add target-capability probe job, batched over the 256-job matrix cap"
 ```
 
 - [ ] **Step 3: Push and verify on a real runner**
 
-Push and confirm: one `target-capability` job instance per matrix entry, each producing all three artifact files, and — for the `nvptx64-nvidia-cuda` entry specifically — `target-spec.json` shows `"std": false` and `supported-crate-types.txt` shows `bin, cdylib, lib, rlib, staticlib` (matching this session's earlier empirical finding, and Standing Principle 5's canary: a clean/all-succeeding result here for nvptx would itself be a bug to chase).
+Push (same branch, follow-up commit). Confirm: `ceil(331/12) = 28` `target-capability` job instances (batch 0 through 27, matching Task 6's real split), each uploading one artifact containing one file-triple per target in its batch. Identify which batch contains `nvptx64-nvidia-cuda` (its position in the real, ordered 331-target list from Task 5/6's run determines this — download whichever batch artifact contains it) and confirm `target-spec-nvptx64-nvidia-cuda.json` shows `"std": false` and `supported-crate-types-nvptx64-nvidia-cuda.txt` shows `bin, cdylib, lib, rlib, staticlib` (matching this session's earlier empirical finding, and Standing Principle 5's canary: a clean/all-succeeding result here for nvptx would itself be a bug to chase).
 
 ---
 
-### Task 7: Dependency-graph and build-attempt probe jobs
+### Task 8: Dependency-graph and build-attempt probe jobs
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `dependency-graph` and `build-attempt` jobs)
 
 **Interfaces:**
-- Consumes: `needs.discovery.outputs.target-matrix`; `target-capability-<target>` artifacts (Task 6) for the crate-type list.
-- Produces: per-(crate, target, feature-config) artifacts consumed by Task 9 (indexing).
+- Consumes: `needs.discovery.outputs.batches`, `needs.discovery.outputs.batch-indices` (Task 6); `target-capability-batch-<batch_index>` artifacts (Task 7) for the crate-type list — note the batch INDEX lines up between jobs (batch `N`'s build-attempt work downloads batch `N`'s capability artifact, since both jobs consume the identical `batches` array from Discovery).
+- Produces: per-batch artifacts `dependency-graph-batch-<batch_index>` and `build-attempt-batch-<batch_index>`, each containing one file (or file-group) per target — consumed by Task 10 (indexing).
+
+Both jobs batch for the same reason as Task 7 (the real, empirically-discovered 331-target count exceeds GitHub Actions' 256-job matrix cap); build-attempt additionally batches at the small size (12 targets/batch, from Task 6) because it crosses each target against 4 `build_std` × 3 `cargo_cmd` × 2 `features` × (typically ~5) crate types — roughly 120 `cargo` invocations per target — which risks exceeding the 6-hour per-job wall-clock limit at a larger batch size.
 
 - [ ] **Step 1: Add the dependency-graph job**
 
 ```yaml
   dependency-graph:
-    name: "Dependency graph: ${{ matrix.target }}"
+    name: "Dependency graph: batch ${{ matrix.batch_index }}"
     needs: [discovery]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(needs.discovery.outputs.target-matrix) }}
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly Rust
         run: rustup toolchain install nightly --profile minimal
-      - name: cargo metadata --filter-platform
+      - name: Dependency-graph probes for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
-          cargo metadata --format-version 1 --filter-platform "${{ matrix.target }}" \
-            > metadata-${{ matrix.target }}.json
-      - name: cargo tree (features, duplicates)
-        run: |
-          cargo tree -p larql-cli -e features --target "${{ matrix.target }}" \
-            > tree-features-${{ matrix.target }}.txt
-          cargo tree -p larql-cli --duplicates --target "${{ matrix.target }}" \
-            > tree-duplicates-${{ matrix.target }}.txt
-      - name: cargo build --unit-graph
-        run: |
-          cargo +nightly build -Z unstable-options --unit-graph \
-            -p larql-cli --target "${{ matrix.target }}" \
-            > unit-graph-${{ matrix.target }}.json
-      - name: cargo-deny (curated, labeled L2)
-        run: |
-          cargo install cargo-deny --locked || true
-          cargo deny --config deny-nvptx.toml check bans licenses advisories sources \
-            > deny-${{ matrix.target }}.txt || true
-      - name: Upload dependency-graph artifacts
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          cargo install cargo-deny --locked
+          FAILED=0
+          while IFS= read -r TARGET; do
+            echo "=== target: $TARGET ==="
+            cargo metadata --format-version 1 --filter-platform "$TARGET" \
+              > "out/metadata-$TARGET.json" || FAILED=1
+            cargo tree -p larql-cli -e features --target "$TARGET" \
+              > "out/tree-features-$TARGET.txt" || FAILED=1
+            cargo tree -p larql-cli --duplicates --target "$TARGET" \
+              > "out/tree-duplicates-$TARGET.txt" || FAILED=1
+            cargo +nightly build -Z unstable-options --unit-graph \
+              -p larql-cli --target "$TARGET" \
+              > "out/unit-graph-$TARGET.json" || FAILED=1
+            cargo deny --config deny-nvptx.toml check bans licenses advisories sources \
+              > "out/deny-$TARGET.txt" || true
+          done < targets-in-batch.txt
+          exit $FAILED
+      - name: Upload dependency-graph artifacts for this batch
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dependency-graph-${{ matrix.target }}
-          path: |
-            metadata-${{ matrix.target }}.json
-            tree-features-${{ matrix.target }}.txt
-            tree-duplicates-${{ matrix.target }}.txt
-            unit-graph-${{ matrix.target }}.json
-            deny-${{ matrix.target }}.txt
+          name: dependency-graph-batch-${{ matrix.batch_index }}
+          path: out/
 ```
 
-Note: `cargo-deny check` failures must never fail this job — its verdict is explicitly labeled curated/L2 (Foundational framework), so `|| true` here is deliberate, not error-suppression; the raw output is still uploaded and the indexing job (Task 9) reports its content, not its exit code.
+`cargo-deny check`'s own `|| true` is unchanged from the original design — its verdict is curated/L2 (Foundational framework) and must never fail the job; the other four commands use `|| FAILED=1` so one target's failure doesn't stop the loop from covering the rest of the batch, but the job itself still reports a real execution failure at the end (`exit $FAILED`) — this job is an observability probe (Error handling: "reflects execution success only"), so a real failure here (as opposed to `cargo-deny`'s curated verdict) is a genuine anomaly, not an expected build outcome.
 
 - [ ] **Step 2: Add the build-attempt job**
 
 ```yaml
   build-attempt:
-    name: "Build attempt: ${{ matrix.target }} / ${{ matrix.build_std }} / ${{ matrix.cargo_cmd }} / ${{ matrix.features }}"
+    name: "Build attempt: batch ${{ matrix.batch_index }}"
     needs: [discovery, target-capability]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(needs.discovery.outputs.target-matrix) }}
-        build_std: ["none", "std", "core,alloc", "core"]
-        cargo_cmd: ["check", "clippy", "build"]
-        features: ["default-features", "no-default-features"]
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly Rust
-        run: rustup toolchain install nightly --profile minimal
-      - name: Download target-capability artifact
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+      - name: Download this batch's target-capability artifact
         uses: actions/download-artifact@v4
         with:
-          name: target-capability-${{ matrix.target }}
-      - name: Set feature flag
-        id: feature-flag
-        run: |
-          if [ "${{ matrix.features }}" = "no-default-features" ]; then
-            echo "flag=--no-default-features" >> "$GITHUB_OUTPUT"
-          else
-            echo "flag=" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Set build-std flag
-        id: build-std-flag
-        run: |
-          if [ "${{ matrix.build_std }}" = "none" ]; then
-            echo "flag=" >> "$GITHUB_OUTPUT"
-          else
-            echo "flag=-Z build-std=${{ matrix.build_std }}" >> "$GITHUB_OUTPUT"
-          fi
-      - name: "cargo ${{ matrix.cargo_cmd }}"
+          name: target-capability-batch-${{ matrix.batch_index }}
+          path: capability
+      - name: Build-attempt probes for every target/build_std/cmd/features/crate-type combination in this batch
         id: attempt
-        continue-on-error: true
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
-          cargo +nightly "${{ matrix.cargo_cmd }}" -p larql-cli \
-            --target "${{ matrix.target }}" \
-            ${{ steps.feature-flag.outputs.flag }} \
-            ${{ steps.build-std-flag.outputs.flag }} \
-            --keep-going \
-            --message-format=json > attempt-output.json
-      - name: Upload full diagnostic JSON
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          FAILED=0
+          while IFS= read -r TARGET; do
+            CRATE_TYPES=$(tr ',' '\n' < "capability/supported-crate-types-$TARGET.txt" | sed 's/^ *//; s/ *$//')
+            for BUILD_STD in none std core,alloc core; do
+              if [ "$BUILD_STD" = "none" ]; then BUILD_STD_FLAG=""; else BUILD_STD_FLAG="-Z build-std=$BUILD_STD"; fi
+              for CARGO_CMD in check clippy build; do
+                for FEATURES in default-features no-default-features; do
+                  if [ "$FEATURES" = "no-default-features" ]; then FEATURES_FLAG="--no-default-features"; else FEATURES_FLAG=""; fi
+                  OUTFILE="out/attempt-$TARGET-$BUILD_STD-$CARGO_CMD-$FEATURES.json"
+                  : > "$OUTFILE"
+                  for CRATE_TYPE in $CRATE_TYPES; do
+                    echo "=== target=$TARGET build_std=$BUILD_STD cmd=$CARGO_CMD features=$FEATURES crate_type=$CRATE_TYPE ==="
+                    cargo +nightly "$CARGO_CMD" -p larql-cli \
+                      --target "$TARGET" --crate-type "$CRATE_TYPE" $FEATURES_FLAG $BUILD_STD_FLAG \
+                      --keep-going --message-format=json >> "$OUTFILE" || FAILED=1
+                  done
+                done
+              done
+            done
+          done < targets-in-batch.txt
+          echo "batch-had-failure=$FAILED" >> "$GITHUB_OUTPUT"
+      - name: Upload full diagnostic JSON for this batch
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-attempt-${{ matrix.target }}-${{ matrix.build_std }}-${{ matrix.cargo_cmd }}-${{ matrix.features }}
-          path: attempt-output.json
+          name: build-attempt-batch-${{ matrix.batch_index }}
+          path: out/
       - name: Assert honest result
         run: |
-          echo "cargo ${{ matrix.cargo_cmd }} outcome: ${{ steps.attempt.outcome }}"
-          if [ "${{ steps.attempt.outcome }}" = "failure" ]; then
-            echo "::notice::Real build failure recorded as a finding, not masked."
+          echo "batch ${{ matrix.batch_index }} had at least one real cargo failure: ${{ steps.attempt.outputs.batch-had-failure }}"
+          if [ "${{ steps.attempt.outputs.batch-had-failure }}" = "1" ]; then
+            echo "::notice::At least one real build failure in this batch, recorded as a finding in the uploaded JSON, not masked."
           fi
 ```
 
-This job deliberately runs every `build_std` × `cargo_cmd` × `features` combination against every target regardless of what `target-capability` reported about `std` (Standing Principle 3 — exhaustive unconditional fan-out; the spec's Build-attempt probes section is explicit that predictable outcomes are still real L1 data). The crate-type dimension from `supported-crate-types.txt` is deferred to this job's Step 3 below rather than baked into the initial matrix, since it needs the downloaded artifact's content, not a value known at matrix-definition time.
+This job deliberately runs every `build_std` × `cargo_cmd` × `features` × `crate_type` combination against every target in the batch regardless of what `target-capability` reported about `std` (Standing Principle 3 — exhaustive unconditional fan-out; the spec's Build-attempt probes section is explicit that predictable outcomes are still real L1 data), iterating `supported-crate-types-$TARGET.txt`'s actual content (Task 7's output) rather than a crate-type list chosen in advance, per this session's `only-cdylib` field-name correction.
 
-- [ ] **Step 3: Extend the build-attempt job to iterate crate types from the capability probe's real output**
+**Two probe-mechanism fixes folded into this rewrite, both caught before dispatch rather than after a wasted 28-batch run:**
+- The crate-type loop's `cargo` invocation now passes `--crate-type "$CRATE_TYPE"` explicitly. Without it, every iteration of the crate-type loop ran the identical command, so the crate-type dimension was silently inert — the loop executed 5 times but never actually varied anything, meaning the spec's "iterate every empirically-supported crate type" requirement went unmet despite looking like it was covered. `cargo build`/`cargo check` (and, transitively, `cargo clippy`) support `--crate-type` directly; confirm on the real run that this composes cleanly with all three `cargo_cmd` values — if `clippy` specifically rejects the flag, that's itself a real, worth-recording finding about the probe mechanism, not something to guess at now.
+- `rustup component add rust-src --toolchain nightly` is now installed alongside the toolchain. Every `-Z build-std` mode (`std`, `core,alloc`, `core`) requires the `rust-src` component to resolve `core`/`alloc`/`std` source for recompilation; without it, every build-std cell would fail with a missing-component error that looks identical to a real target-incompatibility finding but is actually a probe misconfiguration — exactly the kind of contradiction the spec's Error handling section requires distinguishing (`platform-limit-hit` and probe-execution-failure are different categories from a genuine compile error). Distinct from this: a tier-3 target genuinely lacking prebuilt `std` in `build_std=none` mode is a real finding, not a probe bug — the indexing categories need to be able to tell these two failure shapes apart, which is only possible once `rust-src` is actually present so a `none`-mode failure can't be misattributed to the missing component instead.
 
-Add a step before "cargo ${{ matrix.cargo_cmd }}", and change that step to a loop:
-```yaml
-      - name: Build against every empirically-supported crate type
-        continue-on-error: true
-        run: |
-          CRATE_TYPES=$(tr ',' '\n' < supported-crate-types.txt | sed 's/^ *//; s/ *$//')
-          FAILED=0
-          for CRATE_TYPE in $CRATE_TYPES; do
-            echo "=== crate-type: $CRATE_TYPE ==="
-            cargo +nightly "${{ matrix.cargo_cmd }}" -p larql-cli \
-              --target "${{ matrix.target }}" \
-              ${{ steps.feature-flag.outputs.flag }} \
-              ${{ steps.build-std-flag.outputs.flag }} \
-              --keep-going \
-              --message-format=json >> attempt-output.json || FAILED=1
-          done
-          exit $FAILED
-        id: attempt
-```
-Remove the earlier single-invocation "cargo ${{ matrix.cargo_cmd }}" step — this replaces it, iterating `supported-crate-types.txt`'s actual content (Task 6's output) rather than a crate-type list chosen in advance, per this session's `only-cdylib` field-name correction.
+**Deliberate departure from the original per-combo honest-result pattern, noted explicitly so it doesn't read as an oversight:** the original (pre-batch) design used step-level `continue-on-error: true` plus an explicit assert step reading `steps.attempt.outcome`, one pair per (target, build_std, cmd, features) combination. Batching collapses every combination for a batch's targets into one shell loop inside one step, so there is no longer a distinct step per combination to read `.outcome` from. The loop therefore never lets `$FAILED` reach the step's own exit code (there is deliberately no `exit $FAILED` at the end of this step) — the batch job always reports success at the step/job level, and the real per-combination pass/fail signal moves entirely into the uploaded JSON file content (one `attempt-<target>-<build_std>-<cmd>-<features>.json` file per combination, `--message-format=json` preserved exactly as before), which Task 10's indexing job parses directly. This is not a weaker honest-result guarantee — the full compiler diagnostics are strictly more informative than the old per-combo boolean `.outcome` was, and nothing is masked, since the raw JSON is uploaded via `if: always()` regardless of the loop's outcome — but it is a real, deliberate change in *where* the honest signal lives (file content vs. step outcome), worth a reviewer's attention.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: add dependency-graph and build-attempt probe jobs, crate-type iteration from empirical probe output"
+git commit -m "feat: add dependency-graph and build-attempt probe jobs, batched over the 256-job matrix cap"
 ```
 
-- [ ] **Step 5: Push and verify on a real runner**
+- [ ] **Step 4: Push and verify on a real runner**
 
-Push and confirm: `dependency-graph` produces all five artifact files per target with non-empty content; `build-attempt` fans out over the full matrix, and for `nvptx64-nvidia-cuda` × `build_std=none` × any `cargo_cmd`, the job's real outcome is `failure` (per the canary principle) with the honest-result assertion printing the notice, not a masked green.
+Push and confirm: `dependency-graph` produces `ceil(331/12) = 28` batch artifacts, each containing all five per-target files for every target in that batch, non-empty content. `build-attempt` produces 28 batch artifacts; download whichever batch contains `nvptx64-nvidia-cuda` and confirm its `attempt-nvptx64-nvidia-cuda-none-*-*.json` files contain real compiler error messages (per the canary principle — `build_std=none` against a target with no `std` must show real errors, never a clean/empty result) and that the "Assert honest result" step's log shows the `::notice::` for that batch. Also record each `build-attempt` job's actual wall-clock duration from the run — this is the empirical check on Task 6's "12 targets per batch stays under 6 hours" estimate; if any batch approaches the 6-hour limit, the fix is lowering `--max-batch-size` in Task 6's Discovery step (not something to guess at now, only to verify once real duration data exists).
 
 ---
 
-### Task 8: Runtime-test probe job
+### Task 9: Runtime-test probe job
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `runtime-test` job)
 
 **Interfaces:**
-- Consumes: `needs.discovery.outputs.target-matrix`.
-- Produces: per-target artifact recording either real test execution results or an explicit `"blocked: no runner available, reason: <cited>"` record — consumed by Task 9 (indexing).
+- Consumes: `needs.discovery.outputs.batches`, `needs.discovery.outputs.batch-indices` (Task 6).
+- Produces: per-batch artifact `runtime-test-batch-<batch_index>` containing one `runtime-test-result-<target>.json` file per target in that batch, recording either real test execution results or an explicit `"blocked: no runner available, reason: <cited>"` record — consumed by Task 10 (indexing).
 
 - [ ] **Step 1: Add the job**
 
 ```yaml
   runtime-test:
-    name: "Runtime test: ${{ matrix.target }}"
+    name: "Runtime test: batch ${{ matrix.batch_index }}"
     needs: [discovery]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(needs.discovery.outputs.target-matrix) }}
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
     steps:
       - uses: actions/checkout@v4
-      - name: Determine runner availability and execute or record block
+      - name: Determine runner availability and execute or record block, for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
-          case "${{ matrix.target }}" in
-            wasm32*|wasm64*)
-              echo '{"status": "runnable", "runner": "wasmtime"}' > runtime-test-result.json
-              # actual wasmtime execution wired in the wasm-family follow-on work;
-              # this job records availability honestly either way.
-              ;;
-            x86_64-unknown-linux-gnu|aarch64-*-linux-*|aarch64-apple-darwin)
-              echo '{"status": "runnable", "runner": "native"}' > runtime-test-result.json
-              ;;
-            nvptx64-nvidia-cuda)
-              echo '{"status": "blocked", "reason": "no free GPU CI runner available for this project (confirmed 2026-08-16)"}' \
-                > runtime-test-result.json
-              ;;
-            *)
-              echo '{"status": "blocked", "reason": "no known runner for this target"}' \
-                > runtime-test-result.json
-              ;;
-          esac
-      - name: Upload runtime-test result
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          while IFS= read -r TARGET; do
+            case "$TARGET" in
+              wasm32*|wasm64*)
+                echo '{"status": "runnable", "runner": "wasmtime"}' > "out/runtime-test-result-$TARGET.json"
+                # actual wasmtime execution wired in the wasm-family follow-on work;
+                # this job records availability honestly either way.
+                ;;
+              x86_64-unknown-linux-gnu|aarch64-*-linux-*|aarch64-apple-darwin)
+                echo '{"status": "runnable", "runner": "native"}' > "out/runtime-test-result-$TARGET.json"
+                ;;
+              nvptx64-nvidia-cuda)
+                echo '{"status": "blocked", "reason": "no free GPU CI runner available for this project (confirmed 2026-08-16)"}' \
+                  > "out/runtime-test-result-$TARGET.json"
+                ;;
+              *)
+                echo '{"status": "blocked", "reason": "no known runner for this target"}' \
+                  > "out/runtime-test-result-$TARGET.json"
+                ;;
+            esac
+          done < targets-in-batch.txt
+      - name: Upload runtime-test results for this batch
         uses: actions/upload-artifact@v4
         with:
-          name: runtime-test-${{ matrix.target }}
-          path: runtime-test-result.json
+          name: runtime-test-batch-${{ matrix.batch_index }}
+          path: out/
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: add runtime-test probe job with explicit blocked-status recording"
+git commit -m "feat: add runtime-test probe job with explicit blocked-status recording, batched over the 256-job matrix cap"
 ```
 
 - [ ] **Step 3: Push and verify on a real runner**
 
-Push and confirm: every target in the matrix produces a `runtime-test-<target>` artifact, and `nvptx64-nvidia-cuda`'s specifically records `"status": "blocked"` with a cited reason — never silently omitted, per the spec's Runtime-test probes section.
+Push and confirm: `ceil(331/12) = 28` `runtime-test-batch-<N>` artifacts, each containing one result file per target in that batch, and `nvptx64-nvidia-cuda`'s specifically records `"status": "blocked"` with a cited reason — never silently omitted, per the spec's Runtime-test probes section.
 
 ---
 
-### Task 9: Indexing job
+### Task 10: Indexing job
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `indexing` job)
 
 **Interfaces:**
-- Consumes: `scripts/target_analysis_indexing.py`'s CLI (Task 3); every artifact from Tasks 6-8 via `actions/download-artifact`.
-- Produces: `index.json` artifact; job fails (`exit 1`) if any expected artifact is missing.
+- Consumes: `scripts/target_analysis_indexing.py`'s CLI (Task 3); every batch artifact from Tasks 7-9 via `actions/download-artifact`; `needs.discovery.outputs.target-matrix` and `needs.discovery.outputs.batches` (both unbatched-Python-loop-safe per Task 6's ruling).
+- Produces: `index.json` artifact; job fails (`exit 1`) if any expected per-target file is missing.
+
+Completeness now has to be checked at the **file** level, not the artifact-directory level: Tasks 7-9 upload one artifact per *batch* (e.g. `target-capability-batch-3`), each containing many per-target files inside it, rather than one artifact per target. The expected/actual comparison below reflects that directly — `actual` is built from filenames found inside every batch-prefixed artifact directory, not from the directory names themselves.
 
 - [ ] **Step 1: Add the job**
 
@@ -1162,52 +1376,51 @@ Push and confirm: every target in the matrix produces a `runtime-test-<target>` 
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Compute expected vs. actual artifact sets and build index
+      - name: Compute expected vs. actual per-target files, and the target-to-batch map
         run: |
           python3 - <<'PYEOF'
           import json
-          import subprocess
           from pathlib import Path
 
           target_matrix = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
+          batches = json.loads('''${{ needs.discovery.outputs.batches }}''')
+
+          target_to_batch = {}
+          for batch_index, batch_targets in enumerate(batches):
+              for t in batch_targets:
+                  target_to_batch[t] = batch_index
+
           expected = set()
           for t in target_matrix:
-              expected.add(f"target-capability-{t}")
-              expected.add(f"dependency-graph-{t}")
-              expected.add(f"runtime-test-{t}")
+              expected.add(f"target-spec-{t}.json")
+              expected.add(f"cfg-{t}.txt")
+              expected.add(f"supported-crate-types-{t}.txt")
+              expected.add(f"metadata-{t}.json")
+              expected.add(f"tree-features-{t}.txt")
+              expected.add(f"tree-duplicates-{t}.txt")
+              expected.add(f"unit-graph-{t}.json")
+              expected.add(f"deny-{t}.txt")
+              expected.add(f"runtime-test-result-{t}.json")
               for build_std in ["none", "std", "core,alloc", "core"]:
                   for cmd in ["check", "clippy", "build"]:
                       for feat in ["default-features", "no-default-features"]:
-                          expected.add(f"build-attempt-{t}-{build_std}-{cmd}-{feat}")
+                          expected.add(f"attempt-{t}-{build_std}-{cmd}-{feat}.json")
 
-          actual = {p.name for p in Path("artifacts").iterdir() if p.is_dir()}
+          batch_prefixes = (
+              "target-capability-batch-", "dependency-graph-batch-",
+              "build-attempt-batch-", "runtime-test-batch-",
+          )
+          actual = set()
+          for batch_dir in Path("artifacts").iterdir():
+              if batch_dir.is_dir() and batch_dir.name.startswith(batch_prefixes):
+                  for f in batch_dir.iterdir():
+                      if f.is_file():
+                          actual.add(f.name)
+
           Path("expected-artifacts.json").write_text(json.dumps(sorted(expected)))
           Path("actual-artifacts.json").write_text(json.dumps(sorted(actual)))
+          Path("target-to-batch.json").write_text(json.dumps(target_to_batch))
           PYEOF
-      - name: Run indexing script
-        run: |
-          # Representative single-target inputs shown; the real invocation loops
-          # per target in the matrix, writing one index.json section per target.
-          python3 scripts/target_analysis_indexing.py \
-            --compiler-messages-file artifacts/build-attempt-nvptx64-nvidia-cuda-none-check-default-features/attempt-output.json \
-            --target-spec-file artifacts/target-capability-nvptx64-nvidia-cuda/target-spec.json \
-            --std-mode-errors-file <(echo '[]') \
-            --expected-artifacts-file expected-artifacts.json \
-            --actual-artifacts-file actual-artifacts.json \
-            > index.json
-      - name: Upload index
-        uses: actions/upload-artifact@v4
-        with:
-          name: navigation-index
-          path: index.json
-```
-
-The single-target inline invocation shown is a placeholder for the loop structure — resolve this in Step 2 below with a real per-target loop, not left as-is; flagging it here so the loop is written deliberately rather than skipped.
-
-- [ ] **Step 2: Replace the single-target invocation with a real per-target loop**
-
-Replace the "Run indexing script" step with:
-```yaml
       - name: Run indexing script per target
         run: |
           python3 - <<'PYEOF'
@@ -1217,13 +1430,15 @@ Replace the "Run indexing script" step with:
           from pathlib import Path
 
           target_matrix = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
+          target_to_batch = json.loads(Path("target-to-batch.json").read_text())
           combined = {}
           any_missing = False
           for t in target_matrix:
-              attempt_file = Path(f"artifacts/build-attempt-{t}-none-check-default-features/attempt-output.json")
-              spec_file = Path(f"artifacts/target-capability-{t}/target-spec.json")
-              if not attempt_file.exists() or not spec_file.exists():
-                  combined[t] = {"error": "missing required per-target artifact"}
+              batch_index = target_to_batch.get(t)
+              attempt_file = Path(f"artifacts/build-attempt-batch-{batch_index}/attempt-{t}-none-check-default-features.json")
+              spec_file = Path(f"artifacts/target-capability-batch-{batch_index}/target-spec-{t}.json")
+              if batch_index is None or not attempt_file.exists() or not spec_file.exists():
+                  combined[t] = {"error": "missing required per-target file"}
                   any_missing = True
                   continue
               result = subprocess.run(
@@ -1246,57 +1461,74 @@ Replace the "Run indexing script" step with:
           Path("index.json").write_text(json.dumps(combined, indent=2))
           sys.exit(1 if any_missing else 0)
           PYEOF
+      - name: Upload index
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigation-index
+          path: index.json
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
 git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: add indexing job with per-target loop and completeness enforcement"
+git commit -m "feat: add indexing job with per-target file-level completeness enforcement across batched artifacts"
 ```
 
-- [ ] **Step 4: Push and verify on a real runner**
+- [ ] **Step 3: Push and verify on a real runner**
 
-Push and confirm: the `indexing` job runs after all Primary-layer jobs (`needs:` + `!cancelled()`), downloads every artifact, produces `navigation-index` containing one entry per target with `error_counts_by_target`, `contradictions`, and `missing_artifacts`. Then deliberately break completeness once (e.g. temporarily comment out the `runtime-test` job's artifact upload step in a throwaway commit) and confirm the `indexing` job fails loudly rather than silently indexing a partial set — then revert that throwaway commit.
+Push and confirm: the `indexing` job runs after all Primary-layer jobs (`needs:` + `!cancelled()`), downloads every batch artifact, produces `navigation-index` containing one entry per target (all 331) with `error_counts_by_target`, `contradictions`, and `missing_artifacts`. Then deliberately break completeness once (e.g. temporarily comment out the `runtime-test` job's artifact upload step in a throwaway commit) and confirm the `indexing` job fails loudly rather than silently indexing a partial set — then revert that throwaway commit.
 
 ---
 
-### Task 10: Generalize Secondary-layer Stages A and B
+### Task 11: Generalize the Secondary-layer mutation stages (A, B, B2, B3) — single job, no target matrix
+
+**Restructured from the original two-job (per-crate × per-target) design.** All four mutation stages are target-independent: Stage A runs `clippy --fix` against the host target (never `--target`), Stage B is a pure text edit to `lib.rs`, and Stage B2/B3 are pure text edits to `Cargo.toml` files — none of them reference a target triple at all. The original draft matrixed this identical, target-independent work over all 331 targets (and, for Stage A/B, over 5 crates too — 1655 combinations), for no reason: target only enters the Secondary layer at Stage C. This version runs the whole mutation pipeline exactly once per pipeline run, producing a single patch that Task 12's batched Stage C job downloads and applies before checking against each target — this is also what fixes a real bug the original draft had: without an explicit patch-apply step, Stage C would have run against a fresh, unmutated checkout every time, silently checking pristine source instead of the mutation it was supposed to be evaluating.
 
 **Files:**
-- Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-stage-a-b` job, adapted from `experiment-cuda-nvptx.yml`'s existing `nostd-fix-attempt` job's Stage A / Stage B steps at `.github/workflows/experiment-cuda-nvptx.yml:477-553`)
+- Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-mutate` job, adapted from `experiment-cuda-nvptx.yml`'s existing `nostd-fix-attempt` job's Stage A/B/B2/B3 steps at `.github/workflows/experiment-cuda-nvptx.yml:477-624`)
 
 **Interfaces:**
-- Consumes: `needs.discovery.outputs.target-matrix`; a crate matrix (this task hardcodes the five crates already proven in the existing workflow — `larql-boundary`, `larql-vindex-spec`, `larql-models`, `larql-compute`, `larql-cli` — generalizing crate discovery itself is out of scope for this plan, matching the existing proven pipeline's scope).
-- Produces: mutated checkout state (Stage A/B applied) plus `lib_rs_content` captured to a file, consumed by Task 12's `stage-b` promotion check.
+- Consumes: nothing target-specific. `needs: [discovery, indexing]` expresses a real ordering constraint even without consuming `target-matrix` directly — this stage's whole purpose (per Standing Principle 6) is to be validated against a Primary-layer baseline, so it still waits for the Primary layer's indexing to complete first.
+- Produces: one `secondary-mutation` artifact containing `full-mutation.patch` (a single `git diff` of the whole tree after all four stages), per-crate `baseline-lib-rs-<crate>.txt` / `sibling-lib-rs-<crate>.txt` pairs (Stage B promotion input), and `baseline-metadata.json` (the unmutated `cargo metadata` output, captured before Stage B3 trims workspace members — Stage B3 promotion input). Consumed by Task 12.
 
-- [ ] **Step 1: Add the job, reusing the existing workflow's proven Stage A/B logic**
+- [ ] **Step 1: Add the job, reusing the existing workflow's proven Stage A/B/B2/B3 logic, target-independent**
 
 ```yaml
-  secondary-stage-a-b:
-    name: "Secondary Stage A/B: ${{ matrix.crate }} / ${{ matrix.target }}"
+  secondary-mutate:
+    name: "Secondary layer: mutate (Stages A, B, B2, B3)"
     needs: [discovery, indexing]
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJSON(needs.discovery.outputs.target-matrix) }}
-        crate: [larql-boundary, larql-vindex-spec, larql-models, larql-compute, larql-cli]
+    env:
+      CRATES: "larql-boundary larql-vindex-spec larql-models larql-compute larql-cli"
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly Rust
-        run: rustup toolchain install nightly --profile minimal
-      - name: "Stage A: mechanical std->core/alloc rewrite (host target)"
         run: |
-          cargo +nightly clippy --fix --allow-dirty --allow-no-vcs \
-            -p "${{ matrix.crate }}" -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
-      - name: "Stage B: inject #![no_std] scaffold"
+          rustup toolchain install nightly --profile minimal
+          rustup component add clippy --toolchain nightly
+      - name: Capture pre-mutation lib.rs content per crate and pre-mutation workspace metadata
         run: |
-          python3 - <<'PYEOF'
-          import re
+          mkdir -p out
+          for CRATE in $CRATES; do
+            cp "crates/$CRATE/src/lib.rs" "out/baseline-lib-rs-$CRATE.txt"
+          done
+          cargo metadata --format-version 1 --no-deps > out/baseline-metadata.json
+      - name: "Stage A: mechanical std->core/alloc rewrite (host target), per crate"
+        run: |
+          for CRATE in $CRATES; do
+            cargo +nightly clippy --fix --allow-dirty --allow-no-vcs \
+              -p "$CRATE" -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
+          done
+      - name: "Stage B: inject #![no_std] scaffold, per crate"
+        run: |
+          for CRATE in $CRATES; do
+            python3 - "$CRATE" <<'PYEOF'
+          import sys
           from pathlib import Path
 
-          lib_rs = Path("crates/${{ matrix.crate }}/src/lib.rs")
+          crate = sys.argv[1]
+          lib_rs = Path(f"crates/{crate}/src/lib.rs")
           text = lib_rs.read_text(encoding="utf-8")
           lines = text.splitlines(keepends=True)
 
@@ -1312,57 +1544,12 @@ Push and confirm: the `indexing` job runs after all Primary-layer jobs (`needs:`
           lines.insert(insert_at, scaffold)
           lib_rs.write_text("".join(lines), encoding="utf-8")
           PYEOF
-      - name: Capture Stage B lib.rs content for promotion check
-        run: cp "crates/${{ matrix.crate }}/src/lib.rs" "stage-b-lib-rs-${{ matrix.crate }}-${{ matrix.target }}.txt"
-      - name: Upload Stage A/B checkout diff
-        run: git diff > stage-a-b-diff-${{ matrix.crate }}-${{ matrix.target }}.patch
-      - uses: actions/upload-artifact@v4
-        with:
-          name: secondary-stage-a-b-${{ matrix.crate }}-${{ matrix.target }}
-          path: |
-            stage-b-lib-rs-${{ matrix.crate }}-${{ matrix.target }}.txt
-            stage-a-b-diff-${{ matrix.crate }}-${{ matrix.target }}.patch
-```
-
-The scaffold-insertion Python here is the exact fix this session already verified against a real 71-line doc comment (inserting after any leading `//!`/`#![`/blank-line block, never before it) — reused directly, not reinvented.
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: add generalized Secondary-layer Stage A/B job"
-```
-
-- [ ] **Step 3: Push and verify on a real runner**
-
-Push and confirm: for each crate × target pair, Stage A/B applies cleanly (no doc-comment corruption — check `larql-compute`'s output specifically, the crate with the largest leading doc comment), and the uploaded `stage-b-lib-rs-*.txt` files contain both `#![no_std]` and `extern crate alloc;`.
-
----
-
-### Task 11: Generalize Secondary-layer Stages B2 and B3, run concurrently
-
-**Files:**
-- Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-stage-b2-b3` job, adapted from `experiment-cuda-nvptx.yml:554-624`)
-
-**Interfaces:**
-- Consumes: same crate/target matrix as Task 10; runs independently (does not need Task 10's output — B2/B3 touch disjoint files from A/B, per spec's Secondary-layer stages section).
-- Produces: `unit-graph` (post-B2) and `cargo metadata` (post-B3) captures, consumed by Task 12's `stage-b2`/`stage-b3` promotion checks.
-
-- [ ] **Step 1: Add the job with B2 and B3 as concurrent background steps**
-
-```yaml
-  secondary-stage-b2-b3:
-    name: "Secondary Stage B2/B3: ${{ matrix.target }}"
-    needs: [discovery, indexing]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJSON(needs.discovery.outputs.target-matrix) }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install nightly Rust
-        run: rustup toolchain install nightly --profile minimal
+          done
+      - name: Capture post-Stage-B lib.rs content per crate
+        run: |
+          for CRATE in $CRATES; do
+            cp "crates/$CRATE/src/lib.rs" "out/sibling-lib-rs-$CRATE.txt"
+          done
       - name: "Stage B2: patch std-defaulting dependency features"
         id: stage-b2
         background: true
@@ -1389,162 +1576,178 @@ Push and confirm: for each crate × target pair, Stage A/B applies cleanly (no d
           PYEOF
       - name: Wait for B2 and B3
         wait-all: [stage-b2, stage-b3]
-      - name: Capture post-B2 unit-graph
-        run: |
-          cargo +nightly build -Z unstable-options --unit-graph \
-            -p larql-cli --target "${{ matrix.target }}" \
-            > post-b2-unit-graph-${{ matrix.target }}.json
-      - name: Capture post-B3 workspace metadata
-        run: |
-          cargo metadata --format-version 1 --no-deps > post-b3-metadata-${{ matrix.target }}.json
+      - name: Capture the full mutated-tree patch
+        run: git diff > out/full-mutation.patch
       - uses: actions/upload-artifact@v4
         with:
-          name: secondary-stage-b2-b3-${{ matrix.target }}
-          path: |
-            post-b2-unit-graph-${{ matrix.target }}.json
-            post-b3-metadata-${{ matrix.target }}.json
+          name: secondary-mutation
+          path: out/
 ```
 
-This reuses the exact `[^}]*` sed pattern this session verified catches every `serde = { workspace = true, features = [...] }` variant (not just the bare exact-string form that missed five crates originally), and the exact Stage B3 reachable-crate list derived from real `cargo tree -p larql-cli` CI output earlier this session.
+The scaffold-insertion Python is the exact fix this session already verified against a real 71-line doc comment (inserting after any leading `//!`/`#![`/blank-line block, never before it); the Stage B2 sed pattern and Stage B3 reachable-crate list are the exact ones this session verified against real CI output — all reused directly, not reinvented. `baseline-metadata.json` is captured before Stage B3 runs specifically so Task 12 never needs to reconstruct the unmutated workspace member list by parsing `git show`-retrieved TOML text — it's just read directly from this artifact.
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: add generalized Secondary-layer Stage B2/B3 job, run concurrently via background/wait"
+git commit -m "feat: add generalized Secondary-layer mutation job (Stages A, B, B2, B3), target-independent"
 ```
 
 - [ ] **Step 3: Push and verify on a real runner**
 
-Push and confirm: `stage-b2` and `stage-b3` steps run concurrently (check step start timestamps in the run log — they should overlap, not serialize), both complete before the `wait-all` step proceeds, and the uploaded `post-b2-unit-graph-*.json` shows `serde`'s features narrowed as intended while `post-b3-metadata-*.json`'s `workspace_members` is trimmed to the five reachable crates.
+Push and confirm: the `secondary-mutate` job runs exactly once (no matrix), Stage A/B applies cleanly for every crate (no doc-comment corruption — check `larql-compute`'s output specifically, the crate with the largest leading doc comment), the `stage-b2`/`stage-b3` steps' start timestamps overlap (background/wait proven concurrent, matching Standing Principle 8's genuine-dependency-only sequencing), and the uploaded `secondary-mutation` artifact contains `full-mutation.patch`, 5 baseline/sibling lib.rs pairs, and `baseline-metadata.json`.
 
 ---
 
-### Task 12: Stage C and the promotion/depth-advancement decision
+### Task 12: Stage C and the promotion/depth-advancement decision, batched
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-stage-c-and-promotion` job)
 
 **Interfaces:**
-- Consumes: Task 10's `secondary-stage-a-b-*` artifacts, Task 11's `secondary-stage-b2-b3-*` artifacts, `scripts/target_analysis_promotion.py`'s CLI (Task 4), Task 9's `navigation-index` (as the baseline for `depth_advanced`).
-- Produces: `promotion-decision-<target>` artifact recording, per stage, whether it promotes, and whether the round advanced depth — the actual mechanical output this session's "measurable difference" discussion exists to produce.
+- Consumes: `needs.discovery.outputs.batches`/`batch-indices` (Task 6); Task 11's `secondary-mutation` artifact (the patch plus Stage B/B3 baselines); Task 7's `target-capability-batch-<N>` and Task 8's `dependency-graph-batch-<N>` artifacts (the mechanically-grounded Primary-layer baselines for the Stage B2 promotion check — the per-target unmutated `unit-graph-<target>.json` this job would otherwise have no other source for); `scripts/target_analysis_promotion.py`'s CLI (Task 4).
+- Produces: `promotion-decision-batch-<batch_index>` artifact containing, per target in that batch, the stage-b/b2/b3 promotion verdicts and the depth-advancement decision — the actual mechanical output this session's "measurable difference" discussion exists to produce.
+
+**The critical fix this task makes over the original draft:** the original version did a fresh `actions/checkout@v4` and ran `cargo check` directly, with no step ever applying Task 11's mutation — Stage C would have silently checked pristine, unmutated source on every run, and the whole promotion/depth-advancement machinery would have been evaluating data that never reflected the mutation it claimed to evaluate. This version's very first non-checkout step downloads `secondary-mutation` and runs `git apply mutation/full-mutation.patch` before anything else.
 
 - [ ] **Step 1: Add the job**
 
 ```yaml
   secondary-stage-c-and-promotion:
-    name: "Secondary Stage C + promotion: ${{ matrix.target }}"
-    needs: [discovery, indexing, secondary-stage-a-b, secondary-stage-b2-b3]
+    name: "Secondary Stage C + promotion: batch ${{ matrix.batch_index }}"
+    needs: [discovery, indexing, secondary-mutate, target-capability, dependency-graph]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(needs.discovery.outputs.target-matrix) }}
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
     steps:
       - uses: actions/checkout@v4
+      - name: Download the Secondary layer's mutation artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: secondary-mutation
+          path: mutation
+      - name: Apply the mutation patch to this job's checkout
+        run: git apply mutation/full-mutation.patch
       - name: Install nightly Rust
-        run: rustup toolchain install nightly --profile minimal
-      - name: Download all Secondary-layer artifacts for this target
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+      - name: Download this batch's target-capability and dependency-graph artifacts (Primary-layer baselines)
         uses: actions/download-artifact@v4
         with:
-          pattern: "secondary-stage-*-${{ matrix.target }}*"
-          path: secondary-artifacts
-      - name: Download baseline navigation index
-        uses: actions/download-artifact@v4
-        with:
-          name: navigation-index
-          path: baseline
-      - name: "Stage C: target-relative check against ${{ matrix.target }}, full mutated tree"
-        id: stage-c
-        continue-on-error: true
+          pattern: "*-batch-${{ matrix.batch_index }}"
+          path: primary
+      - name: Stage C and promotion checks for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
-          cargo +nightly check -p larql-cli --target "${{ matrix.target }}" \
-            -Z build-std=core,alloc --keep-going --message-format=json > stage-c-output.json
-      - name: Build baseline/sibling state files and run promotion checks
-        run: |
-          python3 - <<'PYEOF'
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          while IFS= read -r TARGET; do
+            echo "=== Stage C: target=$TARGET ==="
+            cargo +nightly check -p larql-cli --target "$TARGET" \
+              -Z build-std=core,alloc --keep-going --message-format=json \
+              > "out/stage-c-$TARGET.json" || true
+
+            python3 - "$TARGET" <<'PYEOF'
           import json
           import subprocess
+          import sys
           from pathlib import Path
 
-          target = "${{ matrix.target }}"
+          target = sys.argv[1]
 
-          # Stage B (no_std scaffold) promotion input.
-          lib_rs_path = next(Path("secondary-artifacts").glob(f"*/stage-b-lib-rs-*-{target}.txt"))
-          sibling_b = {"lib_rs_content": lib_rs_path.read_text(encoding="utf-8")}
-          baseline_b = {"lib_rs_content": ""}  # unmutated checkout has no scaffold present
-          Path("baseline-b.json").write_text(json.dumps(baseline_b))
-          Path("sibling-b.json").write_text(json.dumps(sibling_b))
+          # Stage B (no_std scaffold): real baseline/sibling lib.rs content
+          # captured by the mutation job, target-independent (larql-cli's own file).
+          baseline_b = {"lib_rs_content": Path("mutation/baseline-lib-rs-larql-cli.txt").read_text(encoding="utf-8")}
+          sibling_b = {"lib_rs_content": Path("mutation/sibling-lib-rs-larql-cli.txt").read_text(encoding="utf-8")}
+          Path(f"baseline-b-{target}.json").write_text(json.dumps(baseline_b))
+          Path(f"sibling-b-{target}.json").write_text(json.dumps(sibling_b))
 
-          # Stage B2 (serde features) promotion input.
-          unit_graph_path = Path(f"secondary-artifacts/secondary-stage-b2-b3-{target}/post-b2-unit-graph-{target}.json")
-          sibling_b2 = {"unit_graph": json.loads(unit_graph_path.read_text(encoding="utf-8"))}
-          baseline_index = json.loads(Path("baseline/index.json").read_text(encoding="utf-8"))
-          Path("sibling-b2.json").write_text(json.dumps(sibling_b2))
+          # Stage B2 (serde features): baseline is the Primary layer's own
+          # unmutated unit-graph for this target (dependency-graph-batch-N,
+          # already downloaded — never recomputed, it's real mechanically-
+          # grounded L1 data this job would otherwise have no other source
+          # for); sibling is computed fresh here since the patch is now
+          # applied to this job's own checkout.
+          baseline_unit_graph_path = next(Path("primary").glob(f"dependency-graph-batch-*/unit-graph-{target}.json"))
+          baseline_unit_graph = json.loads(baseline_unit_graph_path.read_text(encoding="utf-8"))
+          sibling_unit_graph_raw = subprocess.run(
+              ["cargo", "+nightly", "build", "-Z", "unstable-options", "--unit-graph",
+               "-p", "larql-cli", "--target", target],
+              capture_output=True, text=True,
+          ).stdout
+          Path(f"baseline-b2-{target}.json").write_text(json.dumps({"unit_graph": baseline_unit_graph}))
+          Path(f"sibling-b2-{target}.json").write_text(json.dumps({"unit_graph": json.loads(sibling_unit_graph_raw)}))
 
-          # Stage B3 (workspace trim) promotion input.
-          metadata_path = Path(f"secondary-artifacts/secondary-stage-b2-b3-{target}/post-b3-metadata-{target}.json")
-          sibling_b3 = {
-              "metadata": json.loads(metadata_path.read_text(encoding="utf-8")),
-              "expected_members": [
-                  "larql-cli", "larql-boundary", "larql-vindex-spec",
-                  "larql-models", "larql-compute",
-              ],
-          }
-          Path("sibling-b3.json").write_text(json.dumps(sibling_b3))
+          # Stage B3 (workspace trim): baseline is the mutation job's own
+          # pre-Stage-B3 cargo metadata capture (target-independent — workspace
+          # membership doesn't vary by target); sibling is this job's own
+          # mutated-tree metadata.
+          expected_members = ["larql-cli", "larql-boundary", "larql-vindex-spec", "larql-models", "larql-compute"]
+          baseline_metadata = json.loads(Path("mutation/baseline-metadata.json").read_text(encoding="utf-8"))
+          sibling_metadata = json.loads(subprocess.run(
+              ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+              capture_output=True, text=True,
+          ).stdout)
+          Path(f"baseline-b3-{target}.json").write_text(json.dumps({"metadata": baseline_metadata, "expected_members": expected_members}))
+          Path(f"sibling-b3-{target}.json").write_text(json.dumps({"metadata": sibling_metadata, "expected_members": expected_members}))
           PYEOF
-      - name: Run Stage B promotion check
-        run: |
-          python3 scripts/target_analysis_promotion.py --stage stage-b \
-            --baseline-state-file baseline-b.json --sibling-state-file sibling-b.json \
-            --github-output "$GITHUB_OUTPUT" || true
-      - name: Compute depth advancement (baseline vs. sibling error sites)
-        run: |
-          python3 - <<'PYEOF'
-          import json
-          from pathlib import Path
 
+            for STAGE in stage-b stage-b2 stage-b3; do
+              python3 scripts/target_analysis_promotion.py --stage "$STAGE" \
+                --baseline-state-file "baseline-$STAGE-$TARGET.json" \
+                --sibling-state-file "sibling-$STAGE-$TARGET.json" \
+                > "out/promotion-$STAGE-$TARGET.json"
+            done
+
+            python3 - "$TARGET" <<'PYEOF'
+          import json
           import sys
           sys.path.insert(0, ".")
+          from pathlib import Path
           from scripts.target_analysis_common import error_sites
+          from scripts.target_analysis_promotion import depth_advanced
 
-          baseline_messages = []  # baseline had no successful compile attempt to draw messages from at this depth
-          with open("stage-c-output.json") as f:
+          target = sys.argv[1]
+          with open(f"out/stage-c-{target}.json") as f:
               sibling_messages = [json.loads(line) for line in f if line.strip()]
+          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 13 wires round-over-round)
 
           baseline_sites = error_sites(baseline_messages)
           sibling_sites = error_sites(sibling_messages)
-
-          from scripts.target_analysis_promotion import depth_advanced
           result = {
-              "target": "${{ matrix.target }}",
+              "target": target,
               "depth_advanced": depth_advanced(baseline_sites, sibling_sites),
               "baseline_site_count": len(baseline_sites),
               "sibling_site_count": len(sibling_sites),
               "resolved_sites": sorted(str(s) for s in (baseline_sites - sibling_sites)),
               "new_sites": sorted(str(s) for s in (sibling_sites - baseline_sites)),
           }
-          Path("depth-decision.json").write_text(json.dumps(result, indent=2))
+          Path(f"out/depth-decision-{target}.json").write_text(json.dumps(result, indent=2))
           PYEOF
+          done < targets-in-batch.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: promotion-decision-${{ matrix.target }}
-          path: |
-            depth-decision.json
-            stage-c-output.json
+          name: promotion-decision-batch-${{ matrix.batch_index }}
+          path: out/
 ```
+
+`primary/dependency-graph-batch-*/unit-graph-{target}.json` uses a glob rather than embedding `${{ matrix.batch_index }}` inside the Python heredoc — the `pattern:` download step already scoped `primary/` to exactly this job's batch index, so there's exactly one matching directory and the glob avoids mixing GitHub Actions expression interpolation into a Python string literal.
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: add Stage C job with mechanical promotion and depth-advancement decisions"
+git commit -m "feat: add Stage C job, batched, applying the mutation patch before checking, with mechanically-grounded b2/b3 baselines"
 ```
 
 - [ ] **Step 3: Push and verify on a real runner**
 
-Push and confirm: `promotion-decision-<target>` artifacts are produced for every target, `depth-decision.json` correctly reports `resolved_sites`/`new_sites` as disjoint diffs against the (currently empty, first-round) baseline, and the Stage B promotion check's `$GITHUB_OUTPUT` line is present in the job log. This first round has no real prior-round baseline yet — Task 13 wires the actual round-over-round baseline handoff.
+Push and confirm: `ceil(331/12) = 28` `promotion-decision-batch-<N>` artifacts are produced, each containing per-target `stage-c-<target>.json`, `promotion-stage-b-<target>.json`, `promotion-stage-b2-<target>.json`, `promotion-stage-b3-<target>.json`, and `depth-decision-<target>.json` files. Specifically check the batch containing `nvptx64-nvidia-cuda`: confirm `stage-c-nvptx64-nvidia-cuda.json` shows real compiler output against the *mutated* tree (spot-check that the file content differs from what Task 8's unmutated `build-attempt` probe recorded for the same target — this is the direct evidence the patch was actually applied, not skipped), and confirm all three `promotion-stage-b*-nvptx64-nvidia-cuda.json` files show real `"promotes": true/false` verdicts (not an error) — this first round has no real prior-round Stage C baseline yet (`baseline_messages = []`), so `depth_advanced` should read `true` for every target with any error at all (every site is "newly resolved" relative to an empty baseline is wrong — re-check this reasoning empirically against the real output: an empty baseline means `baseline_sites - sibling_sites` is always empty regardless of `sibling_sites`, since you cannot subtract from nothing, so `depth_advanced` should read `false` for every target on this first round; Task 13 wires the real round-over-round baseline that makes this check meaningful).
 
 ---
 
@@ -1554,7 +1757,7 @@ Push and confirm: `promotion-decision-<target>` artifacts are produced for every
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `next-round-baseline` job)
 
 **Interfaces:**
-- Consumes: `promotion-decision-<target>` artifacts (Task 12) across every target in the matrix.
+- Consumes: `promotion-decision-batch-<batch_index>` artifacts (Task 12), each containing multiple per-target `depth-decision-<target>.json` and `promotion-stage-*-<target>.json` files.
 - Produces: `round-baseline` artifact — the folded-forward set of promoted stage diffs plus the full set of non-promoted results preserved separately — retrievable by the next `push` to the same branch pattern (the mechanism by which round N+1 begins from round N's baseline, per this session's mutual-recursion finding: observation and mutation inform each other round over round, neither completes independently).
 
 - [ ] **Step 1: Add the job**
@@ -1567,26 +1770,36 @@ Push and confirm: `promotion-decision-<target>` artifacts are produced for every
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download all promotion decisions
+      - name: Download all promotion-decision batch artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: "promotion-decision-*"
+          pattern: "promotion-decision-batch-*"
           path: promotion-decisions
       - name: Fold promoted results, preserve non-promoted results separately
         run: |
           python3 - <<'PYEOF'
           import json
+          import re
           from pathlib import Path
 
           promoted = {}
           preserved = {}
-          for decision_dir in Path("promotion-decisions").iterdir():
-              target = decision_dir.name.removeprefix("promotion-decision-")
-              depth_decision = json.loads((decision_dir / "depth-decision.json").read_text())
-              if depth_decision["depth_advanced"]:
-                  promoted[target] = depth_decision
-              else:
-                  preserved[target] = depth_decision
+          for batch_dir in Path("promotion-decisions").iterdir():
+              if not batch_dir.is_dir():
+                  continue
+              for depth_file in batch_dir.glob("depth-decision-*.json"):
+                  target = re.sub(r"^depth-decision-|\.json$", "", depth_file.name)
+                  depth_decision = json.loads(depth_file.read_text())
+                  stage_verdicts = {}
+                  for stage in ("stage-b", "stage-b2", "stage-b3"):
+                      stage_file = batch_dir / f"promotion-{stage}-{target}.json"
+                      if stage_file.exists():
+                          stage_verdicts[stage] = json.loads(stage_file.read_text())
+                  record = {**depth_decision, "stage_promotions": stage_verdicts}
+                  if depth_decision["depth_advanced"]:
+                      promoted[target] = record
+                  else:
+                      preserved[target] = record
 
           Path("round-baseline.json").write_text(
               json.dumps({"promoted": promoted, "preserved_not_promoted": preserved}, indent=2)
@@ -1707,16 +1920,16 @@ Push and confirm: all three checks pass on the real pipeline as currently writte
 
 **Spec coverage** — every spec section maps to a task:
 - Foundational framework / Standing design principles → Global Constraints (verbatim-sourced).
-- Discovery job → Task 5.
-- Target-capability probes → Task 6.
-- Dependency-graph probes → Task 7 (dependency-graph half).
-- Build-attempt probes (including the `only-cdylib` crate-type correction) → Task 7 (build-attempt half), Step 3.
-- Runtime-test probes → Task 8.
-- Indexing (structural extraction, contradiction rule, completeness enforcement) → Tasks 3 and 9.
-- Secondary-layer stages A/B, B2/B3 (with `background`/`wait` concurrency), C → Tasks 10, 11, 12.
-- The measurable-difference / promotion rule (this session's immediate deliverable) → Task 4 (script) and Task 12 (wiring).
+- Discovery job → Task 5, extended by Task 6 (batching — a real GitHub Actions platform limit discovered empirically on Task 5's own real run, per Standing Principle 1).
+- Target-capability probes → Task 7.
+- Dependency-graph probes → Task 8 (dependency-graph half).
+- Build-attempt probes (including the `only-cdylib` crate-type correction, and the `--crate-type`/`rust-src` fixes caught before dispatch) → Task 8 (build-attempt half).
+- Runtime-test probes → Task 9.
+- Indexing (structural extraction, contradiction rule, completeness enforcement, now at file-level across batched artifacts) → Tasks 3 and 10.
+- Secondary-layer mutation stages A/B/B2/B3 (with `background`/`wait` concurrency, target-independent, single job) → Task 11. Stage C (batched, applying the mutation patch — the critical bug this restructure fixes over the original per-target-matrixed draft) → Task 12.
+- The measurable-difference / promotion rule (this session's immediate deliverable) → Task 4 (script) and Task 12 (wiring, with mechanically-grounded b2/b3 baselines sourced from the Primary layer's own artifacts rather than fabricated).
 - Recursive round-over-round baseline handoff → Task 13.
-- Error handling (honest-result pattern, retries narrow to network calls, platform-limit category) → reused directly from the proven `experiment-cuda-nvptx.yml` patterns in Tasks 7 and 12; the retry/platform-limit categories are not separately re-implemented since Tasks 6-8's probes don't call rate-limited external APIs beyond `rustc`/`cargo` — Discovery's crates.io/GitHub SBOM calls (mentioned in the spec's Discovery job description) are the one place a narrow retry would apply and are flagged here as **not yet implemented**: Task 5 only wires `rustc --print target-list`, not the crates.io/SBOM ecosystem-discovery calls. This is a real gap — added as a follow-up task below rather than silently left out.
+- Error handling (honest-result pattern, retries narrow to network calls, platform-limit category) → reused directly from the proven `experiment-cuda-nvptx.yml` patterns in Tasks 8 and 12; the retry/platform-limit categories are not separately re-implemented since Tasks 7-9's probes don't call rate-limited external APIs beyond `rustc`/`cargo` — Discovery's crates.io/GitHub SBOM calls (mentioned in the spec's Discovery job description) are the one place a narrow retry would apply and are flagged here as **not yet implemented**: Task 5 only wires `rustc --print target-list`, not the crates.io/SBOM ecosystem-discovery calls. This is a real gap — added as a follow-up task below rather than silently left out.
 - Testing (noise floor, blast-radius, golden fixtures, ephemerality, cross-target/native comparison) → Task 14 covers noise floor, blast radius, ephemerality directly. Golden fixtures (`serde-nostd-probe`-style planted-outcome crates) and cross-target/native comparison are **not yet implemented** — flagged below.
 - Explicitly not doing (no caching, no CI commits, no agent curation presented as L1) → Global Constraints + Task 14's ephemerality check enforces the no-commits rule structurally.
 
@@ -1725,7 +1938,8 @@ Push and confirm: all three checks pass on the real pipeline as currently writte
 - Golden-fixture crates with a planted, known-in-advance outcome, generalizing `serde-nostd-probe` (spec: Testing).
 - Cross-target/cross-native comparison job, once the target matrix includes both nvptx and at least one native target's Stage C result for the same underlying finding (spec: Testing) — this is naturally sequenced after Tasks 1-14 produce enough real round data to compare, not before.
 - The target-family tooling registry (curated, labeled L2, e.g. `os: cuda` → CUDA toolkit tooling) mentioned in Components/Discovery job.
+- Toolchain-pinning across jobs within a single run: each job independently runs `rustup toolchain install nightly`, which can resolve to different nightly builds if a run straddles a nightly release boundary (typically UTC midnight), producing spurious cross-job disagreement that Task 14's own noise-floor test is specifically designed to catch but not fix. Not blocking for this plan (the batching correction above already re-verified everything against real CI evidence); worth a dedicated fix (Discovery resolves and pins a specific nightly date, passed to every downstream job) before this pipeline is trusted for long-running, many-round recursive use.
 
-**Placeholder scan:** no "TBD"/"TODO" remain; the one inline placeholder note in Task 9 Step 1 is explicitly resolved by Task 9 Step 2 in the same task, not deferred.
+**Placeholder scan:** no "TBD"/"TODO" remain; the one inline placeholder note in Task 10 Step 1 (in the original single-target-invocation draft) was resolved before this task's content was finalized, not deferred.
 
-**Type consistency:** `stage_promotes(stage_name, baseline_state, sibling_state)` and `depth_advanced(baseline_sites, sibling_sites)` signatures introduced in Task 4 are used identically in Task 12's workflow wiring (same argument order, same dict-shaped state objects keyed exactly as `STAGE_POSTCONDITIONS` expects: `lib_rs_content`, `unit_graph`, `metadata`+`expected_members`). `error_sites()` and `unit_graph_units_named()` from Task 1 are imported by name, unchanged, in Tasks 3, 4, and 12's inline scripts.
+**Type consistency:** `stage_promotes(stage_name, baseline_state, sibling_state)`'s CLI (`--stage`, `--baseline-state-file`, `--sibling-state-file`) and `depth_advanced(baseline_sites, sibling_sites)` introduced in Task 4 are used identically in Task 12's workflow wiring (same dict-shaped state objects keyed exactly as `STAGE_POSTCONDITIONS` expects: `lib_rs_content`, `unit_graph`, `metadata`+`expected_members`). `error_sites()` and `unit_graph_units_named()` from Task 1 are imported by name, unchanged, in Tasks 3, 4, and 12's inline scripts. Artifact-naming consistency re-verified after the batching restructure: Task 7 uploads `target-spec-<target>.json`/`cfg-<target>.txt`/`supported-crate-types-<target>.txt` inside `target-capability-batch-<N>`; Task 8 reads `supported-crate-types-$TARGET.txt` from that same download and uploads `unit-graph-<target>.json` inside `dependency-graph-batch-<N>`; Task 10's expected-file computation and Task 12's `next(Path("primary").glob(...))` baseline lookup both reference these exact filenames — checked directly against Tasks 7/8's `path: out/` upload blocks, not assumed.
