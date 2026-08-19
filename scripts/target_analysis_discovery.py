@@ -33,7 +33,8 @@ def main() -> int:
 
     raw = args.target_list_file.read_text(encoding="utf-8")
     all_targets = parse_target_list(raw)
-    matrix = resolve_target_matrix(all_targets, args.requested_target)
+    requested = args.requested_target or None
+    matrix = resolve_target_matrix(all_targets, requested)
     print(json.dumps(matrix))
     return 0
 

@@ -1,0 +1,39 @@
+name: target-analysis-pipeline
+
+on:
+  push:
+    branches:
+      - "experiment/target-analysis-*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Single target triple to analyze (optional; omit for the full rustc target-list)"
+        required: false
+        type: string
+
+jobs:
+  discovery:
+    name: Discover target matrix
+    runs-on: ubuntu-latest
+    outputs:
+      target-matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
+      - name: rustc --print target-list
+        run: rustup run nightly rustc --print target-list > target-list.txt
+      - name: Resolve target matrix
+        id: resolve
+        env:
+          REQUESTED_TARGET: ${{ inputs.target }}
+        run: |
+          MATRIX=$(python3 scripts/target_analysis_discovery.py \
+            --target-list-file target-list.txt \
+            --requested-target "$REQUESTED_TARGET")
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+      - name: Upload raw target-list
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery-target-list
+          path: target-list.txt

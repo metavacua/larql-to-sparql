@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.target_analysis_discovery import parse_target_list, resolve_target_matrix
@@ -29,3 +31,19 @@ def test_resolve_target_matrix_with_invalid_request_raises():
     targets = parse_target_list(RAW)
     with pytest.raises(ValueError, match="not-a-real-target"):
         resolve_target_matrix(targets, "not-a-real-target")
+
+
+def test_main_treats_empty_string_requested_target_as_none(tmp_path, capsys):
+    from scripts.target_analysis_discovery import main
+    import sys
+
+    target_list_file = tmp_path / "target-list.txt"
+    target_list_file.write_text(RAW, encoding="utf-8")
+    sys.argv = [
+        "target_analysis_discovery.py",
+        "--target-list-file", str(target_list_file),
+        "--requested-target", "",
+    ]
+    assert main() == 0
+    out = capsys.readouterr().out
+    assert json.loads(out) == parse_target_list(RAW)
