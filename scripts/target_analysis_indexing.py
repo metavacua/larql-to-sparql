@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from scripts.target_analysis_common import error_sites
+from scripts.target_analysis_common import load_json
 
 
 def count_errors_by_target(compiler_messages: list[dict[str, Any]]) -> dict[str, int]:
@@ -45,11 +45,11 @@ def main() -> int:
     parser.add_argument("--actual-artifacts-file", required=True, type=Path)
     args = parser.parse_args()
 
-    compiler_messages = json.loads(args.compiler_messages_file.read_text(encoding="utf-8"))
-    target_spec = json.loads(args.target_spec_file.read_text(encoding="utf-8"))
-    std_mode_errors = json.loads(args.std_mode_errors_file.read_text(encoding="utf-8"))
-    expected = set(json.loads(args.expected_artifacts_file.read_text(encoding="utf-8")))
-    actual = set(json.loads(args.actual_artifacts_file.read_text(encoding="utf-8")))
+    compiler_messages = load_json(args.compiler_messages_file)
+    target_spec = load_json(args.target_spec_file)
+    std_mode_errors = load_json(args.std_mode_errors_file)
+    expected = set(load_json(args.expected_artifacts_file))
+    actual = set(load_json(args.actual_artifacts_file))
 
     missing = missing_artifacts(expected, actual)
     result = {
