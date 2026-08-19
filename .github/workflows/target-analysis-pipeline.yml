@@ -41,3 +41,43 @@ jobs:
         with:
           name: discovery-target-list
           path: target-list.txt
+
+  target-capability:
+    name: "Target capability: batch ${{ matrix.batch_index }}"
+    needs: [discovery]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
+      - name: Probe every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          FAILED=0
+          while IFS= read -r TARGET; do
+            echo "=== target: $TARGET ==="
+            if ! rustup run nightly rustc --print target-list | grep -qx "$TARGET"; then
+              echo "::error::$TARGET not found in rustc --print target-list — discovery/capability disagreement"
+              FAILED=1
+              continue
+            fi
+            rustup run nightly rustc --print target-spec-json -Z unstable-options \
+              --target "$TARGET" > "out/target-spec-$TARGET.json" || FAILED=1
+            rustup run nightly rustc --print cfg --target "$TARGET" > "out/cfg-$TARGET.txt" || FAILED=1
+            rustup run nightly rustc --print supported-crate-types --target "$TARGET" \
+              > "out/supported-crate-types-$TARGET.txt" || FAILED=1
+          done < targets-in-batch.txt
+          exit $FAILED
+      - name: Upload capability artifacts for this batch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: target-capability-batch-${{ matrix.batch_index }}
+          path: out/
