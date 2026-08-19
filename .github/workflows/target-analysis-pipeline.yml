@@ -71,8 +71,8 @@ jobs:
             rustup run nightly rustc --print target-spec-json -Z unstable-options \
               --target "$TARGET" > "out/target-spec-$TARGET.json" || FAILED=1
             rustup run nightly rustc --print cfg --target "$TARGET" > "out/cfg-$TARGET.txt" || FAILED=1
-            rustup run nightly rustc --print supported-crate-types --target "$TARGET" \
-              > "out/supported-crate-types-$TARGET.txt" || FAILED=1
+            rustup run nightly rustc --print supported-crate-types -Z unstable-options \
+              --target "$TARGET" > "out/supported-crate-types-$TARGET.txt" || FAILED=1
           done < targets-in-batch.txt
           exit $FAILED
       - name: Upload capability artifacts for this batch
