@@ -47,3 +47,64 @@ def test_main_treats_empty_string_requested_target_as_none(tmp_path, capsys):
     assert main() == 0
     out = capsys.readouterr().out
     assert json.loads(out) == parse_target_list(RAW)
+
+
+from scripts.target_analysis_discovery import chunk_targets
+
+
+def test_chunk_targets_empty_list_returns_empty():
+    assert chunk_targets([], max_size=3) == []
+
+
+def test_chunk_targets_smaller_than_max_size_is_one_chunk():
+    assert chunk_targets(["a", "b"], max_size=3) == [["a", "b"]]
+
+
+def test_chunk_targets_exactly_max_size_is_one_chunk():
+    assert chunk_targets(["a", "b", "c"], max_size=3) == [["a", "b", "c"]]
+
+
+def test_chunk_targets_splits_into_multiple_chunks_with_remainder():
+    targets = ["a", "b", "c", "d", "e", "f", "g"]
+    assert chunk_targets(targets, max_size=3) == [
+        ["a", "b", "c"],
+        ["d", "e", "f"],
+        ["g"],
+    ]
+
+
+def test_chunk_targets_default_max_size_is_256():
+    targets = [f"t{i}" for i in range(300)]
+    chunks = chunk_targets(targets)
+    assert len(chunks) == 2
+    assert len(chunks[0]) == 256
+    assert len(chunks[1]) == 44
+
+
+def test_chunk_targets_rejects_non_positive_max_size():
+    import pytest
+    with pytest.raises(ValueError, match="max_size must be positive"):
+        chunk_targets(["a"], max_size=0)
+
+
+def test_main_writes_batches_and_batch_indices_to_github_output(tmp_path):
+    from scripts.target_analysis_discovery import main
+    import sys
+
+    target_list_file = tmp_path / "target-list.txt"
+    target_list_file.write_text("\n".join(f"t{i}" for i in range(300)), encoding="utf-8")
+    github_output = tmp_path / "github_output.txt"
+    sys.argv = [
+        "target_analysis_discovery.py",
+        "--target-list-file", str(target_list_file),
+        "--requested-target", "",
+        "--github-output", str(github_output),
+    ]
+    assert main() == 0
+    output_text = github_output.read_text(encoding="utf-8")
+    batches_line = next(line for line in output_text.splitlines() if line.startswith("batches="))
+    batch_indices_line = next(line for line in output_text.splitlines() if line.startswith("batch-indices="))
+    batches = json.loads(batches_line[len("batches="):])
+    batch_indices = json.loads(batch_indices_line[len("batch-indices="):])
+    assert len(batches) == 2
+    assert batch_indices == [0, 1]
