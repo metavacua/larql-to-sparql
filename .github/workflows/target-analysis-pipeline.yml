@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       target-matrix: ${{ steps.resolve.outputs.matrix }}
+      batches: ${{ steps.resolve.outputs.batches }}
+      batch-indices: ${{ steps.resolve.outputs.batch-indices }}
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly Rust
@@ -28,10 +30,12 @@ jobs:
         env:
           REQUESTED_TARGET: ${{ inputs.target }}
         run: |
-          MATRIX=$(python3 scripts/target_analysis_discovery.py \
+          python3 scripts/target_analysis_discovery.py \
             --target-list-file target-list.txt \
-            --requested-target "$REQUESTED_TARGET")
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+            --requested-target "$REQUESTED_TARGET" \
+            --max-batch-size 12 \
+            --github-output "$GITHUB_OUTPUT" > matrix-stdout.json
+          echo "matrix=$(cat matrix-stdout.json)" >> "$GITHUB_OUTPUT"
       - name: Upload raw target-list
         uses: actions/upload-artifact@v4
         with:
