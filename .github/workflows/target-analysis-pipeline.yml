@@ -104,11 +104,11 @@ jobs:
           FAILED=0
           while IFS= read -r TARGET; do
             echo "=== target: $TARGET ==="
-            cargo metadata --format-version 1 --filter-platform "$TARGET" \
+            cargo +nightly metadata --format-version 1 --filter-platform "$TARGET" \
               > "out/metadata-$TARGET.json" || FAILED=1
-            cargo tree -p larql-cli -e features --target "$TARGET" \
+            cargo +nightly tree -p larql-cli -e features --target "$TARGET" \
               > "out/tree-features-$TARGET.txt" || FAILED=1
-            cargo tree -p larql-cli --duplicates --target "$TARGET" \
+            cargo +nightly tree -p larql-cli --duplicates --target "$TARGET" \
               > "out/tree-duplicates-$TARGET.txt" || FAILED=1
             cargo +nightly build -Z unstable-options --unit-graph \
               -p larql-cli --target "$TARGET" \
@@ -144,7 +144,7 @@ jobs:
         with:
           name: target-capability-batch-${{ matrix.batch_index }}
           path: capability
-      - name: Build-attempt probes for every target/build_std/cmd/features/crate-type combination in this batch
+      - name: Build-attempt probes for every target/build_std/cmd/features combination in this batch (plus a per-target crate-type canary)
         id: attempt
         env:
           BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
@@ -153,20 +153,34 @@ jobs:
           echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
           FAILED=0
           while IFS= read -r TARGET; do
-            CRATE_TYPES=$(tr ',' '\n' < "capability/supported-crate-types-$TARGET.txt" | sed 's/^ *//; s/ *$//')
+            # Probe-mechanism canary (run 1's real CI evidence): `--crate-type` is
+            # rejected outright by `cargo check`/`clippy`/`build` (it is not a flag
+            # on those subcommands at all -- confirmed from run 1's logs, uniform
+            # "unexpected argument '--crate-type' found" across all three). The one
+            # cargo subcommand that documents `--crate-type` is `cargo rustc`, and
+            # its own docs say it "only works when building a lib or example
+            # library target" -- larql-cli is bin-only (see crates/larql-cli/Cargo.toml),
+            # so the crate-type dimension cannot be driven through cargo's CLI against
+            # this package as it stands. Recorded here as real L1 evidence (not
+            # silently dropped) via a single `|| true` canary per target, instead of
+            # a 5x-wide loop where every iteration issued an identical failing command.
+            FIRST_CRATE_TYPE=$(tr ',' '\n' < "capability/supported-crate-types-$TARGET.txt" | sed 's/^ *//; s/ *$//' | head -1)
+            if [ -n "$FIRST_CRATE_TYPE" ]; then
+              echo "=== crate-type canary: target=$TARGET crate_type=$FIRST_CRATE_TYPE (cargo rustc --crate-type; expected to fail -- larql-cli is bin-only) ==="
+              cargo +nightly rustc -p larql-cli --target "$TARGET" \
+                --crate-type "$FIRST_CRATE_TYPE" --message-format=json \
+                > "out/crate-type-canary-$TARGET.json" 2>&1 || true
+            fi
             for BUILD_STD in none std core,alloc core; do
               if [ "$BUILD_STD" = "none" ]; then BUILD_STD_FLAG=""; else BUILD_STD_FLAG="-Z build-std=$BUILD_STD"; fi
               for CARGO_CMD in check clippy build; do
                 for FEATURES in default-features no-default-features; do
                   if [ "$FEATURES" = "no-default-features" ]; then FEATURES_FLAG="--no-default-features"; else FEATURES_FLAG=""; fi
                   OUTFILE="out/attempt-$TARGET-$BUILD_STD-$CARGO_CMD-$FEATURES.json"
-                  : > "$OUTFILE"
-                  for CRATE_TYPE in $CRATE_TYPES; do
-                    echo "=== target=$TARGET build_std=$BUILD_STD cmd=$CARGO_CMD features=$FEATURES crate_type=$CRATE_TYPE ==="
-                    cargo +nightly "$CARGO_CMD" -p larql-cli \
-                      --target "$TARGET" --crate-type "$CRATE_TYPE" $FEATURES_FLAG $BUILD_STD_FLAG \
-                      --keep-going --message-format=json >> "$OUTFILE" || FAILED=1
-                  done
+                  echo "=== target=$TARGET build_std=$BUILD_STD cmd=$CARGO_CMD features=$FEATURES ==="
+                  cargo +nightly "$CARGO_CMD" -p larql-cli \
+                    --target "$TARGET" $FEATURES_FLAG $BUILD_STD_FLAG \
+                    --keep-going --message-format=json > "$OUTFILE" || FAILED=1
                 done
               done
             done
