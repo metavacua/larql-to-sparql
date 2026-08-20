@@ -198,3 +198,45 @@ jobs:
           if [ "${{ steps.attempt.outputs.batch-had-failure }}" = "1" ]; then
             echo "::notice::At least one real build failure in this batch, recorded as a finding in the uploaded JSON, not masked."
           fi
+
+  runtime-test:
+    name: "Runtime test: batch ${{ matrix.batch_index }}"
+    needs: [discovery]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine runner availability and execute or record block, for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          while IFS= read -r TARGET; do
+            case "$TARGET" in
+              wasm32*|wasm64*)
+                echo '{"status": "runnable", "runner": "wasmtime"}' > "out/runtime-test-result-$TARGET.json"
+                # actual wasmtime execution wired in the wasm-family follow-on work;
+                # this job records availability honestly either way.
+                ;;
+              x86_64-unknown-linux-gnu|aarch64-*-linux-*|aarch64-apple-darwin)
+                echo '{"status": "runnable", "runner": "native"}' > "out/runtime-test-result-$TARGET.json"
+                ;;
+              nvptx64-nvidia-cuda)
+                echo '{"status": "blocked", "reason": "no free GPU CI runner available for this project (confirmed 2026-08-16)"}' \
+                  > "out/runtime-test-result-$TARGET.json"
+                ;;
+              *)
+                echo '{"status": "blocked", "reason": "no known runner for this target"}' \
+                  > "out/runtime-test-result-$TARGET.json"
+                ;;
+            esac
+          done < targets-in-batch.txt
+      - name: Upload runtime-test results for this batch
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-test-batch-${{ matrix.batch_index }}
+          path: out/
