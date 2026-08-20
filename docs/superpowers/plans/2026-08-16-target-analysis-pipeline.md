@@ -24,12 +24,13 @@
 - Every curated (L2) data source (`deny-nvptx.toml`, the target-family tooling registry) is explicitly labeled as curated and checkable against raw, uncurated scan output (Foundational framework).
 - All claims about GitHub Actions mechanics or probe behavior are validated by an actual run on a GitHub-hosted runner, never by local simulation (Validation approach).
 - Trigger is `push` alone, scoped to the pipeline's branch pattern, with `workflow_dispatch` as a secondary single-target convenience path; no `pull_request` trigger (Data flow: Triggers).
+- Concurrency and least-privilege are standing requirements on every job and the workflow itself, not a one-time fix (user directive): the workflow declares `concurrency: {group: ${{ github.workflow }}-${{ github.ref }}, cancel-in-progress: true}` so a new push cancels a stale in-flight run on the same branch instead of queue-contending with it (a real, observed cost — Task 12's real run lost ~40 minutes to exactly this). Every job declares an explicit, minimal `permissions:` block — `contents: read` as the floor (checkout), with `actions: read` added only for jobs that actually call `actions/download-artifact` (the empirically-established pattern from the `indexing` job, Task 10) — never left unset to inherit whatever the repository's own default happens to be.
 
 ---
 
 ## File Structure
 
-- `.github/workflows/target-analysis-pipeline.yml` — the new, generalized pipeline: `discovery` (also computes batches, Task 6), `target-capability`, `dependency-graph`, `build-attempt`, `runtime-test` (all four batched over `batch_index`, Tasks 7-9), `indexing` (Task 10), `secondary-mutate` (Stages A/B/B2/B3, single job, target-independent, Task 15), `secondary-stage-c-and-promotion` (batched, applies the mutation patch, Task 16), `next-round-baseline` (Task 17), `secondary-layer-self-test` (Task 18).
+- `.github/workflows/target-analysis-pipeline.yml` — the new, generalized pipeline: `discovery` (also computes batches, Task 6), `target-capability`, `dependency-graph`, `build-attempt`, `runtime-test` (all four batched over `batch_index`, Tasks 7-9), `indexing` (Task 10), `secondary-mutate` (Stages A/B/B2/B3, single job, target-independent, Task 16), `secondary-stage-c-and-promotion` (batched, applies the mutation patch, Task 17), `next-round-baseline` (Task 18), `secondary-layer-self-test` (Task 19).
 - `scripts/target_analysis_common.py` — shared, dependency-free helpers: JSON loading, `--message-format=json` compiler-message parsing into `(file, line, code)` error-site tuples, `--unit-graph` unit lookup by crate name.
 - `scripts/target_analysis_discovery.py` — turns raw `rustc --print target-list` output (plus an optional single requested target) into the target matrix consumed by downstream jobs' `fromJSON()`.
 - `scripts/target_analysis_indexing.py` — structural extraction (error counts by target name), the `unexpected-clean-std-build` contradiction rule, and artifact-completeness checking.
@@ -478,7 +479,7 @@ This is the mechanical, coded criterion decided in this session: **stage-level p
 
 **Interfaces:**
 - Consumes: `unit_graph_units_named`, `error_sites` from `scripts/target_analysis_common.py` (Task 1).
-- Produces: `serde_features_ok(unit_graph: dict) -> bool`; `workspace_members_ok(metadata: dict, expected_members: list[str]) -> bool`; `no_std_scaffold_ok(lib_rs_content: str) -> bool`; `stage_promotes(stage_name: str, baseline_state: dict, sibling_state: dict) -> bool`; `depth_advanced(baseline_sites: set[tuple[str, int, str]], sibling_sites: set[tuple[str, int, str]]) -> bool`. Task 16 (Secondary-layer promotion wiring) calls `stage_promotes` once per stage (`stage-b`, `stage-b2`, `stage-b3`) and `depth_advanced` once per round to decide what folds into the next round's shared baseline.
+- Produces: `serde_features_ok(unit_graph: dict) -> bool`; `workspace_members_ok(metadata: dict, expected_members: list[str]) -> bool`; `no_std_scaffold_ok(lib_rs_content: str) -> bool`; `stage_promotes(stage_name: str, baseline_state: dict, sibling_state: dict) -> bool`; `depth_advanced(baseline_sites: set[tuple[str, int, str]], sibling_sites: set[tuple[str, int, str]]) -> bool`. Task 17 (Secondary-layer promotion wiring) calls `stage_promotes` once per stage (`stage-b`, `stage-b2`, `stage-b3`) and `depth_advanced` once per round to decide what folds into the next round's shared baseline.
 
 - [ ] **Step 1: Write the fixtures**
 
@@ -865,7 +866,7 @@ target-list` — independently reconfirmed by that task's reviewer via a downloa
 artifact, not assumed. GitHub Actions hard-caps `strategy.matrix` at 256 jobs, and
 separately caps any single job's wall-clock at 6 hours. A `strategy.matrix: target:
 fromJSON(needs.discovery.outputs.target-matrix)` fanning directly over the real,
-unbatched 331-target list — as Tasks 7-9 and 17 originally would have — fails to
+unbatched 331-target list — as Tasks 7-9 and 18 originally would have — fails to
 schedule. Worse, Task 8's build-attempt job crosses each target against 4
 `build_std` modes × 3 `cargo_cmd`s × 2 feature configs × (typically ~5) crate types
 — roughly 120 `cargo` invocations per target — so even a 256-target batch for that
@@ -876,7 +877,7 @@ targets per batch, uniformly across every batch-consuming job) so the heaviest j
 step re-checks this estimate against actual job duration, since it's a reasoned
 estimate, not a verified fact, until a real run confirms it.
 
-This does not change `target-matrix` itself — Task 10's indexing job and Task 18's
+This does not change `target-matrix` itself — Task 10's indexing job and Task 19's
 next-round-baseline job keep consuming the unbatched form directly inside a Python
 loop, which has no 256-element restriction.
 
@@ -1067,7 +1068,7 @@ git commit -m "feat: wire batches/batch-indices outputs into the discovery job"
 
 - [ ] **Step 8: Push and verify on a real runner**
 
-Push a follow-up commit to the same branch Task 5 pushed to (`experiment/target-analysis-pipeline`) — not a new branch. Fetch the real run's `discovery` job log and confirm: `steps.resolve.outputs.batches` is a JSON array of arrays, each of length ≤12 (given the real 331-target count from Task 5's run, expect `ceil(331/12) = 28` batches, the last one shorter — reconfirm the exact target count on this run too, since it could have changed by even one entry since Task 5 ran), and `steps.resolve.outputs.batch-indices` is `[0, 1, ..., 27]` (or whatever the real count implies). Confirm `target-matrix`'s value is unchanged in shape from Task 5's run (still the full unbatched array) — Tasks 10 and 18 still need it that way.
+Push a follow-up commit to the same branch Task 5 pushed to (`experiment/target-analysis-pipeline`) — not a new branch. Fetch the real run's `discovery` job log and confirm: `steps.resolve.outputs.batches` is a JSON array of arrays, each of length ≤12 (given the real 331-target count from Task 5's run, expect `ceil(331/12) = 28` batches, the last one shorter — reconfirm the exact target count on this run too, since it could have changed by even one entry since Task 5 ran), and `steps.resolve.outputs.batch-indices` is `[0, 1, ..., 27]` (or whatever the real count implies). Confirm `target-matrix`'s value is unchanged in shape from Task 5's run (still the full unbatched array) — Tasks 10 and 19 still need it that way.
 
 ---
 
@@ -1628,7 +1629,7 @@ filters to tier ≤ 2 before computing `matrix`/`batches`/`batch-indices`. Every
 round of this pipeline (after Task 10's already-in-flight run against the un-scoped
 331-target universe, which stands as valid ground truth and is not retroactively
 invalidated) fans out over 119 targets → `ceil(119/12) = 10` batches, not 331/28 — no
-changes needed anywhere downstream (Tasks 7-10, 15-18 all derive everything from
+changes needed anywhere downstream (Tasks 7-10, 16-19 all derive everything from
 Discovery's real output, never hardcoding 331/28 anywhere).
 
 A `workflow_dispatch`-requested single target explicitly bypasses this filter — someone
@@ -1873,10 +1874,111 @@ Push a follow-up commit to `experiment/target-analysis-pipeline`. Fetch the real
 
 ---
 
-### Task 13: Target-independent checks run before target-dependent jobs (fmt)
+### Task 13: Add a workflow-level concurrency group and least-privilege permissions to every job
+
+**User directive: concurrency and least-privilege should always be used, not a
+one-time fix.** Two real, separate findings motivate this:
+
+1. **Concurrency.** Task 12's real run lost roughly 40 minutes to runner-queue
+   contention from a stale, superseded prior run on the same branch — this workflow
+   has no `concurrency:` group anywhere, so a new push doesn't cancel an in-flight
+   run before starting a fresh one. GitHub's own mechanism for exactly this is a
+   workflow-level `concurrency:` block with `cancel-in-progress: true`.
+2. **Least privilege.** Of the six jobs currently in this workflow, only `indexing`
+   (Task 10) declares an explicit `permissions:` block (`contents: read` +
+   `actions: read`, the latter specifically because it calls `actions/download-
+   artifact`). Every other job — `discovery`, `target-capability`, `dependency-graph`,
+   `build-attempt`, `runtime-test` — has no `permissions:` block at all, meaning each
+   one inherits whatever the *repository's own* default `GITHUB_TOKEN` permissions
+   happen to be set to, rather than an explicit, auditable, minimal grant declared in
+   the workflow file itself.
+
+This is now a standing Global Constraint (added above), not just a fix for these six
+jobs — every task from here on that adds a new job must declare its own explicit
+`permissions:` block following the same pattern (`contents: read` floor; add
+`actions: read` only if that job calls `actions/download-artifact`).
+
+**Files:**
+- Modify: `.github/workflows/target-analysis-pipeline.yml` (add top-level `concurrency:`; add `permissions:` to the five jobs currently missing it)
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: nothing new — this task changes scheduling/authorization behavior only, no new outputs or artifacts.
+
+- [ ] **Step 1: Add the workflow-level concurrency group**
+
+Modify the top of `.github/workflows/target-analysis-pipeline.yml`, adding a
+`concurrency:` block alongside the existing `on:` block:
+```yaml
+name: target-analysis-pipeline
+
+on:
+  push:
+    branches:
+      - "experiment/target-analysis-*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Single target triple to analyze (optional; omit for the full rustc target-list)"
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+```
+Grouping by `github.ref` (not just `github.workflow`) means only pushes to the *same*
+branch cancel each other — a `workflow_dispatch` run against a different target or a
+push to a different `experiment/target-analysis-*` branch is unaffected.
+
+- [ ] **Step 2: Add `permissions: {contents: read}` to the four jobs that never download artifacts**
+
+Add this block immediately after each job's `runs-on: ubuntu-latest` line — for
+`discovery`, `target-capability`, `dependency-graph`, and `runtime-test`:
+```yaml
+    permissions:
+      contents: read   # actions/checkout
+```
+
+- [ ] **Step 3: Add `permissions: {contents: read, actions: read}` to `build-attempt`**
+
+`build-attempt` is the one remaining job without a `permissions:` block that *does*
+call `actions/download-artifact` (to fetch `target-capability-batch-<N>` for the
+crate-type canary), so it needs the same two-line grant `indexing` already has:
+```yaml
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # actions/download-artifact
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .github/workflows/target-analysis-pipeline.yml
+git commit -m "feat: add workflow-level concurrency group and least-privilege permissions to every job"
+```
+
+- [ ] **Step 5: Push and verify on a real runner**
+
+Push a follow-up commit to `experiment/target-analysis-pipeline`. Fetch the real
+run and confirm every job still succeeds with its new, tightened `permissions:`
+grant — if any job fails with a permission-denied error, that's real evidence it
+needs something this task's minimal grant didn't anticipate; add exactly what the
+error demands, nothing more, and re-verify. Also push a *second*, immediate
+follow-up commit (a trivial no-op change, e.g. a comment) while the first run is
+still in progress, and confirm via the real run list that the first run gets
+cancelled (`conclusion: cancelled`) rather than left to queue-contend with the
+second — this is the concurrency group's own real-world proof, not just a
+plausible-looking YAML block.
+
+---
+
+### Task 14: Target-independent checks run before target-dependent jobs (fmt)
 
 **User directive, general and forward-looking:** anything target-independent must run
-before any target-dependent job. This mirrors the Task 15 restructure's own finding
+before any target-dependent job. This mirrors the Task 16 restructure's own finding
 (Stage A/B/B2/B3 never reference `--target`, so matrixing them per-target was pure
 waste) generalized into a standing sequencing rule, not a one-off fix. `cargo fmt
 --check` is the clearest, most immediately-buildable case: it operates on the AST/text
@@ -1978,7 +2080,7 @@ Push a follow-up commit to `experiment/target-analysis-pipeline`. Fetch the real
 
 ---
 
-### Task 14: Trim build-attempt's `build_std` axis to `none` only in the Primary layer
+### Task 15: Trim build-attempt's `build_std` axis to `none` only in the Primary layer
 
 **User-directed correction to already-merged, already-CI-verified work** (Task 8):
 walking through what each of the four `build_std` modes actually reveals, three of
@@ -2003,9 +2105,9 @@ Primary layer:
   std::...` anywhere fails identically on every target ("unresolved import
   `std::...`"), regardless of the target's real capabilities: the failure is about the
   *source*, not the target. This mode's real value is concentrated exactly where it's
-  already built: Task 16's Stage C, which runs `build_std=core,alloc` against the
+  already built: Task 17's Stage C, which runs `build_std=core,alloc` against the
   *mutated* tree, where the question actually differentiates by target. **Dropped from
-  the Primary layer; unchanged in the Secondary layer (Task 16).**
+  the Primary layer; unchanged in the Secondary layer (Task 17).**
 
 This directly reduces `build-attempt`'s per-target combinations from `4 build_std × 3
 cargo_cmd × 2 features = 24` to `1 × 3 × 2 = 6` — roughly a 4x reduction in the
@@ -2024,7 +2126,7 @@ genuinely different question than testing it against the two `std: false` canari
 not "is there no OS at all" (already known for those two), but "does the mutation
 also hold up against a target where `std` nominally exists but is OS-limited." Since
 it's tier 2, it's already inside Task 12's rescoped 119-target universe and already
-covered by Task 16's Stage C batch — no new task needed for coverage — but it's worth
+covered by Task 17's Stage C batch — no new task needed for coverage — but it's worth
 naming explicitly here so it doesn't just blend anonymously into the batch.
 
 **Files:**
@@ -2106,16 +2208,16 @@ hidden).
 
 ---
 
-### Task 15: Generalize the Secondary-layer mutation stages (A, B, B2, B3) — single job, no target matrix
+### Task 16: Generalize the Secondary-layer mutation stages (A, B, B2, B3) — single job, no target matrix
 
-**Restructured from the original two-job (per-crate × per-target) design.** All four mutation stages are target-independent: Stage A runs `clippy --fix` against the host target (never `--target`), Stage B is a pure text edit to `lib.rs`, and Stage B2/B3 are pure text edits to `Cargo.toml` files — none of them reference a target triple at all. The original draft matrixed this identical, target-independent work over all 331 targets (and, for Stage A/B, over 5 crates too — 1655 combinations), for no reason: target only enters the Secondary layer at Stage C. This version runs the whole mutation pipeline exactly once per pipeline run, producing a single patch that Task 16's batched Stage C job downloads and applies before checking against each target — this is also what fixes a real bug the original draft had: without an explicit patch-apply step, Stage C would have run against a fresh, unmutated checkout every time, silently checking pristine source instead of the mutation it was supposed to be evaluating.
+**Restructured from the original two-job (per-crate × per-target) design.** All four mutation stages are target-independent: Stage A runs `clippy --fix` against the host target (never `--target`), Stage B is a pure text edit to `lib.rs`, and Stage B2/B3 are pure text edits to `Cargo.toml` files — none of them reference a target triple at all. The original draft matrixed this identical, target-independent work over all 331 targets (and, for Stage A/B, over 5 crates too — 1655 combinations), for no reason: target only enters the Secondary layer at Stage C. This version runs the whole mutation pipeline exactly once per pipeline run, producing a single patch that Task 17's batched Stage C job downloads and applies before checking against each target — this is also what fixes a real bug the original draft had: without an explicit patch-apply step, Stage C would have run against a fresh, unmutated checkout every time, silently checking pristine source instead of the mutation it was supposed to be evaluating.
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-mutate` job, adapted from `experiment-cuda-nvptx.yml`'s existing `nostd-fix-attempt` job's Stage A/B/B2/B3 steps at `.github/workflows/experiment-cuda-nvptx.yml:477-624`)
 
 **Interfaces:**
 - Consumes: nothing target-specific. `needs: [discovery, indexing]` expresses a real ordering constraint even without consuming `target-matrix` directly — this stage's whole purpose (per Standing Principle 6) is to be validated against a Primary-layer baseline, so it still waits for the Primary layer's indexing to complete first.
-- Produces: one `secondary-mutation` artifact containing `full-mutation.patch` (a single `git diff` of the whole tree after all four stages), per-crate `baseline-lib-rs-<crate>.txt` / `sibling-lib-rs-<crate>.txt` pairs (Stage B promotion input), and `baseline-metadata.json` (the unmutated `cargo metadata` output, captured before Stage B3 trims workspace members — Stage B3 promotion input). Consumed by Task 16.
+- Produces: one `secondary-mutation` artifact containing `full-mutation.patch` (a single `git diff` of the whole tree after all four stages), per-crate `baseline-lib-rs-<crate>.txt` / `sibling-lib-rs-<crate>.txt` pairs (Stage B promotion input), and `baseline-metadata.json` (the unmutated `cargo metadata` output, captured before Stage B3 trims workspace members — Stage B3 promotion input). Consumed by Task 17.
 
 - [ ] **Step 1: Add the job, reusing the existing workflow's proven Stage A/B/B2/B3 logic, target-independent**
 
@@ -2209,7 +2311,7 @@ hidden).
           path: out/
 ```
 
-The scaffold-insertion Python is the exact fix this session already verified against a real 71-line doc comment (inserting after any leading `//!`/`#![`/blank-line block, never before it); the Stage B2 sed pattern and Stage B3 reachable-crate list are the exact ones this session verified against real CI output — all reused directly, not reinvented. `baseline-metadata.json` is captured before Stage B3 runs specifically so Task 16 never needs to reconstruct the unmutated workspace member list by parsing `git show`-retrieved TOML text — it's just read directly from this artifact.
+The scaffold-insertion Python is the exact fix this session already verified against a real 71-line doc comment (inserting after any leading `//!`/`#![`/blank-line block, never before it); the Stage B2 sed pattern and Stage B3 reachable-crate list are the exact ones this session verified against real CI output — all reused directly, not reinvented. `baseline-metadata.json` is captured before Stage B3 runs specifically so Task 17 never needs to reconstruct the unmutated workspace member list by parsing `git show`-retrieved TOML text — it's just read directly from this artifact.
 
 - [ ] **Step 2: Commit**
 
@@ -2224,16 +2326,16 @@ Push and confirm: the `secondary-mutate` job runs exactly once (no matrix), Stag
 
 ---
 
-### Task 16: Stage C and the promotion/depth-advancement decision, batched
+### Task 17: Stage C and the promotion/depth-advancement decision, batched
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-stage-c-and-promotion` job)
 
 **Interfaces:**
-- Consumes: `needs.discovery.outputs.batches`/`batch-indices` (Task 6); Task 15's `secondary-mutation` artifact (the patch plus Stage B/B3 baselines); Task 7's `target-capability-batch-<N>` and Task 8's `dependency-graph-batch-<N>` artifacts (the mechanically-grounded Primary-layer baselines for the Stage B2 promotion check — the per-target unmutated `unit-graph-<target>.json` this job would otherwise have no other source for); `scripts/target_analysis_promotion.py`'s CLI (Task 4).
+- Consumes: `needs.discovery.outputs.batches`/`batch-indices` (Task 6); Task 16's `secondary-mutation` artifact (the patch plus Stage B/B3 baselines); Task 7's `target-capability-batch-<N>` and Task 8's `dependency-graph-batch-<N>` artifacts (the mechanically-grounded Primary-layer baselines for the Stage B2 promotion check — the per-target unmutated `unit-graph-<target>.json` this job would otherwise have no other source for); `scripts/target_analysis_promotion.py`'s CLI (Task 4).
 - Produces: `promotion-decision-batch-<batch_index>` artifact containing, per target in that batch, the stage-b/b2/b3 promotion verdicts and the depth-advancement decision — the actual mechanical output this session's "measurable difference" discussion exists to produce.
 
-**The critical fix this task makes over the original draft:** the original version did a fresh `actions/checkout@v4` and ran `cargo check` directly, with no step ever applying Task 15's mutation — Stage C would have silently checked pristine, unmutated source on every run, and the whole promotion/depth-advancement machinery would have been evaluating data that never reflected the mutation it claimed to evaluate. This version's very first non-checkout step downloads `secondary-mutation` and runs `git apply mutation/full-mutation.patch` before anything else.
+**The critical fix this task makes over the original draft:** the original version did a fresh `actions/checkout@v4` and ran `cargo check` directly, with no step ever applying Task 16's mutation — Stage C would have silently checked pristine, unmutated source on every run, and the whole promotion/depth-advancement machinery would have been evaluating data that never reflected the mutation it claimed to evaluate. This version's very first non-checkout step downloads `secondary-mutation` and runs `git apply mutation/full-mutation.patch` before anything else.
 
 - [ ] **Step 1: Add the job**
 
@@ -2340,7 +2442,7 @@ Push and confirm: the `secondary-mutate` job runs exactly once (no matrix), Stag
           target = sys.argv[1]
           with open(f"out/stage-c-{target}.json") as f:
               sibling_messages = [json.loads(line) for line in f if line.strip()]
-          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 17 wires round-over-round)
+          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 18 wires round-over-round)
 
           baseline_sites = error_sites(baseline_messages)
           sibling_sites = error_sites(sibling_messages)
@@ -2372,17 +2474,17 @@ git commit -m "feat: add Stage C job, batched, applying the mutation patch befor
 
 - [ ] **Step 3: Push and verify on a real runner**
 
-Push and confirm: `ceil(331/12) = 28` `promotion-decision-batch-<N>` artifacts are produced, each containing per-target `stage-c-<target>.json`, `promotion-stage-b-<target>.json`, `promotion-stage-b2-<target>.json`, `promotion-stage-b3-<target>.json`, and `depth-decision-<target>.json` files. Specifically check the batch containing `nvptx64-nvidia-cuda`: confirm `stage-c-nvptx64-nvidia-cuda.json` shows real compiler output against the *mutated* tree (spot-check that the file content differs from what Task 8's unmutated `build-attempt` probe recorded for the same target — this is the direct evidence the patch was actually applied, not skipped), and confirm all three `promotion-stage-b*-nvptx64-nvidia-cuda.json` files show real `"promotes": true/false` verdicts (not an error) — this first round has no real prior-round Stage C baseline yet (`baseline_messages = []`), so `depth_advanced` should read `true` for every target with any error at all (every site is "newly resolved" relative to an empty baseline is wrong — re-check this reasoning empirically against the real output: an empty baseline means `baseline_sites - sibling_sites` is always empty regardless of `sibling_sites`, since you cannot subtract from nothing, so `depth_advanced` should read `false` for every target on this first round; Task 17 wires the real round-over-round baseline that makes this check meaningful).
+Push and confirm: `ceil(331/12) = 28` `promotion-decision-batch-<N>` artifacts are produced, each containing per-target `stage-c-<target>.json`, `promotion-stage-b-<target>.json`, `promotion-stage-b2-<target>.json`, `promotion-stage-b3-<target>.json`, and `depth-decision-<target>.json` files. Specifically check the batch containing `nvptx64-nvidia-cuda`: confirm `stage-c-nvptx64-nvidia-cuda.json` shows real compiler output against the *mutated* tree (spot-check that the file content differs from what Task 8's unmutated `build-attempt` probe recorded for the same target — this is the direct evidence the patch was actually applied, not skipped), and confirm all three `promotion-stage-b*-nvptx64-nvidia-cuda.json` files show real `"promotes": true/false` verdicts (not an error) — this first round has no real prior-round Stage C baseline yet (`baseline_messages = []`), so `depth_advanced` should read `true` for every target with any error at all (every site is "newly resolved" relative to an empty baseline is wrong — re-check this reasoning empirically against the real output: an empty baseline means `baseline_sites - sibling_sites` is always empty regardless of `sibling_sites`, since you cannot subtract from nothing, so `depth_advanced` should read `false` for every target on this first round; Task 18 wires the real round-over-round baseline that makes this check meaningful).
 
 ---
 
-### Task 17: Recursive-round baseline handoff
+### Task 18: Recursive-round baseline handoff
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `next-round-baseline` job)
 
 **Interfaces:**
-- Consumes: `promotion-decision-batch-<batch_index>` artifacts (Task 16), each containing multiple per-target `depth-decision-<target>.json` and `promotion-stage-*-<target>.json` files.
+- Consumes: `promotion-decision-batch-<batch_index>` artifacts (Task 17), each containing multiple per-target `depth-decision-<target>.json` and `promotion-stage-*-<target>.json` files.
 - Produces: `round-baseline` artifact — the folded-forward set of promoted stage diffs plus the full set of non-promoted results preserved separately — retrievable by the next `push` to the same branch pattern (the mechanism by which round N+1 begins from round N's baseline, per this session's mutual-recursion finding: observation and mutation inform each other round over round, neither completes independently).
 
 - [ ] **Step 1: Add the job**
@@ -2451,7 +2553,7 @@ Push and confirm: `round-baseline` artifact is produced, `promoted` contains onl
 
 ---
 
-### Task 18: Secondary-layer test suite — noise floor, blast-radius containment, ephemerality
+### Task 19: Secondary-layer test suite — noise floor, blast-radius containment, ephemerality
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-layer-self-test` job)
@@ -2552,29 +2654,30 @@ Push and confirm: all three checks pass on the real pipeline as currently writte
 - Runtime-test probes → Task 9.
 - Indexing (structural extraction, contradiction rule, completeness enforcement, now at file-level across batched artifacts) → Tasks 3 and 10. The contradiction rule's real field-path bug (`unexpected_clean_std_build` checked `target_spec["std"]` instead of the real `target_spec["metadata"]["std"]`, inert against real data since Task 3, surfaced by Task 10's own real-CI verification) → Task 11.
 - Discovery scope (tier 1+2 only, 119 of 331 real targets — a user-directed, real-evidence-driven correction to the original "every rustc target" design, mechanically grounded in `target-spec-json`'s own `metadata.tier` field, not agent judgment) → Task 12.
-- Target-independent-before-target-dependent sequencing (user directive, generalizing the Task 15 mutation-job restructure's own finding into a standing rule) → Task 13 (`cargo fmt --check`, the first concrete case).
-- Build-attempt `build_std` axis (user-directed correction to already-merged Task 8 work: of the four modes, only `none` has real, unconditional justification in the Primary layer — `std` was never justified either way, `core`/`core,alloc` are only meaningful post-mutation, which is exactly where Task 16's Stage C already runs them) → Task 14.
-- Secondary-layer mutation stages A/B/B2/B3 (with `background`/`wait` concurrency, target-independent, single job) → Task 15. Stage C (batched, applying the mutation patch — the critical bug this restructure fixes over the original per-target-matrixed draft) → Task 16.
-- The measurable-difference / promotion rule (this session's immediate deliverable) → Task 4 (script) and Task 16 (wiring, with mechanically-grounded b2/b3 baselines sourced from the Primary layer's own artifacts rather than fabricated).
-- Recursive round-over-round baseline handoff → Task 17.
-- Error handling (honest-result pattern, retries narrow to network calls, platform-limit category) → reused directly from the proven `experiment-cuda-nvptx.yml` patterns in Tasks 8 and 16; the retry/platform-limit categories are not separately re-implemented since Tasks 7-9's probes don't call rate-limited external APIs beyond `rustc`/`cargo` — Discovery's crates.io/GitHub SBOM calls (mentioned in the spec's Discovery job description) are the one place a narrow retry would apply and are flagged here as **not yet implemented**: Task 5 only wires `rustc --print target-list`, not the crates.io/SBOM ecosystem-discovery calls. This is a real gap — added as a follow-up task below rather than silently left out.
-- Testing (noise floor, blast-radius, golden fixtures, ephemerality, cross-target/native comparison) → Task 18 covers noise floor, blast radius, ephemerality directly. Golden fixtures (`serde-nostd-probe`-style planted-outcome crates) and cross-target/native comparison are **not yet implemented** — flagged below.
-- Explicitly not doing (no caching, no CI commits, no agent curation presented as L1) → Global Constraints + Task 18's ephemerality check enforces the no-commits rule structurally.
+- Concurrency (a workflow-level group with `cancel-in-progress`, motivated by ~40 real minutes lost to queue contention on Task 12's own run) and least-privilege permissions on every job (user directive, now a standing Global Constraint, not a one-time fix) → Task 13.
+- Target-independent-before-target-dependent sequencing (user directive, generalizing the Task 16 mutation-job restructure's own finding into a standing rule) → Task 14 (`cargo fmt --check`, the first concrete case).
+- Build-attempt `build_std` axis (user-directed correction to already-merged Task 8 work: of the four modes, only `none` has real, unconditional justification in the Primary layer — `std` was never justified either way, `core`/`core,alloc` are only meaningful post-mutation, which is exactly where Task 17's Stage C already runs them) → Task 15.
+- Secondary-layer mutation stages A/B/B2/B3 (with `background`/`wait` concurrency, target-independent, single job) → Task 16. Stage C (batched, applying the mutation patch — the critical bug this restructure fixes over the original per-target-matrixed draft) → Task 17.
+- The measurable-difference / promotion rule (this session's immediate deliverable) → Task 4 (script) and Task 17 (wiring, with mechanically-grounded b2/b3 baselines sourced from the Primary layer's own artifacts rather than fabricated).
+- Recursive round-over-round baseline handoff → Task 18.
+- Error handling (honest-result pattern, retries narrow to network calls, platform-limit category) → reused directly from the proven `experiment-cuda-nvptx.yml` patterns in Tasks 8 and 17; the retry/platform-limit categories are not separately re-implemented since Tasks 7-9's probes don't call rate-limited external APIs beyond `rustc`/`cargo` — Discovery's crates.io/GitHub SBOM calls (mentioned in the spec's Discovery job description) are the one place a narrow retry would apply and are flagged here as **not yet implemented**: Task 5 only wires `rustc --print target-list`, not the crates.io/SBOM ecosystem-discovery calls. This is a real gap — added as a follow-up task below rather than silently left out.
+- Testing (noise floor, blast-radius, golden fixtures, ephemerality, cross-target/native comparison) → Task 19 covers noise floor, blast radius, ephemerality directly. Golden fixtures (`serde-nostd-probe`-style planted-outcome crates) and cross-target/native comparison are **not yet implemented** — flagged below.
+- Explicitly not doing (no caching, no CI commits, no agent curation presented as L1) → Global Constraints + Task 19's ephemerality check enforces the no-commits rule structurally.
 
-**Follow-up tasks not included in this plan** (real gaps, not placeholders — each needs its own task the way Tasks 1-18 are written, deferred here because this plan's immediate trigger was the promotion-rule definition, not full spec closure):
+**Follow-up tasks not included in this plan** (real gaps, not placeholders — each needs its own task the way Tasks 1-19 are written, deferred here because this plan's immediate trigger was the promotion-rule definition, not full spec closure):
 - Discovery job's crates.io/GitHub SBOM ecosystem-discovery calls, with narrow bounded retry on those specific network calls (spec: Components/Discovery job, Error handling/Retries).
 - Golden-fixture crates with a planted, known-in-advance outcome, generalizing `serde-nostd-probe` (spec: Testing).
-- Cross-target/cross-native comparison job, once the target matrix includes both nvptx and at least one native target's Stage C result for the same underlying finding (spec: Testing) — this is naturally sequenced after Tasks 1-18 produce enough real round data to compare, not before.
+- Cross-target/cross-native comparison job, once the target matrix includes both nvptx and at least one native target's Stage C result for the same underlying finding (spec: Testing) — this is naturally sequenced after Tasks 1-19 produce enough real round data to compare, not before.
 - The target-family tooling registry (curated, labeled L2, e.g. `os: cuda` → CUDA toolkit tooling) mentioned in Components/Discovery job.
-- Toolchain-pinning across jobs within a single run: each job independently runs `rustup toolchain install nightly`, which can resolve to different nightly builds if a run straddles a nightly release boundary (typically UTC midnight), producing spurious cross-job disagreement that Task 18's own noise-floor test is specifically designed to catch but not fix. Not blocking for this plan (the batching correction above already re-verified everything against real CI evidence); worth a dedicated fix (Discovery resolves and pins a specific nightly date, passed to every downstream job) before this pipeline is trusted for long-running, many-round recursive use.
-- `cargo-semver-checks` as a second target-independent check (Task 13's pattern) — needs a chosen baseline (last published crates.io version, or a specific git rev) before it can be built; not decided in this plan.
-- `cargo udeps` as a further target-independent check (Task 13's pattern), straightforward to add the same way as `fmt`.
+- Toolchain-pinning across jobs within a single run: each job independently runs `rustup toolchain install nightly`, which can resolve to different nightly builds if a run straddles a nightly release boundary (typically UTC midnight), producing spurious cross-job disagreement that Task 19's own noise-floor test is specifically designed to catch but not fix. Not blocking for this plan (the batching correction above already re-verified everything against real CI evidence); worth a dedicated fix (Discovery resolves and pins a specific nightly date, passed to every downstream job) before this pipeline is trusted for long-running, many-round recursive use.
+- `cargo-semver-checks` as a second target-independent check (Task 14's pattern) — needs a chosen baseline (last published crates.io version, or a specific git rev) before it can be built; not decided in this plan.
+- `cargo udeps` as a further target-independent check (Task 14's pattern), straightforward to add the same way as `fmt`.
 - `cargo miri`, corrected after an initial mischaracterization: Miri genuinely supports cross-target interpretation (`cargo miri test --target s390x-unknown-linux-gnu` is Miri's own documented example for big-endian testing — confirmed against Miri's real README, not assumed), so it belongs as a real axis crossed with `--target` (like `build_std`), not a single target-independent job like `fmt`. Detects out-of-bounds/use-after-free, uninitialized reads, misaligned access, invalid enum/bool discriminants, aliasing violations, memory leaks, and — directly relevant given probable async/concurrent components in this project — data races and weak-memory violations. Two real, confirmed limitations shape its scope: it does not support networking at all, and has very limited FFI access, meaning it will very likely fail against the native-link dependencies already confirmed real in this project (`openssl-sys`, `protobuf-src`, `onig_sys`, `ring`) — those failure points are themselves a mechanical way to locate exactly where behavior stops being portable/host-independent, not an incidental gap to route around. User directed: survey which of the 119 tier 1+2 targets Miri can actually interpret for (narrower than rustc's full codegen list) and which of `larql-cli`'s real dependencies hit the FFI/networking wall, before designing this as a task — not yet done.
-- `wasm32-unknown-unknown` (tier 2, `std: true`, `host_tools: false`) as a third, explicitly-named standing-canary category alongside the two `std: false` canaries — its `std: true` doesn't mean fully OS-backed std (no real filesystem/threads/sockets without special setup), so post-mutation `core`/`alloc` testing against it asks a different question than testing against the `std: false` canaries. Already covered by Task 16's batch (tier 2, so inside Task 12's rescoped universe) — flagged here so it's named, not just anonymously blended into the batch.
+- `wasm32-unknown-unknown` (tier 2, `std: true`, `host_tools: false`) as a third, explicitly-named standing-canary category alongside the two `std: false` canaries — its `std: true` doesn't mean fully OS-backed std (no real filesystem/threads/sockets without special setup), so post-mutation `core`/`alloc` testing against it asks a different question than testing against the `std: false` canaries. Already covered by Task 17's batch (tier 2, so inside Task 12's rescoped universe) — flagged here so it's named, not just anonymously blended into the batch.
 - `cargo hack` feature-powerset testing — current feature coverage is only `default-features`/`no-default-features` (Task 8's `build-attempt`); the full feature powerset is unexplored.
 - Broadening `build-attempt`'s clippy invocation to the spec's own stated lint breadth (`clippy::all`/`pedantic`/`nursery`/`cargo`) — currently runs bare `cargo clippy` with no lint-group flags at all, a real, confirmed gap between what's specified and what's built (found while surveying target-independent/target-dependent axes with the user).
 - Target-side axes beyond std-availability/crate-type, surveyed with the user but not yet built into any probe: panic-strategy (abort vs. unwind — both canary targets are abort-only, no unwind contrast exists), atomics (`max-atomic-width`, including targets with none at all, e.g. `thumbv6m-none-eabi`), endianness (`target-endian`, e.g. `s390x-unknown-linux-gnu` — tier 2, real host tools, currently unexercised as a big-endian canary), pointer width, `host_tools`-derived runnability (currently hand-coded as a case statement in `runtime-test` rather than read from this real field), OS/environment family (WASI/UEFI/RTOS semantics), and libc/vendor variant for the same architecture (gnu/musl/msvc, `crt-static` default).
 
 **Placeholder scan:** no "TBD"/"TODO" remain; the one inline placeholder note in Task 10 Step 1 (in the original single-target-invocation draft) was resolved before this task's content was finalized, not deferred.
 
-**Type consistency:** `stage_promotes(stage_name, baseline_state, sibling_state)`'s CLI (`--stage`, `--baseline-state-file`, `--sibling-state-file`) and `depth_advanced(baseline_sites, sibling_sites)` introduced in Task 4 are used identically in Task 16's workflow wiring (same dict-shaped state objects keyed exactly as `STAGE_POSTCONDITIONS` expects: `lib_rs_content`, `unit_graph`, `metadata`+`expected_members`). `error_sites()` and `unit_graph_units_named()` from Task 1 are imported by name, unchanged, in Tasks 3, 4, and 12's inline scripts. Artifact-naming consistency re-verified after the batching restructure: Task 7 uploads `target-spec-<target>.json`/`cfg-<target>.txt`/`supported-crate-types-<target>.txt` inside `target-capability-batch-<N>`; Task 8 reads `supported-crate-types-$TARGET.txt` from that same download and uploads `unit-graph-<target>.json` inside `dependency-graph-batch-<N>`; Task 10's expected-file computation and Task 16's `next(Path("primary").glob(...))` baseline lookup both reference these exact filenames — checked directly against Tasks 7/8's `path: out/` upload blocks, not assumed.
+**Type consistency:** `stage_promotes(stage_name, baseline_state, sibling_state)`'s CLI (`--stage`, `--baseline-state-file`, `--sibling-state-file`) and `depth_advanced(baseline_sites, sibling_sites)` introduced in Task 4 are used identically in Task 17's workflow wiring (same dict-shaped state objects keyed exactly as `STAGE_POSTCONDITIONS` expects: `lib_rs_content`, `unit_graph`, `metadata`+`expected_members`). `error_sites()` and `unit_graph_units_named()` from Task 1 are imported by name, unchanged, in Tasks 3, 4, and 12's inline scripts. Artifact-naming consistency re-verified after the batching restructure: Task 7 uploads `target-spec-<target>.json`/`cfg-<target>.txt`/`supported-crate-types-<target>.txt` inside `target-capability-batch-<N>`; Task 8 reads `supported-crate-types-$TARGET.txt` from that same download and uploads `unit-graph-<target>.json` inside `dependency-graph-batch-<N>`; Task 10's expected-file computation and Task 17's `next(Path("primary").glob(...))` baseline lookup both reference these exact filenames — checked directly against Tasks 7/8's `path: out/` upload blocks, not assumed.
