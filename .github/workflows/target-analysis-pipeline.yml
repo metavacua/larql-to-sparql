@@ -11,10 +11,16 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   discovery:
     name: Discover target matrix
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
     outputs:
       target-matrix: ${{ steps.resolve.outputs.matrix }}
       batches: ${{ steps.resolve.outputs.batches }}
@@ -72,6 +78,8 @@ jobs:
     name: "Target capability: batch ${{ matrix.batch_index }}"
     needs: [discovery]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +121,8 @@ jobs:
     name: "Dependency graph: batch ${{ matrix.batch_index }}"
     needs: [discovery]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
     strategy:
       fail-fast: false
       matrix:
@@ -155,6 +165,9 @@ jobs:
     name: "Build attempt: batch ${{ matrix.batch_index }}"
     needs: [discovery, target-capability]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # actions/download-artifact
     strategy:
       fail-fast: false
       matrix:
@@ -230,6 +243,8 @@ jobs:
     name: "Runtime test: batch ${{ matrix.batch_index }}"
     needs: [discovery]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
     strategy:
       fail-fast: false
       matrix:
