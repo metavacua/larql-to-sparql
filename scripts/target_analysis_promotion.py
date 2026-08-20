@@ -42,9 +42,8 @@ def serde_features_ok(unit_graph: dict[str, Any]) -> bool:
 
 
 def workspace_members_ok(metadata: dict[str, Any], expected_members: list[str]) -> bool:
-    actual_names = {
-        member.split(" ", 1)[0] for member in metadata.get("workspace_members", [])
-    }
+    id_to_name = {pkg["id"]: pkg["name"] for pkg in metadata.get("packages", [])}
+    actual_names = {id_to_name[member] for member in metadata.get("workspace_members", [])}
     return actual_names == set(expected_members)
 
 

@@ -41,6 +41,24 @@ def test_workspace_members_ok_true_for_trimmed_workspace():
     assert workspace_members_ok(metadata, expected) is True
 
 
+def test_workspace_members_ok_parses_real_modern_package_id_format():
+    # Real cargo (this repo's toolchain: 1.97.1) package-id format is
+    # "path+file:///abs/path/to/crate#version" -- no space anywhere, unlike the
+    # older "name version (source)" format the fixtures previously (wrongly)
+    # assumed, which is why this bug was invisible to this test file since Task 4.
+    metadata = {
+        "packages": [
+            {"id": "path+file:///repo/crates/larql-cli#0.2.0", "name": "larql-cli"},
+            {"id": "path+file:///repo/crates/larql-boundary#0.2.0", "name": "larql-boundary"},
+        ],
+        "workspace_members": [
+            "path+file:///repo/crates/larql-cli#0.2.0",
+            "path+file:///repo/crates/larql-boundary#0.2.0",
+        ],
+    }
+    assert workspace_members_ok(metadata, ["larql-cli", "larql-boundary"]) is True
+
+
 def test_no_std_scaffold_ok_requires_both_markers():
     assert no_std_scaffold_ok("//! docs\n#![no_std]\nextern crate alloc;\n") is True
     assert no_std_scaffold_ok("//! docs\n#![no_std]\n") is False
