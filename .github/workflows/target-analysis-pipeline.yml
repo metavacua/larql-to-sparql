@@ -573,22 +573,15 @@ jobs:
           import sys
           from pathlib import Path
 
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import insert_no_std_scaffold
+
           crate = sys.argv[1]
           lib_rs = Path(f"crates/{crate}/src/lib.rs")
-          text = lib_rs.read_text(encoding="utf-8")
-          lines = text.splitlines(keepends=True)
-
-          insert_at = 0
-          for i, line in enumerate(lines):
-              stripped = line.strip()
-              if stripped.startswith("//!") or stripped.startswith("#![") or stripped == "":
-                  insert_at = i + 1
-              else:
-                  break
-
-          scaffold = "#![no_std]\nextern crate alloc;\n"
-          lines.insert(insert_at, scaffold)
-          lib_rs.write_text("".join(lines), encoding="utf-8")
+          lib_rs.write_text(
+              insert_no_std_scaffold(lib_rs.read_text(encoding="utf-8")),
+              encoding="utf-8",
+          )
           PYEOF
           done
       - name: Capture post-Stage-B lib.rs content per crate
@@ -904,3 +897,62 @@ jobs:
         with:
           name: round-baseline
           path: round-baseline.json
+
+  secondary-layer-self-test:
+    name: Secondary-layer self-test (noise floor, blast radius, ephemerality)
+    needs: [discovery]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
+      - name: "Noise floor: run unmutated Stage C twice, confirm stable findings"
+        run: |
+          for i in 1 2; do
+            cargo +nightly check -p larql-cli --target nvptx64-nvidia-cuda \
+              --message-format=json --keep-going > noise-floor-run-$i.json || true
+          done
+          python3 - <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import error_sites
+
+          def load_messages(path):
+              with open(path) as f:
+                  return [json.loads(line) for line in f if line.strip()]
+
+          run1 = error_sites(load_messages("noise-floor-run-1.json"))
+          run2 = error_sites(load_messages("noise-floor-run-2.json"))
+          if run1 != run2:
+              print(f"::error::Noise floor violated: run1={run1} run2={run2}")
+              sys.exit(1)
+          print(f"Noise floor stable: {len(run1)} identical error sites across both runs.")
+          PYEOF
+      - name: "Blast-radius containment: assert Stage B only touches its declared scope"
+        run: |
+          python3 - <<'PYEOF'
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_promotion import insert_no_std_scaffold, STAGE_B_REPRESENTATIVE_CRATE
+
+          lib_rs = Path(f"crates/{STAGE_B_REPRESENTATIVE_CRATE}/src/lib.rs")
+          lib_rs.write_text(insert_no_std_scaffold(lib_rs.read_text(encoding="utf-8")), encoding="utf-8")
+          PYEOF
+          CHANGED=$(git diff --name-only)
+          if [ "$CHANGED" != "crates/larql-compute/src/lib.rs" ]; then
+            echo "::error::Stage B touched files outside its declared scope: $CHANGED"
+            exit 1
+          fi
+          echo "Blast radius contained to the declared file."
+      - name: "Ephemerality: assert no forbidden git-mutating command exists in this workflow file"
+        run: |
+          if grep -v -E '(echo |::error::|::warning::|^\s*#)' .github/workflows/target-analysis-pipeline.yml | grep -Eq 'git (commit|push)'; then
+            echo "::error::Found a forbidden git-mutating command in the pipeline workflow — mutations must stay ephemeral to the job checkout."
+            exit 1
+          fi
+          echo "No forbidden git-mutating command found in the pipeline workflow."

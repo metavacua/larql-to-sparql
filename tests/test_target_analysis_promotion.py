@@ -6,6 +6,7 @@ from scripts.target_analysis_common import error_sites, load_json
 from scripts.target_analysis_promotion import (
     STAGE_B3_REACHABLE_CLOSURE,
     depth_advanced,
+    insert_no_std_scaffold,
     no_std_scaffold_ok,
     serde_features_ok,
     stage_b_lib_rs_filenames,
@@ -64,6 +65,23 @@ def test_no_std_scaffold_ok_requires_both_markers():
     assert no_std_scaffold_ok("//! docs\n#![no_std]\nextern crate alloc;\n") is True
     assert no_std_scaffold_ok("//! docs\n#![no_std]\n") is False
     assert no_std_scaffold_ok("//! docs\nextern crate alloc;\n") is False
+
+
+def test_insert_no_std_scaffold_inserts_after_leading_doc_comment_and_attributes():
+    text = "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\npub fn f() {}\n"
+    result = insert_no_std_scaffold(text)
+    assert result == (
+        "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\n"
+        "#![no_std]\nextern crate alloc;\n"
+        "pub fn f() {}\n"
+    )
+    assert no_std_scaffold_ok(result) is True
+
+
+def test_insert_no_std_scaffold_inserts_at_top_when_no_leading_doc_comment():
+    text = "pub fn f() {}\n"
+    result = insert_no_std_scaffold(text)
+    assert result == "#![no_std]\nextern crate alloc;\npub fn f() {}\n"
 
 
 def test_stage_promotes_serde_patch_transitions_false_to_true():

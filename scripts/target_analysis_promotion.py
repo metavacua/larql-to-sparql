@@ -51,6 +51,22 @@ def no_std_scaffold_ok(lib_rs_content: str) -> bool:
     return "#![no_std]" in lib_rs_content and "extern crate alloc;" in lib_rs_content
 
 
+def insert_no_std_scaffold(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+
+    insert_at = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("//!") or stripped.startswith("#![") or stripped == "":
+            insert_at = i + 1
+        else:
+            break
+
+    scaffold = "#![no_std]\nextern crate alloc;\n"
+    lines.insert(insert_at, scaffold)
+    return "".join(lines)
+
+
 # The crates the Secondary-layer mutation job (Stage A/B) actually produces a
 # baseline/sibling lib.rs pair for. larql-cli is deliberately absent: it is
 # bin-only (no src/lib.rs), so there is nothing for Stage A/B to mutate.
