@@ -629,7 +629,7 @@ jobs:
 
   secondary-stage-c-and-promotion:
     name: "Secondary Stage C + promotion: batch ${{ matrix.batch_index }}"
-    needs: [discovery, indexing, secondary-mutate, dependency-graph]
+    needs: [discovery, indexing, secondary-mutate, dependency-graph, fetch-prior-round-baseline]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -657,6 +657,11 @@ jobs:
         with:
           name: dependency-graph-batch-${{ matrix.batch_index }}
           path: primary/dependency-graph-batch-${{ matrix.batch_index }}
+      - name: Download this run's fetched prior-round baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: prior-round-baseline
+          path: prior-round-baseline
       - name: Stage C and promotion checks for every target in this batch
         env:
           BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
@@ -738,9 +743,14 @@ jobs:
           target = sys.argv[1]
           with open(f"out/stage-c-{target}.json") as f:
               sibling_messages = [json.loads(line) for line in f if line.strip()]
-          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 20 wires round-over-round)
-
-          baseline_sites = error_sites(baseline_messages)
+          prior_round = json.loads(Path("prior-round-baseline/round-baseline.json").read_text())
+          prior_record = (
+              prior_round.get("promoted", {}).get(target)
+              or prior_round.get("preserved_not_promoted", {}).get(target)
+          )
+          baseline_sites = (
+              {tuple(s) for s in prior_record["sibling_sites"]} if prior_record is not None else set()
+          )
           sibling_sites = error_sites(sibling_messages)
           result = {
               "target": target,
@@ -757,3 +767,140 @@ jobs:
         with:
           name: promotion-decision-batch-${{ matrix.batch_index }}
           path: out/
+
+  fetch-prior-round-baseline:
+    name: Fetch prior round's baseline (cross-run artifact lookup)
+    needs: [discovery]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # gh api /actions/artifacts, cross-run actions/download-artifact
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find the most recent prior run's round-baseline artifact on this branch, if any
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_run_id = os.environ["GITHUB_RUN_ID"]
+
+          raw = subprocess.run(
+              ["gh", "api", f"/repos/{repo}/actions/artifacts", "--paginate",
+               "-X", "GET", "-f", "name=round-baseline"],
+              capture_output=True, text=True, check=True,
+          ).stdout
+          # --paginate with multiple pages emits one JSON object per page;
+          # each page's "artifacts" list is concatenated here.
+          artifacts = []
+          for line in raw.splitlines():
+              if line.strip():
+                  artifacts.extend(json.loads(line)["artifacts"])
+
+          candidates = [
+              a for a in artifacts
+              if not a["expired"]
+              and a.get("workflow_run") is not None
+              and a["workflow_run"]["head_branch"] == branch
+              and str(a["workflow_run"]["id"]) != str(current_run_id)
+          ]
+          candidates.sort(key=lambda a: a["created_at"], reverse=True)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              if candidates:
+                  f.write("found=true\n")
+                  f.write(f"prior_run_id={candidates[0]['workflow_run']['id']}\n")
+              else:
+                  f.write("found=false\n")
+                  f.write("prior_run_id=\n")
+          PYEOF
+      - name: Download the prior run's round-baseline artifact, if one was found
+        if: steps.find.outputs.found == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: round-baseline
+          run-id: ${{ steps.find.outputs.prior_run_id }}
+          github-token: ${{ github.token }}
+          path: prior-round-baseline-download
+      - name: Republish as a same-run artifact, self-describing what was found
+        run: |
+          mkdir -p out
+          if [ "${{ steps.find.outputs.found }}" = "true" ]; then
+            cp prior-round-baseline-download/round-baseline.json out/round-baseline.json
+            printf '{"prior_run_id": %s}' "${{ steps.find.outputs.prior_run_id }}" > out/provenance.json
+          else
+            printf '{"promoted": {}, "preserved_not_promoted": {}}' > out/round-baseline.json
+            printf '{"prior_run_id": null}' > out/provenance.json
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prior-round-baseline
+          path: out/
+
+  next-round-baseline:
+    name: Fold promoted diffs into next round's baseline
+    needs: [discovery, secondary-stage-c-and-promotion]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # actions/download-artifact
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all promotion-decision batch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "promotion-decision-batch-*"
+          path: promotion-decisions
+      - name: Fold promoted results, preserve non-promoted results separately, carry real site sets forward
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import error_sites
+
+          promoted = {}
+          preserved = {}
+          for batch_dir in Path("promotion-decisions").iterdir():
+              if not batch_dir.is_dir():
+                  continue
+              for depth_file in batch_dir.glob("depth-decision-*.json"):
+                  target = re.sub(r"^depth-decision-|\.json$", "", depth_file.name)
+                  depth_decision = json.loads(depth_file.read_text())
+                  stage_verdicts = {}
+                  for stage in ("stage-b", "stage-b2", "stage-b3"):
+                      stage_file = batch_dir / f"promotion-{stage}-{target}.json"
+                      if stage_file.exists():
+                          stage_verdicts[stage] = json.loads(stage_file.read_text())
+
+                  stage_c_file = batch_dir / f"stage-c-{target}.json"
+                  sibling_messages = [
+                      json.loads(line) for line in stage_c_file.read_text().splitlines() if line.strip()
+                  ]
+                  sibling_sites = sorted(list(s) for s in error_sites(sibling_messages))
+
+                  record = {**depth_decision, "stage_promotions": stage_verdicts, "sibling_sites": sibling_sites}
+                  if depth_decision["depth_advanced"]:
+                      promoted[target] = record
+                  else:
+                      preserved[target] = record
+
+          Path("round-baseline.json").write_text(
+              json.dumps({"promoted": promoted, "preserved_not_promoted": preserved}, indent=2)
+          )
+          PYEOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: round-baseline
+          path: round-baseline.json
