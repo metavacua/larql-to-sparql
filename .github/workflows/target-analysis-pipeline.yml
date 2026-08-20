@@ -1,4 +1,6 @@
 name: target-analysis-pipeline
+# Task 13 concurrency-cancellation proof: trivial follow-up commit, pushed
+# immediately after commit a7b3a42a's run started, to trigger cancel-in-progress.
 
 on:
   push:
