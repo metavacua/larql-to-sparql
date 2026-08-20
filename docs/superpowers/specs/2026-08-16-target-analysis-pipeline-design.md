@@ -79,7 +79,20 @@ development — not defaults, each one is load-bearing:
    was demonstrated directly and repeatedly (treating `cargo tree`'s display as
    sufficient, assuming `-Z avoid-dev-deps` worked because it was silently accepted).
 3. **Exhaustive, unconditional fan-out.** Every relevant probe runs every time; nothing
-   is skipped because an earlier result seems to already explain things.
+   is skipped because an earlier result seems to already explain things. This governs
+   *probe types*, not membership in the target universe itself: real evidence from an
+   unscoped run against all 331 real `rustc --print target-list` entries showed 212 of
+   them (64%) are rustc's own tier 3 ("community-maintained, may or may not build"),
+   most lacking `host_tools` — building `larql-cli` against these is near-certain to
+   fail before revealing anything specific to larql-cli's own no_std-readiness, at real,
+   recurring cost given the Secondary layer's many-round recursive design. The default,
+   `push`-triggered target universe is therefore scoped to `tier <= 2` (rustc's own
+   "guaranteed to build" classification, sourced directly from `target-spec-json`'s
+   `metadata.tier` field) — this is still principle 3 in spirit, not a violation of it:
+   the scoping rule is mechanically grounded in rustc's own emitted classification, not
+   an agent's judgment about what "seems relevant" (principle 2). A `workflow_dispatch`
+   request for one specific target always bypasses this default scope, including for a
+   tier-3 target — an explicit request is real intent, never silently narrowed.
 4. **Distinct, unmerged per-probe verdicts.** Disagreement between two independently
    mechanically-grounded sources is the valuable signal (this is how the
    `cargo tree` vs. `cargo build --unit-graph` gap was eventually found), so no
@@ -128,13 +141,17 @@ Two layers, explicit priority order:
 
 **Discovery job** (autonomous, runs first, feeds everything downstream via
 `fromJSON()`-driven dynamic matrices): queries `rustc --print target-list` (or a
-specific target if one was given as input), `rustc --print target-spec-json`/
-`--print cfg` for capability data, crates.io's real search API and GitHub's own
-dependency-graph/SBOM API for ecosystem discovery, `rustup target list`/
-`component list` for toolchain availability — all as real `run:` steps on the runner,
-every run, not pre-computed and frozen into the workflow file. A target-family
-registry (e.g. `os: cuda` → CUDA toolkit tooling) supplements this as one more queried,
-explicitly-labeled-as-curated (L2) source, never the sole source of truth.
+specific target if one was given as input); for the default (no explicit target
+requested) path, additionally queries `rustc --print target-spec-json`'s
+`metadata.tier` for every one of those targets and filters to `tier <= 2` before
+anything downstream sees the list (Standing Principle 3) — a `workflow_dispatch`
+request for one specific target always skips this filter. Also queries crates.io's
+real search API and GitHub's own dependency-graph/SBOM API for ecosystem discovery,
+`rustup target list`/`component list` for toolchain availability — all as real `run:`
+steps on the runner, every run, not pre-computed and frozen into the workflow file. A
+target-family registry (e.g. `os: cuda` → CUDA toolkit tooling) supplements this as
+one more queried, explicitly-labeled-as-curated (L2) source, never the sole source of
+truth.
 
 **Target-capability probes** (per target, crate-independent — one job per target
 regardless of how many crates get tested against it): `target-spec-json` (full
