@@ -25,6 +25,29 @@ jobs:
         run: rustup toolchain install nightly --profile minimal
       - name: rustc --print target-list
         run: rustup run nightly rustc --print target-list > target-list.txt
+      - name: Query tier for every real target
+        run: |
+          : > tier-lines.txt
+          while IFS= read -r TARGET; do
+            TIER=$(rustup run nightly rustc --print target-spec-json -Z unstable-options --target "$TARGET" 2>/dev/null \
+              | python3 -c 'import json, sys
+          try:
+              d = json.load(sys.stdin)
+              print(d.get("metadata", {}).get("tier", ""))
+          except Exception:
+              print("")')
+            printf '%s\t%s\n' "$TARGET" "$TIER" >> tier-lines.txt
+          done < target-list.txt
+          python3 -c "
+          import json
+          tiers = {}
+          with open('tier-lines.txt') as f:
+              for line in f:
+                  target, tier = line.rstrip(chr(10)).split(chr(9), 1)
+                  tiers[target] = int(tier) if tier else None
+          with open('target-tiers.json', 'w') as f:
+              json.dump(tiers, f)
+          "
       - name: Resolve target matrix
         id: resolve
         env:
@@ -34,12 +57,16 @@ jobs:
             --target-list-file target-list.txt \
             --requested-target "$REQUESTED_TARGET" \
             --max-batch-size 12 \
+            --target-tiers-file target-tiers.json \
+            --max-tier 2 \
             --github-output "$GITHUB_OUTPUT" > /dev/null
-      - name: Upload raw target-list
+      - name: Upload raw target-list and tiers
         uses: actions/upload-artifact@v4
         with:
           name: discovery-target-list
-          path: target-list.txt
+          path: |
+            target-list.txt
+            target-tiers.json
 
   target-capability:
     name: "Target capability: batch ${{ matrix.batch_index }}"
