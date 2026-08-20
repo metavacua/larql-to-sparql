@@ -206,9 +206,20 @@ it becomes a parse error). Stage B2 (patches every `crates/*/Cargo.toml` matchin
 `serde = { workspace = true[...] }`, not just the exact-string variant) and Stage B3
 (trims the root `Cargo.toml`'s `members`/`default-members` to the target crate's real
 reachable subtree, removing unrelated workspace crates from Cargo's
-feature-unification scope entirely) touch disjoint files from each other and from A/B,
-so they run as `background: true` steps concurrent with A/B, joined by a `wait` before
-Stage C, which needs all four complete. Every stage's effect is captured as a
+feature-unification scope entirely) touch disjoint files from each other and from A/B.
+**Corrected 2026-08-20 (Task 16 pre-dispatch check):** this document previously claimed
+they "run as `background: true` steps concurrent with A/B, joined by a `wait`" — checked
+directly against GitHub's own workflow-syntax documentation (WebFetch, not assumed) and
+against every real workflow file in this repository (`grep -rn "background:\|wait-all:\|wait:"
+.github/workflows/*.yml`, zero matches anywhere): there is no `background`/`wait`/
+`wait-all`/`parallel` step-level key documented anywhere in GitHub Actions. Steps within
+a job execute strictly sequentially; concurrency is only controllable at the workflow
+and job level, never the step level. This claim was never validated by an actual run
+(this document's own Validation approach section requires exactly that), and is now
+ruled out. Stages A, B, B2, and B3 run as four plain sequential steps within the
+`secondary-mutate` job — real wall-clock cost is negligible regardless (a `clippy --fix`
+pass, one `sed`, and one short Python script), so sequential execution costs nothing
+worth optimizing away. Every stage's effect is captured as a
 before/after diff of the Primary layer's `--unit-graph` and target-capability output,
 not inferred from Stage C's pass/fail alone — that diff is the validation signal, and
 whatever new findings appear at that depth are attributed to having cleared the prior
@@ -237,10 +248,20 @@ via `fromJSON()` from the Discovery job's own output — that *is* a genuine mec
 dependency, not optional parallelism, and is expressed as `needs: [discovery]` on every
 job whose matrix depends on it. Within a single target's fan-out, once the matrix
 exists, target-capability, dependency-graph, and build-attempt probes have no
-prerequisite *on each other* and run fully parallel (via `parallel:`/`background`+
-`wait` steps within jobs, sharing one checkout and toolchain install rather than paying
-that cost per separate job) — build-attempt probes specifically never wait on what the
-dependency-graph probes found, they always run regardless. Beyond `needs: [discovery]`,
+prerequisite *on each other*. **Corrected 2026-08-20** (same correction as above,
+same real evidence): this paragraph's original "`parallel:`/`background`+`wait` steps
+within jobs, sharing one checkout" framing assumed a step-level concurrency mechanism
+that does not exist in GitHub Actions. As actually implemented (Tasks 7-9), each probe
+is its own separate batched job (`target-capability`, `dependency-graph`,
+`build-attempt`), each with its own `needs: [discovery]` (plus `target-capability` for
+`build-attempt`, which needs its batch's capability artifact) and no `needs:` edge
+against each other — GitHub Actions schedules jobs with no `needs:` relationship between
+them concurrently on its own, which is the real mechanism this design relies on, not an
+intra-job step feature. The checkout/toolchain-install cost is paid per job because jobs
+are the real isolation unit; there is no mechanism to share it across separate jobs
+short of a cache (explicitly rejected elsewhere in this document) — build-attempt probes
+specifically never wait on what the dependency-graph probes found, they always run
+regardless. Beyond `needs: [discovery]`,
 `needs:` appears only within the Secondary layer's own internal stage ordering, and at
 its boundary with the Primary layer (`needs: [primary layer jobs]`,
 `if: !cancelled()`, since those are expected to genuinely fail).
@@ -383,9 +404,20 @@ directly. Four things are testable regardless:
 
 Same as the original target-sampling design: validated exclusively by running for real
 on GitHub-hosted runners, never by local simulation. This extends to the design's own
-claims about GitHub Actions mechanics (the `background`/`wait`/`parallel` step family,
-`fromJSON()` dynamic matrices, reusable-workflow `jobs.<id>.uses`) — verified against
-the actual current documentation source (not a summarized/model-processed version of
-it, which was directly caught omitting real content during this design's own
-development) before being relied on, and ultimately proven by an actual run, not by the
-documentation alone.
+claims about GitHub Actions mechanics (`fromJSON()` dynamic matrices, reusable-workflow
+`jobs.<id>.uses`) — verified against the actual current documentation source (not a
+summarized/model-processed version of it, which was directly caught omitting real
+content during this design's own development) before being relied on, and ultimately
+proven by an actual run, not by the documentation alone.
+
+**Corrected 2026-08-20:** this section previously included "the `background`/`wait`/
+`parallel` step family" in the list of mechanics claims described as verified. That
+was itself an unverified claim slipping past its own standard — a direct WebFetch of
+GitHub's workflow-syntax documentation, done as part of Task 16's pre-dispatch check,
+found no such step-level keys documented anywhere, and a repository-wide grep found
+zero real usages in any workflow file this project has ever written. This is exactly
+the failure mode this section exists to prevent (an assumed mechanics claim, never
+actually run-proven), caught by applying the section's own rule retroactively. See the
+Secondary-layer stages and Fan-out sections above for the corrected design (plain
+sequential steps within `secondary-mutate`; separate concurrent jobs, not intra-job
+step concurrency, for target-capability/dependency-graph/build-attempt).
