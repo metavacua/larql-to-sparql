@@ -3249,19 +3249,171 @@ not a blocker for this task or a scope change to it.
 
 ### Task 21: Secondary-layer test suite — noise floor, blast-radius containment, ephemerality
 
+**Three real defects found and fixed in this task's own original text before dispatch**
+(the same pre-flight standard already applied to Tasks 15-17 and 20):
+
+1. **The ephemerality check is self-triggering — confirmed by direct simulation, not
+   assumed.** The original check greps the whole workflow file for the literal
+   substring `git (commit|push)`. But the check's own step name
+   (`"Ephemerality: assert no git commit/push exists anywhere in this workflow
+   file"`) and its own error message (`"Found a git commit/push in the pipeline
+   workflow"`) both *contain that exact substring* — the moment this step is added
+   to the file, the grep matches the step's own descriptive text and the check
+   fails unconditionally, on every run, regardless of whether any real git-mutating
+   command exists anywhere. Confirmed directly: extracting the planned step's own
+   YAML text and running the planned grep against it reproduces the false positive.
+   Fixed below by (a) rewording the step's own name/messages to not contain the
+   literal adjacent phrase, and (b) filtering out `echo`/`::error::`/comment lines
+   before searching, so future additions to this file don't reintroduce the same
+   self-match.
+2. **Blast-radius containment tests a hand-duplicated copy of Stage B's real logic,
+   not Stage B itself, and uses a different crate than the pipeline actually uses.**
+   The original check re-implements the scaffold-insertion algorithm inline, a
+   second, independent copy of the exact code already in the `secondary-mutate`
+   job's real "Stage B: inject `#![no_std]` scaffold" step (Task 16, already
+   merged) — any future change to the real algorithm could silently desync from
+   this copy, so the test would keep passing while testing something Stage B no
+   longer actually does. It also targets `larql-boundary`, not
+   `STAGE_B_REPRESENTATIVE_CRATE` (`larql-compute`, Task 14's own deliberate choice
+   as the hardest real case) — an arbitrary, inconsistent choice. Fixed below by
+   extracting the algorithm into a single, shared, importable function
+   (`insert_no_std_scaffold`) that both the real Stage B step and this self-test
+   call — eliminating the duplication and letting this test genuinely exercise the
+   real mechanism, not a twin of it — and by using `larql-compute` throughout.
+3. Golden-fixture crates and cross-target/native comparison remain **explicitly out
+   of scope for this task** (already flagged as separate, not-yet-implemented
+   follow-ups in the Self-Review below) — not a defect in this task's own text,
+   noted here only so it isn't mistaken for one.
+
 **Files:**
-- Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-layer-self-test` job)
+- Modify: `scripts/target_analysis_promotion.py` (extract `insert_no_std_scaffold`)
+- Modify: `tests/test_target_analysis_promotion.py` (regression test for the extracted function)
+- Modify: `.github/workflows/target-analysis-pipeline.yml` (Stage B step now calls the shared function instead of its own inline copy; add `secondary-layer-self-test` job)
 
 **Interfaces:**
 - Consumes: nothing from earlier jobs — this job validates the Secondary-layer mechanism itself, independent of any specific crate/target result, per the spec's Testing section.
+- Produces: `insert_no_std_scaffold(text: str) -> str`, importable from `scripts.target_analysis_promotion`, consumed by both the real Stage B step and this self-test.
 
-- [ ] **Step 1: Add the noise-floor check**
+- [ ] **Step 1: Write a failing test for the not-yet-extracted function (TDD)**
+
+Add this import to the top of `tests/test_target_analysis_promotion.py` (alphabetically, before `no_std_scaffold_ok`):
+```python
+from scripts.target_analysis_promotion import (
+    STAGE_B3_REACHABLE_CLOSURE,
+    depth_advanced,
+    insert_no_std_scaffold,
+    no_std_scaffold_ok,
+    serde_features_ok,
+    stage_b_lib_rs_filenames,
+    stage_promotes,
+    workspace_members_ok,
+)
+```
+Then add:
+```python
+def test_insert_no_std_scaffold_inserts_after_leading_doc_comment_and_attributes():
+    text = "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\npub fn f() {}\n"
+    result = insert_no_std_scaffold(text)
+    assert result == (
+        "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\n"
+        "#![no_std]\nextern crate alloc;\n"
+        "pub fn f() {}\n"
+    )
+    assert no_std_scaffold_ok(result) is True
+
+
+def test_insert_no_std_scaffold_inserts_at_top_when_no_leading_doc_comment():
+    text = "pub fn f() {}\n"
+    result = insert_no_std_scaffold(text)
+    assert result == "#![no_std]\nextern crate alloc;\npub fn f() {}\n"
+```
+
+Run: `python3 -m pytest tests/test_target_analysis_promotion.py -v`
+Expected: FAIL at collection — `ImportError: cannot import name 'insert_no_std_scaffold'`.
+
+- [ ] **Step 2: Extract `insert_no_std_scaffold` into `scripts/target_analysis_promotion.py`**
+
+Add this immediately after `no_std_scaffold_ok`:
+```python
+def insert_no_std_scaffold(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+
+    insert_at = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("//!") or stripped.startswith("#![") or stripped == "":
+            insert_at = i + 1
+        else:
+            break
+
+    scaffold = "#![no_std]\nextern crate alloc;\n"
+    lines.insert(insert_at, scaffold)
+    return "".join(lines)
+```
+This is a byte-for-byte extraction of the real algorithm already proven in this
+session's real CI runs (Task 16) — the insertion-position loop and the scaffold
+string are copied verbatim, not rewritten.
+
+- [ ] **Step 3: Run the tests, confirm GREEN**
+
+Run: `python3 -m pytest tests/test_target_analysis_promotion.py -v`
+Expected: all tests pass, including the two new ones.
+
+- [ ] **Step 4: Point the real Stage B step at the shared function**
+
+In `.github/workflows/target-analysis-pipeline.yml`, in the `secondary-mutate`
+job's `"Stage B: inject #![no_std] scaffold, per crate"` step, replace:
+```python
+          import sys
+          from pathlib import Path
+
+          crate = sys.argv[1]
+          lib_rs = Path(f"crates/{crate}/src/lib.rs")
+          text = lib_rs.read_text(encoding="utf-8")
+          lines = text.splitlines(keepends=True)
+
+          insert_at = 0
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+              if stripped.startswith("//!") or stripped.startswith("#![") or stripped == "":
+                  insert_at = i + 1
+              else:
+                  break
+
+          scaffold = "#![no_std]\nextern crate alloc;\n"
+          lines.insert(insert_at, scaffold)
+          lib_rs.write_text("".join(lines), encoding="utf-8")
+```
+with:
+```python
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import insert_no_std_scaffold
+
+          crate = sys.argv[1]
+          lib_rs = Path(f"crates/{crate}/src/lib.rs")
+          lib_rs.write_text(
+              insert_no_std_scaffold(lib_rs.read_text(encoding="utf-8")),
+              encoding="utf-8",
+          )
+```
+This is a pure extraction — same algorithm, same output, now shared instead of
+duplicated. Real-CI verification in Step 8 below confirms this produces
+byte-identical `sibling-lib-rs-*.txt` output to before this change, not just
+"looks equivalent."
+
+- [ ] **Step 5: Add the self-test job**
 
 ```yaml
   secondary-layer-self-test:
     name: Secondary-layer self-test (noise floor, blast radius, ephemerality)
     needs: [discovery]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly Rust
@@ -3291,49 +3443,70 @@ not a blocker for this task or a scope change to it.
           PYEOF
       - name: "Blast-radius containment: assert Stage B only touches its declared scope"
         run: |
-          git status --porcelain > before-stage-b.txt
           python3 - <<'PYEOF'
-          import re
+          import sys
+          sys.path.insert(0, ".")
           from pathlib import Path
+          from scripts.target_analysis_promotion import insert_no_std_scaffold, STAGE_B_REPRESENTATIVE_CRATE
 
-          lib_rs = Path("crates/larql-boundary/src/lib.rs")
-          text = lib_rs.read_text(encoding="utf-8")
-          lines = text.splitlines(keepends=True)
-          insert_at = 0
-          for i, line in enumerate(lines):
-              stripped = line.strip()
-              if stripped.startswith("//!") or stripped.startswith("#![") or stripped == "":
-                  insert_at = i + 1
-              else:
-                  break
-          lines.insert(insert_at, "#![no_std]\nextern crate alloc;\n")
-          lib_rs.write_text("".join(lines), encoding="utf-8")
+          lib_rs = Path(f"crates/{STAGE_B_REPRESENTATIVE_CRATE}/src/lib.rs")
+          lib_rs.write_text(insert_no_std_scaffold(lib_rs.read_text(encoding="utf-8")), encoding="utf-8")
           PYEOF
           CHANGED=$(git diff --name-only)
-          if [ "$CHANGED" != "crates/larql-boundary/src/lib.rs" ]; then
+          if [ "$CHANGED" != "crates/larql-compute/src/lib.rs" ]; then
             echo "::error::Stage B touched files outside its declared scope: $CHANGED"
             exit 1
           fi
           echo "Blast radius contained to the declared file."
-      - name: "Ephemerality: assert no git commit/push exists anywhere in this workflow file"
+      - name: "Ephemerality: assert no forbidden git-mutating command exists in this workflow file"
         run: |
-          if grep -Eq "git (commit|push)" .github/workflows/target-analysis-pipeline.yml; then
-            echo "::error::Found a git commit/push in the pipeline workflow — mutations must stay ephemeral to the job checkout."
+          if grep -v -E '(echo |::error::|::warning::|^\s*#)' .github/workflows/target-analysis-pipeline.yml | grep -Eq 'git (commit|push)'; then
+            echo "::error::Found a forbidden git-mutating command in the pipeline workflow — mutations must stay ephemeral to the job checkout."
             exit 1
           fi
-          echo "No git commit/push found in the pipeline workflow."
+          echo "No forbidden git-mutating command found in the pipeline workflow."
 ```
+This step's own name and echoed messages deliberately avoid the literal adjacent
+phrase `git commit`/`git push` (confirmed by direct simulation before this text was
+written: the ORIGINAL wording self-triggered the check the moment it was added to
+the file) — write any future edit to this step the same way, or re-run the same
+simulation before changing its wording.
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 6: Run the full local test suite, confirm GREEN**
+
+Run: `python3 -m pytest -v`
+Expected: all tests pass, including the two new ones from Step 1.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: add Secondary-layer self-test job (noise floor, blast radius, ephemerality)"
+git add scripts/target_analysis_promotion.py tests/test_target_analysis_promotion.py .github/workflows/target-analysis-pipeline.yml
+git commit -m "feat: add Secondary-layer self-test job; extract shared insert_no_std_scaffold to stop duplicating Stage B's real logic"
 ```
 
-- [ ] **Step 3: Push and verify on a real runner**
+- [ ] **Step 8: Push and verify on a real runner**
 
-Push and confirm: all three checks pass on the real pipeline as currently written. Then deliberately introduce a Stage B bug that touches an extra file (e.g., also modify `Cargo.toml` in the blast-radius test's inline script) in a throwaway commit, confirm the blast-radius check fails loudly, then revert.
+Push and confirm: all three self-test checks pass on the real pipeline. Specifically
+for the blast-radius check: confirm it now runs against `larql-compute`, and confirm
+`secondary-mutate`'s own real Stage B step (now calling the shared function) still
+produces the exact same `sibling-lib-rs-larql-compute.txt` content as Task 17's last
+real run (run `32418628575`, or whichever is most recent) — a byte-for-byte diff
+against that prior artifact's content, not merely "the job stayed green," is the
+actual proof this was a safe, behavior-preserving extraction. Then deliberately
+introduce a Stage B bug that touches an extra file (e.g., also modify `Cargo.toml`
+inside the blast-radius test's own inline script) in a throwaway commit, confirm the
+blast-radius check fails loudly, then revert that throwaway commit.
+
+**This push is also Run B for Task 20's recursive-round baseline handoff** — the
+first real chance to prove the read-back path Task 20 could only fall back on.
+Confirm, as part of this same push's verification: `fetch-prior-round-baseline`
+reports `found=true` with `prior_run_id` matching Run A's real run ID (`32418628575`
+unless a further push has landed first), at least one target's `secondary-stage-c-
+and-promotion` computes a genuinely non-empty `baseline_sites` (reconstructed from
+Run A's real `sibling_sites`, not `set()`), and `depth_advanced` for that target is
+computed against that real, non-trivial baseline. Do not close out Task 20's own
+outstanding concern in the ledger until this is confirmed — record the result against
+Task 20's entry as well as this task's own.
 
 ---
 
