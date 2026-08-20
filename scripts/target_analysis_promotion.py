@@ -52,6 +52,33 @@ def no_std_scaffold_ok(lib_rs_content: str) -> bool:
     return "#![no_std]" in lib_rs_content and "extern crate alloc;" in lib_rs_content
 
 
+# The crates the Secondary-layer mutation job (Stage A/B) actually produces a
+# baseline/sibling lib.rs pair for. larql-cli is deliberately absent: it is
+# bin-only (no src/lib.rs), so there is nothing for Stage A/B to mutate.
+MUTATED_LIBRARY_CRATES = (
+    "larql-boundary",
+    "larql-vindex-spec",
+    "larql-models",
+    "larql-compute",
+)
+
+# larql-compute is the chosen Stage-B representative: it has the largest
+# leading doc comment of the four mutated crates, the shape that broke the
+# scaffold-insertion script's first, naive version, making it the sentinel
+# most likely to actually catch a real regression rather than pass vacuously.
+STAGE_B_REPRESENTATIVE_CRATE = "larql-compute"
+
+
+def stage_b_lib_rs_filenames(crate: str = STAGE_B_REPRESENTATIVE_CRATE) -> tuple[str, str]:
+    if crate not in MUTATED_LIBRARY_CRATES:
+        raise ValueError(
+            f"{crate!r} is not one of the crates the Secondary-layer mutation "
+            f"job produces lib.rs baseline/sibling pairs for {MUTATED_LIBRARY_CRATES}. "
+            "larql-cli specifically is bin-only (no src/lib.rs) and is never mutated."
+        )
+    return f"baseline-lib-rs-{crate}.txt", f"sibling-lib-rs-{crate}.txt"
+
+
 STAGE_POSTCONDITIONS: dict[str, Callable[[dict[str, Any]], bool]] = {
     "stage-b": lambda state: no_std_scaffold_ok(state["lib_rs_content"]),
     "stage-b2": lambda state: serde_features_ok(state["unit_graph"]),

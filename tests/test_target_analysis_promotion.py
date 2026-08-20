@@ -1,10 +1,13 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.target_analysis_common import error_sites, load_json
 from scripts.target_analysis_promotion import (
     depth_advanced,
     no_std_scaffold_ok,
     serde_features_ok,
+    stage_b_lib_rs_filenames,
     stage_promotes,
     workspace_members_ok,
 )
@@ -82,3 +85,25 @@ def test_depth_advanced_false_when_sibling_only_adds_new_sites():
     baseline = {("crates/larql-boundary/src/lib.rs", 12, "E0433")}
     sibling = baseline | {("crates/larql-boundary/src/lib.rs", 99, "E0999")}
     assert depth_advanced(baseline, sibling) is False
+
+
+def test_stage_b_lib_rs_filenames_rejects_larql_cli():
+    # larql-cli is bin-only (no src/lib.rs) and is never one of the crates
+    # the Secondary-layer mutation job produces a baseline/sibling lib.rs
+    # pair for. A caller asking for it by name gets a clear error here,
+    # not a bare FileNotFoundError three layers downstream in a per-target
+    # CI loop, across every target in every batch.
+    with pytest.raises(ValueError, match="larql-cli"):
+        stage_b_lib_rs_filenames("larql-cli")
+
+
+def test_stage_b_lib_rs_filenames_default_is_larql_compute():
+    baseline, sibling = stage_b_lib_rs_filenames()
+    assert baseline == "baseline-lib-rs-larql-compute.txt"
+    assert sibling == "sibling-lib-rs-larql-compute.txt"
+
+
+def test_stage_b_lib_rs_filenames_accepts_any_real_mutated_crate():
+    baseline, sibling = stage_b_lib_rs_filenames("larql-boundary")
+    assert baseline == "baseline-lib-rs-larql-boundary.txt"
+    assert sibling == "sibling-lib-rs-larql-boundary.txt"
