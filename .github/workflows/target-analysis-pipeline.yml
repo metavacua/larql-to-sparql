@@ -942,6 +942,13 @@ jobs:
 
           lib_rs = Path(f"crates/{STAGE_B_REPRESENTATIVE_CRATE}/src/lib.rs")
           lib_rs.write_text(insert_no_std_scaffold(lib_rs.read_text(encoding="utf-8")), encoding="utf-8")
+
+          # THROWAWAY DELIBERATE BUG (Task 21 Step 8 verification only -- reverted
+          # in the very next commit): also touch Cargo.toml, simulating a Stage B
+          # regression that leaks outside its declared single-file scope, to prove
+          # the blast-radius check below actually fails loudly when that happens.
+          root_toml = Path("Cargo.toml")
+          root_toml.write_text(root_toml.read_text(encoding="utf-8") + "\n# deliberate blast-radius-test bug\n", encoding="utf-8")
           PYEOF
           CHANGED=$(git diff --name-only)
           if [ "$CHANGED" != "crates/larql-compute/src/lib.rs" ]; then
