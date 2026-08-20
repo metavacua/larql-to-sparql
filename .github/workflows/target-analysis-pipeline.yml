@@ -240,3 +240,150 @@ jobs:
         with:
           name: runtime-test-batch-${{ matrix.batch_index }}
           path: out/
+
+  indexing:
+    name: Build navigation index
+    needs: [discovery, target-capability, dependency-graph, build-attempt, runtime-test]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Compute expected vs. actual per-target files, and the target-to-batch map
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          from pathlib import Path
+
+          target_matrix = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
+          batches = json.loads('''${{ needs.discovery.outputs.batches }}''')
+
+          target_to_batch = {}
+          for batch_index, batch_targets in enumerate(batches):
+              for t in batch_targets:
+                  target_to_batch[t] = batch_index
+
+          expected = set()
+          for t in target_matrix:
+              expected.add(f"target-spec-{t}.json")
+              expected.add(f"cfg-{t}.txt")
+              expected.add(f"supported-crate-types-{t}.txt")
+              expected.add(f"metadata-{t}.json")
+              expected.add(f"tree-features-{t}.txt")
+              expected.add(f"tree-duplicates-{t}.txt")
+              expected.add(f"unit-graph-{t}.json")
+              expected.add(f"deny-{t}.txt")
+              expected.add(f"runtime-test-result-{t}.json")
+              for build_std in ["none", "std", "core,alloc", "core"]:
+                  for cmd in ["check", "clippy", "build"]:
+                      for feat in ["default-features", "no-default-features"]:
+                          expected.add(f"attempt-{t}-{build_std}-{cmd}-{feat}.json")
+
+          batch_prefixes = (
+              "target-capability-batch-", "dependency-graph-batch-",
+              "build-attempt-batch-", "runtime-test-batch-",
+          )
+          actual = set()
+          for batch_dir in Path("artifacts").iterdir():
+              if batch_dir.is_dir() and batch_dir.name.startswith(batch_prefixes):
+                  for f in batch_dir.iterdir():
+                      if f.is_file():
+                          actual.add(f.name)
+
+          Path("expected-artifacts.json").write_text(json.dumps(sorted(expected)))
+          Path("actual-artifacts.json").write_text(json.dumps(sorted(actual)))
+          Path("target-to-batch.json").write_text(json.dumps(target_to_batch))
+          PYEOF
+      - name: Run indexing script per target
+        run: |
+          mkdir -p normalized
+          python3 - <<'PYEOF'
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          target_matrix = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
+          target_to_batch = json.loads(Path("target-to-batch.json").read_text())
+          combined = {}
+          any_missing = False
+          for t in target_matrix:
+              batch_index = target_to_batch.get(t)
+              attempt_file = Path(f"artifacts/build-attempt-batch-{batch_index}/attempt-{t}-none-check-default-features.json")
+              spec_file = Path(f"artifacts/target-capability-batch-{batch_index}/target-spec-{t}.json")
+              if batch_index is None or not attempt_file.exists() or not spec_file.exists():
+                  combined[t] = {"error": "missing required per-target file"}
+                  any_missing = True
+                  continue
+
+              # `cargo ... --message-format=json > attempt_file` writes cargo's
+              # JSON-lines wire format (one JSON object per line -- see
+              # https://doc.rust-lang.org/cargo/reference/external-tools.html and
+              # this repo's own experiment-cuda-nvptx.yml, which already parses
+              # these exact files line-by-line with jq), NOT a single JSON array.
+              # target_analysis_indexing.py's load_json() does a plain json.load(),
+              # which requires a JSON array -- confirmed locally with a synthetic
+              # two-line JSONL fixture (json.decoder.JSONDecodeError: Extra data).
+              # Normalize here, at the workflow-wiring level, rather than touching
+              # the already-tested Task 3 script.
+              normalized_file = Path(f"normalized/attempt-{t}.json")
+              try:
+                  messages = [
+                      json.loads(line)
+                      for line in attempt_file.read_text().splitlines()
+                      if line.strip()
+                  ]
+              except json.JSONDecodeError as exc:
+                  combined[t] = {"error": f"malformed JSONL in {attempt_file}: {exc}"}
+                  any_missing = True
+                  continue
+              normalized_file.write_text(json.dumps(messages))
+
+              result = subprocess.run(
+                  [
+                      "python3", "scripts/target_analysis_indexing.py",
+                      "--compiler-messages-file", str(normalized_file),
+                      "--target-spec-file", str(spec_file),
+                      "--std-mode-errors-file", "/dev/stdin",
+                      "--expected-artifacts-file", "expected-artifacts.json",
+                      "--actual-artifacts-file", "actual-artifacts.json",
+                  ],
+                  input="[]",
+                  capture_output=True,
+                  text=True,
+              )
+              try:
+                  combined[t] = json.loads(result.stdout)
+              except json.JSONDecodeError:
+                  combined[t] = {
+                      "error": "indexing script produced non-JSON stdout",
+                      "returncode": result.returncode,
+                      "stderr": result.stderr[:500],
+                  }
+                  any_missing = True
+                  continue
+              if result.returncode != 0:
+                  any_missing = True
+
+          Path("index.json").write_text(json.dumps(combined, indent=2))
+
+          if any_missing:
+              missing_summary = set()
+              for entry in combined.values():
+                  missing_summary.update(entry.get("missing_artifacts", []))
+              print(f"::error::indexing job found incompleteness across {len(combined)} targets")
+              print(f"{len(missing_summary)} distinct missing artifact names (first 10 shown):")
+              for name in sorted(missing_summary)[:10]:
+                  print(f"  - {name}")
+
+          sys.exit(1 if any_missing else 0)
+          PYEOF
+      - name: Upload index
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigation-index
+          path: index.json
