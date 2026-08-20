@@ -683,8 +683,8 @@ jobs:
           # leading doc comment).
           baseline_b = {"lib_rs_content": Path("mutation/baseline-lib-rs-larql-compute.txt").read_text(encoding="utf-8")}
           sibling_b = {"lib_rs_content": Path("mutation/sibling-lib-rs-larql-compute.txt").read_text(encoding="utf-8")}
-          Path(f"baseline-b-{target}.json").write_text(json.dumps(baseline_b))
-          Path(f"sibling-b-{target}.json").write_text(json.dumps(sibling_b))
+          Path(f"baseline-stage-b-{target}.json").write_text(json.dumps(baseline_b))
+          Path(f"sibling-stage-b-{target}.json").write_text(json.dumps(sibling_b))
 
           # Stage B2 (serde features): baseline is the Primary layer's own
           # unmutated unit-graph for this target (dependency-graph-batch-N,
@@ -699,8 +699,8 @@ jobs:
                "-p", "larql-cli", "--target", target],
               capture_output=True, text=True,
           ).stdout
-          Path(f"baseline-b2-{target}.json").write_text(json.dumps({"unit_graph": baseline_unit_graph}))
-          Path(f"sibling-b2-{target}.json").write_text(json.dumps({"unit_graph": json.loads(sibling_unit_graph_raw)}))
+          Path(f"baseline-stage-b2-{target}.json").write_text(json.dumps({"unit_graph": baseline_unit_graph}))
+          Path(f"sibling-stage-b2-{target}.json").write_text(json.dumps({"unit_graph": json.loads(sibling_unit_graph_raw)}))
 
           # Stage B3 (workspace trim): baseline is the mutation job's own
           # pre-Stage-B3 cargo metadata capture (target-independent -- workspace
@@ -712,12 +712,12 @@ jobs:
               ["cargo", "metadata", "--format-version", "1", "--no-deps"],
               capture_output=True, text=True,
           ).stdout)
-          Path(f"baseline-b3-{target}.json").write_text(json.dumps({"metadata": baseline_metadata, "expected_members": expected_members}))
-          Path(f"sibling-b3-{target}.json").write_text(json.dumps({"metadata": sibling_metadata, "expected_members": expected_members}))
+          Path(f"baseline-stage-b3-{target}.json").write_text(json.dumps({"metadata": baseline_metadata, "expected_members": expected_members}))
+          Path(f"sibling-stage-b3-{target}.json").write_text(json.dumps({"metadata": sibling_metadata, "expected_members": expected_members}))
           PYEOF
 
             for STAGE in stage-b stage-b2 stage-b3; do
-              python3 scripts/target_analysis_promotion.py --stage "$STAGE" \
+              python3 -m scripts.target_analysis_promotion --stage "$STAGE" \
                 --baseline-state-file "baseline-$STAGE-$TARGET.json" \
                 --sibling-state-file "sibling-$STAGE-$TARGET.json" \
                 > "out/promotion-$STAGE-$TARGET.json"
