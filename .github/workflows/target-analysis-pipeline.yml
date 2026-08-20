@@ -212,7 +212,6 @@ jobs:
       - name: Install nightly Rust
         run: |
           rustup toolchain install nightly --profile minimal
-          rustup component add rust-src --toolchain nightly
           rustup component add clippy --toolchain nightly
       - name: Download this batch's target-capability artifact
         uses: actions/download-artifact@v4
@@ -246,17 +245,15 @@ jobs:
                 --crate-type "$FIRST_CRATE_TYPE" --message-format=json \
                 > "out/crate-type-canary-$TARGET.json" 2>&1 || true
             fi
-            for BUILD_STD in none std core,alloc core; do
-              if [ "$BUILD_STD" = "none" ]; then BUILD_STD_FLAG=""; else BUILD_STD_FLAG="-Z build-std=$BUILD_STD"; fi
-              for CARGO_CMD in check clippy build; do
-                for FEATURES in default-features no-default-features; do
-                  if [ "$FEATURES" = "no-default-features" ]; then FEATURES_FLAG="--no-default-features"; else FEATURES_FLAG=""; fi
-                  OUTFILE="out/attempt-$TARGET-$BUILD_STD-$CARGO_CMD-$FEATURES.json"
-                  echo "=== target=$TARGET build_std=$BUILD_STD cmd=$CARGO_CMD features=$FEATURES ==="
-                  cargo +nightly "$CARGO_CMD" -p larql-cli \
-                    --target "$TARGET" $FEATURES_FLAG $BUILD_STD_FLAG \
-                    --keep-going --message-format=json > "$OUTFILE" || FAILED=1
-                done
+            BUILD_STD=none
+            for CARGO_CMD in check clippy build; do
+              for FEATURES in default-features no-default-features; do
+                if [ "$FEATURES" = "no-default-features" ]; then FEATURES_FLAG="--no-default-features"; else FEATURES_FLAG=""; fi
+                OUTFILE="out/attempt-$TARGET-$BUILD_STD-$CARGO_CMD-$FEATURES.json"
+                echo "=== target=$TARGET build_std=$BUILD_STD cmd=$CARGO_CMD features=$FEATURES ==="
+                cargo +nightly "$CARGO_CMD" -p larql-cli \
+                  --target "$TARGET" $FEATURES_FLAG \
+                  --keep-going --message-format=json > "$OUTFILE" || FAILED=1
               done
             done
           done < targets-in-batch.txt
@@ -336,10 +333,11 @@ jobs:
       # (everything else combined: 0.08GB) -- and the runner crashed with
       # `System.IO.IOException: No space left on device`. Neither Step 1 below
       # (which only needs each artifact's *filenames*, for the expected/actual
-      # completeness diff) nor Step 2 (which only reads ONE of the 24
-      # per-target build_std/cmd/features combos --
+      # completeness diff) nor Step 2 (which only reads ONE of the per-target
+      # cmd/features combos -- 24 at the time of the run above, since trimmed
+      # to 6 by dropping the std/core,alloc/core build_std modes --
       # attempt-<target>-none-check-default-features.json -- plus the tiny
-      # target-spec file) needs the other 23 combos' content at all, so bulk
+      # target-spec file) needs the other combos' content at all, so bulk
       # materializing all of build-attempt-batch-*'s content was never
       # necessary. Fixed below: the three small artifact families still use
       # the standard action; build-attempt-batch-* is fetched one batch at a
@@ -417,10 +415,9 @@ jobs:
               expected.add(f"unit-graph-{t}.json")
               expected.add(f"deny-{t}.txt")
               expected.add(f"runtime-test-result-{t}.json")
-              for build_std in ["none", "std", "core,alloc", "core"]:
-                  for cmd in ["check", "clippy", "build"]:
-                      for feat in ["default-features", "no-default-features"]:
-                          expected.add(f"attempt-{t}-{build_std}-{cmd}-{feat}.json")
+              for cmd in ["check", "clippy", "build"]:
+                  for feat in ["default-features", "no-default-features"]:
+                      expected.add(f"attempt-{t}-none-{cmd}-{feat}.json")
 
           batch_prefixes = (
               "target-capability-batch-", "dependency-graph-batch-",
