@@ -235,11 +235,14 @@ jobs:
                 ;;
             esac
           done < targets-in-batch.txt
-      - name: Upload runtime-test results for this batch
-        uses: actions/upload-artifact@v4
-        with:
-          name: runtime-test-batch-${{ matrix.batch_index }}
-          path: out/
+      # THROWAWAY: temporarily disabled to verify the indexing job's
+      # completeness check fails loudly (Task 10 brief, Step 4). Will be
+      # reverted in the very next commit.
+      # - name: Upload runtime-test results for this batch
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: runtime-test-batch-${{ matrix.batch_index }}
+      #     path: out/
 
   indexing:
     name: Build navigation index
