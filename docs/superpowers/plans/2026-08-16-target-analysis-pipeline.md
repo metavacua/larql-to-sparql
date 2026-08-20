@@ -1819,23 +1819,23 @@ Modify `.github/workflows/target-analysis-pipeline.yml`'s `discovery` job to exa
           while IFS= read -r TARGET; do
             TIER=$(rustup run nightly rustc --print target-spec-json -Z unstable-options --target "$TARGET" 2>/dev/null \
               | python3 -c 'import json, sys
-try:
-    d = json.load(sys.stdin)
-    print(d.get("metadata", {}).get("tier", ""))
-except Exception:
-    print("")')
+          try:
+              d = json.load(sys.stdin)
+              print(d.get("metadata", {}).get("tier", ""))
+          except Exception:
+              print("")')
             printf '%s\t%s\n' "$TARGET" "$TIER" >> tier-lines.txt
           done < target-list.txt
           python3 -c "
-import json
-tiers = {}
-with open('tier-lines.txt') as f:
-    for line in f:
-        target, tier = line.rstrip(chr(10)).split(chr(9), 1)
-        tiers[target] = int(tier) if tier else None
-with open('target-tiers.json', 'w') as f:
-    json.dump(tiers, f)
-"
+          import json
+          tiers = {}
+          with open('tier-lines.txt') as f:
+              for line in f:
+                  target, tier = line.rstrip(chr(10)).split(chr(9), 1)
+                  tiers[target] = int(tier) if tier else None
+          with open('target-tiers.json', 'w') as f:
+              json.dump(tiers, f)
+          "
       - name: Resolve target matrix
         id: resolve
         env:
@@ -1857,6 +1857,8 @@ with open('target-tiers.json', 'w') as f:
             target-tiers.json
 ```
 `printf '%s\t%s\n'` (not `echo`) is used for the tab-separated intermediate format specifically because target names and tier values never contain tabs, making a fixed single-tab-split parse in the Python conversion step unambiguous and simple — deliberately avoiding a CSV/JSON-per-line format that would need real escaping for this trivial two-field case.
+
+The embedded Python (both the `python3 -c '...'` inside the loop and the `python3 -c "..."` after it) is indented to match the `run: |` block scalar's own minimum indentation (10 spaces here), not flush to column 0 — this was a real bug caught during this task's own dispatch: the plan originally had the embedded Python at column 0, which YAML parsers reject outright (a `ScannerError` — a line below the block's established minimum indentation ends the scalar early). The Python code's own semantics are unaffected either way (Python only cares about indentation *relative to itself*, and shell's single/double-quoted strings don't care about indentation at all) — only the YAML container's requirement changes what's valid here. Verified against the real, working, committed version of this file, not just reasoned about.
 
 - [ ] **Step 7: Commit**
 
