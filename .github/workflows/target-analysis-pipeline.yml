@@ -604,14 +604,15 @@ jobs:
         run: |
           python3 - <<'PYEOF'
           import re
+          import sys
           from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE
 
           root_toml = Path("Cargo.toml")
           text = root_toml.read_text(encoding="utf-8")
-          reachable = [
-              "crates/larql-cli", "crates/larql-boundary", "crates/larql-vindex-spec",
-              "crates/larql-models", "crates/larql-compute",
-          ]
+          reachable = [f"crates/{name}" for name in STAGE_B3_REACHABLE_CLOSURE]
           members_block_fmt = "{key} = [\n" + "".join(f'    "{c}",\n' for c in reachable) + "]\n"
           for key in ("members", "default-members"):
               text = re.sub(rf"{key} = \[[^\]]*\]\n", members_block_fmt.format(key=key), text, count=1)
@@ -674,6 +675,9 @@ jobs:
           import sys
           from pathlib import Path
 
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE
+
           target = sys.argv[1]
 
           # Stage B (no_std scaffold): real baseline/sibling lib.rs content
@@ -706,7 +710,7 @@ jobs:
           # pre-Stage-B3 cargo metadata capture (target-independent -- workspace
           # membership doesn't vary by target); sibling is this job's own
           # mutated-tree metadata.
-          expected_members = ["larql-cli", "larql-boundary", "larql-vindex-spec", "larql-models", "larql-compute"]
+          expected_members = list(STAGE_B3_REACHABLE_CLOSURE)
           baseline_metadata = json.loads(Path("mutation/baseline-metadata.json").read_text(encoding="utf-8"))
           sibling_metadata = json.loads(subprocess.run(
               ["cargo", "metadata", "--format-version", "1", "--no-deps"],
@@ -734,7 +738,7 @@ jobs:
           target = sys.argv[1]
           with open(f"out/stage-c-{target}.json") as f:
               sibling_messages = [json.loads(line) for line in f if line.strip()]
-          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 18 wires round-over-round)
+          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 20 wires round-over-round)
 
           baseline_sites = error_sites(baseline_messages)
           sibling_sites = error_sites(sibling_messages)

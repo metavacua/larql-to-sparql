@@ -4,6 +4,7 @@ import pytest
 
 from scripts.target_analysis_common import error_sites, load_json
 from scripts.target_analysis_promotion import (
+    STAGE_B3_REACHABLE_CLOSURE,
     depth_advanced,
     no_std_scaffold_ok,
     serde_features_ok,
@@ -125,3 +126,53 @@ def test_stage_b_lib_rs_filenames_accepts_any_real_mutated_crate():
     baseline, sibling = stage_b_lib_rs_filenames("larql-boundary")
     assert baseline == "baseline-lib-rs-larql-boundary.txt"
     assert sibling == "sibling-lib-rs-larql-boundary.txt"
+
+
+def test_stage_b3_reachable_closure_matches_real_transitive_dependency_tree():
+    # Cargo's own documented rule ("All path dependencies residing in the
+    # workspace directory automatically become members") means the real,
+    # trimmed workspace has 14 members, not the 5 originally hand-declared
+    # as "larql-cli's real tree" (Task 16, Task 17) -- confirmed against
+    # real captured CI data from run 32409988443 (Task 17/Task 18) and an
+    # independent transitive-closure grep of the real Cargo.toml files,
+    # exactly matching the original, proven experiment-cuda-nvptx.yml job's
+    # own 13-crate `keep` set plus larql-compute-metal (an optional path
+    # dependency Cargo pulls in as a member regardless of `optional = true`).
+    assert set(STAGE_B3_REACHABLE_CLOSURE) == {
+        "larql-boundary", "larql-cli", "larql-compute", "larql-compute-metal",
+        "larql-core", "larql-execution", "larql-factory", "larql-inference",
+        "larql-kv", "larql-lql", "larql-models", "larql-router-protocol",
+        "larql-vindex", "larql-vindex-spec",
+    }
+    assert len(STAGE_B3_REACHABLE_CLOSURE) == 14
+
+
+def test_workspace_members_ok_true_for_real_trimmed_workspace_against_full_closure():
+    metadata = {
+        "packages": [
+            {"id": f"path+file:///repo/crates/{name}#0.1.0", "name": name}
+            for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+        "workspace_members": [
+            f"path+file:///repo/crates/{name}#0.1.0" for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+    }
+    assert workspace_members_ok(metadata, STAGE_B3_REACHABLE_CLOSURE) is True
+
+
+def test_workspace_members_ok_false_for_real_trimmed_workspace_against_old_5_crate_list():
+    # The bug this task fixes: the OLD hand-declared 5-crate expected list
+    # can never match the real, trimmed workspace's actual 14 members --
+    # this is exactly why Stage B3's promotion signal was doomed to read
+    # False even after Task 18's PackageId-parsing fix.
+    metadata = {
+        "packages": [
+            {"id": f"path+file:///repo/crates/{name}#0.1.0", "name": name}
+            for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+        "workspace_members": [
+            f"path+file:///repo/crates/{name}#0.1.0" for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+    }
+    old_wrong_expected = ["larql-cli", "larql-boundary", "larql-vindex-spec", "larql-models", "larql-compute"]
+    assert workspace_members_ok(metadata, old_wrong_expected) is False

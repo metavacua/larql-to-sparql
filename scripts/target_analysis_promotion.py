@@ -67,6 +67,35 @@ MUTATED_LIBRARY_CRATES = (
 # most likely to actually catch a real regression rather than pass vacuously.
 STAGE_B_REPRESENTATIVE_CRATE = "larql-compute"
 
+# The real, transitive workspace-membership closure once Stage B3's trim runs --
+# NOT the 5 crates originally hand-declared as "larql-cli's real tree" (Task 16,
+# Task 17). Cargo's own documented rule ("All path dependencies residing in the
+# workspace directory automatically become members," confirmed against
+# https://doc.rust-lang.org/cargo/reference/workspaces.html) pulls path-dependency
+# crates back in regardless of what Stage B3's Cargo.toml edit lists in
+# `members`/`default-members`. Derived by a full transitive-dependency closure
+# over the real Cargo.toml files starting from the 5 originally hand-declared
+# crates (confirmed against real captured CI data from run 32409988443), and
+# independently matching the original, proven experiment-cuda-nvptx.yml job's
+# own 13-crate `keep` set plus larql-compute-metal (an optional path dependency
+# of larql-cli that Cargo pulls in as a member regardless of `optional = true`).
+STAGE_B3_REACHABLE_CLOSURE = (
+    "larql-boundary",
+    "larql-cli",
+    "larql-compute",
+    "larql-compute-metal",
+    "larql-core",
+    "larql-execution",
+    "larql-factory",
+    "larql-inference",
+    "larql-kv",
+    "larql-lql",
+    "larql-models",
+    "larql-router-protocol",
+    "larql-vindex",
+    "larql-vindex-spec",
+)
+
 
 def stage_b_lib_rs_filenames(crate: str = STAGE_B_REPRESENTATIVE_CRATE) -> tuple[str, str]:
     if crate not in MUTATED_LIBRARY_CRATES:
