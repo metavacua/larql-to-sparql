@@ -407,7 +407,21 @@ jobs:
 
               result = subprocess.run(
                   [
-                      "python3", "scripts/target_analysis_indexing.py",
+                      # Real-CI evidence (run 32329135970, job "Build
+                      # navigation index", all 331 targets):
+                      # `python3 scripts/target_analysis_indexing.py` makes
+                      # Python add scripts/ itself (not the repo root) to
+                      # sys.path[0], so the script's own
+                      # `from scripts.target_analysis_common import ...`
+                      # raises ModuleNotFoundError: No module named 'scripts'.
+                      # `python3 -m scripts.target_analysis_indexing`, run
+                      # from the repo root (as this step already is, post
+                      # actions/checkout@v4), adds the cwd instead, which is
+                      # exactly what scripts/__init__.py's package needs.
+                      # Confirmed locally: the plain-script form reproduces
+                      # the identical traceback; the -m form succeeds with
+                      # no PYTHONPATH override required.
+                      "python3", "-m", "scripts.target_analysis_indexing",
                       "--compiler-messages-file", str(normalized_file),
                       "--target-spec-file", str(spec_file),
                       "--std-mode-errors-file", "/dev/stdin",
