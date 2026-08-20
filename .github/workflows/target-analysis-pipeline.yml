@@ -111,7 +111,7 @@ jobs:
 
   target-capability:
     name: "Target capability: batch ${{ matrix.batch_index }}"
-    needs: [discovery]
+    needs: [discovery, target-independent-checks]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -154,7 +154,7 @@ jobs:
 
   dependency-graph:
     name: "Dependency graph: batch ${{ matrix.batch_index }}"
-    needs: [discovery]
+    needs: [discovery, target-independent-checks]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -198,7 +198,7 @@ jobs:
 
   build-attempt:
     name: "Build attempt: batch ${{ matrix.batch_index }}"
-    needs: [discovery, target-capability]
+    needs: [discovery, target-capability, target-independent-checks]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -276,7 +276,7 @@ jobs:
 
   runtime-test:
     name: "Runtime test: batch ${{ matrix.batch_index }}"
-    needs: [discovery]
+    needs: [discovery, target-independent-checks]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
