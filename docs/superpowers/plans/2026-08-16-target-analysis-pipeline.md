@@ -30,7 +30,7 @@
 
 ## File Structure
 
-- `.github/workflows/target-analysis-pipeline.yml` — the new, generalized pipeline: `discovery` (also computes batches, Task 6), `target-capability`, `dependency-graph`, `build-attempt`, `runtime-test` (all four batched over `batch_index`, Tasks 7-9), `indexing` (Task 10), `secondary-mutate` (Stages A/B/B2/B3, single job, target-independent, Task 16), `secondary-stage-c-and-promotion` (batched, applies the mutation patch, Task 17), `next-round-baseline` (Task 18), `secondary-layer-self-test` (Task 19).
+- `.github/workflows/target-analysis-pipeline.yml` — the new, generalized pipeline: `discovery` (also computes batches, Task 6), `target-capability`, `dependency-graph`, `build-attempt`, `runtime-test` (all four batched over `batch_index`, Tasks 7-9), `indexing` (Task 10), `secondary-mutate` (Stages A/B/B2/B3, single job, target-independent, Task 16), `secondary-stage-c-and-promotion` (batched, applies the mutation patch, Task 17), `next-round-baseline` (Task 19), `secondary-layer-self-test` (Task 20).
 - `scripts/target_analysis_common.py` — shared, dependency-free helpers: JSON loading, `--message-format=json` compiler-message parsing into `(file, line, code)` error-site tuples, `--unit-graph` unit lookup by crate name.
 - `scripts/target_analysis_discovery.py` — turns raw `rustc --print target-list` output (plus an optional single requested target) into the target matrix consumed by downstream jobs' `fromJSON()`.
 - `scripts/target_analysis_indexing.py` — structural extraction (error counts by target name), the `unexpected-clean-std-build` contradiction rule, and artifact-completeness checking.
@@ -2442,7 +2442,7 @@ Push and confirm: the `secondary-mutate` job runs exactly once (no matrix), Stag
           target = sys.argv[1]
           with open(f"out/stage-c-{target}.json") as f:
               sibling_messages = [json.loads(line) for line in f if line.strip()]
-          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 18 wires round-over-round)
+          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 19 wires round-over-round)
 
           baseline_sites = error_sites(baseline_messages)
           sibling_sites = error_sites(sibling_messages)
@@ -2474,11 +2474,161 @@ git commit -m "feat: add Stage C job, batched, applying the mutation patch befor
 
 - [ ] **Step 3: Push and verify on a real runner**
 
-Push and confirm: `ceil(331/12) = 28` `promotion-decision-batch-<N>` artifacts are produced, each containing per-target `stage-c-<target>.json`, `promotion-stage-b-<target>.json`, `promotion-stage-b2-<target>.json`, `promotion-stage-b3-<target>.json`, and `depth-decision-<target>.json` files. Specifically check the batch containing `nvptx64-nvidia-cuda`: confirm `stage-c-nvptx64-nvidia-cuda.json` shows real compiler output against the *mutated* tree (spot-check that the file content differs from what Task 8's unmutated `build-attempt` probe recorded for the same target — this is the direct evidence the patch was actually applied, not skipped), and confirm all three `promotion-stage-b*-nvptx64-nvidia-cuda.json` files show real `"promotes": true/false` verdicts (not an error) — this first round has no real prior-round Stage C baseline yet (`baseline_messages = []`), so `depth_advanced` should read `true` for every target with any error at all (every site is "newly resolved" relative to an empty baseline is wrong — re-check this reasoning empirically against the real output: an empty baseline means `baseline_sites - sibling_sites` is always empty regardless of `sibling_sites`, since you cannot subtract from nothing, so `depth_advanced` should read `false` for every target on this first round; Task 18 wires the real round-over-round baseline that makes this check meaningful).
+Push and confirm: 10 `promotion-decision-batch-<N>` artifacts are produced (Task 12's real 119-target/10-batch universe, not the stale pre-Task-12 `ceil(331/12) = 28`), each containing per-target `stage-c-<target>.json`, `promotion-stage-b-<target>.json`, `promotion-stage-b2-<target>.json`, `promotion-stage-b3-<target>.json`, and `depth-decision-<target>.json` files. Specifically check the batch containing `nvptx64-nvidia-cuda`: confirm `stage-c-nvptx64-nvidia-cuda.json` shows real compiler output against the *mutated* tree (spot-check that the file content differs from what Task 8's unmutated `build-attempt` probe recorded for the same target — this is the direct evidence the patch was actually applied, not skipped), and confirm all three `promotion-stage-b*-nvptx64-nvidia-cuda.json` files show real `"promotes": true/false` verdicts (not an error) — this first round has no real prior-round Stage C baseline yet (`baseline_messages = []`), so `depth_advanced` should read `true` for every target with any error at all (every site is "newly resolved" relative to an empty baseline is wrong — re-check this reasoning empirically against the real output: an empty baseline means `baseline_sites - sibling_sites` is always empty regardless of `sibling_sites`, since you cannot subtract from nothing, so `depth_advanced` should read `false` for every target on this first round; Task 19 wires the real round-over-round baseline that makes this check meaningful).
+
+**Real-CI addendum (2026-08-20):** run `32409988443` confirmed exactly this — 10/10 batches green, 10/10 `promotion-decision-batch-N` artifacts, 119/119 targets, `depth_advanced` false for all 119, `stage-b` verdicts real (nvptx: `true`), `stage-b2` verdicts real and pre-authorized-false for all targets (`serde_core` still pulls `std` under this nightly toolchain even after the patch). One real, unauthorized bug surfaced by this run: Stage B3's verdict is unconditionally `false` for all 119 targets due to a bug in `workspace_members_ok()` (Task 4, already-merged) assuming an obsolete cargo PackageId string format — routed to a new dedicated task (Task 18) rather than left silently wrong.
 
 ---
 
-### Task 18: Recursive-round baseline handoff
+### Task 18: Fix `workspace_members_ok`'s real cargo-metadata PackageId-format bug — Stage B3's promotion signal has been unconditionally False since Task 4
+
+**Real bug in already-merged, already-tested code (Task 4), surfaced by Task 17's first
+real exercise of this function against actual `cargo metadata` output** (run
+`32409988443`, all 119 targets). `workspace_members_ok()` computes `actual_names =
+{member.split(" ", 1)[0] for member in metadata["workspace_members"]}`, assuming the
+older cargo PackageId string format `"name version (source)"`. Real, modern cargo
+(confirmed: 1.97.1, this repo's own toolchain, via direct `cargo metadata
+--format-version 1 --no-deps` in this worktree) produces a URL-style format instead —
+`path+file:///abs/path/to/crate#version`, e.g.
+`path+file:///.../crates/larql-models#0.2.0` — with no space anywhere in the string, so
+`.split(" ", 1)[0]` returns the entire unsplit string, which can never equal a bare crate
+name like `"larql-cli"`. `workspace_members_ok()` is therefore unconditionally `False`
+regardless of whether a workspace was actually trimmed — confirmed uniformly `False`
+across all 119 real targets in Task 17's real run, not target-specific. Task 4's own
+fixtures (`cargo_metadata_full_workspace.json`, `cargo_metadata_trimmed_workspace.json`)
+hand-author the old, unreal format directly, which is why this has been invisible to
+Task 4's own tests since the day it was written — the fixtures never reflected reality.
+
+The robust fix does not parse the PackageId string at all: real `cargo metadata`'s own
+top-level `packages` array gives an exact `id -> name` mapping (confirmed directly:
+`{"id": "path+file:///.../crates/larql-models#0.2.0", "name": "larql-models", ...}`).
+Building an `id_to_name` lookup from `packages` and mapping `workspace_members` through
+it is immune to any future PackageId string-format change, unlike a path-parsing
+heuristic on the id string itself.
+
+**Files:**
+- Modify: `scripts/target_analysis_promotion.py` (`workspace_members_ok`)
+- Modify: `tests/fixtures/target_analysis/cargo_metadata_full_workspace.json`, `tests/fixtures/target_analysis/cargo_metadata_trimmed_workspace.json` (replace the hand-authored, unreal PackageId format with the real, modern format, including a `packages` array)
+- Modify: `tests/test_target_analysis_promotion.py` (add one explicit regression test)
+
+**Interfaces:**
+- Consumes: nothing new — `workspace_members_ok(metadata, expected_members)`'s signature is unchanged; it already receives the full `metadata` dict, which already contains `packages` (Task 17's own job already produces this via plain `cargo metadata --format-version 1 --no-deps`, no wiring change needed anywhere that calls this function).
+- Produces: the same `bool` return value, now computed correctly against real data.
+
+- [ ] **Step 1: Confirm the real format directly (do not trust memory or the old fixtures)**
+
+Run in this worktree:
+```bash
+cargo metadata --format-version 1 --no-deps | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print('workspace_members[0]:', repr(data['workspace_members'][0]))
+print('packages[0]:', {'id': data['packages'][0]['id'], 'name': data['packages'][0]['name']})
+"
+```
+Expected: `workspace_members[0]` is a `path+file:///...#<version>` string with no space anywhere in it; `packages[0]` shows the same id paired with the crate's real, bare name. Confirm this before writing any fixture or test — it's the ground truth the fix and the fixtures must match.
+
+- [ ] **Step 2: Update the fixtures to the real format (this alone should make the existing tests fail against the OLD implementation — confirm that before touching the implementation)**
+
+Replace `tests/fixtures/target_analysis/cargo_metadata_full_workspace.json` with:
+```json
+{
+  "packages": [
+    {"id": "path+file:///repo/crates/larql-cli#0.1.0", "name": "larql-cli"},
+    {"id": "path+file:///repo/crates/larql-boundary#0.1.0", "name": "larql-boundary"},
+    {"id": "path+file:///repo/crates/larql-python#0.1.0", "name": "larql-python"},
+    {"id": "path+file:///repo/crates/larql-vindex-spec#0.1.0", "name": "larql-vindex-spec"}
+  ],
+  "workspace_members": [
+    "path+file:///repo/crates/larql-cli#0.1.0",
+    "path+file:///repo/crates/larql-boundary#0.1.0",
+    "path+file:///repo/crates/larql-python#0.1.0",
+    "path+file:///repo/crates/larql-vindex-spec#0.1.0"
+  ]
+}
+```
+
+Replace `tests/fixtures/target_analysis/cargo_metadata_trimmed_workspace.json` with:
+```json
+{
+  "packages": [
+    {"id": "path+file:///repo/crates/larql-cli#0.1.0", "name": "larql-cli"},
+    {"id": "path+file:///repo/crates/larql-boundary#0.1.0", "name": "larql-boundary"},
+    {"id": "path+file:///repo/crates/larql-vindex-spec#0.1.0", "name": "larql-vindex-spec"}
+  ],
+  "workspace_members": [
+    "path+file:///repo/crates/larql-cli#0.1.0",
+    "path+file:///repo/crates/larql-boundary#0.1.0",
+    "path+file:///repo/crates/larql-vindex-spec#0.1.0"
+  ]
+}
+```
+
+- [ ] **Step 3: Run the existing tests, confirm they now fail (RED) against the unfixed implementation**
+
+Run: `python3 -m pytest tests/test_target_analysis_promotion.py -k workspace_members -v`
+Expected: FAIL — `test_workspace_members_ok_true_for_trimmed_workspace` should now fail (the old `.split(" ", 1)[0]` logic can no longer produce a matching name from the new, realistic fixture content), proving the fixtures previously masked the real bug rather than exercising it.
+
+- [ ] **Step 4: Fix `workspace_members_ok`**
+
+In `scripts/target_analysis_promotion.py`, replace:
+```python
+def workspace_members_ok(metadata: dict[str, Any], expected_members: list[str]) -> bool:
+    actual_names = {
+        member.split(" ", 1)[0] for member in metadata.get("workspace_members", [])
+    }
+    return actual_names == set(expected_members)
+```
+with:
+```python
+def workspace_members_ok(metadata: dict[str, Any], expected_members: list[str]) -> bool:
+    id_to_name = {pkg["id"]: pkg["name"] for pkg in metadata.get("packages", [])}
+    actual_names = {id_to_name[member] for member in metadata.get("workspace_members", [])}
+    return actual_names == set(expected_members)
+```
+No defensive `.get()`/try-except around the `id_to_name[member]` lookup — every `workspace_members` entry is guaranteed (by cargo's own `--no-deps` contract) to have a matching `packages` entry; a `KeyError` here would mean genuinely malformed metadata, which should fail loudly, not be silently swallowed.
+
+- [ ] **Step 5: Add one explicit, self-contained regression test**
+
+In `tests/test_target_analysis_promotion.py`, add:
+```python
+def test_workspace_members_ok_parses_real_modern_package_id_format():
+    # Real cargo (this repo's toolchain: 1.97.1) package-id format is
+    # "path+file:///abs/path/to/crate#version" -- no space anywhere, unlike the
+    # older "name version (source)" format the fixtures previously (wrongly)
+    # assumed, which is why this bug was invisible to this test file since Task 4.
+    metadata = {
+        "packages": [
+            {"id": "path+file:///repo/crates/larql-cli#0.2.0", "name": "larql-cli"},
+            {"id": "path+file:///repo/crates/larql-boundary#0.2.0", "name": "larql-boundary"},
+        ],
+        "workspace_members": [
+            "path+file:///repo/crates/larql-cli#0.2.0",
+            "path+file:///repo/crates/larql-boundary#0.2.0",
+        ],
+    }
+    assert workspace_members_ok(metadata, ["larql-cli", "larql-boundary"]) is True
+```
+
+- [ ] **Step 6: Run the full test suite, confirm GREEN**
+
+Run: `python3 -m pytest tests/test_target_analysis_promotion.py -v`
+Expected: all tests pass, including the two existing `workspace_members_ok` tests (now against realistic fixtures) and the new regression test.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add scripts/target_analysis_promotion.py tests/test_target_analysis_promotion.py tests/fixtures/target_analysis/cargo_metadata_full_workspace.json tests/fixtures/target_analysis/cargo_metadata_trimmed_workspace.json
+git commit -m "fix: workspace_members_ok assumed the old cargo PackageId format; parse via packages[].id->name instead"
+```
+
+- [ ] **Step 8: Real-data verification against Task 17's own already-captured artifacts (no new CI trigger required)**
+
+Download Task 17's real `secondary-mutation` artifact from run `32409988443` (the `baseline-metadata.json` it contains is real, unmutated-tree `cargo metadata` output, captured on a GitHub-hosted runner) and, in a fresh checkout of the same commit Task 17 tested against, apply `full-mutation.patch` and run `cargo metadata --format-version 1 --no-deps` yourself to get the real, mutated-tree (trimmed) metadata. Feed both real JSON blobs through the now-fixed `workspace_members_ok()` (or `stage_promotes("stage-b3", ...)` directly) and confirm it returns `True` for this real, already-known-to-be-trimmed data — this is the actual proof the fix works against reality, not just synthetic fixtures. Per the Task 11 → Task 12 precedent (a real bug in already-merged code, fixed and unit-tested, with real-CI re-verification deferred to the next task's natural pipeline run rather than a dedicated new trigger), this task's own real-CI push is likewise deferred — the next task (Task 19, "Recursive-round baseline handoff") will exercise this fix live for the first time. Commit this task's fix; it will be pushed together with whatever is already staged in this worktree ahead of the last validated run (including the controller's own prior `ef8637f7` commit), not as a separate, dedicated push solely for this fix.
+
+---
+
+### Task 19: Recursive-round baseline handoff
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `next-round-baseline` job)
@@ -2553,7 +2703,7 @@ Push and confirm: `round-baseline` artifact is produced, `promoted` contains onl
 
 ---
 
-### Task 19: Secondary-layer test suite — noise floor, blast-radius containment, ephemerality
+### Task 20: Secondary-layer test suite — noise floor, blast-radius containment, ephemerality
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-layer-self-test` job)
@@ -2659,17 +2809,17 @@ Push and confirm: all three checks pass on the real pipeline as currently writte
 - Build-attempt `build_std` axis (user-directed correction to already-merged Task 8 work: of the four modes, only `none` has real, unconditional justification in the Primary layer — `std` was never justified either way, `core`/`core,alloc` are only meaningful post-mutation, which is exactly where Task 17's Stage C already runs them) → Task 15.
 - Secondary-layer mutation stages A/B/B2/B3 (with `background`/`wait` concurrency, target-independent, single job) → Task 16. Stage C (batched, applying the mutation patch — the critical bug this restructure fixes over the original per-target-matrixed draft) → Task 17.
 - The measurable-difference / promotion rule (this session's immediate deliverable) → Task 4 (script) and Task 17 (wiring, with mechanically-grounded b2/b3 baselines sourced from the Primary layer's own artifacts rather than fabricated).
-- Recursive round-over-round baseline handoff → Task 18.
+- Recursive round-over-round baseline handoff → Task 19. A real bug in the promotion rule's own already-merged code (`workspace_members_ok()` assumed an obsolete cargo PackageId string format, making Stage B3's verdict unconditionally `False` since Task 4 — surfaced by Task 17's first real exercise against actual `cargo metadata` output) → Task 18.
 - Error handling (honest-result pattern, retries narrow to network calls, platform-limit category) → reused directly from the proven `experiment-cuda-nvptx.yml` patterns in Tasks 8 and 17; the retry/platform-limit categories are not separately re-implemented since Tasks 7-9's probes don't call rate-limited external APIs beyond `rustc`/`cargo` — Discovery's crates.io/GitHub SBOM calls (mentioned in the spec's Discovery job description) are the one place a narrow retry would apply and are flagged here as **not yet implemented**: Task 5 only wires `rustc --print target-list`, not the crates.io/SBOM ecosystem-discovery calls. This is a real gap — added as a follow-up task below rather than silently left out.
-- Testing (noise floor, blast-radius, golden fixtures, ephemerality, cross-target/native comparison) → Task 19 covers noise floor, blast radius, ephemerality directly. Golden fixtures (`serde-nostd-probe`-style planted-outcome crates) and cross-target/native comparison are **not yet implemented** — flagged below.
-- Explicitly not doing (no caching, no CI commits, no agent curation presented as L1) → Global Constraints + Task 19's ephemerality check enforces the no-commits rule structurally.
+- Testing (noise floor, blast-radius, golden fixtures, ephemerality, cross-target/native comparison) → Task 20 covers noise floor, blast radius, ephemerality directly. Golden fixtures (`serde-nostd-probe`-style planted-outcome crates) and cross-target/native comparison are **not yet implemented** — flagged below.
+- Explicitly not doing (no caching, no CI commits, no agent curation presented as L1) → Global Constraints + Task 20's ephemerality check enforces the no-commits rule structurally.
 
 **Follow-up tasks not included in this plan** (real gaps, not placeholders — each needs its own task the way Tasks 1-19 are written, deferred here because this plan's immediate trigger was the promotion-rule definition, not full spec closure):
 - Discovery job's crates.io/GitHub SBOM ecosystem-discovery calls, with narrow bounded retry on those specific network calls (spec: Components/Discovery job, Error handling/Retries).
 - Golden-fixture crates with a planted, known-in-advance outcome, generalizing `serde-nostd-probe` (spec: Testing).
 - Cross-target/cross-native comparison job, once the target matrix includes both nvptx and at least one native target's Stage C result for the same underlying finding (spec: Testing) — this is naturally sequenced after Tasks 1-19 produce enough real round data to compare, not before.
 - The target-family tooling registry (curated, labeled L2, e.g. `os: cuda` → CUDA toolkit tooling) mentioned in Components/Discovery job.
-- Toolchain-pinning across jobs within a single run: each job independently runs `rustup toolchain install nightly`, which can resolve to different nightly builds if a run straddles a nightly release boundary (typically UTC midnight), producing spurious cross-job disagreement that Task 19's own noise-floor test is specifically designed to catch but not fix. Not blocking for this plan (the batching correction above already re-verified everything against real CI evidence); worth a dedicated fix (Discovery resolves and pins a specific nightly date, passed to every downstream job) before this pipeline is trusted for long-running, many-round recursive use.
+- Toolchain-pinning across jobs within a single run: each job independently runs `rustup toolchain install nightly`, which can resolve to different nightly builds if a run straddles a nightly release boundary (typically UTC midnight), producing spurious cross-job disagreement that Task 20's own noise-floor test is specifically designed to catch but not fix. Not blocking for this plan (the batching correction above already re-verified everything against real CI evidence); worth a dedicated fix (Discovery resolves and pins a specific nightly date, passed to every downstream job) before this pipeline is trusted for long-running, many-round recursive use.
 - `cargo-semver-checks` as a second target-independent check (Task 14's pattern) — needs a chosen baseline (last published crates.io version, or a specific git rev) before it can be built; not decided in this plan.
 - `cargo udeps` as a further target-independent check (Task 14's pattern), straightforward to add the same way as `fmt`.
 - `cargo miri`, corrected after an initial mischaracterization: Miri genuinely supports cross-target interpretation (`cargo miri test --target s390x-unknown-linux-gnu` is Miri's own documented example for big-endian testing — confirmed against Miri's real README, not assumed), so it belongs as a real axis crossed with `--target` (like `build_std`), not a single target-independent job like `fmt`. Detects out-of-bounds/use-after-free, uninitialized reads, misaligned access, invalid enum/bool discriminants, aliasing violations, memory leaks, and — directly relevant given probable async/concurrent components in this project — data races and weak-memory violations. Two real, confirmed limitations shape its scope: it does not support networking at all, and has very limited FFI access, meaning it will very likely fail against the native-link dependencies already confirmed real in this project (`openssl-sys`, `protobuf-src`, `onig_sys`, `ring`) — those failure points are themselves a mechanical way to locate exactly where behavior stops being portable/host-independent, not an incidental gap to route around. User directed: survey which of the 119 tier 1+2 targets Miri can actually interpret for (narrower than rustc's full codegen list) and which of `larql-cli`'s real dependencies hit the FFI/networking wall, before designing this as a task — not yet done.
