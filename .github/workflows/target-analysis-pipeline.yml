@@ -538,3 +538,87 @@ jobs:
         with:
           name: navigation-index
           path: index.json
+
+  secondary-mutate:
+    name: "Secondary layer: mutate (Stages A, B, B2, B3)"
+    needs: [discovery, indexing]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    env:
+      CRATES: "larql-boundary larql-vindex-spec larql-models larql-compute"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add clippy --toolchain nightly
+      - name: Capture pre-mutation lib.rs content per crate and pre-mutation workspace metadata
+        run: |
+          mkdir -p out
+          for CRATE in $CRATES; do
+            cp "crates/$CRATE/src/lib.rs" "out/baseline-lib-rs-$CRATE.txt"
+          done
+          cargo metadata --format-version 1 --no-deps > out/baseline-metadata.json
+      - name: "Stage A: mechanical std->core/alloc rewrite (host target), per crate"
+        run: |
+          for CRATE in $CRATES; do
+            cargo +nightly clippy --fix --allow-dirty --allow-staged \
+              -p "$CRATE" --lib -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
+          done
+      - name: "Stage B: inject #![no_std] scaffold, per crate"
+        run: |
+          for CRATE in $CRATES; do
+            python3 - "$CRATE" <<'PYEOF'
+          import sys
+          from pathlib import Path
+
+          crate = sys.argv[1]
+          lib_rs = Path(f"crates/{crate}/src/lib.rs")
+          text = lib_rs.read_text(encoding="utf-8")
+          lines = text.splitlines(keepends=True)
+
+          insert_at = 0
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+              if stripped.startswith("//!") or stripped.startswith("#![") or stripped == "":
+                  insert_at = i + 1
+              else:
+                  break
+
+          scaffold = "#![no_std]\nextern crate alloc;\n"
+          lines.insert(insert_at, scaffold)
+          lib_rs.write_text("".join(lines), encoding="utf-8")
+          PYEOF
+          done
+      - name: Capture post-Stage-B lib.rs content per crate
+        run: |
+          for CRATE in $CRATES; do
+            cp "crates/$CRATE/src/lib.rs" "out/sibling-lib-rs-$CRATE.txt"
+          done
+      - name: "Stage B2: patch std-defaulting dependency features"
+        run: |
+          find crates -name Cargo.toml -exec \
+            sed -i -E 's/serde = \{ workspace = true([^}]*)\}/serde = { workspace = true, default-features = false, features = ["alloc", "derive"]\1}/' {} \;
+      - name: "Stage B3: trim workspace members to larql-cli's real tree"
+        run: |
+          python3 - <<'PYEOF'
+          import re
+          from pathlib import Path
+
+          root_toml = Path("Cargo.toml")
+          text = root_toml.read_text(encoding="utf-8")
+          reachable = [
+              "crates/larql-cli", "crates/larql-boundary", "crates/larql-vindex-spec",
+              "crates/larql-models", "crates/larql-compute",
+          ]
+          members_block = "members = [\n" + "".join(f'    "{c}",\n' for c in reachable) + "]\n"
+          text = re.sub(r"members = \[[^\]]*\]\n", members_block, text, count=1)
+          root_toml.write_text(text, encoding="utf-8")
+          PYEOF
+      - name: Capture the full mutated-tree patch
+        run: git diff > out/full-mutation.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: secondary-mutation
+          path: out/
