@@ -599,7 +599,7 @@ jobs:
       - name: "Stage B2: patch std-defaulting dependency features"
         run: |
           find crates -name Cargo.toml -exec \
-            sed -i -E 's/serde = \{ workspace = true([^}]*)\}/serde = { workspace = true, default-features = false, features = ["alloc", "derive"]\1}/' {} \;
+            sed -i -E 's/serde = \{ workspace = true[^}]*\}/serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }/' {} \;
       - name: "Stage B3: trim workspace members to larql-cli's real tree"
         run: |
           python3 - <<'PYEOF'
@@ -612,10 +612,13 @@ jobs:
               "crates/larql-cli", "crates/larql-boundary", "crates/larql-vindex-spec",
               "crates/larql-models", "crates/larql-compute",
           ]
-          members_block = "members = [\n" + "".join(f'    "{c}",\n' for c in reachable) + "]\n"
-          text = re.sub(r"members = \[[^\]]*\]\n", members_block, text, count=1)
+          members_block_fmt = "{key} = [\n" + "".join(f'    "{c}",\n' for c in reachable) + "]\n"
+          for key in ("members", "default-members"):
+              text = re.sub(rf"{key} = \[[^\]]*\]\n", members_block_fmt.format(key=key), text, count=1)
           root_toml.write_text(text, encoding="utf-8")
           PYEOF
+      - name: Verify the mutated workspace manifest actually loads
+        run: cargo metadata --format-version 1 > /dev/null
       - name: Capture the full mutated-tree patch
         run: git diff > out/full-mutation.patch
       - uses: actions/upload-artifact@v4
