@@ -5,6 +5,7 @@ import pytest
 
 from scripts.target_analysis_discovery import (
     chunk_targets,
+    filter_by_tier,
     main,
     parse_target_list,
     resolve_target_matrix,
@@ -107,3 +108,60 @@ def test_main_writes_matrix_batches_and_batch_indices_to_github_output(tmp_path)
     assert matrix == [f"t{i}" for i in range(300)]
     assert len(batches) == 2
     assert batch_indices == [0, 1]
+
+
+def test_filter_by_tier_keeps_only_tier_at_or_below_max():
+    targets_with_tiers = {"a": 1, "b": 2, "c": 3, "d": None}
+    assert filter_by_tier(targets_with_tiers, max_tier=2) == ["a", "b"]
+
+
+def test_filter_by_tier_excludes_null_tier():
+    targets_with_tiers = {"a": None}
+    assert filter_by_tier(targets_with_tiers, max_tier=3) == []
+
+
+def test_filter_by_tier_max_tier_3_keeps_everything_with_a_tier():
+    targets_with_tiers = {"a": 1, "b": 2, "c": 3}
+    assert filter_by_tier(targets_with_tiers, max_tier=3) == ["a", "b", "c"]
+
+
+def test_main_applies_tier_filter_when_no_target_requested(tmp_path):
+    target_list_file = tmp_path / "target-list.txt"
+    target_list_file.write_text("a\nb\nc\nd\n", encoding="utf-8")
+    tiers_file = tmp_path / "tiers.json"
+    tiers_file.write_text(json.dumps({"a": 1, "b": 2, "c": 3, "d": None}), encoding="utf-8")
+    github_output = tmp_path / "github_output.txt"
+    sys.argv = [
+        "target_analysis_discovery.py",
+        "--target-list-file", str(target_list_file),
+        "--requested-target", "",
+        "--target-tiers-file", str(tiers_file),
+        "--max-tier", "2",
+        "--github-output", str(github_output),
+    ]
+    assert main() == 0
+    output_text = github_output.read_text(encoding="utf-8")
+    matrix_line = next(line for line in output_text.splitlines() if line.startswith("matrix="))
+    matrix = json.loads(matrix_line[len("matrix="):])
+    assert matrix == ["a", "b"]
+
+
+def test_main_skips_tier_filter_when_specific_target_requested(tmp_path):
+    target_list_file = tmp_path / "target-list.txt"
+    target_list_file.write_text("a\nb\nc\n", encoding="utf-8")
+    tiers_file = tmp_path / "tiers.json"
+    tiers_file.write_text(json.dumps({"a": 1, "b": 2, "c": 3}), encoding="utf-8")
+    github_output = tmp_path / "github_output.txt"
+    sys.argv = [
+        "target_analysis_discovery.py",
+        "--target-list-file", str(target_list_file),
+        "--requested-target", "c",
+        "--target-tiers-file", str(tiers_file),
+        "--max-tier", "2",
+        "--github-output", str(github_output),
+    ]
+    assert main() == 0
+    output_text = github_output.read_text(encoding="utf-8")
+    matrix_line = next(line for line in output_text.splitlines() if line.startswith("matrix="))
+    matrix = json.loads(matrix_line[len("matrix="):])
+    assert matrix == ["c"]

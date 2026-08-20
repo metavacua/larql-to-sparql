@@ -31,18 +31,33 @@ def chunk_targets(targets: list[str], max_size: int = 256) -> list[list[str]]:
     return [targets[i : i + max_size] for i in range(0, len(targets), max_size)]
 
 
+def filter_by_tier(targets_with_tiers: dict[str, int | None], max_tier: int) -> list[str]:
+    return [
+        target
+        for target, tier in targets_with_tiers.items()
+        if tier is not None and tier <= max_tier
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-list-file", required=True, type=Path)
     parser.add_argument("--requested-target", default=None)
     parser.add_argument("--max-batch-size", type=int, default=256)
     parser.add_argument("--github-output", type=Path, default=None)
+    parser.add_argument("--target-tiers-file", type=Path, default=None)
+    parser.add_argument("--max-tier", type=int, default=None)
     args = parser.parse_args()
 
     raw = args.target_list_file.read_text(encoding="utf-8")
     all_targets = parse_target_list(raw)
     requested = args.requested_target or None
     matrix = resolve_target_matrix(all_targets, requested)
+
+    if requested is None and args.target_tiers_file is not None and args.max_tier is not None:
+        target_tiers = json.loads(args.target_tiers_file.read_text(encoding="utf-8"))
+        matrix = filter_by_tier(target_tiers, max_tier=args.max_tier)
+
     batches = chunk_targets(matrix, max_size=args.max_batch_size)
     batch_indices = list(range(len(batches)))
 
