@@ -26,8 +26,16 @@ def test_unexpected_clean_std_build_does_not_flag_a_real_failure():
 
 
 def test_unexpected_clean_std_build_does_not_flag_targets_with_std():
-    host_spec = {"std": True}
+    host_spec = {"metadata": {"std": True}}
     assert unexpected_clean_std_build(host_spec, std_mode_errors=[]) is False
+
+
+def test_unexpected_clean_std_build_ignores_stray_top_level_std_key():
+    # Real rustc target-spec-json nests std under metadata; a stray top-level
+    # "std" key (the exact shape mismatch that made this check inert) must
+    # never be mistaken for the real field.
+    target_spec = {"std": False, "metadata": {}}
+    assert unexpected_clean_std_build(target_spec, std_mode_errors=[]) is False
 
 
 def test_missing_artifacts_returns_the_set_difference():

@@ -25,7 +25,7 @@ def count_errors_by_target(compiler_messages: list[dict[str, Any]]) -> dict[str,
 
 
 def unexpected_clean_std_build(target_spec: dict[str, Any], std_mode_errors: list[Any]) -> bool:
-    return target_spec.get("std") is False and len(std_mode_errors) == 0
+    return target_spec.get("metadata", {}).get("std") is False and len(std_mode_errors) == 0
 
 
 def missing_artifacts(expected: set[str], actual: set[str]) -> set[str]:
