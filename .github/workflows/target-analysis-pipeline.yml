@@ -246,12 +246,75 @@ jobs:
     needs: [discovery, target-capability, dependency-graph, build-attempt, runtime-test]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # gh run download, below
     steps:
       - uses: actions/checkout@v4
-      - name: Download all artifacts
+      # Real-CI evidence (run 32316739919, job "Build navigation index",
+      # https://github.com/metavacua/larql-to-sparql/actions/runs/32316739919):
+      # an unfiltered `actions/download-artifact@v4` with `path: artifacts` and
+      # no name/pattern (i.e. "download everything") pulled all 113 artifacts,
+      # dominated by build-attempt-batch-* at 9.43GB total across 28 batches
+      # (everything else combined: 0.08GB) -- and the runner crashed with
+      # `System.IO.IOException: No space left on device`. Neither Step 1 below
+      # (which only needs each artifact's *filenames*, for the expected/actual
+      # completeness diff) nor Step 2 (which only reads ONE of the 24
+      # per-target build_std/cmd/features combos --
+      # attempt-<target>-none-check-default-features.json -- plus the tiny
+      # target-spec file) needs the other 23 combos' content at all, so bulk
+      # materializing all of build-attempt-batch-*'s content was never
+      # necessary. Fixed below: the three small artifact families still use
+      # the standard action; build-attempt-batch-* is fetched one batch at a
+      # time via `gh run download` and immediately trimmed, so peak disk
+      # usage never exceeds roughly one batch's uncompressed size.
+      - name: Download target-capability artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: target-capability-batch-*
+      - name: Download dependency-graph artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: dependency-graph-batch-*
+      - name: Download runtime-test artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: runtime-test-batch-*
+      - name: Download build-attempt artifacts one batch at a time (avoids the disk exhaustion above)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BATCH_INDICES: ${{ needs.discovery.outputs.batch-indices }}
+        run: |
+          set -euo pipefail
+          echo "$BATCH_INDICES" | python3 -c 'import json, sys; print("\n".join(str(i) for i in json.load(sys.stdin)))' > batch-indices.txt
+          while IFS= read -r N; do
+            echo "=== build-attempt batch $N ==="
+            rm -rf raw-attempt-batch
+            gh run download "${{ github.run_id }}" \
+              --repo "${{ github.repository }}" \
+              -n "build-attempt-batch-$N" \
+              -D raw-attempt-batch
+            mkdir -p "artifacts/build-attempt-batch-$N"
+            # Preserve every filename (Step 1 needs the full expected/actual
+            # completeness diff), but only keep real content for the one file
+            # per target Step 2 actually reads -- everything else becomes a
+            # 0-byte placeholder. f.is_file() in Step 1 is true either way.
+            for f in raw-attempt-batch/*; do
+              name=$(basename "$f")
+              case "$name" in
+                *-none-check-default-features.json)
+                  cp "$f" "artifacts/build-attempt-batch-$N/$name"
+                  ;;
+                *)
+                  : > "artifacts/build-attempt-batch-$N/$name"
+                  ;;
+              esac
+            done
+            rm -rf raw-attempt-batch
+          done < batch-indices.txt
       - name: Compute expected vs. actual per-target files, and the target-to-batch map
         run: |
           python3 - <<'PYEOF'
