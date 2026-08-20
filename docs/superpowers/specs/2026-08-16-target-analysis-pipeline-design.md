@@ -306,6 +306,19 @@ negative that finding is. Build-attempt-probe jobs reflect the build's own pass/
 via the honest-result pattern already proven (step-level `continue-on-error`, no
 job-level masking, a final unmasked assertion step checking real `.outcome`).
 
+**Corrected 2026-08-20 (final whole-branch review):** this document's "a final
+unmasked assertion step checking real `.outcome`" was never actually built this
+way, and Task 8's own text explicitly adjudicated the deviation rather than
+missing it: `fmt` and `build-attempt`'s honest-result steps read the real
+`.outcome` and emit an `::notice::`, but never assert/fail on it. The reasoning
+(recorded in Task 8's plan text): the uploaded raw JSON is strictly more
+informative than a boolean pass/fail, `if: always()` already guarantees it's
+never lost to a masked failure, and a human or the indexing job's own
+completeness check is the actual consumer, not a job-level gate. This is a
+real, deliberate, evidenced choice, not an oversight — this section is
+corrected to match what was actually built and validated by real CI, per this
+document's own Validation-approach standard.
+
 Retries are narrow: only external network calls (crates.io, GitHub's API) get a
 bounded, logged retry, since a rate limit or timeout isn't information about the
 target. Actual `cargo build`/`clippy` attempts are never retried — deterministic

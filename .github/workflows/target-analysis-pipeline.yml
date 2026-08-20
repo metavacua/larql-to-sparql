@@ -1,6 +1,4 @@
 name: target-analysis-pipeline
-# Task 13 concurrency-cancellation proof: trivial follow-up commit, pushed
-# immediately after commit a7b3a42a's run started, to trigger cancel-in-progress.
 
 on:
   push:
@@ -443,6 +441,9 @@ jobs:
           import sys
           from pathlib import Path
 
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import error_level_messages
+
           target_matrix = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
           target_to_batch = json.loads(Path("target-to-batch.json").read_text())
           combined = {}
@@ -478,6 +479,7 @@ jobs:
                   any_missing = True
                   continue
               normalized_file.write_text(json.dumps(messages))
+              std_mode_errors = [message for _entry, message in error_level_messages(messages)]
 
               result = subprocess.run(
                   [
@@ -502,7 +504,7 @@ jobs:
                       "--expected-artifacts-file", "expected-artifacts.json",
                       "--actual-artifacts-file", "actual-artifacts.json",
                   ],
-                  input="[]",
+                  input=json.dumps(std_mode_errors),
                   capture_output=True,
                   text=True,
               )
@@ -542,6 +544,7 @@ jobs:
   secondary-mutate:
     name: "Secondary layer: mutate (Stages A, B, B2, B3)"
     needs: [discovery, indexing]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -674,7 +677,7 @@ jobs:
           from pathlib import Path
 
           sys.path.insert(0, ".")
-          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE
+          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE, stage_b_lib_rs_filenames
 
           target = sys.argv[1]
 
@@ -683,8 +686,9 @@ jobs:
           # has no lib.rs (bin-only) so larql-compute is the chosen
           # representative crate (Task 14's own hardest real case -- largest
           # leading doc comment).
-          baseline_b = {"lib_rs_content": Path("mutation/baseline-lib-rs-larql-compute.txt").read_text(encoding="utf-8")}
-          sibling_b = {"lib_rs_content": Path("mutation/sibling-lib-rs-larql-compute.txt").read_text(encoding="utf-8")}
+          baseline_b_filename, sibling_b_filename = stage_b_lib_rs_filenames()
+          baseline_b = {"lib_rs_content": Path(f"mutation/{baseline_b_filename}").read_text(encoding="utf-8")}
+          sibling_b = {"lib_rs_content": Path(f"mutation/{sibling_b_filename}").read_text(encoding="utf-8")}
           Path(f"baseline-stage-b-{target}.json").write_text(json.dumps(baseline_b))
           Path(f"sibling-stage-b-{target}.json").write_text(json.dumps(sibling_b))
 
@@ -757,6 +761,7 @@ jobs:
           PYEOF
           done < targets-in-batch.txt
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: promotion-decision-batch-${{ matrix.batch_index }}
           path: out/
@@ -889,6 +894,13 @@ jobs:
                   else:
                       preserved[target] = record
 
+          all_targets = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
+          folded_targets = set(promoted) | set(preserved)
+          missing = set(all_targets) - folded_targets
+          if missing:
+              print(f"::error::next-round-baseline is incomplete: {len(missing)} of {len(all_targets)} targets missing (a batch likely failed partway) -- refusing to publish a lossy baseline: {sorted(missing)[:10]}")
+              sys.exit(1)
+
           Path("round-baseline.json").write_text(
               json.dumps({"promoted": promoted, "preserved_not_promoted": preserved}, indent=2)
           )
@@ -934,7 +946,7 @@ jobs:
           PYEOF
       - name: "Blast-radius containment: assert Stage B only touches its declared scope"
         run: |
-          python3 - <<'PYEOF'
+          EXPECTED_PATH=$(python3 - <<'PYEOF'
           import sys
           sys.path.insert(0, ".")
           from pathlib import Path
@@ -942,13 +954,15 @@ jobs:
 
           lib_rs = Path(f"crates/{STAGE_B_REPRESENTATIVE_CRATE}/src/lib.rs")
           lib_rs.write_text(insert_no_std_scaffold(lib_rs.read_text(encoding="utf-8")), encoding="utf-8")
+          print(lib_rs)
           PYEOF
+          )
           CHANGED=$(git diff --name-only)
-          if [ "$CHANGED" != "crates/larql-compute/src/lib.rs" ]; then
+          if [ "$CHANGED" != "$EXPECTED_PATH" ]; then
             echo "::error::Stage B touched files outside its declared scope: $CHANGED"
             exit 1
           fi
-          echo "Blast radius contained to the declared file."
+          echo "Blast radius contained to the declared file: $EXPECTED_PATH"
       - name: "Ephemerality: assert no forbidden git-mutating command exists in this workflow file"
         run: |
           if grep -v -E '(echo |::error::|::warning::|^\s*#)' .github/workflows/target-analysis-pipeline.yml | grep -Eq 'git (commit|push)'; then
