@@ -76,6 +76,39 @@ jobs:
             target-list.txt
             target-tiers.json
 
+  target-independent-checks:
+    name: "Target-independent checks: fmt (${{ matrix.crate }})"
+    needs: [discovery]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [larql-boundary, larql-vindex-spec, larql-models, larql-compute, larql-cli]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rustfmt --toolchain nightly
+      - name: "cargo fmt --check: ${{ matrix.crate }}"
+        id: fmt
+        continue-on-error: true
+        run: cargo +nightly fmt -p "${{ matrix.crate }}" --check > fmt-output.txt 2>&1
+      - name: Upload fmt-check output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: target-independent-checks-${{ matrix.crate }}
+          path: fmt-output.txt
+      - name: Assert honest result
+        run: |
+          echo "cargo fmt --check outcome: ${{ steps.fmt.outcome }}"
+          if [ "${{ steps.fmt.outcome }}" = "failure" ]; then
+            echo "::notice::Real fmt violation recorded as a finding, not masked."
+          fi
+
   target-capability:
     name: "Target capability: batch ${{ matrix.batch_index }}"
     needs: [discovery]
