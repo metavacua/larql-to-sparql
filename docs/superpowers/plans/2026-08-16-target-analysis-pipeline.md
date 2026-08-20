@@ -2911,14 +2911,175 @@ Using the same real `baseline-metadata.json` (from Task 17's `secondary-mutation
 
 ### Task 20: Recursive-round baseline handoff
 
+**Real gap this task closes, caught before dispatch (pre-flight review, same
+standard as Tasks 15-17's brief corrections).** This task's original text
+only ever *produced* a `round-baseline` artifact — it never wired anything
+to *consume* a prior round's `round-baseline` back in as the next round's
+actual Stage C baseline. `secondary-stage-c-and-promotion` (Task 17,
+already merged) hardcodes `baseline_messages = []` unconditionally, with a
+comment reading "first round: no prior-round Stage C output exists yet."
+Nothing in the original Task 20 text ever made that comment stop being
+true for round 2 onward. As specced, the recursive loop this whole
+Secondary layer exists to run — "observation and mutation inform each
+other round over round" — never actually closes: `round-baseline` would be
+produced every run and read by nothing, forever. This revision adds the
+missing read-back half.
+
+**Design, confirmed against real GitHub documentation before being written
+here** (same standard this plan already held itself to for the
+`background:`/`wait-all:` correction and Cargo's workspace-membership
+rule): `actions/download-artifact@v4` supports fetching an artifact from a
+*different* workflow run via `run-id:` + `github-token:` inputs (confirmed
+directly against the action's own v4 README — "The id of the workflow run
+where the desired download artifact was uploaded from... If github-token is
+specified, this is the run that artifacts will be downloaded from"). Finding
+*which* prior run to fetch from uses GitHub's REST API `GET
+/repos/{owner}/{repo}/actions/artifacts` endpoint (confirmed directly
+against GitHub's own REST API docs), which supports a `name` query filter
+and returns each artifact's `expired` flag and its `workflow_run` object
+(`id`, `head_branch`). The API's own docs do not specify a sort order, so
+the candidate list is sorted client-side by `created_at`, newest first —
+never assumed to arrive pre-sorted.
+
+**Placement: the exotic cross-run mechanism lives in exactly one small,
+dedicated job**, not spread across `secondary-mutate` or all 10
+`secondary-stage-c-and-promotion` batch jobs. That job fetches once and
+republishes what it found as an ordinary same-run artifact; every other
+job downloads that same-run artifact the normal way, with no cross-run
+awareness of its own.
+
+**No silent fallback.** A first-ever run (or a run on a branch with no
+prior `round-baseline`) is a real, expected case, not an error — but it
+must be visible, not silently indistinguishable from "compared against a
+real prior round and found nothing new." The fetch job's own output
+records whether it found a prior run and, if so, which run ID; that
+provenance is written into the republished artifact so every downstream
+consumer — and any human reading `round-baseline.json` later — can tell
+which case occurred.
+
+**Payload: carry full per-target site sets, recomputed from the real
+`stage-c-<target>.json` compiler output already present in each batch's
+own `out/` directory** (confirmed: `secondary-stage-c-and-promotion`'s
+final `upload-artifact` step uploads `path: out/` in full, and
+`stage-c-$TARGET.json` is written into `out/` earlier in that same job —
+Task 17, already merged). The existing `depth-decision-<target>.json`
+records (`resolved_sites`, `new_sites`) are *differences*, not the full
+site set, and are serialized as `sorted(str(s) for s in ...)` —
+stringified tuples like `"('crates/foo/src/lib.rs', 12, 'E0433')"` — which
+would require a fragile `eval`/regex to parse back into a real tuple. The
+fold step instead recomputes each target's actual `sibling_sites` directly
+from that target's own `stage-c-<target>.json`, via the same `error_sites()`
+call `secondary-stage-c-and-promotion`'s own depth-advancement step
+already uses, and stores it as a real JSON list of `[file, line, code]`
+triples — the next round restores it as a set of tuples with
+`{tuple(s) for s in ...}`, never by parsing a stringified repr. Skipping
+this tuple-restore step would silently produce empty-looking set
+intersections downstream with no local test to catch it, since no test in
+this repo exercises the live workflow's own heredocs end-to-end.
+
+**Scope note: "fold promoted diffs" means verdict records (JSON), never
+source patches.** This task carries forward `depth-decision`/promotion
+JSON and recomputed site sets — never a `git diff`/patch of the mutated
+source tree. Committing a patch across runs would violate this plan's
+explicit no-CI-commits, no-caching-of-mutated-source Global Constraint;
+each round's mutation is re-derived fresh from Stage A/B/B2/B3 every run,
+only the *verdicts* about it persist round-to-round.
+
 **Files:**
-- Modify: `.github/workflows/target-analysis-pipeline.yml` (add `next-round-baseline` job)
+- Modify: `.github/workflows/target-analysis-pipeline.yml` — add a new `fetch-prior-round-baseline` job; add a new `next-round-baseline` job (this task's original deliverable, now enriched with real per-target site payloads); modify the already-merged `secondary-stage-c-and-promotion` job's `depth_advanced` heredoc to read the fetched baseline back in, replacing the `baseline_messages = []` hardcode.
 
 **Interfaces:**
-- Consumes: `promotion-decision-batch-<batch_index>` artifacts (Task 17), each containing multiple per-target `depth-decision-<target>.json` and `promotion-stage-*-<target>.json` files.
-- Produces: `round-baseline` artifact — the folded-forward set of promoted stage diffs plus the full set of non-promoted results preserved separately — retrievable by the next `push` to the same branch pattern (the mechanism by which round N+1 begins from round N's baseline, per this session's mutual-recursion finding: observation and mutation inform each other round over round, neither completes independently).
+- Consumes: `promotion-decision-batch-<batch_index>` artifacts (Task 17), each containing per-target `depth-decision-<target>.json`, `promotion-stage-*-<target>.json`, and `stage-c-<target>.json` files (the last of these newly consumed by this task's fold step, though it was already being uploaded).
+- Produces: `round-baseline` artifact (this run's own fold, for the *next* run to find) and `prior-round-baseline` artifact (this run's own same-run republish of whatever the fetch job found, consumed by `secondary-stage-c-and-promotion` within this same run).
 
-- [ ] **Step 1: Add the job**
+- [ ] **Step 1: Add the `fetch-prior-round-baseline` job**
+
+```yaml
+  fetch-prior-round-baseline:
+    name: Fetch prior round's baseline (cross-run artifact lookup)
+    needs: [discovery]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # gh api /actions/artifacts, cross-run actions/download-artifact
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find the most recent prior run's round-baseline artifact on this branch, if any
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_run_id = os.environ["GITHUB_RUN_ID"]
+
+          raw = subprocess.run(
+              ["gh", "api", f"/repos/{repo}/actions/artifacts", "--paginate",
+               "-f", "name=round-baseline"],
+              capture_output=True, text=True, check=True,
+          ).stdout
+          # --paginate with multiple pages emits one JSON object per page;
+          # each page's "artifacts" list is concatenated here.
+          artifacts = []
+          for line in raw.splitlines():
+              if line.strip():
+                  artifacts.extend(json.loads(line)["artifacts"])
+
+          candidates = [
+              a for a in artifacts
+              if not a["expired"]
+              and a.get("workflow_run") is not None
+              and a["workflow_run"]["head_branch"] == branch
+              and str(a["workflow_run"]["id"]) != str(current_run_id)
+          ]
+          candidates.sort(key=lambda a: a["created_at"], reverse=True)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              if candidates:
+                  f.write("found=true\n")
+                  f.write(f"prior_run_id={candidates[0]['workflow_run']['id']}\n")
+              else:
+                  f.write("found=false\n")
+                  f.write("prior_run_id=\n")
+          PYEOF
+      - name: Download the prior run's round-baseline artifact, if one was found
+        if: steps.find.outputs.found == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: round-baseline
+          run-id: ${{ steps.find.outputs.prior_run_id }}
+          github-token: ${{ github.token }}
+          path: prior-round-baseline-download
+      - name: Republish as a same-run artifact, self-describing what was found
+        run: |
+          mkdir -p out
+          if [ "${{ steps.find.outputs.found }}" = "true" ]; then
+            cp prior-round-baseline-download/round-baseline.json out/round-baseline.json
+            printf '{"prior_run_id": %s}' "${{ steps.find.outputs.prior_run_id }}" > out/provenance.json
+          else
+            printf '{"promoted": {}, "preserved_not_promoted": {}}' > out/round-baseline.json
+            printf '{"prior_run_id": null}' > out/provenance.json
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prior-round-baseline
+          path: out/
+```
+
+`--paginate`'s exact output framing (one JSON object per page vs. one
+combined array) is a real `gh` CLI behavior to confirm against the first
+real run's step output, not assumed — if it emits a single combined JSON
+array instead of one object per page, the parsing loop above needs
+`json.loads(raw)["artifacts"]` directly instead. Note this explicitly when
+verifying Step 4 below.
+
+- [ ] **Step 2: Add the `next-round-baseline` job, enriched with real per-target site payloads**
 
 ```yaml
   next-round-baseline:
@@ -2926,6 +3087,9 @@ Using the same real `baseline-metadata.json` (from Task 17's `secondary-mutation
     needs: [discovery, secondary-stage-c-and-promotion]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # actions/download-artifact
     steps:
       - uses: actions/checkout@v4
       - name: Download all promotion-decision batch artifacts
@@ -2933,12 +3097,16 @@ Using the same real `baseline-metadata.json` (from Task 17's `secondary-mutation
         with:
           pattern: "promotion-decision-batch-*"
           path: promotion-decisions
-      - name: Fold promoted results, preserve non-promoted results separately
+      - name: Fold promoted results, preserve non-promoted results separately, carry real site sets forward
         run: |
           python3 - <<'PYEOF'
           import json
           import re
+          import sys
           from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import error_sites
 
           promoted = {}
           preserved = {}
@@ -2953,7 +3121,14 @@ Using the same real `baseline-metadata.json` (from Task 17's `secondary-mutation
                       stage_file = batch_dir / f"promotion-{stage}-{target}.json"
                       if stage_file.exists():
                           stage_verdicts[stage] = json.loads(stage_file.read_text())
-                  record = {**depth_decision, "stage_promotions": stage_verdicts}
+
+                  stage_c_file = batch_dir / f"stage-c-{target}.json"
+                  sibling_messages = [
+                      json.loads(line) for line in stage_c_file.read_text().splitlines() if line.strip()
+                  ]
+                  sibling_sites = sorted(list(s) for s in error_sites(sibling_messages))
+
+                  record = {**depth_decision, "stage_promotions": stage_verdicts, "sibling_sites": sibling_sites}
                   if depth_decision["depth_advanced"]:
                       promoted[target] = record
                   else:
@@ -2969,18 +3144,106 @@ Using the same real `baseline-metadata.json` (from Task 17's `secondary-mutation
           path: round-baseline.json
 ```
 
-Per the spec's Data flow open question, cross-run artifact retention beyond GitHub's default 90-day expiry is explicitly not resolved by this plan — `round-baseline` is retrievable within that window via `actions/download-artifact` from the prior run, which is sufficient for the recursive loop's own mechanics without deciding the longer-term history question.
+`sibling_sites` is carried forward for every target regardless of
+promotion status — a target that didn't promote this round still has a
+real error wall the next round needs as its comparison baseline; only
+`depth_advanced`'s own true/false split (not this payload) distinguishes
+promoted from preserved. Per the spec's Data flow open question, cross-run
+artifact retention beyond GitHub's default 90-day expiry is explicitly not
+resolved by this plan — sufficient for the recursive loop's own mechanics
+without deciding the longer-term history question.
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 3: Wire the read-back into `secondary-stage-c-and-promotion` (already-merged, Task 17)**
+
+Add `fetch-prior-round-baseline` to this job's `needs:` list (currently
+`needs: [discovery, indexing, secondary-mutate, dependency-graph]` — add
+`fetch-prior-round-baseline` to that list) and add a download step
+alongside its existing `dependency-graph-batch-<N>` download:
+
+```yaml
+      - name: Download this run's fetched prior-round baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: prior-round-baseline
+          path: prior-round-baseline
+```
+
+Then, in the per-target `depth_advanced` heredoc, replace:
+```python
+          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 20 wires round-over-round)
+
+          baseline_sites = error_sites(baseline_messages)
+          sibling_sites = error_sites(sibling_messages)
+```
+with:
+```python
+          prior_round = json.loads(Path("prior-round-baseline/round-baseline.json").read_text())
+          prior_record = (
+              prior_round.get("promoted", {}).get(target)
+              or prior_round.get("preserved_not_promoted", {}).get(target)
+          )
+          baseline_sites = (
+              {tuple(s) for s in prior_record["sibling_sites"]} if prior_record is not None else set()
+          )
+          sibling_sites = error_sites(sibling_messages)
+```
+`prior_record is None` covers both real, expected cases without treating
+either as an error: a genuine first-ever run (no prior round-baseline
+existed at all, per Step 1's own explicit fallback) and a target newly
+appearing in this round's matrix that had no corresponding entry in the
+prior round's fold. Both correctly start that target's `baseline_sites` at
+the empty set, matching the pre-existing "first round" semantics exactly —
+only now real for round 2+ too, instead of hardcoded forever.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: add next-round-baseline job folding promoted diffs forward per the measurable-difference rule"
+git commit -m "feat: wire real cross-run baseline handoff -- fetch, fold, and read back prior round's Stage C sites"
 ```
 
-- [ ] **Step 3: Push and verify on a real runner**
+- [ ] **Step 5: Push and verify on a real runner — two runs, not one**
 
-Push and confirm: `round-baseline` artifact is produced, `promoted` contains only targets where `depth_advanced` was `true`, and `preserved_not_promoted` contains the rest — nothing is discarded, matching the promotion rule: a sibling producing zero measurable difference is preserved as its own artifact, not folded forward and not deleted.
+This task's own real-CI verification requires **two separate pushes**, not
+one, and both must be checked before this task is considered proven — a
+single green run only exercises the fallback half:
+
+*Run A (this task's own push, combined with the already-staged, unpushed
+`ef8637f7`, `3e5ad217`, and `166851a9` commits per the Task 11 → 12 and
+Task 18/19 precedent):* confirm `fetch-prior-round-baseline` reports
+`found=false` (no `round-baseline` artifact has ever existed on this
+branch — this job and `next-round-baseline` are both new in this same
+push), confirm `secondary-stage-c-and-promotion` still runs correctly with
+`baseline_sites = set()` for every target (identical observable behavior
+to before this task, since `prior_record` is `None` for everyone), and
+confirm `round-baseline` and `prior-round-baseline` artifacts are both
+produced with the enriched `sibling_sites` payload present for every
+target. This run proves the fallback path and first-ever production of a
+real, enriched `round-baseline` — it does **not** prove the read-back path
+works, since nothing exists yet for it to read.
+
+*Run B (the next natural push after Run A — expected to be supplied by
+Task 21's own work, not a separate dedicated trigger for this task alone):*
+confirm `fetch-prior-round-baseline` reports `found=true` with a real
+`prior_run_id` matching Run A's actual run ID, confirm at least one
+target's `baseline_sites` in `secondary-stage-c-and-promotion` is
+genuinely non-empty (reconstructed from Run A's real `sibling_sites`, not
+`set()`), and confirm `depth_advanced` for that target is computed against
+that real, non-trivial baseline rather than vacuously reading `true` for
+every non-empty `sibling_sites` (the empty-baseline case Task 17 already
+flagged this exact failure mode for). **Do not declare this task's loop
+"closed" — in the ledger or otherwise — until Run B's read-back path is
+confirmed on real CI; Run A alone only proves the parts of this task that
+would have been trivially true even without it.**
+
+**Known, already-flagged interaction, not new scope:** cross-round site
+comparison inherits the unpinned-nightly toolchain drift this plan already
+flagged as a follow-up (each job independently runs `rustup toolchain
+install nightly`, which can resolve to a different nightly build across
+runs) — a spurious site appearing or disappearing between Run A and Run B
+could be toolchain drift, not real mutation progress, until that follow-up
+is addressed. Noted here as a real caveat on how to read Run B's result,
+not a blocker for this task or a scope change to it.
 
 ---
 
