@@ -30,7 +30,7 @@
 
 ## File Structure
 
-- `.github/workflows/target-analysis-pipeline.yml` — the new, generalized pipeline: `discovery` (also computes batches, Task 6), `target-capability`, `dependency-graph`, `build-attempt`, `runtime-test` (all four batched over `batch_index`, Tasks 7-9), `indexing` (Task 10), `secondary-mutate` (Stages A/B/B2/B3, single job, target-independent, Task 16), `secondary-stage-c-and-promotion` (batched, applies the mutation patch, Task 17), `next-round-baseline` (Task 19), `secondary-layer-self-test` (Task 20).
+- `.github/workflows/target-analysis-pipeline.yml` — the new, generalized pipeline: `discovery` (also computes batches, Task 6), `target-capability`, `dependency-graph`, `build-attempt`, `runtime-test` (all four batched over `batch_index`, Tasks 7-9), `indexing` (Task 10), `secondary-mutate` (Stages A/B/B2/B3, single job, target-independent, Task 16), `secondary-stage-c-and-promotion` (batched, applies the mutation patch, Task 17), `next-round-baseline` (Task 20), `secondary-layer-self-test` (Task 21).
 - `scripts/target_analysis_common.py` — shared, dependency-free helpers: JSON loading, `--message-format=json` compiler-message parsing into `(file, line, code)` error-site tuples, `--unit-graph` unit lookup by crate name.
 - `scripts/target_analysis_discovery.py` — turns raw `rustc --print target-list` output (plus an optional single requested target) into the target matrix consumed by downstream jobs' `fromJSON()`.
 - `scripts/target_analysis_indexing.py` — structural extraction (error counts by target name), the `unexpected-clean-std-build` contradiction rule, and artifact-completeness checking.
@@ -877,7 +877,7 @@ targets per batch, uniformly across every batch-consuming job) so the heaviest j
 step re-checks this estimate against actual job duration, since it's a reasoned
 estimate, not a verified fact, until a real run confirms it.
 
-This does not change `target-matrix` itself — Task 10's indexing job and Task 19's
+This does not change `target-matrix` itself — Task 10's indexing job and Task 20's
 next-round-baseline job keep consuming the unbatched form directly inside a Python
 loop, which has no 256-element restriction.
 
@@ -2442,7 +2442,7 @@ Push and confirm: the `secondary-mutate` job runs exactly once (no matrix), Stag
           target = sys.argv[1]
           with open(f"out/stage-c-{target}.json") as f:
               sibling_messages = [json.loads(line) for line in f if line.strip()]
-          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 19 wires round-over-round)
+          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 20 wires round-over-round)
 
           baseline_sites = error_sites(baseline_messages)
           sibling_sites = error_sites(sibling_messages)
@@ -2474,9 +2474,9 @@ git commit -m "feat: add Stage C job, batched, applying the mutation patch befor
 
 - [ ] **Step 3: Push and verify on a real runner**
 
-Push and confirm: 10 `promotion-decision-batch-<N>` artifacts are produced (Task 12's real 119-target/10-batch universe, not the stale pre-Task-12 `ceil(331/12) = 28`), each containing per-target `stage-c-<target>.json`, `promotion-stage-b-<target>.json`, `promotion-stage-b2-<target>.json`, `promotion-stage-b3-<target>.json`, and `depth-decision-<target>.json` files. Specifically check the batch containing `nvptx64-nvidia-cuda`: confirm `stage-c-nvptx64-nvidia-cuda.json` shows real compiler output against the *mutated* tree (spot-check that the file content differs from what Task 8's unmutated `build-attempt` probe recorded for the same target — this is the direct evidence the patch was actually applied, not skipped), and confirm all three `promotion-stage-b*-nvptx64-nvidia-cuda.json` files show real `"promotes": true/false` verdicts (not an error) — this first round has no real prior-round Stage C baseline yet (`baseline_messages = []`), so `depth_advanced` should read `true` for every target with any error at all (every site is "newly resolved" relative to an empty baseline is wrong — re-check this reasoning empirically against the real output: an empty baseline means `baseline_sites - sibling_sites` is always empty regardless of `sibling_sites`, since you cannot subtract from nothing, so `depth_advanced` should read `false` for every target on this first round; Task 19 wires the real round-over-round baseline that makes this check meaningful).
+Push and confirm: 10 `promotion-decision-batch-<N>` artifacts are produced (Task 12's real 119-target/10-batch universe, not the stale pre-Task-12 `ceil(331/12) = 28`), each containing per-target `stage-c-<target>.json`, `promotion-stage-b-<target>.json`, `promotion-stage-b2-<target>.json`, `promotion-stage-b3-<target>.json`, and `depth-decision-<target>.json` files. Specifically check the batch containing `nvptx64-nvidia-cuda`: confirm `stage-c-nvptx64-nvidia-cuda.json` shows real compiler output against the *mutated* tree (spot-check that the file content differs from what Task 8's unmutated `build-attempt` probe recorded for the same target — this is the direct evidence the patch was actually applied, not skipped), and confirm all three `promotion-stage-b*-nvptx64-nvidia-cuda.json` files show real `"promotes": true/false` verdicts (not an error) — this first round has no real prior-round Stage C baseline yet (`baseline_messages = []`), so `depth_advanced` should read `true` for every target with any error at all (every site is "newly resolved" relative to an empty baseline is wrong — re-check this reasoning empirically against the real output: an empty baseline means `baseline_sites - sibling_sites` is always empty regardless of `sibling_sites`, since you cannot subtract from nothing, so `depth_advanced` should read `false` for every target on this first round; Task 20 wires the real round-over-round baseline that makes this check meaningful).
 
-**Real-CI addendum (2026-08-20):** run `32409988443` confirmed exactly this — 10/10 batches green, 10/10 `promotion-decision-batch-N` artifacts, 119/119 targets, `depth_advanced` false for all 119, `stage-b` verdicts real (nvptx: `true`), `stage-b2` verdicts real and pre-authorized-false for all targets (`serde_core` still pulls `std` under this nightly toolchain even after the patch). One real, unauthorized bug surfaced by this run: Stage B3's verdict is unconditionally `false` for all 119 targets due to a bug in `workspace_members_ok()` (Task 4, already-merged) assuming an obsolete cargo PackageId string format — routed to a new dedicated task (Task 18) rather than left silently wrong.
+**Real-CI addendum (2026-08-20):** run `32409988443` confirmed exactly this — 10/10 batches green, 10/10 `promotion-decision-batch-N` artifacts, 119/119 targets, `depth_advanced` false for all 119, `stage-b` verdicts real (nvptx: `true`), `stage-b2` verdicts real and pre-authorized-false for all targets (`serde_core` still pulls `std` under this nightly toolchain even after the patch). One real, unauthorized bug surfaced by this run: Stage B3's verdict is unconditionally `false` for all 119 targets due to a bug in `workspace_members_ok()` (Task 4, already-merged) assuming an obsolete cargo PackageId string format — routed to a new dedicated task (Task 18) rather than left silently wrong. Task 18's own real-data verification (its Step 8) surfaced a second, distinct, deeper bug in the same area: Stage B3's `expected_members`/`reachable` lists (Task 16 and Task 17, already-merged) hand-declare 5 crates as "larql-cli's real tree," but Cargo's own documented rule ("All path dependencies residing in the workspace directory automatically become members," confirmed via direct WebFetch of Cargo's reference docs) means the real, trimmed workspace has 14 members, not 5 — confirmed independently via a full transitive-closure grep of the real Cargo.toml files, and matching the original proven `experiment-cuda-nvptx.yml` job's own 13-crate `keep` set plus `larql-compute-metal` (an optional path dependency Cargo pulls in regardless of `optional = true`). Routed to a new dedicated task (Task 19) rather than left silently wrong.
 
 ---
 
@@ -2624,11 +2624,292 @@ git commit -m "fix: workspace_members_ok assumed the old cargo PackageId format;
 
 - [ ] **Step 8: Real-data verification against Task 17's own already-captured artifacts (no new CI trigger required)**
 
-Download Task 17's real `secondary-mutation` artifact from run `32409988443` (the `baseline-metadata.json` it contains is real, unmutated-tree `cargo metadata` output, captured on a GitHub-hosted runner) and, in a fresh checkout of the same commit Task 17 tested against, apply `full-mutation.patch` and run `cargo metadata --format-version 1 --no-deps` yourself to get the real, mutated-tree (trimmed) metadata. Feed both real JSON blobs through the now-fixed `workspace_members_ok()` (or `stage_promotes("stage-b3", ...)` directly) and confirm it returns `True` for this real, already-known-to-be-trimmed data — this is the actual proof the fix works against reality, not just synthetic fixtures. Per the Task 11 → Task 12 precedent (a real bug in already-merged code, fixed and unit-tested, with real-CI re-verification deferred to the next task's natural pipeline run rather than a dedicated new trigger), this task's own real-CI push is likewise deferred — the next task (Task 19, "Recursive-round baseline handoff") will exercise this fix live for the first time. Commit this task's fix; it will be pushed together with whatever is already staged in this worktree ahead of the last validated run (including the controller's own prior `ef8637f7` commit), not as a separate, dedicated push solely for this fix.
+Download Task 17's real `secondary-mutation` artifact from run `32409988443` (the `baseline-metadata.json` it contains is real, unmutated-tree `cargo metadata` output, captured on a GitHub-hosted runner) and, in a fresh checkout of the same commit Task 17 tested against, apply `full-mutation.patch` and run `cargo metadata --format-version 1 --no-deps` yourself to get the real, mutated-tree (trimmed) metadata. Feed both real JSON blobs through the now-fixed `workspace_members_ok()` (or `stage_promotes("stage-b3", ...)` directly) and confirm it returns `True` for this real, already-known-to-be-trimmed data — this is the actual proof the fix works against reality, not just synthetic fixtures. Per the Task 11 → Task 12 precedent (a real bug in already-merged code, fixed and unit-tested, with real-CI re-verification deferred to the next task's natural pipeline run rather than a dedicated new trigger), this task's own real-CI push is likewise deferred — Task 19 (inserted immediately after this task, fixing a second, distinct bug in the same area found during this very step) and then Task 20 ("Recursive-round baseline handoff") will exercise this fix live for the first time, together. Commit this task's fix; it will be pushed together with whatever is already staged in this worktree ahead of the last validated run (including the controller's own prior `ef8637f7` commit), not as a separate, dedicated push solely for this fix.
 
 ---
 
-### Task 19: Recursive-round baseline handoff
+### Task 19: Fix Stage B3's `expected_members`/`reachable` closure — the real trimmed workspace has 14 members, not 5
+
+**Real, distinct, deeper bug found during Task 18's own real-data verification (its Step
+8), independently confirmed twice by the controller** (a full transitive-dependency
+grep of the real Cargo.toml files, and a direct WebFetch of Cargo's own reference
+documentation). Task 18 fixed `workspace_members_ok()`'s PackageId parsing so it can
+now correctly compare real cargo-metadata output against an `expected_members` list —
+but the `expected_members`/`reachable` lists themselves (Task 16's Stage B3 mutation
+step, Task 17's Stage C `expected_members` literal) hand-declare only 5 crates
+(`larql-cli, larql-boundary, larql-vindex-spec, larql-models, larql-compute`) as
+"larql-cli's real tree." Cargo's own documented rule (confirmed via WebFetch of
+`https://doc.rust-lang.org/cargo/reference/workspaces.html`): **"All path dependencies
+residing in the workspace directory automatically become members"** — the only
+override is an explicit `exclude` entry, which Stage B3 never adds. So every one of
+those 5 crates' own path dependencies gets silently pulled back in as a real workspace
+member regardless of the trimmed `members`/`default-members` arrays' literal contents.
+
+A full transitive-dependency closure over the real Cargo.toml files, starting from the
+5 hand-declared crates, was independently confirmed by the controller (direct grep of
+every crate's `Cargo.toml`, three rounds until the frontier of new path dependencies was
+empty) and separately by Task 18's own real-data replay (downloading Task 17's real
+`secondary-mutation` artifact from run `32409988443`, applying `full-mutation.patch` in
+a fresh checkout, and running real `cargo metadata --format-version 1 --no-deps`): the
+real, trimmed workspace has exactly **14 members**, not 5:
+
+```
+larql-boundary, larql-cli, larql-compute, larql-compute-metal, larql-core,
+larql-execution, larql-factory, larql-inference, larql-kv, larql-lql, larql-models,
+larql-router-protocol, larql-vindex, larql-vindex-spec
+```
+
+This exactly matches the original, proven `experiment-cuda-nvptx.yml` job's own
+13-crate `keep` set (`larql-boundary, larql-cli, larql-compute, larql-core,
+larql-execution, larql-factory, larql-inference, larql-kv, larql-lql, larql-models,
+larql-router-protocol, larql-vindex, larql-vindex-spec` — read directly from that job's
+own Stage-B3-equivalent step during Task 16's pre-flight review this session, but not
+cross-checked against the 5-crate list at the time — a real miss, now corrected here)
+plus `larql-compute-metal`, an *optional* path dependency of `larql-cli`
+(`larql-compute-metal = { path = "../larql-compute-metal", optional = true }`) that
+Cargo's implicit-membership rule pulls in as a real workspace member regardless of
+`optional = true` (optionality only affects whether it's compiled as a *dependency*,
+not whether it counts as a workspace *member*).
+
+**This is not a defect in the trim itself — it is a defect in the check's literal.**
+The 5 crates genuinely, correctly dropped by Stage B3's trim (`larql-demos`,
+`larql-server`, `larql-router`, `larql-python`, `model-compute`) are exactly the
+feature-unification polluters the original `experiment-cuda-nvptx.yml` job's own
+comments named as needing removal (`larql-server`'s HTTP stack, `larql-python`'s pyo3
+bindings pulling in default/std features transitively). Cargo's implicit-member
+mechanic didn't defeat Stage B3's purpose; it mechanically computed `larql-cli`'s true
+reachable dependency closure and correctly excluded everything genuinely outside it.
+No prior CI evidence from Tasks 16 or 17 is invalidated by this finding — this is
+Stage B3's *check* catching up to what its *trim* already correctly does.
+
+**Ruling on remediation (of three options Task 18's implementer raised):** fix
+`expected_members` to the real 14-name closure, sourced as a single new, shared,
+importable Python constant (following the `MUTATED_LIBRARY_CRATES` pattern already
+established in this file), not a fresh hand-typed guess and not a second hardcoded
+YAML literal. Adding an `exclude` list to force the trim down to literally 5 members
+was rejected — it would mutate reality to fit a wrong literal, defeating the mechanism
+for no benefit (the polluters are already gone). Weakening the postcondition to
+subset/containment semantics was also rejected — it would blunt the exact-witness
+promotion definition Task 4's whole design is built on.
+
+**Files:**
+- Modify: `scripts/target_analysis_promotion.py` (add `STAGE_B3_REACHABLE_CLOSURE`)
+- Modify: `tests/test_target_analysis_promotion.py` (add three regression tests)
+- Modify: `.github/workflows/target-analysis-pipeline.yml` (Stage B3's `reachable` list in the `secondary-mutate` job; `expected_members` in the `secondary-stage-c-and-promotion` job; one stale `# ... (Task 18 wires round-over-round)` comment left over from before this session's task-renumbering, corrected to `Task 20`)
+
+**Interfaces:**
+- Consumes: `workspace_members_ok(metadata, expected_members)` (Task 4, fixed by Task 18) — signature unchanged.
+- Produces: `STAGE_B3_REACHABLE_CLOSURE: tuple[str, ...]` (14 real crate names), importable from `scripts.target_analysis_promotion`, consumed by both the mutation step and the Stage C promotion step in the live workflow, and available to Task 20 if its round-over-round bookkeeping needs the same closure.
+
+- [ ] **Step 1: Reproduce the real, trimmed-workspace member list directly — do not trust this brief's list blindly**
+
+Download Task 17's real `secondary-mutation` artifact from run `32409988443` (the same
+one Task 18's own Step 8 already used). In a fresh checkout of the same commit Task 17
+tested against, apply `mutation/full-mutation.patch`, then run:
+```bash
+cargo metadata --format-version 1 --no-deps | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+id_to_name = {p['id']: p['name'] for p in data['packages']}
+names = sorted(id_to_name[m] for m in data['workspace_members'])
+print(len(names))
+print(names)
+"
+```
+Expected: `14` and exactly `['larql-boundary', 'larql-cli', 'larql-compute', 'larql-compute-metal', 'larql-core', 'larql-execution', 'larql-factory', 'larql-inference', 'larql-kv', 'larql-lql', 'larql-models', 'larql-router-protocol', 'larql-vindex', 'larql-vindex-spec']`. Confirm this before writing anything — it is the ground truth both the controller's own independent transitive-closure grep and Task 18's real-data replay already confirm.
+
+- [ ] **Step 2: Write the failing tests first (TDD) — reference the not-yet-existing constant**
+
+In `tests/test_target_analysis_promotion.py`, add this import to the existing import block at the top of the file:
+```python
+from scripts.target_analysis_promotion import (
+    STAGE_B3_REACHABLE_CLOSURE,
+    depth_advanced,
+    no_std_scaffold_ok,
+    serde_features_ok,
+    stage_b_lib_rs_filenames,
+    stage_promotes,
+    workspace_members_ok,
+)
+```
+(this replaces the existing `from scripts.target_analysis_promotion import (...)` block — just add `STAGE_B3_REACHABLE_CLOSURE,` alphabetically before `depth_advanced,`)
+
+Then add these three tests:
+```python
+def test_stage_b3_reachable_closure_matches_real_transitive_dependency_tree():
+    # Cargo's own documented rule ("All path dependencies residing in the
+    # workspace directory automatically become members") means the real,
+    # trimmed workspace has 14 members, not the 5 originally hand-declared
+    # as "larql-cli's real tree" (Task 16, Task 17) -- confirmed against
+    # real captured CI data from run 32409988443 (Task 17/Task 18) and an
+    # independent transitive-closure grep of the real Cargo.toml files,
+    # exactly matching the original, proven experiment-cuda-nvptx.yml job's
+    # own 13-crate `keep` set plus larql-compute-metal (an optional path
+    # dependency Cargo pulls in as a member regardless of `optional = true`).
+    assert set(STAGE_B3_REACHABLE_CLOSURE) == {
+        "larql-boundary", "larql-cli", "larql-compute", "larql-compute-metal",
+        "larql-core", "larql-execution", "larql-factory", "larql-inference",
+        "larql-kv", "larql-lql", "larql-models", "larql-router-protocol",
+        "larql-vindex", "larql-vindex-spec",
+    }
+    assert len(STAGE_B3_REACHABLE_CLOSURE) == 14
+
+
+def test_workspace_members_ok_true_for_real_trimmed_workspace_against_full_closure():
+    metadata = {
+        "packages": [
+            {"id": f"path+file:///repo/crates/{name}#0.1.0", "name": name}
+            for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+        "workspace_members": [
+            f"path+file:///repo/crates/{name}#0.1.0" for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+    }
+    assert workspace_members_ok(metadata, STAGE_B3_REACHABLE_CLOSURE) is True
+
+
+def test_workspace_members_ok_false_for_real_trimmed_workspace_against_old_5_crate_list():
+    # The bug this task fixes: the OLD hand-declared 5-crate expected list
+    # can never match the real, trimmed workspace's actual 14 members --
+    # this is exactly why Stage B3's promotion signal was doomed to read
+    # False even after Task 18's PackageId-parsing fix.
+    metadata = {
+        "packages": [
+            {"id": f"path+file:///repo/crates/{name}#0.1.0", "name": name}
+            for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+        "workspace_members": [
+            f"path+file:///repo/crates/{name}#0.1.0" for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+    }
+    old_wrong_expected = ["larql-cli", "larql-boundary", "larql-vindex-spec", "larql-models", "larql-compute"]
+    assert workspace_members_ok(metadata, old_wrong_expected) is False
+```
+
+- [ ] **Step 3: Run the tests, confirm they fail with a collection-time `ImportError` (RED)**
+
+Run: `python3 -m pytest tests/test_target_analysis_promotion.py -v`
+Expected: FAIL at collection — `ImportError: cannot import name 'STAGE_B3_REACHABLE_CLOSURE' from 'scripts.target_analysis_promotion'`. This confirms the test file is exercising code that doesn't exist yet, not a typo.
+
+- [ ] **Step 4: Add `STAGE_B3_REACHABLE_CLOSURE` to `scripts/target_analysis_promotion.py`**
+
+Add this immediately after the existing `STAGE_B_REPRESENTATIVE_CRATE` constant (before the `stage_b_lib_rs_filenames` function):
+```python
+# The real, transitive workspace-membership closure once Stage B3's trim runs --
+# NOT the 5 crates originally hand-declared as "larql-cli's real tree" (Task 16,
+# Task 17). Cargo's own documented rule ("All path dependencies residing in the
+# workspace directory automatically become members," confirmed against
+# https://doc.rust-lang.org/cargo/reference/workspaces.html) pulls path-dependency
+# crates back in regardless of what Stage B3's Cargo.toml edit lists in
+# `members`/`default-members`. Derived by a full transitive-dependency closure
+# over the real Cargo.toml files starting from the 5 originally hand-declared
+# crates (confirmed against real captured CI data from run 32409988443), and
+# independently matching the original, proven experiment-cuda-nvptx.yml job's
+# own 13-crate `keep` set plus larql-compute-metal (an optional path dependency
+# of larql-cli that Cargo pulls in as a member regardless of `optional = true`).
+STAGE_B3_REACHABLE_CLOSURE = (
+    "larql-boundary",
+    "larql-cli",
+    "larql-compute",
+    "larql-compute-metal",
+    "larql-core",
+    "larql-execution",
+    "larql-factory",
+    "larql-inference",
+    "larql-kv",
+    "larql-lql",
+    "larql-models",
+    "larql-router-protocol",
+    "larql-vindex",
+    "larql-vindex-spec",
+)
+```
+
+- [ ] **Step 5: Run the tests, confirm GREEN**
+
+Run: `python3 -m pytest tests/test_target_analysis_promotion.py -v`
+Expected: all tests pass, including the three new ones.
+
+- [ ] **Step 6: Wire the real closure into the live workflow — Stage B3's mutation step**
+
+In `.github/workflows/target-analysis-pipeline.yml`, in the `secondary-mutate` job's `"Stage B3: trim workspace members to larql-cli's real tree"` step, replace:
+```python
+          import re
+          from pathlib import Path
+
+          root_toml = Path("Cargo.toml")
+          text = root_toml.read_text(encoding="utf-8")
+          reachable = [
+              "crates/larql-cli", "crates/larql-boundary", "crates/larql-vindex-spec",
+              "crates/larql-models", "crates/larql-compute",
+          ]
+```
+with:
+```python
+          import re
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE
+
+          root_toml = Path("Cargo.toml")
+          text = root_toml.read_text(encoding="utf-8")
+          reachable = [f"crates/{name}" for name in STAGE_B3_REACHABLE_CLOSURE]
+```
+The rest of the step (the `members_block_fmt` computation and the `members`/`default-members` substitution loop) is unchanged — only the `reachable` list's source changes, from a hardcoded 5-name literal to the real 14-name closure.
+
+- [ ] **Step 7: Wire the real closure into the live workflow — Stage C's `expected_members`**
+
+In the same file, in the `secondary-stage-c-and-promotion` job's per-target Python heredoc (the one that writes `baseline-stage-b3-$TARGET.json`/`sibling-stage-b3-$TARGET.json`), add the import alongside the heredoc's existing imports:
+```python
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE
+
+          target = sys.argv[1]
+```
+(this adds two lines — `sys.path.insert(0, ".")` and the `from scripts...` import — right after the existing `from pathlib import Path` line and before `target = sys.argv[1]`)
+
+Then replace:
+```python
+          expected_members = ["larql-cli", "larql-boundary", "larql-vindex-spec", "larql-models", "larql-compute"]
+```
+with:
+```python
+          expected_members = list(STAGE_B3_REACHABLE_CLOSURE)
+```
+
+- [ ] **Step 8: Fix the stale task-number comment left over from this session's renumbering**
+
+In the same file, in the `depth_advanced` heredoc, replace:
+```python
+          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 18 wires round-over-round)
+```
+with:
+```python
+          baseline_messages = []  # first round: no prior-round Stage C output exists yet (Task 20 wires round-over-round)
+```
+(this task inserted ahead of the plan's former Task 19 "Recursive-round baseline handoff," renumbering it to Task 20 — this comment predates that renumbering)
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add scripts/target_analysis_promotion.py tests/test_target_analysis_promotion.py .github/workflows/target-analysis-pipeline.yml
+git commit -m "fix: Stage B3's expected_members/reachable list hand-declared 5 crates; the real transitive closure is 14"
+```
+
+- [ ] **Step 10: Real-data verification against Task 17's own already-captured artifacts (no new CI trigger required)**
+
+Using the same real `baseline-metadata.json` (from Task 17's `secondary-mutation` artifact, run `32409988443`) and the same real, mutated-tree `cargo metadata` output from Step 1 above, feed both through `stage_promotes("stage-b3", baseline_state, sibling_state)` with `expected_members = list(STAGE_B3_REACHABLE_CLOSURE)` in both states. Expected: `workspace_members_ok` reads `False` for the baseline (19 real unmutated members ≠ the 14-name closure) and `True` for the sibling (14 real trimmed members == the 14-name closure exactly), so `stage_promotes("stage-b3", ...)` reads `True` — the first genuine, real `False → True` stage promotion this pipeline has produced. This is the actual proof the fix works against reality, not just synthetic fixtures. Per the Task 11 → Task 12 and Task 17 → Task 18 precedent, this task's own real-CI push is deferred to Task 20's next natural pipeline run — commit this task's fix now; it will be pushed together with the controller's own already-staged, unpushed `ef8637f7` and Task 18's `3e5ad217` commits, not as a separate, dedicated push solely for this fix.
+
+---
+
+### Task 20: Recursive-round baseline handoff
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `next-round-baseline` job)
@@ -2703,7 +2984,7 @@ Push and confirm: `round-baseline` artifact is produced, `promoted` contains onl
 
 ---
 
-### Task 20: Secondary-layer test suite — noise floor, blast-radius containment, ephemerality
+### Task 21: Secondary-layer test suite — noise floor, blast-radius containment, ephemerality
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (add `secondary-layer-self-test` job)
@@ -2809,17 +3090,17 @@ Push and confirm: all three checks pass on the real pipeline as currently writte
 - Build-attempt `build_std` axis (user-directed correction to already-merged Task 8 work: of the four modes, only `none` has real, unconditional justification in the Primary layer — `std` was never justified either way, `core`/`core,alloc` are only meaningful post-mutation, which is exactly where Task 17's Stage C already runs them) → Task 15.
 - Secondary-layer mutation stages A/B/B2/B3 (with `background`/`wait` concurrency, target-independent, single job) → Task 16. Stage C (batched, applying the mutation patch — the critical bug this restructure fixes over the original per-target-matrixed draft) → Task 17.
 - The measurable-difference / promotion rule (this session's immediate deliverable) → Task 4 (script) and Task 17 (wiring, with mechanically-grounded b2/b3 baselines sourced from the Primary layer's own artifacts rather than fabricated).
-- Recursive round-over-round baseline handoff → Task 19. A real bug in the promotion rule's own already-merged code (`workspace_members_ok()` assumed an obsolete cargo PackageId string format, making Stage B3's verdict unconditionally `False` since Task 4 — surfaced by Task 17's first real exercise against actual `cargo metadata` output) → Task 18.
+- Recursive round-over-round baseline handoff → Task 20. A real bug in the promotion rule's own already-merged code (`workspace_members_ok()` assumed an obsolete cargo PackageId string format, making Stage B3's verdict unconditionally `False` since Task 4 — surfaced by Task 17's first real exercise against actual `cargo metadata` output) → Task 18. A second, distinct, deeper bug in the same area — Stage B3's `expected_members`/`reachable` lists hand-declare 5 crates, but Cargo's own documented implicit-workspace-membership rule means the real, trimmed tree has 14 members — surfaced by Task 18's own real-data verification → Task 19.
 - Error handling (honest-result pattern, retries narrow to network calls, platform-limit category) → reused directly from the proven `experiment-cuda-nvptx.yml` patterns in Tasks 8 and 17; the retry/platform-limit categories are not separately re-implemented since Tasks 7-9's probes don't call rate-limited external APIs beyond `rustc`/`cargo` — Discovery's crates.io/GitHub SBOM calls (mentioned in the spec's Discovery job description) are the one place a narrow retry would apply and are flagged here as **not yet implemented**: Task 5 only wires `rustc --print target-list`, not the crates.io/SBOM ecosystem-discovery calls. This is a real gap — added as a follow-up task below rather than silently left out.
-- Testing (noise floor, blast-radius, golden fixtures, ephemerality, cross-target/native comparison) → Task 20 covers noise floor, blast radius, ephemerality directly. Golden fixtures (`serde-nostd-probe`-style planted-outcome crates) and cross-target/native comparison are **not yet implemented** — flagged below.
-- Explicitly not doing (no caching, no CI commits, no agent curation presented as L1) → Global Constraints + Task 20's ephemerality check enforces the no-commits rule structurally.
+- Testing (noise floor, blast-radius, golden fixtures, ephemerality, cross-target/native comparison) → Task 21 covers noise floor, blast radius, ephemerality directly. Golden fixtures (`serde-nostd-probe`-style planted-outcome crates) and cross-target/native comparison are **not yet implemented** — flagged below.
+- Explicitly not doing (no caching, no CI commits, no agent curation presented as L1) → Global Constraints + Task 21's ephemerality check enforces the no-commits rule structurally.
 
-**Follow-up tasks not included in this plan** (real gaps, not placeholders — each needs its own task the way Tasks 1-19 are written, deferred here because this plan's immediate trigger was the promotion-rule definition, not full spec closure):
+**Follow-up tasks not included in this plan** (real gaps, not placeholders — each needs its own task the way Tasks 1-21 are written, deferred here because this plan's immediate trigger was the promotion-rule definition, not full spec closure):
 - Discovery job's crates.io/GitHub SBOM ecosystem-discovery calls, with narrow bounded retry on those specific network calls (spec: Components/Discovery job, Error handling/Retries).
 - Golden-fixture crates with a planted, known-in-advance outcome, generalizing `serde-nostd-probe` (spec: Testing).
-- Cross-target/cross-native comparison job, once the target matrix includes both nvptx and at least one native target's Stage C result for the same underlying finding (spec: Testing) — this is naturally sequenced after Tasks 1-19 produce enough real round data to compare, not before.
+- Cross-target/cross-native comparison job, once the target matrix includes both nvptx and at least one native target's Stage C result for the same underlying finding (spec: Testing) — this is naturally sequenced after Tasks 1-21 produce enough real round data to compare, not before.
 - The target-family tooling registry (curated, labeled L2, e.g. `os: cuda` → CUDA toolkit tooling) mentioned in Components/Discovery job.
-- Toolchain-pinning across jobs within a single run: each job independently runs `rustup toolchain install nightly`, which can resolve to different nightly builds if a run straddles a nightly release boundary (typically UTC midnight), producing spurious cross-job disagreement that Task 20's own noise-floor test is specifically designed to catch but not fix. Not blocking for this plan (the batching correction above already re-verified everything against real CI evidence); worth a dedicated fix (Discovery resolves and pins a specific nightly date, passed to every downstream job) before this pipeline is trusted for long-running, many-round recursive use.
+- Toolchain-pinning across jobs within a single run: each job independently runs `rustup toolchain install nightly`, which can resolve to different nightly builds if a run straddles a nightly release boundary (typically UTC midnight), producing spurious cross-job disagreement that Task 21's own noise-floor test is specifically designed to catch but not fix. Not blocking for this plan (the batching correction above already re-verified everything against real CI evidence); worth a dedicated fix (Discovery resolves and pins a specific nightly date, passed to every downstream job) before this pipeline is trusted for long-running, many-round recursive use.
 - `cargo-semver-checks` as a second target-independent check (Task 14's pattern) — needs a chosen baseline (last published crates.io version, or a specific git rev) before it can be built; not decided in this plan.
 - `cargo udeps` as a further target-independent check (Task 14's pattern), straightforward to add the same way as `fmt`.
 - `cargo miri`, corrected after an initial mischaracterization: Miri genuinely supports cross-target interpretation (`cargo miri test --target s390x-unknown-linux-gnu` is Miri's own documented example for big-endian testing — confirmed against Miri's real README, not assumed), so it belongs as a real axis crossed with `--target` (like `build_std`), not a single target-independent job like `fmt`. Detects out-of-bounds/use-after-free, uninitialized reads, misaligned access, invalid enum/bool discriminants, aliasing violations, memory leaks, and — directly relevant given probable async/concurrent components in this project — data races and weak-memory violations. Two real, confirmed limitations shape its scope: it does not support networking at all, and has very limited FFI access, meaning it will very likely fail against the native-link dependencies already confirmed real in this project (`openssl-sys`, `protobuf-src`, `onig_sys`, `ring`) — those failure points are themselves a mechanical way to locate exactly where behavior stops being portable/host-independent, not an incidental gap to route around. User directed: survey which of the 119 tier 1+2 targets Miri can actually interpret for (narrower than rustc's full codegen list) and which of `larql-cli`'s real dependencies hit the FFI/networking wall, before designing this as a task — not yet done.
