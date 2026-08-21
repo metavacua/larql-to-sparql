@@ -914,31 +914,97 @@ Push and confirm: real site keys for third-party dependency errors (e.g. `serde_
 
 ---
 
-### Task 12: Wire the genuinely installable runner dependencies for the ~57%-bucket target families
+### Task 12: Add a real runner-capability probe, then wire the genuinely installable runner dependencies for the ~57%-bucket target families from what it discovers
 
 **Real, exhaustively-researched finding (2026-08-21 audit).** Across all 119 real targets: ~57% (68 targets — linux-gnu, linux-musl, windows-gnu/gnullvm, android, most of wasm, freebsd, ohos, fuchsia, netbsd, redox, uefi) have a real, documented, standard installation method on `ubuntu-latest`; ~14% (17 — Apple family, windows-msvc) require a different runner OS or sit in commercial-toolchain/licensing-gray territory; ~29% (34 — bare-metal/no-std targets, nvptx, wasm32v1-none) are structurally blocked regardless of toolchain, since `std` has no implementation there at all. This task wires the cheapest, highest-value real fixes from the first bucket; it explicitly does not attempt the second or third.
 
+**Design ruling (user-directed, two messages, 2026-08-21): discover the runner's real capabilities once, mechanically, and let downstream jobs consume that discovery — rather than each job independently assuming or blindly attempting the same fix.** The user asked directly whether install/misconfiguration issues "can be resolved by the runners themselves in the workflows," then followed up: "there seems like more than enough information for the runners to pull the information they need to discover runner-configuration issues and update the workflow dynamically for downstream jobs." This task's design answers both messages concretely, with one constraint carried over unchanged from the rest of this plan: **the capability manifest this task produces gates provisioning only — it must never decide which targets get probed or which measurements run.** Standing Principle 3 requires every relevant probe to run unconditionally, every time; an absent toolchain is a real, recorded outcome for that target (a `ToolNotFound` build-script failure, same as today), not a reason to skip or relabel the measurement. What changes is only whether the pipeline additionally *tries to fix* the gap before that measurement runs, and whether it tries just once (mechanically, with evidence) instead of guessing three times over.
+
+Concretely: a new job, `runner-capability-probe`, runs once per workflow run, independent of the target matrix, and mechanically discovers two real facts about the actual runner image this run landed on — whether `ANDROID_NDK_HOME` really points at a real clang, and whether `gcc-mingw-w64-x86-64` has a real installable apt candidate — publishing both as job outputs and as an uploaded artifact (real L1 data: if a future `ubuntu-latest` image drops the NDK, this artifact's history shows exactly which run it happened on, which is the same kind of longitudinal signal Task 9's `cross_round_drift` relabeling already relies on). `build-attempt`, `dependency-graph`, and `secondary-stage-c-and-promotion` each consume that discovery instead of re-deriving it, and their own installs remain per-job (GitHub Actions gives every job, and every matrix instance within a job, its own fresh, unshared VM — there is no way to "install once, all jobs get it" without caching, which the Global Constraint above forbids; the value of discovering-once is not skipping installation, it's skipping the *redundant discovery* and the futile install attempts once the probe has already established a package isn't there).
+
+**The probe itself must be structurally unable to fail** — every command it runs is tolerant (`|| true` / `2>/dev/null`), and it always writes both outputs on every path, using an empty string or `false` to mean "not found," never a job failure. If the probe job failed outright, every job that depends on it would be skipped by default (GitHub's ordinary `needs:` semantics), silently dropping all three downstream jobs' worth of real experimental data for reasons that have nothing to do with the experiment — the same "completeness check as involuntary kill switch" defect class as I1, reintroduced in a new job if this invariant is skipped.
+
 **Files:**
-- Modify: `.github/workflows/target-analysis-pipeline.yml` (`build-attempt`, `dependency-graph`, and `secondary-stage-c-and-promotion`'s "Install nightly Rust" steps: add real toolchain installation for the families below)
+- Modify: `.github/workflows/target-analysis-pipeline.yml` (add job `runner-capability-probe`; modify `build-attempt`, `dependency-graph`, and `secondary-stage-c-and-promotion`'s `needs:` lists and their "Install nightly Rust" steps)
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: nothing new — this reduces irrelevant native-toolchain noise in the already-existing error/build-script-failure fields, it does not add new ones.
+- Produces: `needs.runner-capability-probe.outputs.android-ndk-clang-dir` (string, empty if absent) and `needs.runner-capability-probe.outputs.mingw-w64-installable` (string `"true"`/`"false"`) — consumed by the three jobs below. Also produces an uploaded artifact `runner-capabilities` (`out/runner-capabilities.json`) for longitudinal record-keeping; nothing downstream reads the artifact itself, only the job outputs.
 
-- [ ] **Step 1: Install mingw-w64 for the windows-gnu family (2 targets: i686-pc-windows-gnu, x86_64-pc-windows-gnu)**
+- [ ] **Step 1: Add the `runner-capability-probe` job**
 
-In each of the three jobs' "Install nightly Rust" steps, add:
-```bash
-          sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686
+Insert as a new top-level job (no `needs:` — it has no data dependency on `discovery` or anything else, so it runs from the start of the workflow in parallel with everything else):
+
+```yaml
+  runner-capability-probe:
+    name: Probe this run's real runner toolchain capabilities
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    outputs:
+      android-ndk-clang-dir: ${{ steps.probe.outputs.android-ndk-clang-dir }}
+      mingw-w64-installable: ${{ steps.probe.outputs.mingw-w64-installable }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe real runner capabilities -- structurally cannot fail; absence is data, never a job failure
+        id: probe
+        run: |
+          mkdir -p out
+          NDK_DIR=""
+          if [ -n "$ANDROID_NDK_HOME" ] && [ -d "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
+            NDK_DIR="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          else
+            echo "::warning::ANDROID_NDK_HOME is unset or its expected clang directory is missing on this real runner -- the audit's 'ubuntu-latest ships the NDK preinstalled' claim does not hold here."
+          fi
+          echo "android-ndk-clang-dir=$NDK_DIR" >> "$GITHUB_OUTPUT"
+
+          sudo apt-get update -qq || true
+          MINGW_OK="false"
+          if apt-cache policy gcc-mingw-w64-x86-64 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+            MINGW_OK="true"
+          else
+            echo "::warning::gcc-mingw-w64-x86-64 has no installable apt candidate on this runner (or apt-get update failed) -- windows-gnu targets will keep their real ToolNotFound errors."
+          fi
+          echo "mingw-w64-installable=$MINGW_OK" >> "$GITHUB_OUTPUT"
+
+          printf '{"android_ndk_clang_dir": "%s", "mingw_w64_installable": %s}\n' "$NDK_DIR" "$MINGW_OK" > out/runner-capabilities.json
+      - name: Upload the real runner-capability manifest (L1 data: what this run's own runner image actually had)
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-capabilities
+          path: out/runner-capabilities.json
 ```
 
-- [ ] **Step 2: Wire cc-rs to the Android NDK that GitHub's runner image already ships**
+Note the tightened apt-cache check: `grep -q 'Candidate: [0-9]'`, not a bare `grep -q "Candidate:"` — `apt-cache policy` prints `Candidate: (none)` for a known-but-uninstallable package, and a bare match on the literal `Candidate:` label would misread that as "installable."
 
-Confirmed via the audit: `ubuntu-latest` ships the Android SDK/NDK preinstalled (`ANDROID_NDK_HOME` env var present) — the real bug is that `cc-rs` is never pointed at it. Add, in the same three "Install nightly Rust" steps:
-```bash
-          echo "PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH" >> "$GITHUB_ENV"
+- [ ] **Step 2: Wire the three consumer jobs to depend on the probe and consume its outputs**
+
+In `.github/workflows/target-analysis-pipeline.yml`, add `runner-capability-probe` to the `needs:` array of `build-attempt` (currently `[discovery, target-capability, target-independent-checks]`), `dependency-graph` (currently `[discovery, target-independent-checks]`), and `secondary-stage-c-and-promotion` (currently `[discovery, indexing, secondary-mutate, dependency-graph, fetch-prior-round-baseline]`).
+
+In each of those three jobs, immediately after their existing "Install nightly Rust" step, add:
+
+```yaml
+      - name: Provision this job's runner from the probed capabilities (gates provisioning only -- never which targets get measured)
+        env:
+          ANDROID_NDK_CLANG_DIR: ${{ needs.runner-capability-probe.outputs.android-ndk-clang-dir }}
+          MINGW_W64_INSTALLABLE: ${{ needs.runner-capability-probe.outputs.mingw-w64-installable }}
+        run: |
+          if [ -n "$ANDROID_NDK_CLANG_DIR" ] && [ -d "$ANDROID_NDK_CLANG_DIR" ]; then
+            echo "PATH=$ANDROID_NDK_CLANG_DIR:$PATH" >> "$GITHUB_ENV"
+            echo "Android NDK confirmed present at $ANDROID_NDK_CLANG_DIR (per this run's own probe); cc-rs now wired to its clang."
+          else
+            echo "::warning::this job's own runner does not have the NDK clang dir the probe reported (image skew between jobs in this same run, or the probe found none) -- android targets keep their real ToolNotFound errors for this job."
+          fi
+
+          if [ "$MINGW_W64_INSTALLABLE" = "true" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+              || echo "::warning::mingw-w64 install failed on this job's own runner despite the probe finding a candidate -- transient apt issue, continuing; windows-gnu targets keep their real ToolNotFound errors for this job"
+          else
+            echo "::warning::probe found no installable mingw-w64 candidate on this run's runner image -- skipping the install attempt for this job; windows-gnu targets keep their real ToolNotFound errors"
+          fi
 ```
-This must use `$GITHUB_ENV` (not a plain shell export) to persist across subsequent steps in the same job, matching this pipeline's own established pattern (e.g. the `CRATES`/`fmt-crates` derivation, Task 20/21's `/simplify` pass).
+
+The re-check (`[ -d "$ANDROID_NDK_CLANG_DIR" ]`) before wiring PATH matters even though the probe already confirmed it: GitHub rolls runner-image updates progressively, so two jobs in the same workflow run can land on different image versions — the probe's output is a hint this step verifies locally, never a blind trust. Both branches use `$GITHUB_ENV`/`$GITHUB_OUTPUT` (not plain shell exports), matching this pipeline's own established pattern (e.g. the `CRATES`/`fmt-crates` derivation, Task 20/21's `/simplify` pass). Neither branch ever `exit 1`s — a loud diagnostic either way, never a reason to abort the batch and lose real data for every other target.
 
 - [ ] **Step 3: Confirm `rustup target add` (Task 1) already covers the wasm family's rustup-installable members**
 
@@ -950,12 +1016,12 @@ No new step needed here — `wasm32-unknown-unknown`, `wasm32-wasip1`, `wasm32-w
 python3 -c "import yaml; yaml.safe_load(open('.github/workflows/target-analysis-pipeline.yml')); print('YAML OK')"
 actionlint .github/workflows/target-analysis-pipeline.yml
 git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: install mingw-w64 and wire cc-rs to the runner's preinstalled Android NDK -- removes two real, irrelevant classes of native-toolchain noise from the error signal"
+git commit -m "feat: add a real runner-capability probe job and wire cc-rs/mingw-w64 provisioning to its discovery -- removes two real, irrelevant classes of native-toolchain noise from the error signal without hardcoding an unverified assumption in three places"
 ```
 
 - [ ] **Step 5: Push and verify on a real runner**
 
-Push and confirm: real Stage C / build-attempt output for `x86_64-pc-windows-gnu` and `aarch64-linux-android` no longer shows `ToolNotFound: aarch64-w64-mingw32-clang` / `ToolNotFound: aarch64-linux-android-clang`; confirm `larql-compute`'s own native build (the `csrc/q4_dot.c` kernel) now succeeds on `aarch64-linux-android` specifically (previously a real, confirmed build-script failure).
+Push and confirm, from the real job logs (not assumed): first, download the `runner-capabilities` artifact and report both fields exactly as discovered on this real run — whether the NDK was found and whether mingw-w64 had an installable candidate. If the NDK was found and each consumer job's own local re-check also confirmed it: confirm real Stage C / build-attempt output for `aarch64-linux-android` no longer shows `ToolNotFound: aarch64-linux-android-clang`, and confirm `larql-compute`'s own native build (the `csrc/q4_dot.c` kernel) now succeeds on that target specifically (previously a real, confirmed build-script failure). If the NDK was not found, or a consumer job's local re-check disagreed with the probe: report this as a real, open finding for the task reviewer and controller to adjudicate — it means the audit's citation does not hold for this runner image (or there is real image skew across jobs within one run), and Task 12's Android-NDK fix needs a different approach (e.g. a dedicated NDK-install action) before it can be considered complete for that family. Independently of the NDK outcome, confirm real Stage C / build-attempt output for `x86_64-pc-windows-gnu` no longer shows `ToolNotFound: aarch64-w64-mingw32-clang` if the probe reported mingw-w64 as installable.
 
 ---
 
