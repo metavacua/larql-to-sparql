@@ -35,16 +35,23 @@ from scripts.target_analysis_common import load_json, unit_graph_units_named
 
 # The exact feature set Stage B2 (secondary-mutate job) patches every
 # `serde = { workspace = true }` dependency line to -- single source of
-# truth for both the mutation's sed replacement and this postcondition.
+# truth for the mutation's sed replacement. NOT a source of truth for
+# serde_features_ok()'s postcondition any more: real cargo always adds
+# the implied `serde_derive` feature alongside `derive`, so an exact-set
+# comparison against this tuple can never be satisfied by a real,
+# correctly-patched unit graph (confirmed via real `--unit-graph` output,
+# 2026-08-21).
 STAGE_B2_SERDE_FEATURES = ("alloc", "derive")
 
 
 def serde_features_ok(unit_graph: dict[str, Any]) -> bool:
-    units = unit_graph_units_named(unit_graph, "serde")
-    if not units:
-        return False
-    expected = set(STAGE_B2_SERDE_FEATURES)
-    return all(set(unit.get("features", [])) == expected for unit in units)
+    for crate_name in ("serde", "serde_core"):
+        units = unit_graph_units_named(unit_graph, crate_name)
+        if not units:
+            return False
+        if any("std" in set(unit.get("features", [])) for unit in units):
+            return False
+    return True
 
 
 def workspace_members_ok(metadata: dict[str, Any], expected_members: list[str]) -> bool:

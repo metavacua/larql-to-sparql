@@ -15,7 +15,9 @@ def test_unit_graph_units_named_finds_serde_only():
     unit_graph = load_json(FIXTURES / "unit_graph_serde_default.json")
     units = unit_graph_units_named(unit_graph, "serde")
     assert len(units) == 1
-    assert units[0]["features"] == ["default", "std", "derive"]
+    # Real cargo (serde 1.0.228) unit-graph output, captured 2026-08-21 --
+    # see unit_graph_serde_default.json's own regeneration in Task 7.
+    assert units[0]["features"] == ["alloc", "default", "derive", "serde_derive", "std"]
 
 
 def test_unit_graph_units_named_returns_empty_for_absent_crate():

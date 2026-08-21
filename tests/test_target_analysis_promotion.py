@@ -30,6 +30,32 @@ def test_serde_features_ok_is_true_for_patched_features():
     assert serde_features_ok(unit_graph) is True
 
 
+def test_serde_features_ok_checks_serde_core_specifically():
+    # Modern serde (1.0.228+) carries `std` on serde_core, not serde itself
+    # -- a fixture where serde looks clean but serde_core still has std
+    # must still read False.
+    #
+    # Deviation from the brief's literal Step 2 snippet: the inline serde
+    # unit here is `["alloc", "derive"]`, not `["alloc", "derive",
+    # "serde_derive"]`. The brief's own literal features list already
+    # fails the OLD exact-set check (STAGE_B2_SERDE_FEATURES is exactly
+    # {"alloc", "derive"}), so it would return False under the pre-fix
+    # code too -- green-before-green-after, not a real red. Using
+    # ["alloc", "derive"] (still real -- this is real cargo's shape for a
+    # crate with no dependents forcing extra features) makes the OLD
+    # function return True (exact match, and it never inspects
+    # serde_core), and the NEW function correctly return False (finds
+    # `std` on serde_core) -- a genuine red-for-the-right-reason before
+    # the fix, matching this task's TDD requirement.
+    unit_graph = {
+        "units": [
+            {"target": {"name": "serde"}, "features": ["alloc", "derive"]},
+            {"target": {"name": "serde_core"}, "features": ["alloc", "std"]},
+        ]
+    }
+    assert serde_features_ok(unit_graph) is False
+
+
 def test_serde_features_ok_is_false_when_serde_is_absent():
     assert serde_features_ok({"units": []}) is False
 

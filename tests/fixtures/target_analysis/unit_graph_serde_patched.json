@@ -2,15 +2,20 @@
   "version": 1,
   "units": [
     {
-      "pkg_id": "serde 1.0.210",
+      "pkg_id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
       "target": {"kind": ["lib"], "name": "serde"},
-      "features": ["alloc", "derive"]
+      "features": ["alloc", "derive", "serde_derive"]
     },
     {
-      "pkg_id": "larql-cli 0.1.0",
-      "target": {"kind": ["bin"], "name": "larql-cli"},
+      "pkg_id": "registry+https://github.com/rust-lang/crates.io-index#serde_core@1.0.228",
+      "target": {"kind": ["lib"], "name": "serde_core"},
+      "features": ["alloc", "result"]
+    },
+    {
+      "pkg_id": "path+file:///home/metavacua/larql-upstream-2026-08-13/.worktrees/target-analysis-pipeline/crates/larql-nostd-canary#0.1.0",
+      "target": {"kind": ["lib"], "name": "larql_nostd_canary"},
       "features": []
     }
   ],
-  "roots": [1]
+  "roots": [2]
 }
