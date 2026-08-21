@@ -601,7 +601,18 @@ jobs:
           # [workspace.dependencies] entry itself sets it (confirmed via a
           # minimal isolated repro, 2026-08-21 review) -- patch it here too.
           sed -i -E "s/serde = \{ version = \"1\", features = \[\"derive\"\] \}/serde = { version = \"1\", default-features = false, features = [$FEATURES_TOML] }/" Cargo.toml
-          sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false }/' Cargo.toml
+          sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false, features = ["alloc"] }/' Cargo.toml
+          # thiserror defaults to its "std" feature (registry: default =
+          # ["std"], std = []) and Stage B2 has never patched it -- root-only
+          # is sufficient since every crate declares `thiserror = { workspace
+          # = true }` and inherits from here.
+          sed -i -E 's/^thiserror = "2"$/thiserror = { version = "2", default-features = false }/' Cargo.toml
+          # safetensors's own "std" feature (on by default) requires
+          # serde/default -- reactivating serde's std feature workspace-wide
+          # once larql-models is checked alongside the other mutated crates
+          # in one combined `cargo check` invocation (confirmed via
+          # `cargo tree -i serde -e features`, 2026-08-21 review).
+          sed -i -E 's/^safetensors = "0.7"$/safetensors = { version = "0.7", default-features = false, features = ["alloc"] }/' crates/larql-models/Cargo.toml
       - name: "Stage B3: trim workspace members to larql-cli's real tree"
         run: |
           python3 - <<'PYEOF'
