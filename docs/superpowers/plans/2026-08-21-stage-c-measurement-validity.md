@@ -31,7 +31,7 @@
 
 **Real bug, confirmed via the 2026-08-21 audit's own reproduction:** `grep -rn "rustup target add" .github/workflows/ scripts/` returns zero hits anywhere in this pipeline. `build-attempt` and `dependency-graph` both run real cross-target Cargo commands (`cargo check`, `cargo clippy`, `cargo build`, `cargo tree`, `cargo metadata --filter-platform`) without `-Z build-std` — meaning Cargo needs a prebuilt `core`/`std` sysroot for each target, which only exists after `rustup target add <target>`. Confirmed directly in a real job log: `cargo check --target aarch64-linux-android` (no build-std flag) fails immediately with `error[E0463]: can't find crate for 'core' ... consider downloading the target with 'rustup target add aarch64-linux-android'`. `rustup target list --toolchain nightly` confirms 118 of the 119 real targets in this pipeline's matrix are installable this way; the lone exception is `s390x-unknown-none-softfloat`, which rustup ships no component for at all.
 
-This is the Primary layer's own baseline measurement failing for a reason that has nothing to do with no_std/no_alloc portability — fixing it is a prerequisite for every later task in this plan, since Task 7's new unmutated-vs-mutated Stage C comparison needs the Secondary layer's own baseline pass to be measuring something real too.
+This is the Primary layer's own baseline measurement failing for a reason that has nothing to do with no_std/no_alloc portability — fixing it is a prerequisite for every later task in this plan, since Task 8's new unmutated-vs-mutated Stage C comparison needs the Secondary layer's own baseline pass to be measuring something real too.
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (`build-attempt` job's per-target loop; `dependency-graph` job's per-target loop)
@@ -247,7 +247,7 @@ A second, related bug in the same area: `secondary-layer-self-test`'s "Golden fi
 
 **Interfaces:**
 - Consumes: `no_std_scaffold_ok()` (Task 1's plan, unchanged — still checks the *final* content has both markers, regardless of which stage inserted which).
-- Produces: `insert_alloc_extern_crate(text: str) -> str`, `insert_no_std_attribute(text: str) -> str` (both replace `insert_no_std_scaffold`'s two real call sites — `secondary-mutate`'s Stage B and `secondary-layer-self-test`'s Golden fixture step. **Correction, ruled during implementation:** this plan's own Step 6 below requires leaving `secondary-layer-self-test`'s *separate* "Blast-radius containment" step untouched, and that step also calls `insert_no_std_scaffold` — deleting the function outright would therefore break Blast-radius before Task 11 gets to it, which is mutually exclusive with Step 6's own instruction. Resolution: `insert_no_std_scaffold` is kept as a thin, deprecated, provably byte-identical wrapper — `return insert_no_std_attribute(insert_alloc_extern_crate(text))` — so Blast-radius's existing call keeps working unchanged. Task 11 removes this wrapper together with updating Blast-radius's own call site, once that task touches this area for real.
+- Produces: `insert_alloc_extern_crate(text: str) -> str`, `insert_no_std_attribute(text: str) -> str` (both replace `insert_no_std_scaffold`'s two real call sites — `secondary-mutate`'s Stage B and `secondary-layer-self-test`'s Golden fixture step. **Correction, ruled during implementation:** this plan's own Step 6 below requires leaving `secondary-layer-self-test`'s *separate* "Blast-radius containment" step untouched, and that step also calls `insert_no_std_scaffold` — deleting the function outright would therefore break Blast-radius before Task 12 gets to it, which is mutually exclusive with Step 6's own instruction. Resolution: `insert_no_std_scaffold` is kept as a thin, deprecated, provably byte-identical wrapper — `return insert_no_std_attribute(insert_alloc_extern_crate(text))` — so Blast-radius's existing call keeps working unchanged. Task 12 removes this wrapper together with updating Blast-radius's own call site, once that task touches this area for real.
 
 - [ ] **Step 1: Mandatory local verification — confirm the hypothesis before writing any workflow change**
 
@@ -509,7 +509,7 @@ Then replace the entire "Golden fixture" step (which currently applies the *comb
           echo "Golden fixture passed: the known-good canary compiles cleanly under -Z build-std=core,alloc."
 ```
 
-Note the "Blast-radius containment" step (immediately before "Golden fixture" in this same job) still calls `insert_no_std_scaffold` too — leave it untouched for now; Task 11 (blast-radius containment, formerly Task 10) already has this step in its own scope and will need to account for the split there specifically. This task's scope is the ordering defect Task 2 found, not a blanket sweep of every remaining `insert_no_std_scaffold` reference — confirmed there is exactly one such reference left after this task's own 2 replacements (`secondary-mutate`'s Stage B, `secondary-layer-self-test`'s Golden fixture), in the Blast-radius step, correctly deferred.
+Note the "Blast-radius containment" step (immediately before "Golden fixture" in this same job) still calls `insert_no_std_scaffold` too — leave it untouched for now; Task 12 (blast-radius containment, formerly Task 11) already has this step in its own scope and will need to account for the split there specifically. This task's scope is the ordering defect Task 2 found, not a blanket sweep of every remaining `insert_no_std_scaffold` reference — confirmed there is exactly one such reference left after this task's own 2 replacements (`secondary-mutate`'s Stage B, `secondary-layer-self-test`'s Golden fixture), in the Blast-radius step, correctly deferred.
 
 - [ ] **Step 7: Validate and commit**
 
@@ -523,7 +523,7 @@ git commit -m "fix: split Stage A/B's scaffold insertion so std->alloc rewrites 
 
 - [ ] **Step 8: Push and confirm the real failure reason changes**
 
-Push and confirm on real CI: `secondary-mutate`'s "Stage A" step log now shows the previously-reverted fixes (`larql-vindex-spec`, `larql-models`, `larql-compute`, `larql-nostd-canary`) actually persisting (`git diff`/`Fixed ...` output for each, not just `larql-boundary`); the golden-fixture self-test step's real failure reason (if it still fails) has changed from the E0433 ordering error to something else entirely — report the exact new reason in the ledger, since Stage C still checking `-p larql-cli` (fixed next, in Task 4) may still be masking full success at this point. Do not expect a full GREEN yet — this task's acceptance criterion is that the *real, previously-silent* Stage A persistence defect is now visibly gone from the log, not that the golden fixture fully passes (that is Task 9's own gate).
+Push and confirm on real CI: `secondary-mutate`'s "Stage A" step log now shows the previously-reverted fixes (`larql-vindex-spec`, `larql-models`, `larql-compute`, `larql-nostd-canary`) actually persisting (`git diff`/`Fixed ...` output for each, not just `larql-boundary`); the golden-fixture self-test step's real failure reason (if it still fails) has changed from the E0433 ordering error to something else entirely — report the exact new reason in the ledger, since Stage C still checking `-p larql-cli` (fixed next, in Task 4) may still be masking full success at this point. Do not expect a full GREEN yet — this task's acceptance criterion is that the *real, previously-silent* Stage A persistence defect is now visibly gone from the log, not that the golden fixture fully passes (that is Task 10's own gate).
 
 ---
 
@@ -656,11 +656,134 @@ git commit -m "fix: Stage B2 now patches the root workspace manifest's serde/ser
 
 - [ ] **Step 5: Push and re-run the golden fixture and Stage B2's own postcondition, record the new result**
 
-Push and confirm: real Stage B2 mutation now touches the root `Cargo.toml` (check `full-mutation.patch` for a real root-manifest hunk); real `cargo metadata`/unit-graph output for the mutated tree shows `serde`/`serde_core` no longer carrying `std`, for at least the targets where the build gets far enough to resolve them. Note in the ledger whether `stage-b2`'s promotion verdict changes real-CI values yet (it may not, until Task 6 also fixes `serde_features_ok()`'s own unsatisfiable check).
+Push and confirm: real Stage B2 mutation now touches the root `Cargo.toml` (check `full-mutation.patch` for a real root-manifest hunk); real `cargo metadata`/unit-graph output for the mutated tree shows `serde`/`serde_core` no longer carrying `std`, for at least the targets where the build gets far enough to resolve them. Note in the ledger whether `stage-b2`'s promotion verdict changes real-CI values yet (it may not, until Task 7 also fixes `serde_features_ok()`'s own unsatisfiable check).
 
 ---
 
-### Task 6: Fix `serde_features_ok()`'s unsatisfiable exact-set check, and regenerate its test fixture from real cargo output
+### Task 6: Fix Stage B2's remaining std-defaulting dependency gaps — serde_json's missing `alloc` feature, `thiserror` never patched, and `safetensors` reactivating serde's `std` feature
+
+**Real, confirmed defect, found by locally reproducing Task 5's fix and Stage C's exact invocation shape (not by transferring an untested precedent — see the ruling below).** Task 5's root-manifest patch correctly disables serde's/serde_json's default features, but real CI (run 32525010769) still shows `serde_core` failing with `error[E0463]: can't find crate for 'std'` on every target, 0/12 targets in batch-0 showing `promotes: true` for Stage B2. Direct local reproduction — applying Task 5's exact sed commands to this repo, then running the exact `cargo +nightly check $CHECK_PACKAGES --target <target> -Z build-std=core,alloc --keep-going` command Stage C invokes, against a genuinely no_std bare target (`thumbv7em-none-eabihf`) — isolated three independent, concrete causes, confirmed one at a time:
+
+1. **`serde_json`'s patch disables default features but never enables `alloc`.** `serde_json = { version = "1", default-features = false }` leaves it with *no* feature enabled at all (registry `Cargo.toml` confirms `alloc = ["serde_core/alloc"]` exists as a real, separate feature, distinct from `default = ["std"]`). Real error observed: `serde_json requires that either 'std' (default) or 'alloc' feature is enabled`. This is a bug in Task 5's own plan-text (the sed's replacement string), not a deviation by Task 5's implementer — it transcribed the brief faithfully.
+2. **`thiserror` is never patched at all.** The root manifest's `thiserror = "2"` still defaults to its `std` feature (registry `Cargo.toml`: `default = ["std"]`, `std = []`) — Stage B2 has only ever targeted serde/serde_json. Real error observed: `error[E0463]: can't find crate for 'std'` inside `thiserror`'s own source.
+3. **`larql-models`'s `safetensors = "0.7"` dependency reactivates serde's `std` feature workspace-wide.** `safetensors`'s own `std` feature (on by default) explicitly requires `serde/default` (registry: `std = ["serde/default", "serde_json/default"]`). Because Stage C checks all 5 mutated crates in one combined `cargo check -p A -p B -p C -p D -p E` invocation, resolver v2 unifies this into the single shared `serde` used by every package in that command — reactivating `std` for `larql-boundary`, `larql-vindex-spec`, and the golden fixture too, not just for `larql-models` itself. Confirmed directly via `cargo tree -p <all 5> -i serde -e features`: once (1) and (2) above were fixed, `safetensors feature "std"` was the *only* remaining path to `serde feature "std"` in the trace; patching `safetensors` in `larql-models`'s own `Cargo.toml` removed it from the trace entirely, and a before/after combined `cargo check` confirmed `serde_json` and `safetensors` no longer appear anywhere in the `could not compile` set once all three fixes below are applied together.
+
+**Ruling: `-Z avoid-dev-deps` does not apply here and is not part of this fix.** An earlier hypothesis — drawn from this repo's own history, commit `0647e056` on `experiment/cuda-nvptx-lint-build`, which diagnosed and fixed an apparently identical "serde carries `std`" symptom with this flag — was tested directly against this repo's current Stage C invocation shape and falsified: the exact same `cargo check -p <crate> --lib --target ... -Z build-std=core,alloc --keep-going` command produced byte-identical error sets with and without `-Z avoid-dev-deps`, both before these fixes (with `thiserror`/`serde_json` still broken) and after (with all three fixes applied, 9 `E0463` errors either way, all attributable to unmutated source or genuinely OS-dependent transitive crates, never to serde/serde_json/thiserror/safetensors). Verified on `cargo 1.97.1` / `rustc 1.100.0-nightly`. The real cause here is a *normal*-dependency edge (`larql-models` → `safetensors` → `serde/default`), not dev-dependency feature unification bleeding past a `--lib`-only build — resolver v2 does not unify dev-dependency features into a plain `cargo check` with no test/bench targets requested, which is also why `criterion` appearing in `cargo tree`'s display (via `ciborium`/`tinytemplate`) was a red herring rather than the actual mechanism. `-Z avoid-dev-deps` was never going to touch a normal-dependency edge. Do not reintroduce this flag on the strength of the historical precedent alone; if a similar symptom resurfaces, re-derive from this repo's own real invocation and `cargo tree` trace, not the other experiment's commit message.
+
+**Expected outcome after this task (state this precisely — a fourth over- or under-claiming report is exactly what this section exists to prevent):**
+- All 5 mutated crates become real compile targets in Stage C's output for every target (visibility). `larql-boundary`, `larql-vindex-spec`, and the golden fixture no longer fail on the shared-dependency `serde_core`/`serde_json`/`thiserror`/`safetensors` wall; whatever they fail on instead is *their own* code (real, and expected — Stage A's clippy-fix and Stage B's `#![no_std]` insertion already run before Stage C in real CI, unlike this task's own local verification, which does not run them and will still show `#![no_std]`-scaffold-shaped errors as pure local noise).
+- `larql-models` and `larql-compute` will very likely still show real, non-serde compile errors — `ndarray`'s own `default = ["std"]` (no `alloc`-only path exists in its feature list), plus `rayon`/`crossbeam-utils`/`memmap2`/`matrixmultiply` (OS-dependent, structurally incompatible with a bare `core`+`alloc` build regardless of any feature flag). **This is real, correct signal, not a regression and not evidence this task failed — do not patch further to chase these; they are out of scope for Stage B2, which exists to fix std-*defaulting* (feature-flag-controllable) dependencies, not std-*requiring* (structurally OS-dependent) ones.**
+- `promotion-stage-b2-<target>.json`'s `promotes` verdict may *still* read `false` across the board even after this task, real CI included. That is expected and is not this task's concern: `serde_features_ok()`'s own unsatisfiable exact-set check (Task 7, next) is what currently makes `promotes` unreachable regardless of the real underlying data. A false `promotes` verdict here is not evidence this task failed.
+
+**Files:**
+- Modify: `.github/workflows/target-analysis-pipeline.yml` (`secondary-mutate`'s "Stage B2: patch std-defaulting dependency features" step)
+
+**Interfaces:**
+- Consumes: `FEATURES_TOML` (already computed in this step, Task 5).
+- Produces: nothing new — extends the same mutation mechanism Task 5 already established.
+
+- [ ] **Step 1: Fix the serde_json replacement text to enable `alloc`**
+
+In `.github/workflows/target-analysis-pipeline.yml`, in Stage B2, find the line Task 5 added:
+```bash
+          sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false }/' Cargo.toml
+```
+Replace it with:
+```bash
+          sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false, features = ["alloc"] }/' Cargo.toml
+```
+(The match pattern is unchanged — `serde_json = "1"` is what a fresh checkout's root manifest actually has; only the replacement text changes.)
+
+- [ ] **Step 2: Add a new sed to patch `thiserror` at the root manifest**
+
+Immediately after the line from Step 1, add:
+```bash
+          # thiserror defaults to its "std" feature (registry: default =
+          # ["std"], std = []) and Stage B2 has never patched it -- root-only
+          # is sufficient since every crate declares `thiserror = { workspace
+          # = true }` and inherits from here.
+          sed -i -E 's/^thiserror = "2"$/thiserror = { version = "2", default-features = false }/' Cargo.toml
+```
+
+- [ ] **Step 3: Add a new sed to patch `safetensors`, scoped to `larql-models`'s own `Cargo.toml`**
+
+`safetensors` is a direct (non-workspace-shared) dependency of `larql-models` only — add a separate, crate-scoped sed after the existing per-crate `find crates -name Cargo.toml ...` line:
+```bash
+          # safetensors's own "std" feature (on by default) requires
+          # serde/default -- reactivating serde's std feature workspace-wide
+          # once larql-models is checked alongside the other mutated crates
+          # in one combined `cargo check` invocation (confirmed via
+          # `cargo tree -i serde -e features`, 2026-08-21 review).
+          sed -i -E 's/^safetensors = "0.7"$/safetensors = { version = "0.7", default-features = false, features = ["alloc"] }/' crates/larql-models/Cargo.toml
+```
+
+- [ ] **Step 4: Validate YAML and confirm all three sed patterns match the real current manifests**
+
+```bash
+grep -n "^serde_json\|^thiserror" Cargo.toml
+grep -n "^safetensors" crates/larql-models/Cargo.toml
+```
+Expected:
+```
+serde_json = "1"
+thiserror = "2"
+```
+and
+```
+safetensors = "0.7"
+```
+Then:
+```bash
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/target-analysis-pipeline.yml')); print('YAML OK')"
+actionlint .github/workflows/target-analysis-pipeline.yml
+```
+
+- [ ] **Step 5: Local dry-run against copies of the real manifests, confirming all three patches apply and produce valid TOML**
+
+```bash
+cp Cargo.toml /tmp/root-dryrun.toml
+cp crates/larql-models/Cargo.toml /tmp/models-dryrun.toml
+sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false, features = ["alloc"] }/' /tmp/root-dryrun.toml
+sed -i -E 's/^thiserror = "2"$/thiserror = { version = "2", default-features = false }/' /tmp/root-dryrun.toml
+sed -i -E 's/^safetensors = "0.7"$/safetensors = { version = "0.7", default-features = false, features = ["alloc"] }/' /tmp/models-dryrun.toml
+grep -n "^serde_json\|^thiserror" /tmp/root-dryrun.toml
+grep -n "^safetensors" /tmp/models-dryrun.toml
+python3 -c "import tomllib; tomllib.load(open('/tmp/root-dryrun.toml', 'rb')); tomllib.load(open('/tmp/models-dryrun.toml', 'rb')); print('valid TOML after patch')"
+rm /tmp/root-dryrun.toml /tmp/models-dryrun.toml
+```
+Expected: `serde_json = { version = "1", default-features = false, features = ["alloc"] }`, `thiserror = { version = "2", default-features = false }`, `safetensors = { version = "0.7", default-features = false, features = ["alloc"] }`, and `valid TOML after patch`.
+
+- [ ] **Step 6: Local end-to-end verification — apply all three patches directly and run the real combined Stage C invocation**
+
+```bash
+sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false, features = ["alloc"] }/' Cargo.toml
+sed -i -E 's/^thiserror = "2"$/thiserror = { version = "2", default-features = false }/' Cargo.toml
+sed -i -E 's/^safetensors = "0.7"$/safetensors = { version = "0.7", default-features = false, features = ["alloc"] }/' crates/larql-models/Cargo.toml
+# Task 5's own serde patch too, since a real fresh checkout would already have it committed:
+sed -i -E 's/^serde = \{ version = "1", features = \["derive"\] \}$/serde = { version = "1", default-features = false, features = ["alloc", "derive"] }/' Cargo.toml
+
+rustup target add thumbv7em-none-eabihf --toolchain nightly  # any genuinely no_std bare target works for this check
+cargo +nightly check -p larql-boundary -p larql-vindex-spec -p larql-models -p larql-compute -p larql-nostd-canary \
+  --target thumbv7em-none-eabihf -Z build-std=core,alloc --keep-going --message-format=short 2>&1 | grep "could not compile"
+
+git checkout -- Cargo.toml crates/larql-models/Cargo.toml  # revert -- this step is local verification only, not a commit
+```
+Expected: `serde_json` and `safetensors` do NOT appear anywhere in the `could not compile` output. (`larql-boundary`, `larql-vindex-spec`, and `larql-nostd-canary` will still show `could not compile` here, on their own source — this local check has not run Stage A's clippy-fix or Stage B's `#![no_std]` insertion, so this is expected local-only noise, not a sign this fix is wrong. `larql-models`/`larql-compute`'s own transitive `ndarray`/`rayon`/`crossbeam-utils`/`memmap2`/`matrixmultiply` failures are also expected here, per this task's "Expected outcome" section above.)
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add .github/workflows/target-analysis-pipeline.yml
+git commit -m "fix: Stage B2 missed serde_json's alloc feature, never patched thiserror, and never patched safetensors' std-reactivating default feature"
+```
+
+- [ ] **Step 8: Push and re-run, record the real CI result**
+
+Push and confirm via real CI: `full-mutation.patch` shows all three new hunks applied; `stage-c-<target>.json` for at least one previously-all-serde_core-blocked target now shows `larql-boundary`/`larql-vindex-spec`/the golden fixture reached as real compile targets with errors (if any) attributable to their own code, not `serde_core`/`serde_json`/`thiserror`/`safetensors`. Record in the ledger whether `larql-models`/`larql-compute` show the expected `ndarray`/`rayon`-family errors instead of the old universal `serde_core` wall (either outcome here is fine per this task's "Expected outcome" section — only a *recurrence* of the `serde_core`/`serde_json`/`thiserror`/`safetensors` failure signature would mean this task itself failed).
+
+---
+
+### Task 7: Fix `serde_features_ok()`'s unsatisfiable exact-set check, and regenerate its test fixture from real cargo output
 
 **Real, confirmed defect (C6).** `serde_features_ok()` requires `set(unit["features"]) == {"alloc", "derive"}` exactly. Real cargo always resolves the `derive` feature into `['alloc', 'derive', 'serde_derive']` — the implied `serde_derive` feature is always present alongside `derive`. Running the shipped function against a corrected, provably std-free real unit graph (post-Task-4 fix) still returns `False`, because of this exact-equality mismatch — meaning even a *perfectly successful* Stage B2 mutation could never satisfy this check as written. A second, independent defect in the same function: it only inspects the unit named `serde`, while the unit that actually carries `std` in modern serde (1.0.228+) is `serde_core`. A third: `tests/fixtures/target_analysis/unit_graph_serde_patched.json` is hand-invented (an obsolete `"pkg_id": "serde 1.0.210"` format; a `"features": ["alloc", "derive"]` list missing the implied feature real cargo always emits) rather than captured from real output — the same defect class already ruled on once in this plan's history (Task 18, `workspace_members_ok`'s obsolete-PackageId-format bug), recurring for the same root reason: a fixture invented by hand instead of captured from a real run.
 
@@ -673,13 +796,16 @@ Push and confirm: real Stage B2 mutation now touches the root `Cargo.toml` (chec
 - Consumes: `unit_graph_units_named()` (Task 1, unchanged signature).
 - Produces: `serde_features_ok(unit_graph) -> bool` — same signature, corrected semantics: "does `std` appear in either `serde`'s or `serde_core`'s resolved features," not "does `serde`'s feature set equal an exact literal."
 
-- [ ] **Step 1: Capture real cargo unit-graph output for both the unpatched and patched (post-Task-4) manifests**
+- [ ] **Step 1: Capture real cargo unit-graph output for both the unpatched and patched (post-Task-6) manifests**
 
-In a scratch checkout with Task 5's fix applied and Stage A/B/B2 mutation run for real (or via a local dry-run of the same commands), capture:
+**Amended (2026-08-21 review): use `CHECK_PACKAGES` (the 5 mutated crates, per Task 4's fix), not `-p larql-cli` — `larql-cli`'s own dependency closure is exactly the noise Task 4 removed Stage C from measuring, and capturing this fixture against it would reintroduce that noise into the regenerated fixture. Likewise, "Task 5's root-manifest patch" alone is insufficient — Task 6 found and fixed two more gaps (`serde_json`'s missing `alloc` feature, `thiserror` never patched) plus a third (`safetensors` in `larql-models`) that only manifests when all 5 crates are resolved together. Apply all of Task 5's and Task 6's real patches before capturing "patched," or this fixture bakes in the same contamination Task 6 just removed.**
+
+In a scratch checkout with Tasks 5 and 6's fixes applied and Stage A/B/B2 mutation run for real (or via a local dry-run of the same commands), capture:
 ```bash
-cargo +nightly build -Z unstable-options --unit-graph -p larql-cli --target x86_64-unknown-linux-gnu > /tmp/real-unit-graph-unpatched.json
-# ... apply Task 5's root-manifest patch locally ...
-cargo +nightly build -Z unstable-options --unit-graph -p larql-cli --target x86_64-unknown-linux-gnu > /tmp/real-unit-graph-patched.json
+CHECK_PACKAGES="-p larql-boundary -p larql-vindex-spec -p larql-models -p larql-compute -p larql-nostd-canary"
+cargo +nightly build -Z unstable-options --unit-graph $CHECK_PACKAGES --target x86_64-unknown-linux-gnu > /tmp/real-unit-graph-unpatched.json
+# ... apply Task 5's serde patch AND Task 6's serde_json/thiserror/safetensors patches locally (all four) ...
+cargo +nightly build -Z unstable-options --unit-graph $CHECK_PACKAGES --target x86_64-unknown-linux-gnu > /tmp/real-unit-graph-patched.json
 python3 -c "
 import json
 for label, path in [('unpatched', '/tmp/real-unit-graph-unpatched.json'), ('patched', '/tmp/real-unit-graph-patched.json')]:
@@ -769,7 +895,7 @@ Push and confirm: with Task 5's manifest fix and this task's postcondition fix b
 
 ---
 
-### Task 7: Add a genuine within-run unmutated-vs-mutated Stage C comparison
+### Task 8: Add a genuine within-run unmutated-vs-mutated Stage C comparison
 
 **Real, confirmed defect (C1 and C2), the largest structural gap.** `secondary-stage-c-and-promotion` checks out the repo, downloads the mutation patch, and applies it (`git apply mutation/full-mutation.patch`) *before* Stage C ever runs — there is no point in this job's lifecycle where a pristine, unmutated checkout is available to compare against. Instead, Stage C's "baseline" is `prior_round[...][target]["sibling_sites"]` — the *previous round's already-mutated* output. Since `secondary-mutate` never reads the prior round's baseline (`needs: [discovery, indexing]` only) and Stages A/B/B2/B3 are deterministic and unconditional, round N+1's mutated tree is byte-for-byte identical to round N's, forever — confirmed directly: real data across all 7 audited runs shows `baseline_site_count == sibling_site_count` exactly, set-identical, not merely numerically equal, for every one of 833 real target-measurements. **The comparison the pipeline actually computes is a mathematical fixed point by construction; it was never capable of detecting progress, independent of any toolchain issue.**
 
@@ -832,7 +958,7 @@ with:
           baseline_sites = error_sites(baseline_messages)
           sibling_sites = error_sites(sibling_messages)
 ```
-This is now a genuine, real, within-run unmutated-vs-mutated comparison — the primary, load-bearing progress signal. The cross-run `prior-round-baseline` mechanism is not deleted in this task (see Task 10, which explicitly re-scopes it as a separate, secondary, honestly-labeled longitudinal signal rather than removing working infrastructure).
+This is now a genuine, real, within-run unmutated-vs-mutated comparison — the primary, load-bearing progress signal. The cross-run `prior-round-baseline` mechanism is not deleted in this task (see Task 11, which explicitly re-scopes it as a separate, secondary, honestly-labeled longitudinal signal rather than removing working infrastructure).
 
 - [ ] **Step 4: Validate YAML and heredoc syntax locally**
 
@@ -855,7 +981,7 @@ Push and confirm: `baseline-out/stage-c-$TARGET.json` and `out/stage-c-$TARGET.j
 
 ---
 
-### Task 8: Make spanless errors and build-script failures count as real signal instead of disappearing
+### Task 9: Make spanless errors and build-script failures count as real signal instead of disappearing
 
 **Real, confirmed defect (C4), plus an independently-found deeper case.** `error_sites()` only records a site when an error-level message has a primary span. Real data: `x86_64-unknown-linux-gnu`'s Stage C output has 51 real error-level messages, all spanless (`duplicate lang item in crate 'core' (which 'std' depends on): 'sized'`, the classic `-Z build-std` × prebuilt-sysroot collision) -- the recorded verdict is `sibling_site_count: 0`, byte-identical to what a genuinely clean, successful build would produce. Deeper still: a real build-script failure (confirmed directly, `larql-compute`'s own `csrc/q4_dot.c` native build failing on `aarch64-linux-android` for real: `error: failed to run custom build command for 'larql-compute v0.2.0' ... process didn't exit successfully ... exit status: 1`) doesn't appear in the compiler-message JSON stream *at all* -- it is raw, non-JSON stderr text, invisible to `error_sites()`/`count_errors_by_target()` no matter how they're extended, since Stage C's current invocation only redirects stdout (`> "out/stage-c-$TARGET.json"`, no `2>&1`).
 
@@ -923,7 +1049,7 @@ Expected: all pass, including `test_error_sites_extracts_only_error_level_primar
 
 - [ ] **Step 5: Capture stderr from both Stage C passes (baseline and sibling) into separate files**
 
-In `.github/workflows/target-analysis-pipeline.yml`, in Task 7's new baseline-pass step, change:
+In `.github/workflows/target-analysis-pipeline.yml`, in Task 8's new baseline-pass step, change:
 ```bash
             cargo +nightly check $CHECK_PACKAGES --target "$TARGET" \
               -Z build-std=core,alloc --keep-going --message-format=json \
@@ -950,7 +1076,7 @@ to:
 
 - [ ] **Step 6: Fold build-script failures into the depth_advanced computation**
 
-In the same file, in the final per-target Python heredoc, after computing `baseline_sites`/`sibling_sites` (per Task 7 Step 3), add:
+In the same file, in the final per-target Python heredoc, after computing `baseline_sites`/`sibling_sites` (per Task 8 Step 3), add:
 ```python
           def build_script_failures(stderr_path):
               text = Path(stderr_path).read_text(encoding="utf-8") if Path(stderr_path).exists() else ""
@@ -981,13 +1107,13 @@ Push and confirm: `x86_64-unknown-linux-gnu`'s real `sibling_site_count` is now 
 
 ---
 
-### Task 9: Re-run the golden fixture on real CI and confirm it passes -- this plan's acceptance test
+### Task 10: Re-run the golden fixture on real CI and confirm it passes -- this plan's acceptance test
 
 **Files:** none (verification-only task).
 
 **Interfaces:** none new.
 
-- [ ] **Step 1: Push the accumulated commits from Tasks 1-8 if not already pushed, and trigger a real run**
+- [ ] **Step 1: Push the accumulated commits from Tasks 1-9 if not already pushed, and trigger a real run**
 
 ```bash
 git push fork sdd/target-analysis-pipeline:experiment/target-analysis-pipeline
@@ -1006,17 +1132,17 @@ gh api "/repos/metavacua/larql-to-sparql/actions/jobs/$JOB_ID/logs" | grep -A5 "
 
 - [ ] **Step 3: Confirm the golden-fixture check now passes**
 
-Expected real output: `Golden fixture passed: the known-good canary compiles cleanly under -Z build-std=core,alloc.` If it still fails, read the real captured `canary-check.json` from the job's artifact and diagnose against this plan's own tasks -- do not proceed to Task 10 until this genuinely passes on real CI. This is the plan's own acceptance criterion: a green golden fixture is required evidence that Tasks 1-8 collectively restored the measurement's capacity to report a correct result, not merely that each task's own narrower local check passed.
+Expected real output: `Golden fixture passed: the known-good canary compiles cleanly under -Z build-std=core,alloc.` If it still fails, read the real captured `canary-check.json` from the job's artifact and diagnose against this plan's own tasks -- do not proceed to Task 11 until this genuinely passes on real CI. This is the plan's own acceptance criterion: a green golden fixture is required evidence that Tasks 1-9 collectively restored the measurement's capacity to report a correct result, not merely that each task's own narrower local check passed.
 
 - [ ] **Step 4: Ledger the result**
 
-Record in `.superpowers/sdd/2026-08-16-target-analysis-pipeline/progress.md`: the real run ID, the golden fixture's real pass/fail history across this plan's pushes (Task 2's RED, and the real reason it changed or didn't after each of Tasks 4-8), and the final confirmed GREEN.
+Record in `.superpowers/sdd/2026-08-16-target-analysis-pipeline/progress.md`: the real run ID, the golden fixture's real pass/fail history across this plan's pushes (Task 2's RED, and the real reason it changed or didn't after each of Tasks 4-9), and the final confirmed GREEN.
 
 ---
 
-### Task 10: Re-scope the cross-round baseline handoff as an explicit, separate longitudinal-drift signal
+### Task 11: Re-scope the cross-round baseline handoff as an explicit, separate longitudinal-drift signal
 
-**Rationale.** Task 7 gives the pipeline a genuine within-run progress signal for the first time. The existing cross-run `fetch-prior-round-baseline`/`next-round-baseline` mechanism (Tasks 20-21 of the original plan) is real, working infrastructure -- it should not be deleted -- but per the spec's own Principle 4 ("no aggregation step collapses one probe's verdict into another's"), it must not be presented as equivalent to the new within-run comparison. Its actual, honest purpose going forward: detecting drift across calendar time (toolchain updates, registry version bumps) between otherwise-identical mutated-tree checks, a genuinely different question from "did this round's mutation improve on this round's own baseline."
+**Rationale.** Task 8 gives the pipeline a genuine within-run progress signal for the first time. The existing cross-run `fetch-prior-round-baseline`/`next-round-baseline` mechanism (Tasks 20-21 of the original plan) is real, working infrastructure -- it should not be deleted -- but per the spec's own Principle 4 ("no aggregation step collapses one probe's verdict into another's"), it must not be presented as equivalent to the new within-run comparison. Its actual, honest purpose going forward: detecting drift across calendar time (toolchain updates, registry version bumps) between otherwise-identical mutated-tree checks, a genuinely different question from "did this round's mutation improve on this round's own baseline."
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (`next-round-baseline`'s fold step: rename the folded field to make its scope explicit)
@@ -1047,7 +1173,7 @@ the *prior round's own mutated output* rather than a real unmutated
 checkout -- a fixed point by construction, confirmed via real data across 7
 runs and 833 target-measurements (0 ever showing progress). Stage C now
 computes a genuine within-run unmutated-vs-mutated comparison (this plan's
-Task 7); the pre-existing cross-run baseline handoff is retained as a
+Task 8); the pre-existing cross-run baseline handoff is retained as a
 separate, explicitly-labeled longitudinal drift signal
 (`signal_type: "cross_round_drift"`), never merged with the within-run
 result, per Standing Principle 4.
@@ -1068,7 +1194,7 @@ Push and confirm: `round-baseline.json`'s real records carry `signal_type: "cros
 
 ---
 
-### Task 11: Extend blast-radius containment to Stage A and Stage B2
+### Task 12: Extend blast-radius containment to Stage A and Stage B2
 
 **Real gap (finding I4).** The spec requires blast-radius containment "per stage." Only Stage B is checked (`secondary-layer-self-test`'s existing "Blast-radius containment" step). Stage A (`clippy --fix` across five crates, now including the golden fixture) and Stage B2 (a `sed -i -E` over every `crates/*/Cargo.toml`, plus, as of Task 5, the root `Cargo.toml`) are the two stages with genuinely unbounded blast radius, and neither is covered.
 
@@ -1157,9 +1283,9 @@ Push and confirm both new checks pass as currently written, and that the retimed
 
 ---
 
-### Task 12: Normalize site keys to strip absolute registry paths
+### Task 13: Normalize site keys to strip absolute registry paths
 
-**Real gap (finding I2).** 6,608 of 6,616 real sites recorded for `aarch64-apple-darwin` are absolute registry paths (`/home/runner/.cargo/registry/src/.../serde_core-1.0.228/src/...`). Any patch-version bump in any erroring crate rewrites every one of that crate's site keys, and `depth_advanced` would read `true` across the board -- attributing pure dependency-version drift to the mutation. This is a false-positive mode distinct from (and additional to) the false-negative fixed-point defect Task 7 already fixed.
+**Real gap (finding I2).** 6,608 of 6,616 real sites recorded for `aarch64-apple-darwin` are absolute registry paths (`/home/runner/.cargo/registry/src/.../serde_core-1.0.228/src/...`). Any patch-version bump in any erroring crate rewrites every one of that crate's site keys, and `depth_advanced` would read `true` across the board -- attributing pure dependency-version drift to the mutation. This is a false-positive mode distinct from (and additional to) the false-negative fixed-point defect Task 8 already fixed.
 
 **Files:**
 - Modify: `scripts/target_analysis_common.py` (`error_sites`)
@@ -1228,13 +1354,13 @@ Push and confirm: real site keys for third-party dependency errors (e.g. `serde_
 
 ---
 
-### Task 13: Add a real runner-capability probe, then wire the genuinely installable runner dependencies for the ~57%-bucket target families from what it discovers
+### Task 14: Add a real runner-capability probe, then wire the genuinely installable runner dependencies for the ~57%-bucket target families from what it discovers
 
 **Real, exhaustively-researched finding (2026-08-21 audit).** Across all 119 real targets: ~57% (68 targets — linux-gnu, linux-musl, windows-gnu/gnullvm, android, most of wasm, freebsd, ohos, fuchsia, netbsd, redox, uefi) have a real, documented, standard installation method on `ubuntu-latest`; ~14% (17 — Apple family, windows-msvc) require a different runner OS or sit in commercial-toolchain/licensing-gray territory; ~29% (34 — bare-metal/no-std targets, nvptx, wasm32v1-none) are structurally blocked regardless of toolchain, since `std` has no implementation there at all. This task wires the cheapest, highest-value real fixes from the first bucket; it explicitly does not attempt the second or third.
 
 **Design ruling (user-directed, two messages, 2026-08-21): discover the runner's real capabilities once, mechanically, and let downstream jobs consume that discovery — rather than each job independently assuming or blindly attempting the same fix.** The user asked directly whether install/misconfiguration issues "can be resolved by the runners themselves in the workflows," then followed up: "there seems like more than enough information for the runners to pull the information they need to discover runner-configuration issues and update the workflow dynamically for downstream jobs." This task's design answers both messages concretely, with one constraint carried over unchanged from the rest of this plan: **the capability manifest this task produces gates provisioning only — it must never decide which targets get probed or which measurements run.** Standing Principle 3 requires every relevant probe to run unconditionally, every time; an absent toolchain is a real, recorded outcome for that target (a `ToolNotFound` build-script failure, same as today), not a reason to skip or relabel the measurement. What changes is only whether the pipeline additionally *tries to fix* the gap before that measurement runs, and whether it tries just once (mechanically, with evidence) instead of guessing three times over.
 
-Concretely: a new job, `runner-capability-probe`, runs once per workflow run, independent of the target matrix, and mechanically discovers two real facts about the actual runner image this run landed on — whether `ANDROID_NDK_HOME` really points at a real clang, and whether `gcc-mingw-w64-x86-64` has a real installable apt candidate — publishing both as job outputs and as an uploaded artifact (real L1 data: if a future `ubuntu-latest` image drops the NDK, this artifact's history shows exactly which run it happened on, which is the same kind of longitudinal signal Task 10's `cross_round_drift` relabeling already relies on). `build-attempt`, `dependency-graph`, and `secondary-stage-c-and-promotion` each consume that discovery instead of re-deriving it, and their own installs remain per-job (GitHub Actions gives every job, and every matrix instance within a job, its own fresh, unshared VM — there is no way to "install once, all jobs get it" without caching, which the Global Constraint above forbids; the value of discovering-once is not skipping installation, it's skipping the *redundant discovery* and the futile install attempts once the probe has already established a package isn't there).
+Concretely: a new job, `runner-capability-probe`, runs once per workflow run, independent of the target matrix, and mechanically discovers two real facts about the actual runner image this run landed on — whether `ANDROID_NDK_HOME` really points at a real clang, and whether `gcc-mingw-w64-x86-64` has a real installable apt candidate — publishing both as job outputs and as an uploaded artifact (real L1 data: if a future `ubuntu-latest` image drops the NDK, this artifact's history shows exactly which run it happened on, which is the same kind of longitudinal signal Task 11's `cross_round_drift` relabeling already relies on). `build-attempt`, `dependency-graph`, and `secondary-stage-c-and-promotion` each consume that discovery instead of re-deriving it, and their own installs remain per-job (GitHub Actions gives every job, and every matrix instance within a job, its own fresh, unshared VM — there is no way to "install once, all jobs get it" without caching, which the Global Constraint above forbids; the value of discovering-once is not skipping installation, it's skipping the *redundant discovery* and the futile install attempts once the probe has already established a package isn't there).
 
 **The probe itself must be structurally unable to fail** — every command it runs is tolerant (`|| true` / `2>/dev/null`), and it always writes both outputs on every path, using an empty string or `false` to mean "not found," never a job failure. If the probe job failed outright, every job that depends on it would be skipped by default (GitHub's ordinary `needs:` semantics), silently dropping all three downstream jobs' worth of real experimental data for reasons that have nothing to do with the experiment — the same "completeness check as involuntary kill switch" defect class as I1, reintroduced in a new job if this invariant is skipped.
 
@@ -1335,7 +1461,7 @@ git commit -m "feat: add a real runner-capability probe job and wire cc-rs/mingw
 
 - [ ] **Step 5: Push and verify on a real runner**
 
-Push and confirm, from the real job logs (not assumed): first, download the `runner-capabilities` artifact and report both fields exactly as discovered on this real run — whether the NDK was found and whether mingw-w64 had an installable candidate. If the NDK was found and each consumer job's own local re-check also confirmed it: confirm real Stage C / build-attempt output for `aarch64-linux-android` no longer shows `ToolNotFound: aarch64-linux-android-clang`, and confirm `larql-compute`'s own native build (the `csrc/q4_dot.c` kernel) now succeeds on that target specifically (previously a real, confirmed build-script failure). If the NDK was not found, or a consumer job's local re-check disagreed with the probe: report this as a real, open finding for the task reviewer and controller to adjudicate — it means the audit's citation does not hold for this runner image (or there is real image skew across jobs within one run), and Task 13's Android-NDK fix needs a different approach (e.g. a dedicated NDK-install action) before it can be considered complete for that family. Independently of the NDK outcome, confirm real Stage C / build-attempt output for `x86_64-pc-windows-gnu` no longer shows `ToolNotFound: aarch64-w64-mingw32-clang` if the probe reported mingw-w64 as installable.
+Push and confirm, from the real job logs (not assumed): first, download the `runner-capabilities` artifact and report both fields exactly as discovered on this real run — whether the NDK was found and whether mingw-w64 had an installable candidate. If the NDK was found and each consumer job's own local re-check also confirmed it: confirm real Stage C / build-attempt output for `aarch64-linux-android` no longer shows `ToolNotFound: aarch64-linux-android-clang`, and confirm `larql-compute`'s own native build (the `csrc/q4_dot.c` kernel) now succeeds on that target specifically (previously a real, confirmed build-script failure). If the NDK was not found, or a consumer job's local re-check disagreed with the probe: report this as a real, open finding for the task reviewer and controller to adjudicate — it means the audit's citation does not hold for this runner image (or there is real image skew across jobs within one run), and Task 14's Android-NDK fix needs a different approach (e.g. a dedicated NDK-install action) before it can be considered complete for that family. Independently of the NDK outcome, confirm real Stage C / build-attempt output for `x86_64-pc-windows-gnu` no longer shows `ToolNotFound: aarch64-w64-mingw32-clang` if the probe reported mingw-w64 as installable.
 
 ---
 
@@ -1343,17 +1469,17 @@ Push and confirm, from the real job logs (not assumed): first, download the `run
 
 **Spec coverage** — every spec section this plan touches maps to a task:
 - Testing / golden fixtures ("a deliberately known, planted outcome... run through the full Stage A→C pipeline") → Task 2, previously entirely unbuilt.
-- Error handling / "every stage's effect captured as a before/after diff... not inferred from Stage C's pass/fail alone" → Task 7 (the guardrail the spec already stated, honored for B/B2/B3, restored for C).
-- Standing Principle 4 (no aggregation collapses distinct signals) → Task 10 (explicit `signal_type` labeling, not a merge).
-- Testing / blast-radius "per stage" → Task 11 (previously only Stage B).
+- Error handling / "every stage's effect captured as a before/after diff... not inferred from Stage C's pass/fail alone" → Task 8 (the guardrail the spec already stated, honored for B/B2/B3, restored for C).
+- Standing Principle 4 (no aggregation collapses distinct signals) → Task 11 (explicit `signal_type` labeling, not a merge).
+- Testing / blast-radius "per stage" → Task 12 (previously only Stage B).
 - Data flow / retention (cross-run artifact size, already flagged as open in the spec) → not addressed by this plan; the review's finding I3 (134MB `round-baseline.json`, ~330MB/run in `promotion-decision-batch-*` artifacts) is noted here as a real, separate follow-up, not folded into this plan's scope.
 
 **Placeholder scan:** no "TBD"/"TODO" remain; every code block in every task is the actual real content to write, derived from a real captured artifact, a real local repro, or an existing proven function in this codebase — not a description of what to do.
 
-**Type consistency:** `MUTATED_LIBRARY_CRATES` (Task 2) grows from 4 to 5 entries and is consumed identically by Task 4's `-p` derivation, Task 11's blast-radius checks, and the already-existing `secondary-mutate`/`target-independent-checks` sites (Task 20/21's `/simplify` pass) without any signature change — `GOLDEN_FIXTURE_CRATE` is additive, not a breaking change to the existing tuple's consumers. `error_sites()`'s return type (`set[tuple[str, int, str]]`) is unchanged across Tasks 8 and 12 — only the *values* inside the tuple change (a spanless sentinel, a normalized path), never the shape, so every existing consumer (`depth_advanced`, `next-round-baseline`'s fold) keeps working unmodified.
+**Type consistency:** `MUTATED_LIBRARY_CRATES` (Task 2) grows from 4 to 5 entries and is consumed identically by Task 4's `-p` derivation, Task 12's blast-radius checks, and the already-existing `secondary-mutate`/`target-independent-checks` sites (Task 20/21's `/simplify` pass) without any signature change — `GOLDEN_FIXTURE_CRATE` is additive, not a breaking change to the existing tuple's consumers. `error_sites()`'s return type (`set[tuple[str, int, str]]`) is unchanged across Tasks 9 and 13 — only the *values* inside the tuple change (a spanless sentinel, a normalized path), never the shape, so every existing consumer (`depth_advanced`, `next-round-baseline`'s fold) keeps working unmodified.
 
 **Follow-ups explicitly flagged, not included in this plan** (real gaps, named so they aren't silently dropped):
-- Redefining `depth_advanced`'s own boolean semantics to also account for `build_script_failures` (Task 8 makes the failure visible in the data; it does not change what counts as "progress" — a real, separate design decision).
-- `wasm32-unknown-emscripten`'s SDK (`emscripten-core/setup-emsdk`), the Android NDK-shipped-but-unused-for-other-families question, FreeBSD/NetBSD/OpenHarmony/Fuchsia/Redox cross-toolchains (the audit's own ~57% bucket minus what Task 13 covers) — a real, larger body of work, deliberately scoped out of this plan to keep it finite; each is independently actionable using the audit's own family table.
-- The user's own earlier "waterfall"/subgraph-branching architectural question (should mutation stages become round-parameterized so the cross-round loop can show *mechanical* advancement, not just drift detection) — Task 10 deliberately re-scopes rather than resolves this; it remains open, parked, and requires its own dedicated design conversation per the standing ruling already recorded in this project's ledger.
+- Redefining `depth_advanced`'s own boolean semantics to also account for `build_script_failures` (Task 9 makes the failure visible in the data; it does not change what counts as "progress" — a real, separate design decision).
+- `wasm32-unknown-emscripten`'s SDK (`emscripten-core/setup-emsdk`), the Android NDK-shipped-but-unused-for-other-families question, FreeBSD/NetBSD/OpenHarmony/Fuchsia/Redox cross-toolchains (the audit's own ~57% bucket minus what Task 14 covers) — a real, larger body of work, deliberately scoped out of this plan to keep it finite; each is independently actionable using the audit's own family table.
+- The user's own earlier "waterfall"/subgraph-branching architectural question (should mutation stages become round-parameterized so the cross-round loop can show *mechanical* advancement, not just drift detection) — Task 11 deliberately re-scopes rather than resolves this; it remains open, parked, and requires its own dedicated design conversation per the standing ruling already recorded in this project's ledger.
 - Solaris/illumos (2 + 1 targets) — confirmed no standard, documented installation method exists; left as a permanently-open gap unless a future finding changes this.
