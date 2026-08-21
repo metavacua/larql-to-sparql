@@ -14,11 +14,18 @@ def load_json(path: Path) -> Any:
         return json.load(handle)
 
 
+def parse_jsonl(text: str) -> list[Any]:
+    """Parse already-in-memory JSONL text (one JSON object per line, blank
+    lines skipped) -- the core `load_jsonl()` delegates to, for callers that
+    have JSONL from somewhere other than a file (e.g. a subprocess's stdout)."""
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
 def load_jsonl(path: Path) -> list[Any]:
     """Read cargo's `--message-format=json` wire format: one JSON object per
     line, not a single JSON array (confirmed against real cargo output; see
     this pipeline's own workflow comments on the same distinction)."""
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return parse_jsonl(path.read_text(encoding="utf-8"))
 
 
 def unit_graph_units_named(unit_graph: dict[str, Any], name: str) -> list[dict[str, Any]]:

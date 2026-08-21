@@ -7,13 +7,24 @@ artifact rather than silently indexing whatever showed up)."""
 
 from __future__ import annotations
 
-import argparse
-import json
-import sys
-from pathlib import Path
 from typing import Any
 
-from scripts.target_analysis_common import error_level_messages, load_json
+from scripts.target_analysis_common import error_level_messages
+
+# The exact cmd x features cartesian product build-attempt's own bash loop
+# generates for every target -- single source of truth for both sides, so
+# a future change to either dimension can't silently desync the workflow's
+# generation loop from indexing's expected-artifact computation.
+BUILD_ATTEMPT_CARGO_CMDS = ("check", "clippy", "build")
+BUILD_ATTEMPT_FEATURE_MODES = ("default-features", "no-default-features")
+
+
+def build_attempt_filenames(target: str) -> list[str]:
+    return [
+        f"attempt-{target}-none-{cmd}-{feat}.json"
+        for cmd in BUILD_ATTEMPT_CARGO_CMDS
+        for feat in BUILD_ATTEMPT_FEATURE_MODES
+    ]
 
 
 def count_errors_by_target(compiler_messages: list[dict[str, Any]]) -> dict[str, int]:
@@ -30,34 +41,3 @@ def unexpected_clean_std_build(target_spec: dict[str, Any], std_mode_errors: lis
 
 def missing_artifacts(expected: set[str], actual: set[str]) -> set[str]:
     return expected - actual
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--compiler-messages-file", required=True, type=Path)
-    parser.add_argument("--target-spec-file", required=True, type=Path)
-    parser.add_argument("--std-mode-errors-file", required=True, type=Path)
-    parser.add_argument("--expected-artifacts-file", required=True, type=Path)
-    parser.add_argument("--actual-artifacts-file", required=True, type=Path)
-    args = parser.parse_args()
-
-    compiler_messages = load_json(args.compiler_messages_file)
-    target_spec = load_json(args.target_spec_file)
-    std_mode_errors = load_json(args.std_mode_errors_file)
-    expected = set(load_json(args.expected_artifacts_file))
-    actual = set(load_json(args.actual_artifacts_file))
-
-    missing = missing_artifacts(expected, actual)
-    result = {
-        "error_counts_by_target": count_errors_by_target(compiler_messages),
-        "contradictions": {
-            "unexpected_clean_std_build": unexpected_clean_std_build(target_spec, std_mode_errors),
-        },
-        "missing_artifacts": sorted(missing),
-    }
-    print(json.dumps(result, indent=2))
-    return 1 if missing else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -66,6 +66,13 @@ def test_expand_batch_json_single_target():
     assert expand_batch_json('["nvptx64-nvidia-cuda"]') == "nvptx64-nvidia-cuda"
 
 
+def test_expand_batch_json_handles_integer_arrays():
+    # $BATCH_INDICES (the indexing job's build-attempt-batch download loop)
+    # is a JSON array of ints, not strings -- the same transform must work
+    # for both, not just the target-name case.
+    assert expand_batch_json("[0, 1, 2]") == "0\n1\n2"
+
+
 def test_chunk_targets_empty_list_returns_empty():
     assert chunk_targets([], max_size=3) == []
 

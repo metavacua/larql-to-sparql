@@ -18,10 +18,10 @@ def parse_target_list(raw: str) -> list[str]:
 
 
 def expand_batch_json(raw: str) -> str:
-    """Turn a `toJSON(...)`-produced JSON array string (a batch's targets)
-    into the newline-delimited list every batched job's per-target
-    `while IFS= read` loop consumes."""
-    return "\n".join(json.loads(raw))
+    """Turn a `toJSON(...)`-produced JSON array string (a batch's targets,
+    or a batch's indices) into the newline-delimited list every batched
+    job's per-target/per-batch `while IFS= read` loop consumes."""
+    return "\n".join(str(item) for item in json.loads(raw))
 
 
 def resolve_target_matrix(all_targets: list[str], requested: str | None) -> list[str]:

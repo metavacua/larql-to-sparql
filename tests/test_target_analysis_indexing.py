@@ -2,6 +2,7 @@ from pathlib import Path
 
 from scripts.target_analysis_common import load_json
 from scripts.target_analysis_indexing import (
+    build_attempt_filenames,
     count_errors_by_target,
     missing_artifacts,
     unexpected_clean_std_build,
@@ -47,3 +48,25 @@ def test_missing_artifacts_returns_the_set_difference():
 def test_missing_artifacts_empty_when_nothing_missing():
     expected = {"probe-a"}
     assert missing_artifacts(expected, expected) == set()
+
+
+def test_build_attempt_filenames_covers_all_six_real_combos():
+    # The exact cmd x features cartesian product build-attempt's own bash
+    # loop generates -- single source of truth so a future change to either
+    # dimension can't silently desync the two.
+    assert build_attempt_filenames("nvptx64-nvidia-cuda") == [
+        "attempt-nvptx64-nvidia-cuda-none-check-default-features.json",
+        "attempt-nvptx64-nvidia-cuda-none-check-no-default-features.json",
+        "attempt-nvptx64-nvidia-cuda-none-clippy-default-features.json",
+        "attempt-nvptx64-nvidia-cuda-none-clippy-no-default-features.json",
+        "attempt-nvptx64-nvidia-cuda-none-build-default-features.json",
+        "attempt-nvptx64-nvidia-cuda-none-build-no-default-features.json",
+    ]
+
+
+def test_build_attempt_filenames_first_combo_matches_the_representative_single_file():
+    # indexing's per-target loop reads exactly one of these six combos
+    # (check + default-features) as its representative real build result --
+    # confirmed here to be the first entry, so both stay in sync by
+    # construction rather than by two independently-hand-typed literals.
+    assert build_attempt_filenames("t")[0] == "attempt-t-none-check-default-features.json"

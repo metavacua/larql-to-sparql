@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from scripts.target_analysis_common import error_sites, load_json, load_jsonl, unit_graph_units_named
+from scripts.target_analysis_common import error_sites, load_json, load_jsonl, parse_jsonl, unit_graph_units_named
 
 FIXTURES = Path(__file__).parent / "fixtures" / "target_analysis"
 
@@ -49,3 +49,17 @@ def test_load_jsonl_skips_blank_lines(tmp_path):
     path = tmp_path / "with-blanks.jsonl"
     path.write_text('{"a": 1}\n\n{"a": 2}\n\n', encoding="utf-8")
     assert load_jsonl(path) == [{"a": 1}, {"a": 2}]
+
+
+def test_parse_jsonl_reads_text_directly_no_file_needed():
+    # The text-level core load_jsonl() delegates to -- used directly by
+    # callers that already have JSONL in memory (e.g. `gh api --paginate`
+    # stdout), not read from a file.
+    assert parse_jsonl('{"a": 1}\n\n{"a": 2}\n') == [{"a": 1}, {"a": 2}]
+
+
+def test_load_jsonl_and_parse_jsonl_agree_on_the_same_content(tmp_path):
+    content = '{"a": 1}\n{"a": 2}\n{"a": 3}\n'
+    path = tmp_path / "same.jsonl"
+    path.write_text(content, encoding="utf-8")
+    assert load_jsonl(path) == parse_jsonl(content)
