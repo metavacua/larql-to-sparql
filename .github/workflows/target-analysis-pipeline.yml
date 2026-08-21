@@ -178,6 +178,7 @@ jobs:
           cargo install cargo-deny --locked
           FAILED=0
           while IFS= read -r TARGET; do
+            rustup target add "$TARGET" --toolchain nightly 2>&1 || echo "::warning::rustup target add failed for $TARGET (expected for targets with no prebuilt std component, e.g. s390x-unknown-none-softfloat)"
             echo "=== target: $TARGET ==="
             cargo +nightly metadata --format-version 1 --filter-platform "$TARGET" \
               > "out/metadata-$TARGET.json" || FAILED=1
@@ -230,6 +231,7 @@ jobs:
           echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
           FAILED=0
           while IFS= read -r TARGET; do
+            rustup target add "$TARGET" --toolchain nightly 2>&1 || echo "::warning::rustup target add failed for $TARGET (expected for targets with no prebuilt std component, e.g. s390x-unknown-none-softfloat)"
             # Probe-mechanism canary (run 1's real CI evidence): `--crate-type` is
             # rejected outright by `cargo check`/`clippy`/`build` (it is not a flag
             # on those subcommands at all -- confirmed from run 1's logs, uniform
