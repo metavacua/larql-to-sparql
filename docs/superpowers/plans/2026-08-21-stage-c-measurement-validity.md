@@ -247,7 +247,7 @@ A second, related bug in the same area: `secondary-layer-self-test`'s "Golden fi
 
 **Interfaces:**
 - Consumes: `no_std_scaffold_ok()` (Task 1's plan, unchanged — still checks the *final* content has both markers, regardless of which stage inserted which).
-- Produces: `insert_alloc_extern_crate(text: str) -> str`, `insert_no_std_attribute(text: str) -> str` (both replace `insert_no_std_scaffold`, which is deleted — nothing else calls it, confirmed by repo-wide grep before writing this task).
+- Produces: `insert_alloc_extern_crate(text: str) -> str`, `insert_no_std_attribute(text: str) -> str` (both replace `insert_no_std_scaffold`'s two real call sites — `secondary-mutate`'s Stage B and `secondary-layer-self-test`'s Golden fixture step. **Correction, ruled during implementation:** this plan's own Step 6 below requires leaving `secondary-layer-self-test`'s *separate* "Blast-radius containment" step untouched, and that step also calls `insert_no_std_scaffold` — deleting the function outright would therefore break Blast-radius before Task 11 gets to it, which is mutually exclusive with Step 6's own instruction. Resolution: `insert_no_std_scaffold` is kept as a thin, deprecated, provably byte-identical wrapper — `return insert_no_std_attribute(insert_alloc_extern_crate(text))` — so Blast-radius's existing call keeps working unchanged. Task 11 removes this wrapper together with updating Blast-radius's own call site, once that task touches this area for real.
 
 - [ ] **Step 1: Mandatory local verification — confirm the hypothesis before writing any workflow change**
 
@@ -409,7 +409,7 @@ def test_alloc_then_no_std_attribute_composition_matches_old_combined_scaffold()
 ```bash
 python3 -m pytest tests/test_target_analysis_promotion.py -v
 ```
-Expected: all tests pass, including the 3 new/changed ones above; no reference to `insert_no_std_scaffold` remains anywhere (`grep -rn insert_no_std_scaffold .` returns nothing).
+Expected: all tests pass, including the 3 new/changed ones above. **Corrected** (see the Interfaces section's note above): after Step 6, exactly two references to `insert_no_std_scaffold` remain — its own deprecated-wrapper definition in `scripts/target_analysis_promotion.py`, and `secondary-layer-self-test`'s "Blast-radius containment" step's unchanged call — both deliberate, not a leftover to eliminate here.
 
 - [ ] **Step 5: Insert Stage A0 into `secondary-mutate`, retime Stage B**
 
@@ -1074,10 +1074,12 @@ Push and confirm: `round-baseline.json`'s real records carry `signal_type: "cros
 
 **Files:**
 - Modify: `.github/workflows/target-analysis-pipeline.yml` (`secondary-layer-self-test`)
+- Modify: `scripts/target_analysis_promotion.py` (delete the `insert_no_std_scaffold` wrapper Task 3 deferred here)
+- Modify: `tests/test_target_analysis_promotion.py` (confirm no test references the deleted wrapper — Task 3 already moved its own tests off it)
 
 **Interfaces:**
-- Consumes: `MUTATED_LIBRARY_CRATES`, `STAGE_B2_SERDE_FEATURES` (unchanged).
-- Produces: two new self-test steps; no schema change.
+- Consumes: `MUTATED_LIBRARY_CRATES`, `STAGE_B2_SERDE_FEATURES` (unchanged), `insert_alloc_extern_crate`/`insert_no_std_attribute` (Task 3).
+- Produces: two new self-test steps; no schema change. `insert_no_std_scaffold` is removed — nothing calls it after this task.
 
 - [ ] **Step 1: Add a Stage A blast-radius check**
 
@@ -1125,18 +1127,33 @@ Add another new step, before the same existing Stage B check:
 ```
 The `git checkout -- .` calls bracket this step so it doesn't interfere with the Stage A/B/B3 checks that follow it in the same job (each blast-radius check must start from a clean tree).
 
-- [ ] **Step 3: Validate and commit**
+- [ ] **Step 3: Retire the deprecated `insert_no_std_scaffold` wrapper**
+
+Task 3 introduced `insert_alloc_extern_crate`/`insert_no_std_attribute` (splitting Stage A0/Stage B's scaffold insertion so `std`→`alloc` rewrites persist) but had to leave `secondary-layer-self-test`'s pre-existing "Blast-radius containment: assert Stage B only touches its declared scope" step calling the old, now-deprecated `insert_no_std_scaffold(text)` — deleting it then would have broken that step before this task got here. This task touches that same job, so finish the cleanup: in that step's own Python heredoc, change the import from `insert_no_std_scaffold` to `insert_alloc_extern_crate, insert_no_std_attribute`, and change the single call:
+```python
+lib_rs.write_text(insert_no_std_scaffold(lib_rs.read_text(encoding="utf-8")), encoding="utf-8")
+```
+to:
+```python
+lib_rs.write_text(
+    insert_no_std_attribute(insert_alloc_extern_crate(lib_rs.read_text(encoding="utf-8"))),
+    encoding="utf-8",
+)
+```
+Then delete `insert_no_std_scaffold` entirely from `scripts/target_analysis_promotion.py` (it is a one-line-bodied wrapper around exactly this composition — confirm via `grep -rn insert_no_std_scaffold .` that this is now its only remaining call site before deleting). Run `python3 -m pytest tests/test_target_analysis_promotion.py -v` to confirm nothing referenced the wrapper from the test file either (Task 3 already replaced its own tests to use the split functions directly).
+
+- [ ] **Step 4: Validate and commit**
 
 ```bash
 python3 -c "import yaml; yaml.safe_load(open('.github/workflows/target-analysis-pipeline.yml')); print('YAML OK')"
 actionlint .github/workflows/target-analysis-pipeline.yml
-git add .github/workflows/target-analysis-pipeline.yml
-git commit -m "feat: extend blast-radius containment to Stage A and Stage B2 -- previously only Stage B was checked"
+git add .github/workflows/target-analysis-pipeline.yml scripts/target_analysis_promotion.py tests/test_target_analysis_promotion.py
+git commit -m "feat: extend blast-radius containment to Stage A and Stage B2; retire the insert_no_std_scaffold wrapper Task 3 deferred here -- previously only Stage B was checked"
 ```
 
-- [ ] **Step 4: Push and verify on a real runner, then deliberately break each new check once to confirm it fails loudly**
+- [ ] **Step 5: Push and verify on a real runner, then deliberately break each new check once to confirm it fails loudly**
 
-Push and confirm both new checks pass as currently written. Then, in a throwaway commit, deliberately widen Stage A's or Stage B2's real mutation to touch an extra file, confirm the corresponding check fails loudly, then revert the throwaway commit -- matching the precedent already established for Stage B's own blast-radius check.
+Push and confirm both new checks pass as currently written, and that the retimed "Blast-radius containment: assert Stage B..." step (now calling the split functions directly) still passes unchanged. Then, in a throwaway commit, deliberately widen Stage A's or Stage B2's real mutation to touch an extra file, confirm the corresponding check fails loudly, then revert the throwaway commit -- matching the precedent already established for Stage B's own blast-radius check.
 
 ---
 
