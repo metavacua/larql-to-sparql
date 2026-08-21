@@ -404,6 +404,27 @@ directly. Four things are testable regardless:
 - No caching (`actions/cache`, `Swatinem/rust-cache`) — matches the original
   target-sampling design's own reasoning: runner minutes aren't a constraint at this
   project's tier, and there's no data yet on what's actually slow.
+  **Revisit trigger fired 2026-08-21** ("revisit only if iteration time becomes a real
+  problem" — it did): real per-job/per-step timing pulled from `gh api .../jobs` across
+  3 full runs, plus real timestamped job logs, now give the missing data. Conclusion:
+  still not caching, but for a different, now-evidenced reason, not the original
+  "no data yet." `rustup toolchain install nightly` costs 8–10s/job everywhere —
+  negligible; caching it would save under 5 minutes off a ~28-minute run. The real
+  cost (Stage C ~576s/batch, build-attempt ~430–460s/batch) is 95%+ genuine `rustc`
+  work — confirmed from a real Stage C job log: 755 `Compiling` lines against only 2
+  `Updating crates.io index` + 7 `Downloading` events in the same ~10.5-minute step.
+  Caching the one thing that *would* cut this (a `target/` build-artifact cache across
+  runs) is the single highest measurement-validity risk available: Stage B mutates the
+  source fresh every run, and a stale cached artifact from a different mutation state
+  landing in Stage C's error-site harvest is a direct rerun of the C1/C2 fixed-point
+  defect, in a worse form (stale binaries, not just a stale comparison baseline). See
+  `docs/superpowers/plans/2026-08-21-workflow-iteration-time.md` for what real
+  investigation found the actual, validity-safe levers to be: the workflow's `needs:`
+  graph over-serializes work with no real data dependency behind it, and `build-attempt`
+  spends real, avoidable time (~3m19s of one real ~3m40s invocation, confirmed from a
+  real job log) rebuilding `ring`'s native build script for targets already known, from
+  data the pipeline already collected in the same run, to be incapable of building
+  `larql-cli` at all.
 - No commits from CI, ever, anywhere in either layer — matches the original design's
   same rule, extended to the Secondary layer's mutations, which are explicitly
   ephemeral to a single job's checkout.
@@ -412,6 +433,60 @@ directly. Four things are testable regardless:
   labeled as such, sourced, and checkable against raw, uncurated scan output.
 - No resolution of the cross-run artifact retention question (Data flow) — left open,
   not assumed.
+
+## `needs:` T-schema (added 2026-08-21)
+
+`needs:` in GitHub Actions is a purely syntactic scheduling primitive — it blocks a job
+until every job named has completed, and nothing else. Nothing in the platform derives
+it from, or checks it against, what a job's own steps actually read. The two can drift
+apart with zero warning, in either direction:
+
+- **Soundness** (∀T, j, k. `reads_T(j,k) → needs(j,k)`) — the dangerous direction. A
+  violation is a real race: `j` starting before the `k` it actually reads has finished.
+- **Completeness** (∀j, k. `needs(j,k) → ∃T. reads_T(j,k)`) — the wasteful direction. An
+  ungrounded `needs:` edge costs only time, never correctness, so nothing stops it from
+  drifting forever unnoticed — which is exactly what happened here: a direct, corrected
+  mechanical audit (`tests/test_target_analysis_needs_schema.py`, see the iteration-time
+  plan's Task 1) found the file's `needs:` graph sound everywhere, but incomplete in 9
+  of its ~23 real edges, spread across 6 of its 12 jobs.
+
+`reads_T` has two real grounds in this file, both mechanically discoverable from a
+job's own step bodies (never from its `needs:` list, which is exactly the thing being
+checked):
+
+- `Content` — `j` parses data belonging to an artifact/output `k` produced (via
+  `${{ needs.k.outputs.* }}`, or via a downloaded artifact's file content read through
+  `load_json`/`load_jsonl`/`.read_text()`/`open()`/a bash `<` redirect or `cat`).
+- `Presence` — `j` requires only that `k`'s artifact *exist* (never reads its content),
+  typically because `j` runs a completeness/honesty check (see `indexing`'s own
+  Standing Principle 9 docstring) that would otherwise conflate "genuinely missing"
+  with "not uploaded yet."
+
+A cross-run artifact fetch (`actions/download-artifact` with `run-id:` set, as
+`fetch-prior-round-baseline` does) is outside this schema's domain entirely — it names
+a different run's job instance, which `needs:` cannot express and must not be asked to.
+
+## `build-attempt` no-std short-circuit (added 2026-08-21)
+
+`build-attempt` checks/clippys/builds `larql-cli` (its real, full dependency closure —
+`reqwest`→`rustls`→`ring`, `tokenizers`, `wasmtime`, etc., none of it behind any
+`[features]` gate in `crates/larql-cli/Cargo.toml`) against every real target, 6
+cmd×feature combinations each, with `--keep-going` so a first error doesn't stop the
+rest of the graph from being attempted. For any target `target-capability` has already
+proven lacks `std` (its own `metadata.std` field, from the same run, unconditionally
+computed for every target already), this is a guaranteed failure before it starts —
+`larql-cli` cannot build without `std` under any feature combination that exists today.
+`--keep-going` is exactly why the pipeline pays for the attempt anyway: real log
+evidence shows compilation proceeding through dozens of small crates erroring on
+missing `std`, then `ring`'s native build script running silently for ~3m19s of one
+target's ~3m40s total, before the attempt as a whole gives up. The fix records the same
+real fact (`std` unavailable → `larql-cli` cannot build) as an explicit, structured skip
+rather than paying to re-derive it expensively — never a silent omission. This is not a
+new class of finding; it must not be conflated with `indexing`'s own
+`unexpected_clean_std_build` contradiction check (Standing Principle 5), which watches
+for a *different* thing — a target reporting zero errors despite actually attempting
+the full build. A deliberate skip is neither a pass nor that contradiction, and must be
+distinguishably recorded as its own third outcome, not indistinguishable "0 errors."
 
 ## Validation approach
 
