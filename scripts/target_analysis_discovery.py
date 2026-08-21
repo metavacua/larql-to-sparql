@@ -10,9 +10,18 @@ import json
 import sys
 from pathlib import Path
 
+from scripts.target_analysis_common import load_json
+
 
 def parse_target_list(raw: str) -> list[str]:
     return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+def expand_batch_json(raw: str) -> str:
+    """Turn a `toJSON(...)`-produced JSON array string (a batch's targets)
+    into the newline-delimited list every batched job's per-target
+    `while IFS= read` loop consumes."""
+    return "\n".join(json.loads(raw))
 
 
 def resolve_target_matrix(all_targets: list[str], requested: str | None) -> list[str]:
@@ -52,11 +61,14 @@ def main() -> int:
     raw = args.target_list_file.read_text(encoding="utf-8")
     all_targets = parse_target_list(raw)
     requested = args.requested_target or None
-    matrix = resolve_target_matrix(all_targets, requested)
 
-    if requested is None and args.target_tiers_file is not None and args.max_tier is not None:
-        target_tiers = json.loads(args.target_tiers_file.read_text(encoding="utf-8"))
+    if requested is not None:
+        matrix = resolve_target_matrix(all_targets, requested)
+    elif args.target_tiers_file is not None and args.max_tier is not None:
+        target_tiers = load_json(args.target_tiers_file)
         matrix = filter_by_tier(target_tiers, max_tier=args.max_tier)
+    else:
+        matrix = all_targets
 
     batches = chunk_targets(matrix, max_size=args.max_batch_size)
     batch_indices = list(range(len(batches)))

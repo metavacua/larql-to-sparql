@@ -25,8 +25,13 @@ jobs:
       target-matrix: ${{ steps.resolve.outputs.matrix }}
       batches: ${{ steps.resolve.outputs.batches }}
       batch-indices: ${{ steps.resolve.outputs.batch-indices }}
+      fmt-crates: ${{ steps.fmt-crates.outputs.list }}
     steps:
       - uses: actions/checkout@v4
+      - name: Expose the fmt-check crate list (single source of truth, MUTATED_LIBRARY_CRATES + larql-cli)
+        id: fmt-crates
+        run: |
+          echo "list=$(python3 -c 'import json, sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(json.dumps(list(MUTATED_LIBRARY_CRATES) + ["larql-cli"]))')" >> "$GITHUB_OUTPUT"
       - name: Install nightly Rust
         run: rustup toolchain install nightly --profile minimal
       - name: rustc --print target-list
@@ -49,7 +54,7 @@ jobs:
           tiers = {}
           with open('tier-lines.txt') as f:
               for line in f:
-                  target, tier = line.rstrip(chr(10)).split(chr(9), 1)
+                  target, tier = line.rstrip('\n').split('\t', 1)
                   tiers[target] = int(tier) if tier else None
           with open('target-tiers.json', 'w') as f:
               json.dump(tiers, f)
@@ -59,7 +64,7 @@ jobs:
         env:
           REQUESTED_TARGET: ${{ inputs.target }}
         run: |
-          python3 scripts/target_analysis_discovery.py \
+          python3 -m scripts.target_analysis_discovery \
             --target-list-file target-list.txt \
             --requested-target "$REQUESTED_TARGET" \
             --max-batch-size 12 \
@@ -83,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [larql-boundary, larql-vindex-spec, larql-models, larql-compute, larql-cli]
+        crate: ${{ fromJSON(needs.discovery.outputs.fmt-crates) }}
     steps:
       - uses: actions/checkout@v4
       - name: Install nightly Rust
@@ -126,7 +131,7 @@ jobs:
           BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
           mkdir -p out
-          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
           rustup run nightly rustc --print target-list > full-target-list.txt
           FAILED=0
           while IFS= read -r TARGET; do
@@ -169,7 +174,7 @@ jobs:
           BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
           mkdir -p out
-          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
           cargo install cargo-deny --locked
           FAILED=0
           while IFS= read -r TARGET; do
@@ -222,7 +227,7 @@ jobs:
           BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
           mkdir -p out
-          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
           FAILED=0
           while IFS= read -r TARGET; do
             # Probe-mechanism canary (run 1's real CI evidence): `--crate-type` is
@@ -286,7 +291,7 @@ jobs:
           BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
           mkdir -p out
-          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
           while IFS= read -r TARGET; do
             case "$TARGET" in
               wasm32*|wasm64*)
@@ -442,10 +447,10 @@ jobs:
           from pathlib import Path
 
           sys.path.insert(0, ".")
-          from scripts.target_analysis_common import error_level_messages
+          from scripts.target_analysis_common import error_level_messages, load_json, load_jsonl
 
           target_matrix = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
-          target_to_batch = json.loads(Path("target-to-batch.json").read_text())
+          target_to_batch = load_json(Path("target-to-batch.json"))
           combined = {}
           any_missing = False
           for t in target_matrix:
@@ -469,11 +474,7 @@ jobs:
               # the already-tested Task 3 script.
               normalized_file = Path(f"normalized/attempt-{t}.json")
               try:
-                  messages = [
-                      json.loads(line)
-                      for line in attempt_file.read_text().splitlines()
-                      if line.strip()
-                  ]
+                  messages = load_jsonl(attempt_file)
               except json.JSONDecodeError as exc:
                   combined[t] = {"error": f"malformed JSONL in {attempt_file}: {exc}"}
                   any_missing = True
@@ -548,10 +549,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
-    env:
-      CRATES: "larql-boundary larql-vindex-spec larql-models larql-compute"
     steps:
       - uses: actions/checkout@v4
+      - name: Derive CRATES from the single source of truth (MUTATED_LIBRARY_CRATES)
+        run: |
+          echo "CRATES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(MUTATED_LIBRARY_CRATES))')" >> "$GITHUB_ENV"
       - name: Install nightly Rust
         run: |
           rustup toolchain install nightly --profile minimal
@@ -594,8 +596,9 @@ jobs:
           done
       - name: "Stage B2: patch std-defaulting dependency features"
         run: |
+          FEATURES_TOML=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import STAGE_B2_SERDE_FEATURES; print(", ".join(f"\"{f}\"" for f in STAGE_B2_SERDE_FEATURES))')
           find crates -name Cargo.toml -exec \
-            sed -i -E 's/serde = \{ workspace = true[^}]*\}/serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }/' {} \;
+            sed -i -E "s/serde = \{ workspace = true[^}]*\}/serde = { workspace = true, default-features = false, features = [$FEATURES_TOML] }/" {} \;
       - name: "Stage B3: trim workspace members to larql-cli's real tree"
         run: |
           python3 - <<'PYEOF'
@@ -658,17 +661,71 @@ jobs:
         with:
           name: prior-round-baseline
           path: prior-round-baseline
+      - name: Compute Stage B and Stage B3 state once per batch (target-independent -- see comments below)
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import load_json
+          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE, stage_b_lib_rs_filenames
+
+          # Stage B (no_std scaffold): real baseline/sibling lib.rs content
+          # captured by the mutation job, target-independent. larql-cli itself
+          # has no lib.rs (bin-only) so larql-compute is the chosen
+          # representative crate (Task 14's own hardest real case -- largest
+          # leading doc comment). Computed once per batch job, not once per
+          # target, since neither the content nor the postcondition depends
+          # on which target is current.
+          baseline_b_filename, sibling_b_filename = stage_b_lib_rs_filenames()
+          baseline_b = {"lib_rs_content": Path(f"mutation/{baseline_b_filename}").read_text(encoding="utf-8")}
+          sibling_b = {"lib_rs_content": Path(f"mutation/{sibling_b_filename}").read_text(encoding="utf-8")}
+          Path("baseline-stage-b.json").write_text(json.dumps(baseline_b))
+          Path("sibling-stage-b.json").write_text(json.dumps(sibling_b))
+
+          # Stage B3 (workspace trim): baseline is the mutation job's own
+          # pre-Stage-B3 cargo metadata capture (target-independent -- workspace
+          # membership doesn't vary by target); sibling is this job's own
+          # mutated-tree metadata, computed once here (a single `cargo metadata`
+          # call, not once per target) since it too cannot vary by target.
+          expected_members = list(STAGE_B3_REACHABLE_CLOSURE)
+          baseline_metadata = load_json(Path("mutation/baseline-metadata.json"))
+          sibling_metadata = json.loads(subprocess.run(
+              ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+              capture_output=True, text=True,
+          ).stdout)
+          Path("baseline-stage-b3.json").write_text(json.dumps({"metadata": baseline_metadata, "expected_members": expected_members}))
+          Path("sibling-stage-b3.json").write_text(json.dumps({"metadata": sibling_metadata, "expected_members": expected_members}))
+          PYEOF
+      - name: Compute Stage B and Stage B3 promotion verdicts once per batch
+        run: |
+          for STAGE in stage-b stage-b3; do
+            python3 -m scripts.target_analysis_promotion --stage "$STAGE" \
+              --baseline-state-file "baseline-$STAGE.json" \
+              --sibling-state-file "sibling-$STAGE.json" \
+              > "batch-promotion-$STAGE.json"
+          done
       - name: Stage C and promotion checks for every target in this batch
         env:
           BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
         run: |
           mkdir -p out
-          echo "$BATCH_TARGETS" | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > targets-in-batch.txt
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
           while IFS= read -r TARGET; do
             echo "=== Stage C: target=$TARGET ==="
             cargo +nightly check -p larql-cli --target "$TARGET" \
               -Z build-std=core,alloc --keep-going --message-format=json \
               > "out/stage-c-$TARGET.json" || true
+
+            # Stage B and Stage B3 verdicts are target-independent (see the
+            # comments in the batch-level step above) -- copy the single
+            # result already computed for this whole batch instead of
+            # recomputing it once per target.
+            cp "batch-promotion-stage-b.json" "out/promotion-stage-b-$TARGET.json"
+            cp "batch-promotion-stage-b3.json" "out/promotion-stage-b3-$TARGET.json"
 
             python3 - "$TARGET" <<'PYEOF'
           import json
@@ -677,29 +734,19 @@ jobs:
           from pathlib import Path
 
           sys.path.insert(0, ".")
-          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE, stage_b_lib_rs_filenames
+          from scripts.target_analysis_common import load_json
 
           target = sys.argv[1]
-
-          # Stage B (no_std scaffold): real baseline/sibling lib.rs content
-          # captured by the mutation job, target-independent. larql-cli itself
-          # has no lib.rs (bin-only) so larql-compute is the chosen
-          # representative crate (Task 14's own hardest real case -- largest
-          # leading doc comment).
-          baseline_b_filename, sibling_b_filename = stage_b_lib_rs_filenames()
-          baseline_b = {"lib_rs_content": Path(f"mutation/{baseline_b_filename}").read_text(encoding="utf-8")}
-          sibling_b = {"lib_rs_content": Path(f"mutation/{sibling_b_filename}").read_text(encoding="utf-8")}
-          Path(f"baseline-stage-b-{target}.json").write_text(json.dumps(baseline_b))
-          Path(f"sibling-stage-b-{target}.json").write_text(json.dumps(sibling_b))
 
           # Stage B2 (serde features): baseline is the Primary layer's own
           # unmutated unit-graph for this target (dependency-graph-batch-N,
           # already downloaded -- never recomputed, it's real mechanically-
           # grounded L1 data this job would otherwise have no other source
           # for); sibling is computed fresh here since the patch is now
-          # applied to this job's own checkout.
+          # applied to this job's own checkout. Genuinely target-dependent
+          # (unlike Stage B/B3 above), so this stays inside the per-target loop.
           baseline_unit_graph_path = next(Path("primary").glob(f"dependency-graph-batch-*/unit-graph-{target}.json"))
-          baseline_unit_graph = json.loads(baseline_unit_graph_path.read_text(encoding="utf-8"))
+          baseline_unit_graph = load_json(baseline_unit_graph_path)
           sibling_unit_graph_raw = subprocess.run(
               ["cargo", "+nightly", "build", "-Z", "unstable-options", "--unit-graph",
                "-p", "larql-cli", "--target", target],
@@ -707,40 +754,24 @@ jobs:
           ).stdout
           Path(f"baseline-stage-b2-{target}.json").write_text(json.dumps({"unit_graph": baseline_unit_graph}))
           Path(f"sibling-stage-b2-{target}.json").write_text(json.dumps({"unit_graph": json.loads(sibling_unit_graph_raw)}))
-
-          # Stage B3 (workspace trim): baseline is the mutation job's own
-          # pre-Stage-B3 cargo metadata capture (target-independent -- workspace
-          # membership doesn't vary by target); sibling is this job's own
-          # mutated-tree metadata.
-          expected_members = list(STAGE_B3_REACHABLE_CLOSURE)
-          baseline_metadata = json.loads(Path("mutation/baseline-metadata.json").read_text(encoding="utf-8"))
-          sibling_metadata = json.loads(subprocess.run(
-              ["cargo", "metadata", "--format-version", "1", "--no-deps"],
-              capture_output=True, text=True,
-          ).stdout)
-          Path(f"baseline-stage-b3-{target}.json").write_text(json.dumps({"metadata": baseline_metadata, "expected_members": expected_members}))
-          Path(f"sibling-stage-b3-{target}.json").write_text(json.dumps({"metadata": sibling_metadata, "expected_members": expected_members}))
           PYEOF
 
-            for STAGE in stage-b stage-b2 stage-b3; do
-              python3 -m scripts.target_analysis_promotion --stage "$STAGE" \
-                --baseline-state-file "baseline-$STAGE-$TARGET.json" \
-                --sibling-state-file "sibling-$STAGE-$TARGET.json" \
-                > "out/promotion-$STAGE-$TARGET.json"
-            done
+            python3 -m scripts.target_analysis_promotion --stage stage-b2 \
+              --baseline-state-file "baseline-stage-b2-$TARGET.json" \
+              --sibling-state-file "sibling-stage-b2-$TARGET.json" \
+              > "out/promotion-stage-b2-$TARGET.json"
 
             python3 - "$TARGET" <<'PYEOF'
           import json
           import sys
           sys.path.insert(0, ".")
           from pathlib import Path
-          from scripts.target_analysis_common import error_sites
+          from scripts.target_analysis_common import error_sites, load_json, load_jsonl
           from scripts.target_analysis_promotion import depth_advanced
 
           target = sys.argv[1]
-          with open(f"out/stage-c-{target}.json") as f:
-              sibling_messages = [json.loads(line) for line in f if line.strip()]
-          prior_round = json.loads(Path("prior-round-baseline/round-baseline.json").read_text())
+          sibling_messages = load_jsonl(Path(f"out/stage-c-{target}.json"))
+          prior_round = load_json(Path("prior-round-baseline/round-baseline.json"))
           prior_record = (
               prior_round.get("promoted", {}).get(target)
               or prior_round.get("preserved_not_promoted", {}).get(target)
@@ -754,6 +785,11 @@ jobs:
               "depth_advanced": depth_advanced(baseline_sites, sibling_sites),
               "baseline_site_count": len(baseline_sites),
               "sibling_site_count": len(sibling_sites),
+              # Carried forward verbatim so next-round-baseline's fold step
+              # doesn't need to re-download/re-parse this target's full raw
+              # stage-c-<target>.json (potentially thousands of lines) just
+              # to regenerate a value already computed here.
+              "sibling_sites": sorted(list(s) for s in sibling_sites),
               "resolved_sites": sorted(str(s) for s in (baseline_sites - sibling_sites)),
               "new_sites": sorted(str(s) for s in (sibling_sites - baseline_sites)),
           }
@@ -866,7 +902,7 @@ jobs:
           from pathlib import Path
 
           sys.path.insert(0, ".")
-          from scripts.target_analysis_common import error_sites
+          from scripts.target_analysis_common import load_json
 
           promoted = {}
           preserved = {}
@@ -875,20 +911,18 @@ jobs:
                   continue
               for depth_file in batch_dir.glob("depth-decision-*.json"):
                   target = re.sub(r"^depth-decision-|\.json$", "", depth_file.name)
-                  depth_decision = json.loads(depth_file.read_text())
+                  # depth_decision already carries its own "sibling_sites"
+                  # (Stage C writes it directly) -- no need to re-download
+                  # or re-parse this target's raw stage-c-<target>.json
+                  # (potentially thousands of lines) just to regenerate it.
+                  depth_decision = load_json(depth_file)
                   stage_verdicts = {}
                   for stage in ("stage-b", "stage-b2", "stage-b3"):
                       stage_file = batch_dir / f"promotion-{stage}-{target}.json"
                       if stage_file.exists():
-                          stage_verdicts[stage] = json.loads(stage_file.read_text())
+                          stage_verdicts[stage] = load_json(stage_file)
 
-                  stage_c_file = batch_dir / f"stage-c-{target}.json"
-                  sibling_messages = [
-                      json.loads(line) for line in stage_c_file.read_text().splitlines() if line.strip()
-                  ]
-                  sibling_sites = sorted(list(s) for s in error_sites(sibling_messages))
-
-                  record = {**depth_decision, "stage_promotions": stage_verdicts, "sibling_sites": sibling_sites}
+                  record = {**depth_decision, "stage_promotions": stage_verdicts}
                   if depth_decision["depth_advanced"]:
                       promoted[target] = record
                   else:
@@ -928,17 +962,13 @@ jobs:
               --message-format=json --keep-going > noise-floor-run-$i.json || true
           done
           python3 - <<'PYEOF'
-          import json
           import sys
           sys.path.insert(0, ".")
-          from scripts.target_analysis_common import error_sites
+          from pathlib import Path
+          from scripts.target_analysis_common import error_sites, load_jsonl
 
-          def load_messages(path):
-              with open(path) as f:
-                  return [json.loads(line) for line in f if line.strip()]
-
-          run1 = error_sites(load_messages("noise-floor-run-1.json"))
-          run2 = error_sites(load_messages("noise-floor-run-2.json"))
+          run1 = error_sites(load_jsonl(Path("noise-floor-run-1.json")))
+          run2 = error_sites(load_jsonl(Path("noise-floor-run-2.json")))
           if run1 != run2:
               print(f"::error::Noise floor violated: run1={run1} run2={run2}")
               sys.exit(1)

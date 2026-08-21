@@ -30,14 +30,20 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from scripts.target_analysis_common import unit_graph_units_named
+from scripts.target_analysis_common import load_json, unit_graph_units_named
+
+
+# The exact feature set Stage B2 (secondary-mutate job) patches every
+# `serde = { workspace = true }` dependency line to -- single source of
+# truth for both the mutation's sed replacement and this postcondition.
+STAGE_B2_SERDE_FEATURES = ("alloc", "derive")
 
 
 def serde_features_ok(unit_graph: dict[str, Any]) -> bool:
     units = unit_graph_units_named(unit_graph, "serde")
     if not units:
         return False
-    expected = {"alloc", "derive"}
+    expected = set(STAGE_B2_SERDE_FEATURES)
     return all(set(unit.get("features", [])) == expected for unit in units)
 
 
@@ -150,17 +156,13 @@ def main() -> int:
     parser.add_argument("--stage", required=True, choices=sorted(STAGE_POSTCONDITIONS))
     parser.add_argument("--baseline-state-file", required=True, type=Path)
     parser.add_argument("--sibling-state-file", required=True, type=Path)
-    parser.add_argument("--github-output", type=Path, default=None)
     args = parser.parse_args()
 
-    baseline_state = json.loads(args.baseline_state_file.read_text(encoding="utf-8"))
-    sibling_state = json.loads(args.sibling_state_file.read_text(encoding="utf-8"))
+    baseline_state = load_json(args.baseline_state_file)
+    sibling_state = load_json(args.sibling_state_file)
     promotes = stage_promotes(args.stage, baseline_state, sibling_state)
 
     print(json.dumps({"stage": args.stage, "promotes": promotes}))
-    if args.github_output is not None:
-        with args.github_output.open("a", encoding="utf-8") as handle:
-            handle.write(f"promotes={'true' if promotes else 'false'}\n")
     return 0
 
 

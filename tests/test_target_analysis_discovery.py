@@ -5,6 +5,7 @@ import pytest
 
 from scripts.target_analysis_discovery import (
     chunk_targets,
+    expand_batch_json,
     filter_by_tier,
     main,
     parse_target_list,
@@ -51,6 +52,18 @@ def test_main_treats_empty_string_requested_target_as_none(tmp_path, capsys):
     assert main() == 0
     out = capsys.readouterr().out
     assert json.loads(out) == parse_target_list(RAW)
+
+
+def test_expand_batch_json_turns_json_array_into_newline_list():
+    # The exact transform every batched job's `$BATCH_TARGETS` env var (a
+    # `toJSON(...)`-produced JSON array string) needs before its per-target
+    # `while IFS= read` loop -- previously reimplemented inline 5 times
+    # across the workflow YAML.
+    assert expand_batch_json('["a", "b", "c"]') == "a\nb\nc"
+
+
+def test_expand_batch_json_single_target():
+    assert expand_batch_json('["nvptx64-nvidia-cuda"]') == "nvptx64-nvidia-cuda"
 
 
 def test_chunk_targets_empty_list_returns_empty():
