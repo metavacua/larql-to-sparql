@@ -754,7 +754,7 @@ jobs:
 
           sys.path.insert(0, ".")
           from scripts.target_analysis_common import load_json
-          from scripts.target_analysis_promotion import stage_promotes
+          from scripts.target_analysis_promotion import stage_promotes, MUTATED_LIBRARY_CRATES
 
           target = sys.argv[1]
 
@@ -765,11 +765,24 @@ jobs:
           # for); sibling is computed fresh here since the patch is now
           # applied to this job's own checkout. Genuinely target-dependent
           # (unlike Stage B/B3 above), so this stays inside the per-target loop.
+          #
+          # Sibling scope is MUTATED_LIBRARY_CRATES (the same 5-crate scope
+          # Task 4 already established for Stage C's own `cargo check`), NOT
+          # `-p larql-cli`: larql-cli's full transitive closure pulls in
+          # larql-inference/larql-vindex, which still declare their own
+          # unpatched `safetensors = "0.7"` -- resolver v2 unifies that
+          # crate's default (std-requiring) feature across the whole
+          # `-p larql-cli` graph and reactivates `std` on the shared
+          # serde/serde_core units even though the mutated crates alone
+          # resolve std-free (confirmed by reproducing this exact
+          # discrepancy locally against a real captured unit graph,
+          # 2026-08-21).
           baseline_unit_graph_path = next(Path("primary").glob(f"dependency-graph-batch-*/unit-graph-{target}.json"))
           baseline_unit_graph = load_json(baseline_unit_graph_path)
+          check_package_args = [flag for crate in MUTATED_LIBRARY_CRATES for flag in ("-p", crate)]
           sibling_unit_graph_raw = subprocess.run(
               ["cargo", "+nightly", "build", "-Z", "unstable-options", "--unit-graph",
-               "-p", "larql-cli", "--target", target],
+               *check_package_args, "--target", target],
               capture_output=True, text=True,
           ).stdout
           baseline_state = {"unit_graph": baseline_unit_graph}
