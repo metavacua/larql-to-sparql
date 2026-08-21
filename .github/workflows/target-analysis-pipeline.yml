@@ -715,9 +715,10 @@ jobs:
         run: |
           mkdir -p out
           echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
+          CHECK_PACKAGES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(f"-p {c}" for c in MUTATED_LIBRARY_CRATES))')
           while IFS= read -r TARGET; do
             echo "=== Stage C: target=$TARGET ==="
-            cargo +nightly check -p larql-cli --target "$TARGET" \
+            cargo +nightly check $CHECK_PACKAGES --target "$TARGET" \
               -Z build-std=core,alloc --keep-going --message-format=json \
               > "out/stage-c-$TARGET.json" || true
 
@@ -960,8 +961,9 @@ jobs:
       - name: "Noise floor: run unmutated Stage C twice, confirm stable findings"
         run: |
           for i in 1 2; do
-            cargo +nightly check -p larql-cli --target nvptx64-nvidia-cuda \
-              --message-format=json --keep-going > noise-floor-run-$i.json || true
+            CHECK_PACKAGES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(f"-p {c}" for c in MUTATED_LIBRARY_CRATES))')
+            cargo +nightly check $CHECK_PACKAGES --target nvptx64-nvidia-cuda \
+              -Z build-std=core,alloc --message-format=json --keep-going > noise-floor-run-$i.json || true
           done
           python3 - <<'PYEOF'
           import sys
