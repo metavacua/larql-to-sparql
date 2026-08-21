@@ -57,9 +57,12 @@ def no_std_scaffold_ok(lib_rs_content: str) -> bool:
     return "#![no_std]" in lib_rs_content and "extern crate alloc;" in lib_rs_content
 
 
-def insert_no_std_scaffold(text: str) -> str:
+def _leading_block_end(text: str) -> int:
+    """The line index immediately after any leading //! doc comments, #![...]
+    inner attributes, and blank lines -- the correct insertion point for a
+    module-level attribute or extern crate declaration, so it lands before
+    any real code but after the crate's own existing doc/attributes."""
     lines = text.splitlines(keepends=True)
-
     insert_at = 0
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -67,10 +70,47 @@ def insert_no_std_scaffold(text: str) -> str:
             insert_at = i + 1
         else:
             break
+    return insert_at
 
-    scaffold = "#![no_std]\nextern crate alloc;\n"
-    lines.insert(insert_at, scaffold)
+
+def insert_alloc_extern_crate(text: str) -> str:
+    """Runs before Stage A's clippy --fix. A plain, still-std-linked crate
+    can declare `extern crate alloc;` without `#![no_std]` -- alloc ships in
+    every target's sysroot regardless -- so std:: references Stage A does
+    NOT touch keep working exactly as before, while std::X paths clippy
+    suggests rewriting to alloc::X now have something to resolve against.
+    Real CI evidence (2026-08-21): without this, Stage A's fix for any
+    std::->alloc::-only path (BTreeMap, BTreeSet, Arc, VecDeque) fails to
+    compile once applied and clippy's own safety check silently reverts it
+    -- confirmed for 4 of 5 mutated crates."""
+    lines = text.splitlines(keepends=True)
+    lines.insert(_leading_block_end(text), "extern crate alloc;\n")
     return "".join(lines)
+
+
+def insert_no_std_attribute(text: str) -> str:
+    """Runs after Stage A. Only #![no_std] remains to insert -- extern
+    crate alloc; was already added by insert_alloc_extern_crate() before
+    Stage A ran."""
+    lines = text.splitlines(keepends=True)
+    lines.insert(_leading_block_end(text), "#![no_std]\n")
+    return "".join(lines)
+
+
+def insert_no_std_scaffold(text: str) -> str:
+    """DEPRECATED -- kept only because `secondary-layer-self-test`'s
+    "Blast-radius containment" step (out of this task's scope; Task 11's,
+    per the 2026-08-21-stage-c-measurement-validity plan) still imports and
+    calls this name directly, and that step is explicitly left untouched by
+    this task. Provably equivalent to the old combined-scaffold single pass
+    for ANY input: `extern crate alloc;` never matches the `//!`/`#![`/blank
+    classification `_leading_block_end` scans for, so it doesn't shift where
+    the scan halts -- composing insert_alloc_extern_crate then
+    insert_no_std_attribute always lands #![no_std] immediately above
+    extern crate alloc;, byte-for-byte matching this function's old
+    single-pass output. Task 11 removes this function and its one remaining
+    call site together."""
+    return insert_no_std_attribute(insert_alloc_extern_crate(text))
 
 
 # The spec's required positive control (Testing section): a crate with a

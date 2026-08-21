@@ -8,7 +8,8 @@ from scripts.target_analysis_promotion import (
     MUTATED_LIBRARY_CRATES,
     STAGE_B3_REACHABLE_CLOSURE,
     depth_advanced,
-    insert_no_std_scaffold,
+    insert_alloc_extern_crate,
+    insert_no_std_attribute,
     no_std_scaffold_ok,
     serde_features_ok,
     stage_b_lib_rs_filenames,
@@ -69,9 +70,21 @@ def test_no_std_scaffold_ok_requires_both_markers():
     assert no_std_scaffold_ok("//! docs\nextern crate alloc;\n") is False
 
 
-def test_insert_no_std_scaffold_inserts_after_leading_doc_comment_and_attributes():
+def test_insert_alloc_extern_crate_inserts_after_leading_doc_comment_and_attributes():
     text = "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\npub fn f() {}\n"
-    result = insert_no_std_scaffold(text)
+    result = insert_alloc_extern_crate(text)
+    assert result == (
+        "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\n"
+        "extern crate alloc;\n"
+        "pub fn f() {}\n"
+    )
+
+
+def test_insert_no_std_attribute_inserts_before_a_prior_extern_crate_alloc():
+    # The exact post-Stage-A0 shape Stage B receives in the real pipeline:
+    # extern crate alloc; already present, #![no_std] still missing.
+    text = "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\nextern crate alloc;\npub fn f() {}\n"
+    result = insert_no_std_attribute(text)
     assert result == (
         "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\n"
         "#![no_std]\nextern crate alloc;\n"
@@ -80,10 +93,15 @@ def test_insert_no_std_scaffold_inserts_after_leading_doc_comment_and_attributes
     assert no_std_scaffold_ok(result) is True
 
 
-def test_insert_no_std_scaffold_inserts_at_top_when_no_leading_doc_comment():
+def test_alloc_then_no_std_attribute_composition_matches_old_combined_scaffold():
+    # Real pipeline order (Stage A0 then Stage B) must produce the exact
+    # same final scaffold the old single-pass function used to, for a
+    # crate with no leading doc comment.
     text = "pub fn f() {}\n"
-    result = insert_no_std_scaffold(text)
-    assert result == "#![no_std]\nextern crate alloc;\npub fn f() {}\n"
+    step1 = insert_alloc_extern_crate(text)
+    step2 = insert_no_std_attribute(step1)
+    assert step2 == "#![no_std]\nextern crate alloc;\npub fn f() {}\n"
+    assert no_std_scaffold_ok(step2) is True
 
 
 def test_stage_promotes_serde_patch_transitions_false_to_true():
