@@ -23,6 +23,10 @@ members = [
     "crates/larql-boundary",
     # portable (extract to sibling repos later, names stable)
     "crates/model-compute",
+    # Secondary-layer-only fixture: the target-analysis-pipeline's
+    # golden-fixture canary crate (never built by a plain `cargo build`
+    # at the workspace root -- deliberately absent from default-members).
+    "crates/larql-nostd-canary",
 ]
 default-members = [
     "crates/larql-models",

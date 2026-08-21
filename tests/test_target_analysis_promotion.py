@@ -4,6 +4,8 @@ import pytest
 
 from scripts.target_analysis_common import error_sites, load_json
 from scripts.target_analysis_promotion import (
+    GOLDEN_FIXTURE_CRATE,
+    MUTATED_LIBRARY_CRATES,
     STAGE_B3_REACHABLE_CLOSURE,
     depth_advanced,
     insert_no_std_scaffold,
@@ -194,3 +196,8 @@ def test_workspace_members_ok_false_for_real_trimmed_workspace_against_old_5_cra
     }
     old_wrong_expected = ["larql-cli", "larql-boundary", "larql-vindex-spec", "larql-models", "larql-compute"]
     assert workspace_members_ok(metadata, old_wrong_expected) is False
+
+
+def test_golden_fixture_crate_is_one_of_the_mutated_crates():
+    assert GOLDEN_FIXTURE_CRATE in MUTATED_LIBRARY_CRATES
+    assert GOLDEN_FIXTURE_CRATE == "larql-nostd-canary"

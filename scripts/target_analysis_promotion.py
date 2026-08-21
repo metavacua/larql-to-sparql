@@ -73,6 +73,11 @@ def insert_no_std_scaffold(text: str) -> str:
     return "".join(lines)
 
 
+# The spec's required positive control (Testing section): a crate with a
+# known-in-advance outcome, run through the real Stage A->C pipeline, so a
+# broken measurement is distinguishable from a genuine experimental result.
+GOLDEN_FIXTURE_CRATE = "larql-nostd-canary"
+
 # The crates the Secondary-layer mutation job (Stage A/B) actually produces a
 # baseline/sibling lib.rs pair for. larql-cli is deliberately absent: it is
 # bin-only (no src/lib.rs), so there is nothing for Stage A/B to mutate.
@@ -81,6 +86,7 @@ MUTATED_LIBRARY_CRATES = (
     "larql-vindex-spec",
     "larql-models",
     "larql-compute",
+    GOLDEN_FIXTURE_CRATE,
 )
 
 # larql-compute is the chosen Stage-B representative: it has the largest

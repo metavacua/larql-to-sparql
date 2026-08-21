@@ -590,7 +590,11 @@ jobs:
 
           root_toml = Path("Cargo.toml")
           text = root_toml.read_text(encoding="utf-8")
-          reachable = [f"crates/{name}" for name in STAGE_B3_REACHABLE_CLOSURE]
+          # larql-nostd-canary has no path-dependency relationship to the
+          # real 14-crate closure (it depends on nothing), so it is kept
+          # explicitly rather than folded into STAGE_B3_REACHABLE_CLOSURE,
+          # which must stay an honest, derived-from-real-dependencies set.
+          reachable = [f"crates/{name}" for name in STAGE_B3_REACHABLE_CLOSURE] + ["crates/larql-nostd-canary"]
           members_block_fmt = "{key} = [\n" + "".join(f'    "{c}",\n' for c in reachable) + "]\n"
           for key in ("members", "default-members"):
               text = re.sub(rf"{key} = \[[^\]]*\]\n", members_block_fmt.format(key=key), text, count=1)
@@ -971,6 +975,27 @@ jobs:
             exit 1
           fi
           echo "Blast radius contained to the declared file: $EXPECTED_PATH"
+      - name: "Golden fixture: assert the pipeline reports the known planted outcome"
+        run: |
+          python3 - <<'PYEOF'
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_promotion import insert_no_std_scaffold, GOLDEN_FIXTURE_CRATE
+
+          lib_rs = Path(f"crates/{GOLDEN_FIXTURE_CRATE}/src/lib.rs")
+          lib_rs.write_text(insert_no_std_scaffold(lib_rs.read_text(encoding="utf-8")), encoding="utf-8")
+          PYEOF
+          cargo +nightly clippy --fix --allow-dirty --allow-staged \
+            -p "larql-nostd-canary" --lib -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
+          cargo +nightly check -p larql-nostd-canary --target thumbv6m-none-eabi \
+            -Z build-std=core,alloc --message-format=json > canary-check.json
+          if grep -q '"level":"error"' canary-check.json; then
+            echo "::error::Golden fixture failed -- the pipeline's own known-good canary does not compile under core+alloc. This means the measurement machinery is broken, not that a real experiment found a negative result."
+            cat canary-check.json
+            exit 1
+          fi
+          echo "Golden fixture passed: the known-good canary compiles cleanly under -Z build-std=core,alloc."
       - name: "Ephemerality: assert no forbidden git-mutating command exists in this workflow file"
         run: |
           if grep -v -E '(echo |::error::|::warning::|^\s*#)' .github/workflows/target-analysis-pipeline.yml | grep -Eq 'git (commit|push)'; then
