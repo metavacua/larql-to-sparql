@@ -58,7 +58,10 @@ def error_sites(compiler_messages: list[dict[str, Any]]) -> set[tuple[str, int, 
     sites: set[tuple[str, int, str]] = set()
     for _entry, message in error_level_messages(compiler_messages):
         code = (message.get("code") or {}).get("code") or message.get("message", "")[:60]
-        for span in message.get("spans", []):
-            if span.get("is_primary"):
+        primary_spans = [s for s in message.get("spans", []) if s.get("is_primary")]
+        if primary_spans:
+            for span in primary_spans:
                 sites.add((span.get("file_name", ""), span.get("line_start", -1), code))
+        else:
+            sites.add(("<spanless>", -1, code))
     return sites

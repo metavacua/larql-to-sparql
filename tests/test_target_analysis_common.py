@@ -34,6 +34,17 @@ def test_error_sites_extracts_only_error_level_primary_spans():
     }
 
 
+def test_error_sites_keeps_spanless_errors_instead_of_dropping_them():
+    # Real case: a `duplicate lang item` error under -Z build-std has no
+    # primary span at all -- dropping it silently reads as a clean build.
+    messages = [
+        {"reason": "compiler-message", "message": {"level": "error", "code": {"code": "E0152"}, "message": "duplicate lang item in crate 'core' (which 'std' depends on): 'sized'", "spans": []}},
+    ]
+    sites = error_sites(messages)
+    assert len(sites) == 1
+    assert sites == {("<spanless>", -1, "E0152")}
+
+
 def test_load_jsonl_reads_cargos_real_line_delimited_wire_format():
     # cargo's --message-format=json writes one JSON object per line, not a
     # single JSON array (confirmed elsewhere in this pipeline's own workflow

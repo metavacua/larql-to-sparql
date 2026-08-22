@@ -673,7 +673,7 @@ jobs:
             echo "=== Stage C baseline: target=$TARGET ==="
             cargo +nightly check $CHECK_PACKAGES --target "$TARGET" \
               -Z build-std=core,alloc --keep-going --message-format=json \
-              > "baseline-out/stage-c-$TARGET.json" || true
+              > "baseline-out/stage-c-$TARGET.json" 2> "baseline-out/stage-c-$TARGET.stderr.txt" || true
           done < targets-in-batch.txt
       - name: Download the Secondary layer's mutation artifact
         uses: actions/download-artifact@v4
@@ -750,7 +750,7 @@ jobs:
             echo "=== Stage C: target=$TARGET ==="
             cargo +nightly check $CHECK_PACKAGES --target "$TARGET" \
               -Z build-std=core,alloc --keep-going --message-format=json \
-              > "out/stage-c-$TARGET.json" || true
+              > "out/stage-c-$TARGET.json" 2> "out/stage-c-$TARGET.stderr.txt" || true
 
             # Stage B and Stage B3 verdicts are target-independent (see the
             # comments in the batch-level step above) -- copy the single
@@ -817,6 +817,13 @@ jobs:
           baseline_messages = load_jsonl(Path(f"baseline-out/stage-c-{target}.json"))
           baseline_sites = error_sites(baseline_messages)
           sibling_sites = error_sites(sibling_messages)
+
+          def build_script_failures(stderr_path):
+              text = Path(stderr_path).read_text(encoding="utf-8") if Path(stderr_path).exists() else ""
+              return sorted({line.strip() for line in text.splitlines() if "failed to run custom build command for" in line})
+
+          baseline_build_failures = build_script_failures(f"baseline-out/stage-c-{target}.stderr.txt")
+          sibling_build_failures = build_script_failures(f"out/stage-c-{target}.stderr.txt")
           result = {
               "target": target,
               "depth_advanced": depth_advanced(baseline_sites, sibling_sites),
@@ -829,6 +836,8 @@ jobs:
               "sibling_sites": sorted(list(s) for s in sibling_sites),
               "resolved_sites": sorted(str(s) for s in (baseline_sites - sibling_sites)),
               "new_sites": sorted(str(s) for s in (sibling_sites - baseline_sites)),
+              "baseline_build_script_failures": baseline_build_failures,
+              "sibling_build_script_failures": sibling_build_failures,
           }
           Path(f"out/depth-decision-{target}.json").write_text(json.dumps(result, indent=2))
           PYEOF
