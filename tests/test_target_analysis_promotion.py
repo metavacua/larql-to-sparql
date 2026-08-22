@@ -1,0 +1,273 @@
+from pathlib import Path
+
+import pytest
+
+from scripts.target_analysis_common import error_sites, load_json
+from scripts.target_analysis_promotion import (
+    GOLDEN_FIXTURE_CRATE,
+    MUTATED_LIBRARY_CRATES,
+    STAGE_B3_EXPECTED_MEMBERS,
+    STAGE_B3_REACHABLE_CLOSURE,
+    depth_advanced,
+    insert_alloc_extern_crate,
+    insert_no_std_attribute,
+    no_std_scaffold_ok,
+    serde_features_ok,
+    stage_b_lib_rs_filenames,
+    stage_promotes,
+    workspace_members_ok,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures" / "target_analysis"
+
+
+def test_serde_features_ok_is_false_for_default_features():
+    unit_graph = load_json(FIXTURES / "unit_graph_serde_default.json")
+    assert serde_features_ok(unit_graph) is False
+
+
+def test_serde_features_ok_is_true_for_patched_features():
+    unit_graph = load_json(FIXTURES / "unit_graph_serde_patched.json")
+    assert serde_features_ok(unit_graph) is True
+
+
+def test_serde_features_ok_checks_serde_core_specifically():
+    # Modern serde (1.0.228+) carries `std` on serde_core, not serde itself
+    # -- a fixture where serde looks clean but serde_core still has std
+    # must still read False.
+    #
+    # Deviation from the brief's literal Step 2 snippet: the inline serde
+    # unit here is `["alloc", "derive"]`, not `["alloc", "derive",
+    # "serde_derive"]`. The brief's own literal features list already
+    # fails the OLD exact-set check (STAGE_B2_SERDE_FEATURES is exactly
+    # {"alloc", "derive"}), so it would return False under the pre-fix
+    # code too -- green-before-green-after, not a real red. Using
+    # ["alloc", "derive"] (still real -- this is real cargo's shape for a
+    # crate with no dependents forcing extra features) makes the OLD
+    # function return True (exact match, and it never inspects
+    # serde_core), and the NEW function correctly return False (finds
+    # `std` on serde_core) -- a genuine red-for-the-right-reason before
+    # the fix, matching this task's TDD requirement.
+    unit_graph = {
+        "units": [
+            {"target": {"name": "serde"}, "features": ["alloc", "derive"]},
+            {"target": {"name": "serde_core"}, "features": ["alloc", "std"]},
+        ]
+    }
+    assert serde_features_ok(unit_graph) is False
+
+
+def test_serde_features_ok_is_false_when_serde_is_absent():
+    assert serde_features_ok({"units": []}) is False
+
+
+def test_workspace_members_ok_false_for_full_workspace():
+    metadata = load_json(FIXTURES / "cargo_metadata_full_workspace.json")
+    expected = ["larql-cli", "larql-boundary", "larql-vindex-spec"]
+    assert workspace_members_ok(metadata, expected) is False
+
+
+def test_workspace_members_ok_true_for_trimmed_workspace():
+    metadata = load_json(FIXTURES / "cargo_metadata_trimmed_workspace.json")
+    expected = ["larql-cli", "larql-boundary", "larql-vindex-spec"]
+    assert workspace_members_ok(metadata, expected) is True
+
+
+def test_workspace_members_ok_parses_real_modern_package_id_format():
+    # Real cargo (this repo's toolchain: 1.97.1) package-id format is
+    # "path+file:///abs/path/to/crate#version" -- no space anywhere, unlike the
+    # older "name version (source)" format the fixtures previously (wrongly)
+    # assumed, which is why this bug was invisible to this test file since Task 4.
+    metadata = {
+        "packages": [
+            {"id": "path+file:///repo/crates/larql-cli#0.2.0", "name": "larql-cli"},
+            {"id": "path+file:///repo/crates/larql-boundary#0.2.0", "name": "larql-boundary"},
+        ],
+        "workspace_members": [
+            "path+file:///repo/crates/larql-cli#0.2.0",
+            "path+file:///repo/crates/larql-boundary#0.2.0",
+        ],
+    }
+    assert workspace_members_ok(metadata, ["larql-cli", "larql-boundary"]) is True
+
+
+def test_no_std_scaffold_ok_requires_both_markers():
+    assert no_std_scaffold_ok("//! docs\n#![no_std]\nextern crate alloc;\n") is True
+    assert no_std_scaffold_ok("//! docs\n#![no_std]\n") is False
+    assert no_std_scaffold_ok("//! docs\nextern crate alloc;\n") is False
+
+
+def test_insert_alloc_extern_crate_inserts_after_leading_doc_comment_and_attributes():
+    text = "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\npub fn f() {}\n"
+    result = insert_alloc_extern_crate(text)
+    assert result == (
+        "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\n"
+        "extern crate alloc;\n"
+        "pub fn f() {}\n"
+    )
+
+
+def test_insert_no_std_attribute_inserts_before_a_prior_extern_crate_alloc():
+    # The exact post-Stage-A0 shape Stage B receives in the real pipeline:
+    # extern crate alloc; already present, #![no_std] still missing.
+    text = "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\nextern crate alloc;\npub fn f() {}\n"
+    result = insert_no_std_attribute(text)
+    assert result == (
+        "//! A crate.\n//! More docs.\n#![allow(dead_code)]\n\n"
+        "#![no_std]\nextern crate alloc;\n"
+        "pub fn f() {}\n"
+    )
+    assert no_std_scaffold_ok(result) is True
+
+
+def test_alloc_then_no_std_attribute_composition_matches_old_combined_scaffold():
+    # Real pipeline order (Stage A0 then Stage B) must produce the exact
+    # same final scaffold the old single-pass function used to, for a
+    # crate with no leading doc comment.
+    text = "pub fn f() {}\n"
+    step1 = insert_alloc_extern_crate(text)
+    step2 = insert_no_std_attribute(step1)
+    assert step2 == "#![no_std]\nextern crate alloc;\npub fn f() {}\n"
+    assert no_std_scaffold_ok(step2) is True
+
+
+def test_stage_promotes_serde_patch_transitions_false_to_true():
+    baseline = {"unit_graph": load_json(FIXTURES / "unit_graph_serde_default.json")}
+    sibling = {"unit_graph": load_json(FIXTURES / "unit_graph_serde_patched.json")}
+    assert stage_promotes("stage-b2", baseline, sibling) is True
+
+
+def test_stage_promotes_serde_patch_false_when_sibling_also_unpatched():
+    baseline = {"unit_graph": load_json(FIXTURES / "unit_graph_serde_default.json")}
+    sibling = {"unit_graph": load_json(FIXTURES / "unit_graph_serde_default.json")}
+    assert stage_promotes("stage-b2", baseline, sibling) is False
+
+
+def test_stage_promotes_false_when_baseline_already_satisfies_postcondition():
+    # A sibling can never promote by matching an already-true baseline —
+    # promotion requires a genuine false-to-true transition, not just "true".
+    baseline = {"unit_graph": load_json(FIXTURES / "unit_graph_serde_patched.json")}
+    sibling = {"unit_graph": load_json(FIXTURES / "unit_graph_serde_patched.json")}
+    assert stage_promotes("stage-b2", baseline, sibling) is False
+
+
+def test_depth_advanced_true_when_a_baseline_site_is_resolved():
+    baseline = error_sites(load_json(FIXTURES / "compiler_messages_baseline.json"))
+    sibling = error_sites(load_json(FIXTURES / "compiler_messages_sibling_progress.json"))
+    # baseline has line 12 and 47; sibling has 47 and a new line 60.
+    # Line 12 disappearing is real progress, even though a new site (60) appeared.
+    assert depth_advanced(baseline, sibling) is True
+
+
+def test_depth_advanced_false_when_nothing_baseline_present_is_resolved():
+    baseline = error_sites(load_json(FIXTURES / "compiler_messages_baseline.json"))
+    # sibling == baseline: identical wall, no resolution, no advancement.
+    assert depth_advanced(baseline, baseline) is False
+
+
+def test_depth_advanced_false_when_sibling_only_adds_new_sites():
+    baseline = {("crates/larql-boundary/src/lib.rs", 12, "E0433")}
+    sibling = baseline | {("crates/larql-boundary/src/lib.rs", 99, "E0999")}
+    assert depth_advanced(baseline, sibling) is False
+
+
+def test_stage_b_lib_rs_filenames_rejects_larql_cli():
+    # larql-cli is bin-only (no src/lib.rs) and is never one of the crates
+    # the Secondary-layer mutation job produces a baseline/sibling lib.rs
+    # pair for. A caller asking for it by name gets a clear error here,
+    # not a bare FileNotFoundError three layers downstream in a per-target
+    # CI loop, across every target in every batch.
+    with pytest.raises(ValueError, match="larql-cli"):
+        stage_b_lib_rs_filenames("larql-cli")
+
+
+def test_stage_b_lib_rs_filenames_default_is_larql_compute():
+    baseline, sibling = stage_b_lib_rs_filenames()
+    assert baseline == "baseline-lib-rs-larql-compute.txt"
+    assert sibling == "sibling-lib-rs-larql-compute.txt"
+
+
+def test_stage_b_lib_rs_filenames_accepts_any_real_mutated_crate():
+    baseline, sibling = stage_b_lib_rs_filenames("larql-boundary")
+    assert baseline == "baseline-lib-rs-larql-boundary.txt"
+    assert sibling == "sibling-lib-rs-larql-boundary.txt"
+
+
+def test_stage_b3_reachable_closure_matches_real_transitive_dependency_tree():
+    # Cargo's own documented rule ("All path dependencies residing in the
+    # workspace directory automatically become members") means the real,
+    # trimmed workspace has 14 members, not the 5 originally hand-declared
+    # as "larql-cli's real tree" (Task 16, Task 17) -- confirmed against
+    # real captured CI data from run 32409988443 (Task 17/Task 18) and an
+    # independent transitive-closure grep of the real Cargo.toml files,
+    # exactly matching the original, proven experiment-cuda-nvptx.yml job's
+    # own 13-crate `keep` set plus larql-compute-metal (an optional path
+    # dependency Cargo pulls in as a member regardless of `optional = true`).
+    assert set(STAGE_B3_REACHABLE_CLOSURE) == {
+        "larql-boundary", "larql-cli", "larql-compute", "larql-compute-metal",
+        "larql-core", "larql-execution", "larql-factory", "larql-inference",
+        "larql-kv", "larql-lql", "larql-models", "larql-router-protocol",
+        "larql-vindex", "larql-vindex-spec",
+    }
+    assert len(STAGE_B3_REACHABLE_CLOSURE) == 14
+
+
+def test_workspace_members_ok_true_for_real_trimmed_workspace_against_full_closure():
+    metadata = {
+        "packages": [
+            {"id": f"path+file:///repo/crates/{name}#0.1.0", "name": name}
+            for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+        "workspace_members": [
+            f"path+file:///repo/crates/{name}#0.1.0" for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+    }
+    assert workspace_members_ok(metadata, STAGE_B3_REACHABLE_CLOSURE) is True
+
+
+def test_workspace_members_ok_false_for_real_trimmed_workspace_against_old_5_crate_list():
+    # The bug this task fixes: the OLD hand-declared 5-crate expected list
+    # can never match the real, trimmed workspace's actual 14 members --
+    # this is exactly why Stage B3's promotion signal was doomed to read
+    # False even after Task 18's PackageId-parsing fix.
+    metadata = {
+        "packages": [
+            {"id": f"path+file:///repo/crates/{name}#0.1.0", "name": name}
+            for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+        "workspace_members": [
+            f"path+file:///repo/crates/{name}#0.1.0" for name in STAGE_B3_REACHABLE_CLOSURE
+        ],
+    }
+    old_wrong_expected = ["larql-cli", "larql-boundary", "larql-vindex-spec", "larql-models", "larql-compute"]
+    assert workspace_members_ok(metadata, old_wrong_expected) is False
+
+
+def test_golden_fixture_crate_is_one_of_the_mutated_crates():
+    assert GOLDEN_FIXTURE_CRATE in MUTATED_LIBRARY_CRATES
+    assert GOLDEN_FIXTURE_CRATE == "larql-nostd-canary"
+
+
+def test_stage_promotes_stage_b3_true_when_sibling_matches_expected_members_including_golden_fixture():
+    # Regression test for the C-1 finding (final whole-branch review,
+    # 2026-08-22): Stage B3's promotion verdict was pinned False for all
+    # 119 targets because the promotion computation checked the real,
+    # 15-member trimmed workspace (STAGE_B3_REACHABLE_CLOSURE + the golden
+    # fixture crate, which the mutate job's trim step appends explicitly)
+    # against the bare 14-name STAGE_B3_REACHABLE_CLOSURE alone -- an
+    # unsatisfiable postcondition regardless of whether the trim actually
+    # worked. STAGE_B3_EXPECTED_MEMBERS is the fix: the real, full expected
+    # membership set.
+    assert STAGE_B3_EXPECTED_MEMBERS == STAGE_B3_REACHABLE_CLOSURE + (GOLDEN_FIXTURE_CRATE,)
+    untrimmed_metadata = {
+        "packages": [{"id": f"id-{n}", "name": n} for n in STAGE_B3_EXPECTED_MEMBERS]
+        + [{"id": "id-extra", "name": "some-other-crate-not-in-the-trim"}],
+        "workspace_members": [f"id-{n}" for n in STAGE_B3_EXPECTED_MEMBERS] + ["id-extra"],
+    }
+    trimmed_metadata = {
+        "packages": [{"id": f"id-{n}", "name": n} for n in STAGE_B3_EXPECTED_MEMBERS],
+        "workspace_members": [f"id-{n}" for n in STAGE_B3_EXPECTED_MEMBERS],
+    }
+    baseline_state = {"metadata": untrimmed_metadata, "expected_members": list(STAGE_B3_EXPECTED_MEMBERS)}
+    sibling_state = {"metadata": trimmed_metadata, "expected_members": list(STAGE_B3_EXPECTED_MEMBERS)}
+    assert stage_promotes("stage-b3", baseline_state, sibling_state) is True

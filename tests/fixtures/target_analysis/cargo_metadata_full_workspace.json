@@ -1,0 +1,14 @@
+{
+  "packages": [
+    {"id": "path+file:///repo/crates/larql-cli#0.1.0", "name": "larql-cli"},
+    {"id": "path+file:///repo/crates/larql-boundary#0.1.0", "name": "larql-boundary"},
+    {"id": "path+file:///repo/crates/larql-python#0.1.0", "name": "larql-python"},
+    {"id": "path+file:///repo/crates/larql-vindex-spec#0.1.0", "name": "larql-vindex-spec"}
+  ],
+  "workspace_members": [
+    "path+file:///repo/crates/larql-cli#0.1.0",
+    "path+file:///repo/crates/larql-boundary#0.1.0",
+    "path+file:///repo/crates/larql-python#0.1.0",
+    "path+file:///repo/crates/larql-vindex-spec#0.1.0"
+  ]
+}

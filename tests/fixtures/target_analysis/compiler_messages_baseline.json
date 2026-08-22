@@ -1,0 +1,5 @@
+[
+  {"reason": "compiler-message", "target": {"name": "larql-boundary"}, "message": {"level": "error", "code": {"code": "E0433"}, "message": "failed to resolve: use of undeclared crate or module `std`", "spans": [{"file_name": "crates/larql-boundary/src/lib.rs", "line_start": 12, "is_primary": true}]}},
+  {"reason": "compiler-message", "target": {"name": "larql-boundary"}, "message": {"level": "error", "code": {"code": "E0433"}, "message": "failed to resolve: use of undeclared crate or module `std`", "spans": [{"file_name": "crates/larql-boundary/src/lib.rs", "line_start": 47, "is_primary": true}]}},
+  {"reason": "compiler-message", "target": {"name": "larql-boundary"}, "message": {"level": "warning", "code": null, "message": "unused import", "spans": [{"file_name": "crates/larql-boundary/src/lib.rs", "line_start": 3, "is_primary": true}]}}
+]

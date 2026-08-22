@@ -1,0 +1,1287 @@
+name: target-analysis-pipeline
+
+on:
+  push:
+    branches:
+      - "experiment/target-analysis-*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Single target triple to analyze (optional; omit for the full rustc target-list)"
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discovery:
+    name: Discover target matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    outputs:
+      target-matrix: ${{ steps.resolve.outputs.matrix }}
+      batches: ${{ steps.resolve.outputs.batches }}
+      batch-indices: ${{ steps.resolve.outputs.batch-indices }}
+      fmt-crates: ${{ steps.fmt-crates.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expose the fmt-check crate list (single source of truth, MUTATED_LIBRARY_CRATES + larql-cli)
+        id: fmt-crates
+        run: |
+          echo "list=$(python3 -c 'import json, sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(json.dumps(list(MUTATED_LIBRARY_CRATES) + ["larql-cli"]))')" >> "$GITHUB_OUTPUT"
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
+      - name: rustc --print target-list
+        run: rustup run nightly rustc --print target-list > target-list.txt
+      - name: Query tier for every real target
+        run: |
+          : > tier-lines.txt
+          while IFS= read -r TARGET; do
+            TIER=$(rustup run nightly rustc --print target-spec-json -Z unstable-options --target "$TARGET" 2>/dev/null \
+              | python3 -c 'import json, sys
+          try:
+              d = json.load(sys.stdin)
+              print(d.get("metadata", {}).get("tier", ""))
+          except Exception:
+              print("")')
+            printf '%s\t%s\n' "$TARGET" "$TIER" >> tier-lines.txt
+          done < target-list.txt
+          python3 -c "
+          import json
+          tiers = {}
+          with open('tier-lines.txt') as f:
+              for line in f:
+                  target, tier = line.rstrip('\n').split('\t', 1)
+                  tiers[target] = int(tier) if tier else None
+          with open('target-tiers.json', 'w') as f:
+              json.dump(tiers, f)
+          "
+      - name: Resolve target matrix
+        id: resolve
+        env:
+          REQUESTED_TARGET: ${{ inputs.target }}
+        run: |
+          python3 -m scripts.target_analysis_discovery \
+            --target-list-file target-list.txt \
+            --requested-target "$REQUESTED_TARGET" \
+            --max-batch-size 12 \
+            --target-tiers-file target-tiers.json \
+            --max-tier 2 \
+            --github-output "$GITHUB_OUTPUT" > /dev/null
+      - name: Upload raw target-list and tiers
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery-target-list
+          path: |
+            target-list.txt
+            target-tiers.json
+
+  runner-capability-probe:
+    name: Probe this run's real runner toolchain capabilities
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    outputs:
+      android-ndk-clang-dir: ${{ steps.probe.outputs.android-ndk-clang-dir }}
+      mingw-w64-installable: ${{ steps.probe.outputs.mingw-w64-installable }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe real runner capabilities -- structurally cannot fail; absence is data, never a job failure
+        id: probe
+        run: |
+          mkdir -p out
+          NDK_DIR=""
+          if [ -n "$ANDROID_NDK_HOME" ] && [ -d "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
+            NDK_DIR="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          else
+            echo "::warning::ANDROID_NDK_HOME is unset or its expected clang directory is missing on this real runner -- the audit's 'ubuntu-latest ships the NDK preinstalled' claim does not hold here."
+          fi
+          echo "android-ndk-clang-dir=$NDK_DIR" >> "$GITHUB_OUTPUT"
+
+          sudo apt-get update -qq || true
+          MINGW_OK="false"
+          if apt-cache policy gcc-mingw-w64-x86-64 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+            MINGW_OK="true"
+          else
+            echo "::warning::gcc-mingw-w64-x86-64 has no installable apt candidate on this runner (or apt-get update failed) -- windows-gnu targets will keep their real ToolNotFound errors."
+          fi
+          echo "mingw-w64-installable=$MINGW_OK" >> "$GITHUB_OUTPUT"
+
+          printf '{"android_ndk_clang_dir": "%s", "mingw_w64_installable": %s}\n' "$NDK_DIR" "$MINGW_OK" > out/runner-capabilities.json
+      - name: "Upload the real runner-capability manifest (L1 data: what this run's own runner image actually had)"
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-capabilities
+          path: out/runner-capabilities.json
+
+  target-independent-checks:
+    name: "Target-independent checks: fmt (${{ matrix.crate }})"
+    needs: [discovery]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJSON(needs.discovery.outputs.fmt-crates) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rustfmt --toolchain nightly
+      - name: "cargo fmt --check: ${{ matrix.crate }}"
+        id: fmt
+        continue-on-error: true
+        run: cargo +nightly fmt -p "${{ matrix.crate }}" --check > fmt-output.txt 2>&1
+      - name: Upload fmt-check output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: target-independent-checks-${{ matrix.crate }}
+          path: fmt-output.txt
+      - name: Assert honest result
+        run: |
+          echo "cargo fmt --check outcome: ${{ steps.fmt.outcome }}"
+          if [ "${{ steps.fmt.outcome }}" = "failure" ]; then
+            echo "::notice::Real fmt violation recorded as a finding, not masked."
+          fi
+
+  target-capability:
+    name: "Target capability: batch ${{ matrix.batch_index }}"
+    needs: [discovery]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
+      - name: Probe every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
+          rustup run nightly rustc --print target-list > full-target-list.txt
+          FAILED=0
+          while IFS= read -r TARGET; do
+            echo "=== target: $TARGET ==="
+            if ! grep -qx "$TARGET" full-target-list.txt; then
+              echo "::error::$TARGET not found in rustc --print target-list — discovery/capability disagreement"
+              FAILED=1
+              continue
+            fi
+            rustup run nightly rustc --print target-spec-json -Z unstable-options \
+              --target "$TARGET" > "out/target-spec-$TARGET.json" || FAILED=1
+            rustup run nightly rustc --print cfg --target "$TARGET" > "out/cfg-$TARGET.txt" || FAILED=1
+            rustup run nightly rustc --print supported-crate-types -Z unstable-options \
+              --target "$TARGET" > "out/supported-crate-types-$TARGET.txt" || FAILED=1
+          done < targets-in-batch.txt
+          exit $FAILED
+      - name: Upload capability artifacts for this batch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: target-capability-batch-${{ matrix.batch_index }}
+          path: out/
+
+  dependency-graph:
+    name: "Dependency graph: batch ${{ matrix.batch_index }}"
+    needs: [discovery, runner-capability-probe]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
+      - name: Provision this job's runner from the probed capabilities (gates provisioning only -- never which targets get measured)
+        env:
+          ANDROID_NDK_CLANG_DIR: ${{ needs.runner-capability-probe.outputs.android-ndk-clang-dir }}
+          MINGW_W64_INSTALLABLE: ${{ needs.runner-capability-probe.outputs.mingw-w64-installable }}
+        run: |
+          if [ -n "$ANDROID_NDK_CLANG_DIR" ] && [ -d "$ANDROID_NDK_CLANG_DIR" ]; then
+            echo "PATH=$ANDROID_NDK_CLANG_DIR:$PATH" >> "$GITHUB_ENV"
+            echo "Android NDK confirmed present at $ANDROID_NDK_CLANG_DIR (per this run's own probe); cc-rs now wired to its clang."
+          else
+            echo "::warning::this job's own runner does not have the NDK clang dir the probe reported (image skew between jobs in this same run, or the probe found none) -- android targets keep their real ToolNotFound errors for this job."
+          fi
+
+          if [ "$MINGW_W64_INSTALLABLE" = "true" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+              || echo "::warning::mingw-w64 install failed on this job's own runner despite the probe finding a candidate -- transient apt issue, continuing; windows-gnu targets keep their real ToolNotFound errors for this job"
+          else
+            echo "::warning::probe found no installable mingw-w64 candidate on this run's runner image -- skipping the install attempt for this job; windows-gnu targets keep their real ToolNotFound errors"
+          fi
+      - name: Dependency-graph probes for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
+          cargo install cargo-deny --locked
+          FAILED=0
+          while IFS= read -r TARGET; do
+            rustup target add "$TARGET" --toolchain nightly 2>&1 || echo "::warning::rustup target add failed for $TARGET (expected for targets with no prebuilt std component, e.g. s390x-unknown-none-softfloat)"
+            echo "=== target: $TARGET ==="
+            cargo +nightly metadata --format-version 1 --filter-platform "$TARGET" \
+              > "out/metadata-$TARGET.json" || FAILED=1
+            cargo +nightly tree -p larql-cli -e features --target "$TARGET" \
+              > "out/tree-features-$TARGET.txt" || FAILED=1
+            cargo +nightly tree -p larql-cli --duplicates --target "$TARGET" \
+              > "out/tree-duplicates-$TARGET.txt" || FAILED=1
+            cargo +nightly build -Z unstable-options --unit-graph \
+              -p larql-cli --target "$TARGET" \
+              > "out/unit-graph-$TARGET.json" || FAILED=1
+            cargo deny --config deny-nvptx.toml check bans licenses advisories sources \
+              > "out/deny-$TARGET.txt" || true
+          done < targets-in-batch.txt
+          exit $FAILED
+      - name: Upload dependency-graph artifacts for this batch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-graph-batch-${{ matrix.batch_index }}
+          path: out/
+
+  build-attempt:
+    name: "Build attempt: batch ${{ matrix.batch_index }}"
+    needs: [discovery, target-capability, runner-capability-probe]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # actions/download-artifact
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add clippy --toolchain nightly
+      - name: Provision this job's runner from the probed capabilities (gates provisioning only -- never which targets get measured)
+        env:
+          ANDROID_NDK_CLANG_DIR: ${{ needs.runner-capability-probe.outputs.android-ndk-clang-dir }}
+          MINGW_W64_INSTALLABLE: ${{ needs.runner-capability-probe.outputs.mingw-w64-installable }}
+        run: |
+          if [ -n "$ANDROID_NDK_CLANG_DIR" ] && [ -d "$ANDROID_NDK_CLANG_DIR" ]; then
+            echo "PATH=$ANDROID_NDK_CLANG_DIR:$PATH" >> "$GITHUB_ENV"
+            echo "Android NDK confirmed present at $ANDROID_NDK_CLANG_DIR (per this run's own probe); cc-rs now wired to its clang."
+          else
+            echo "::warning::this job's own runner does not have the NDK clang dir the probe reported (image skew between jobs in this same run, or the probe found none) -- android targets keep their real ToolNotFound errors for this job."
+          fi
+
+          if [ "$MINGW_W64_INSTALLABLE" = "true" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+              || echo "::warning::mingw-w64 install failed on this job's own runner despite the probe finding a candidate -- transient apt issue, continuing; windows-gnu targets keep their real ToolNotFound errors for this job"
+          else
+            echo "::warning::probe found no installable mingw-w64 candidate on this run's runner image -- skipping the install attempt for this job; windows-gnu targets keep their real ToolNotFound errors"
+          fi
+      - name: Download this batch's target-capability artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: target-capability-batch-${{ matrix.batch_index }}
+          path: capability
+      - name: Build-attempt probes for every target/cmd/features combination in this batch (plus a per-target crate-type canary)
+        id: attempt
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
+          FAILED=0
+          SKIPPED=0
+          while IFS= read -r TARGET; do
+            rustup target add "$TARGET" --toolchain nightly 2>&1 || echo "::warning::rustup target add failed for $TARGET (expected for targets with no prebuilt std component, e.g. s390x-unknown-none-softfloat)"
+            # Probe-mechanism canary (run 1's real CI evidence): `--crate-type` is
+            # rejected outright by `cargo check`/`clippy`/`build` (it is not a flag
+            # on those subcommands at all -- confirmed from run 1's logs, uniform
+            # "unexpected argument '--crate-type' found" across all three). The one
+            # cargo subcommand that documents `--crate-type` is `cargo rustc`, and
+            # its own docs say it "only works when building a lib or example
+            # library target" -- larql-cli is bin-only (see crates/larql-cli/Cargo.toml),
+            # so the crate-type dimension cannot be driven through cargo's CLI against
+            # this package as it stands. Recorded here as real L1 evidence (not
+            # silently dropped) via a single `|| true` canary per target, instead of
+            # a 5x-wide loop where every iteration issued an identical failing command.
+            FIRST_CRATE_TYPE=$(tr ',' '\n' < "capability/supported-crate-types-$TARGET.txt" | sed 's/^ *//; s/ *$//' | head -1)
+            if [ -n "$FIRST_CRATE_TYPE" ]; then
+              echo "=== crate-type canary: target=$TARGET crate_type=$FIRST_CRATE_TYPE (cargo rustc --crate-type; expected to fail -- larql-cli is bin-only) ==="
+              cargo +nightly rustc -p larql-cli --target "$TARGET" \
+                --crate-type "$FIRST_CRATE_TYPE" --message-format=json \
+                > "out/crate-type-canary-$TARGET.json" 2>&1 || true
+            fi
+            GUARANTEED_FAIL=$(python3 - "$TARGET" <<'PYEOF'
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_common import load_json
+          from scripts.target_analysis_build_attempt import guaranteed_std_failure
+
+          target = sys.argv[1]
+          target_spec = load_json(Path(f"capability/target-spec-{target}.json"))
+          print("true" if guaranteed_std_failure(target_spec, target) else "false")
+          PYEOF
+            )
+            if [ "$GUARANTEED_FAIL" = "true" ]; then
+              echo "=== target=$TARGET: skipping the 6 cmd/feature closure checks -- target-capability's own metadata already proves std is unavailable and larql-cli's reqwest dependency is unconditional (crates/larql-cli/Cargo.toml, confirmed 2026-08-21) ==="
+              SKIPPED=$((SKIPPED+1))
+              python3 - "$TARGET" <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_build_attempt import skip_record
+          from scripts.target_analysis_indexing import build_attempt_filenames
+
+          target = sys.argv[1]
+          for filename in build_attempt_filenames(target):
+              Path(f"out/{filename}").write_text(json.dumps(skip_record(target)))
+          PYEOF
+              continue
+            fi
+            BUILD_STD=none
+            for CARGO_CMD in check clippy build; do
+              for FEATURES in default-features no-default-features; do
+                if [ "$FEATURES" = "no-default-features" ]; then FEATURES_FLAG="--no-default-features"; else FEATURES_FLAG=""; fi
+                OUTFILE="out/attempt-$TARGET-$BUILD_STD-$CARGO_CMD-$FEATURES.json"
+                echo "=== target=$TARGET build_std=$BUILD_STD cmd=$CARGO_CMD features=$FEATURES ==="
+                cargo +nightly "$CARGO_CMD" -p larql-cli \
+                  --target "$TARGET" $FEATURES_FLAG \
+                  --keep-going --message-format=json > "$OUTFILE" || FAILED=1
+              done
+            done
+          done < targets-in-batch.txt
+          echo "batch-had-failure=$FAILED" >> "$GITHUB_OUTPUT"
+          echo "batch-skipped-count=$SKIPPED" >> "$GITHUB_OUTPUT"
+      - name: Upload full diagnostic JSON for this batch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-attempt-batch-${{ matrix.batch_index }}
+          path: out/
+      - name: Assert honest result
+        run: |
+          echo "batch ${{ matrix.batch_index }} had at least one real cargo failure: ${{ steps.attempt.outputs.batch-had-failure }}"
+          if [ "${{ steps.attempt.outputs.batch-had-failure }}" = "1" ]; then
+            echo "::notice::At least one real build failure in this batch, recorded as a finding in the uploaded JSON, not masked."
+          fi
+          echo "batch ${{ matrix.batch_index }} skipped ${{ steps.attempt.outputs.batch-skipped-count }} target(s) via the guaranteed-std-failure short-circuit"
+
+  runtime-test:
+    name: "Runtime test: batch ${{ matrix.batch_index }}"
+    needs: [discovery]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine runner availability and execute or record block, for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
+          while IFS= read -r TARGET; do
+            case "$TARGET" in
+              wasm32*|wasm64*)
+                echo '{"status": "runnable", "runner": "wasmtime"}' > "out/runtime-test-result-$TARGET.json"
+                # actual wasmtime execution wired in the wasm-family follow-on work;
+                # this job records availability honestly either way.
+                ;;
+              x86_64-unknown-linux-gnu|aarch64-*-linux-*|aarch64-apple-darwin)
+                echo '{"status": "runnable", "runner": "native"}' > "out/runtime-test-result-$TARGET.json"
+                ;;
+              nvptx64-nvidia-cuda)
+                echo '{"status": "blocked", "reason": "no free GPU CI runner available for this project (confirmed 2026-08-16)"}' \
+                  > "out/runtime-test-result-$TARGET.json"
+                ;;
+              *)
+                echo '{"status": "blocked", "reason": "no known runner for this target"}' \
+                  > "out/runtime-test-result-$TARGET.json"
+                ;;
+            esac
+          done < targets-in-batch.txt
+      - name: Upload runtime-test results for this batch
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-test-batch-${{ matrix.batch_index }}
+          path: out/
+
+  indexing:
+    name: Build navigation index
+    needs: [discovery, target-capability, dependency-graph, build-attempt, runtime-test]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # gh run download, below
+    steps:
+      - uses: actions/checkout@v4
+      # Real-CI evidence (run 32316739919, job "Build navigation index",
+      # https://github.com/metavacua/larql-to-sparql/actions/runs/32316739919):
+      # an unfiltered `actions/download-artifact@v4` with `path: artifacts` and
+      # no name/pattern (i.e. "download everything") pulled all 113 artifacts,
+      # dominated by build-attempt-batch-* at 9.43GB total across 28 batches
+      # (everything else combined: 0.08GB) -- and the runner crashed with
+      # `System.IO.IOException: No space left on device`. Neither Step 1 below
+      # (which only needs each artifact's *filenames*, for the expected/actual
+      # completeness diff) nor Step 2 (which only reads ONE of the per-target
+      # cmd/features combos -- 24 at the time of the run above, since trimmed
+      # to 6 by dropping the std/core,alloc/core build_std modes --
+      # attempt-<target>-none-check-default-features.json -- plus the tiny
+      # target-spec file) needs the other combos' content at all, so bulk
+      # materializing all of build-attempt-batch-*'s content was never
+      # necessary. Fixed below: the three small artifact families still use
+      # the standard action; build-attempt-batch-* is fetched one batch at a
+      # time via `gh run download` and immediately trimmed, so peak disk
+      # usage never exceeds roughly one batch's uncompressed size.
+      - name: Download target-capability artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: target-capability-batch-*
+      - name: Download dependency-graph artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: dependency-graph-batch-*
+      - name: Download runtime-test artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: runtime-test-batch-*
+      - name: Download build-attempt artifacts one batch at a time (avoids the disk exhaustion above)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BATCH_INDICES: ${{ needs.discovery.outputs.batch-indices }}
+        run: |
+          set -euo pipefail
+          echo "$BATCH_INDICES" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > batch-indices.txt
+          REPRESENTATIVE_SUFFIX=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_indexing import build_attempt_filenames; print(build_attempt_filenames("X")[0].replace("attempt-X-", "-", 1))')
+          while IFS= read -r N; do
+            echo "=== build-attempt batch $N ==="
+            rm -rf raw-attempt-batch
+            gh run download "${{ github.run_id }}" \
+              --repo "${{ github.repository }}" \
+              -n "build-attempt-batch-$N" \
+              -D raw-attempt-batch
+            mkdir -p "artifacts/build-attempt-batch-$N"
+            # Preserve every filename (Step 1 needs the full expected/actual
+            # completeness diff), but only keep real content for the one file
+            # per target Step 2 actually reads -- everything else becomes a
+            # 0-byte placeholder. f.is_file() in Step 1 is true either way.
+            for f in raw-attempt-batch/*; do
+              name=$(basename "$f")
+              case "$name" in
+                *"$REPRESENTATIVE_SUFFIX")
+                  cp "$f" "artifacts/build-attempt-batch-$N/$name"
+                  ;;
+                *)
+                  : > "artifacts/build-attempt-batch-$N/$name"
+                  ;;
+              esac
+            done
+            rm -rf raw-attempt-batch
+          done < batch-indices.txt
+      - name: Compute expected vs. actual per-target files, and the target-to-batch map
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_indexing import build_attempt_filenames
+
+          target_matrix = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
+          batches = json.loads('''${{ needs.discovery.outputs.batches }}''')
+
+          target_to_batch = {}
+          for batch_index, batch_targets in enumerate(batches):
+              for t in batch_targets:
+                  target_to_batch[t] = batch_index
+
+          expected = set()
+          for t in target_matrix:
+              expected.add(f"target-spec-{t}.json")
+              expected.add(f"cfg-{t}.txt")
+              expected.add(f"supported-crate-types-{t}.txt")
+              expected.add(f"metadata-{t}.json")
+              expected.add(f"tree-features-{t}.txt")
+              expected.add(f"tree-duplicates-{t}.txt")
+              expected.add(f"unit-graph-{t}.json")
+              expected.add(f"deny-{t}.txt")
+              expected.add(f"runtime-test-result-{t}.json")
+              expected.update(build_attempt_filenames(t))
+
+          batch_prefixes = (
+              "target-capability-batch-", "dependency-graph-batch-",
+              "build-attempt-batch-", "runtime-test-batch-",
+          )
+          actual = set()
+          for batch_dir in Path("artifacts").iterdir():
+              if batch_dir.is_dir() and batch_dir.name.startswith(batch_prefixes):
+                  for f in batch_dir.iterdir():
+                      if f.is_file():
+                          actual.add(f.name)
+
+          Path("expected-artifacts.json").write_text(json.dumps(sorted(expected)))
+          Path("actual-artifacts.json").write_text(json.dumps(sorted(actual)))
+          Path("target-to-batch.json").write_text(json.dumps(target_to_batch))
+          PYEOF
+      - name: Run indexing script per target
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import load_json, load_jsonl
+          from scripts.target_analysis_indexing import (
+              build_attempt_filenames,
+              combined_record_for_target,
+              missing_artifacts,
+          )
+
+          target_matrix = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
+          target_to_batch = load_json(Path("target-to-batch.json"))
+
+          # expected/actual and their diff are target-invariant -- computed
+          # once here instead of once per target via 331 separate subprocess
+          # spawns of this same script's old CLI (each re-reading and
+          # re-diffing the identical ~1000-element sets for the identical
+          # answer every time).
+          expected = set(load_json(Path("expected-artifacts.json")))
+          actual = set(load_json(Path("actual-artifacts.json")))
+          missing = missing_artifacts(expected, actual)
+          missing_sorted = sorted(missing)
+
+          combined = {}
+          any_missing = bool(missing)
+          for t in target_matrix:
+              batch_index = target_to_batch.get(t)
+              attempt_file = Path(f"artifacts/build-attempt-batch-{batch_index}/{build_attempt_filenames(t)[0]}")
+              spec_file = Path(f"artifacts/target-capability-batch-{batch_index}/target-spec-{t}.json")
+              if batch_index is None or not attempt_file.exists() or not spec_file.exists():
+                  combined[t] = {"error": "missing required per-target file"}
+                  any_missing = True
+                  continue
+
+              # `cargo ... --message-format=json > attempt_file` writes cargo's
+              # JSON-lines wire format (one JSON object per line -- see
+              # https://doc.rust-lang.org/cargo/reference/external-tools.html and
+              # this repo's own experiment-cuda-nvptx.yml, which already parses
+              # these exact files line-by-line with jq), NOT a single JSON array.
+              try:
+                  messages = load_jsonl(attempt_file)
+              except json.JSONDecodeError as exc:
+                  combined[t] = {"error": f"malformed JSONL in {attempt_file}: {exc}"}
+                  any_missing = True
+                  continue
+              target_spec = load_json(spec_file)
+              combined[t] = combined_record_for_target(messages, target_spec, missing_sorted)
+
+          Path("index.json").write_text(json.dumps(combined, indent=2))
+
+          if any_missing:
+              print(f"::error::indexing job found incompleteness across {len(combined)} targets")
+              print(f"{len(missing_sorted)} distinct missing artifact names (first 10 shown):")
+              for name in missing_sorted[:10]:
+                  print(f"  - {name}")
+
+          sys.exit(1 if any_missing else 0)
+          PYEOF
+      - name: Upload index
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigation-index
+          path: index.json
+
+  secondary-mutate:
+    name: "Secondary layer: mutate (Stages A, B, B2, B3)"
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    steps:
+      - uses: actions/checkout@v4
+      - name: Derive CRATES from the single source of truth (MUTATED_LIBRARY_CRATES)
+        run: |
+          echo "CRATES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(MUTATED_LIBRARY_CRATES))')" >> "$GITHUB_ENV"
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add clippy --toolchain nightly
+      - name: Capture pre-mutation lib.rs content per crate and pre-mutation workspace metadata
+        run: |
+          mkdir -p out
+          for CRATE in $CRATES; do
+            cp "crates/$CRATE/src/lib.rs" "out/baseline-lib-rs-$CRATE.txt"
+          done
+          cargo metadata --format-version 1 --no-deps > out/baseline-metadata.json
+      - name: "Stage A0: insert extern crate alloc; (prerequisite for Stage A's alloc-path rewrites to resolve)"
+        run: |
+          for CRATE in $CRATES; do
+            python3 - "$CRATE" <<'PYEOF'
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import insert_alloc_extern_crate
+
+          crate = sys.argv[1]
+          lib_rs = Path(f"crates/{crate}/src/lib.rs")
+          lib_rs.write_text(
+              insert_alloc_extern_crate(lib_rs.read_text(encoding="utf-8")),
+              encoding="utf-8",
+          )
+          PYEOF
+          done
+      - name: "Stage A: mechanical std->core/alloc rewrite (host target), per crate"
+        run: |
+          for CRATE in $CRATES; do
+            cargo +nightly clippy --fix --allow-dirty --allow-staged \
+              -p "$CRATE" --lib -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
+          done
+      - name: "Stage B: inject #![no_std] attribute, per crate"
+        run: |
+          for CRATE in $CRATES; do
+            python3 - "$CRATE" <<'PYEOF'
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import insert_no_std_attribute
+
+          crate = sys.argv[1]
+          lib_rs = Path(f"crates/{crate}/src/lib.rs")
+          lib_rs.write_text(
+              insert_no_std_attribute(lib_rs.read_text(encoding="utf-8")),
+              encoding="utf-8",
+          )
+          PYEOF
+          done
+      - name: Capture post-Stage-B lib.rs content per crate
+        run: |
+          for CRATE in $CRATES; do
+            cp "crates/$CRATE/src/lib.rs" "out/sibling-lib-rs-$CRATE.txt"
+          done
+      - name: "Stage B2: patch std-defaulting dependency features"
+        run: |
+          FEATURES_TOML=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import STAGE_B2_SERDE_FEATURES; print(", ".join(f"\"{f}\"" for f in STAGE_B2_SERDE_FEATURES))')
+          find crates -name Cargo.toml -exec \
+            sed -i -E "s/serde = \{ workspace = true[^}]*\}/serde = { workspace = true, default-features = false, features = [$FEATURES_TOML] }/" {} \;
+          # Cargo's workspace-dependency-inheritance rule means a member's
+          # own default-features override has no effect unless the root
+          # [workspace.dependencies] entry itself sets it (confirmed via a
+          # minimal isolated repro, 2026-08-21 review) -- patch it here too.
+          sed -i -E "s/serde = \{ version = \"1\", features = \[\"derive\"\] \}/serde = { version = \"1\", default-features = false, features = [$FEATURES_TOML] }/" Cargo.toml
+          sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false, features = ["alloc"] }/' Cargo.toml
+          # thiserror defaults to its "std" feature (registry: default =
+          # ["std"], std = []) and Stage B2 has never patched it -- root-only
+          # is sufficient since every crate declares `thiserror = { workspace
+          # = true }` and inherits from here.
+          sed -i -E 's/^thiserror = "2"$/thiserror = { version = "2", default-features = false }/' Cargo.toml
+          # safetensors's own "std" feature (on by default) requires
+          # serde/default -- reactivating serde's std feature workspace-wide
+          # once larql-models is checked alongside the other mutated crates
+          # in one combined `cargo check` invocation (confirmed via
+          # `cargo tree -i serde -e features`, 2026-08-21 review).
+          sed -i -E 's/^safetensors = "0.7"$/safetensors = { version = "0.7", default-features = false, features = ["alloc"] }/' crates/larql-models/Cargo.toml
+      - name: "Stage B3: trim workspace members to larql-cli's real tree"
+        run: |
+          python3 - <<'PYEOF'
+          import re
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import STAGE_B3_EXPECTED_MEMBERS
+
+          root_toml = Path("Cargo.toml")
+          text = root_toml.read_text(encoding="utf-8")
+          # STAGE_B3_EXPECTED_MEMBERS already includes the golden-fixture
+          # crate (larql-nostd-canary) alongside the real 14-crate
+          # dependency closure -- see its definition in
+          # scripts/target_analysis_promotion.py for why it's kept as a
+          # separate constant rather than folded into the closure itself.
+          reachable = [f"crates/{name}" for name in STAGE_B3_EXPECTED_MEMBERS]
+          members_block_fmt = "{key} = [\n" + "".join(f'    "{c}",\n' for c in reachable) + "]\n"
+          for key in ("members", "default-members"):
+              text = re.sub(rf"{key} = \[[^\]]*\]\n", members_block_fmt.format(key=key), text, count=1)
+          root_toml.write_text(text, encoding="utf-8")
+          PYEOF
+      - name: Verify the mutated workspace manifest actually loads
+        run: cargo metadata --format-version 1 > /dev/null
+      - name: Capture the full mutated-tree patch
+        run: git diff > out/full-mutation.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: secondary-mutation
+          path: out/
+
+  secondary-stage-c-and-promotion:
+    name: "Secondary Stage C + promotion: batch ${{ matrix.batch_index }}"
+    needs: [discovery, secondary-mutate, dependency-graph, fetch-prior-round-baseline, runner-capability-probe]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # actions/download-artifact
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+      - name: Provision this job's runner from the probed capabilities (gates provisioning only -- never which targets get measured)
+        env:
+          ANDROID_NDK_CLANG_DIR: ${{ needs.runner-capability-probe.outputs.android-ndk-clang-dir }}
+          MINGW_W64_INSTALLABLE: ${{ needs.runner-capability-probe.outputs.mingw-w64-installable }}
+        run: |
+          if [ -n "$ANDROID_NDK_CLANG_DIR" ] && [ -d "$ANDROID_NDK_CLANG_DIR" ]; then
+            echo "PATH=$ANDROID_NDK_CLANG_DIR:$PATH" >> "$GITHUB_ENV"
+            echo "Android NDK confirmed present at $ANDROID_NDK_CLANG_DIR (per this run's own probe); cc-rs now wired to its clang."
+          else
+            echo "::warning::this job's own runner does not have the NDK clang dir the probe reported (image skew between jobs in this same run, or the probe found none) -- android targets keep their real ToolNotFound errors for this job."
+          fi
+
+          if [ "$MINGW_W64_INSTALLABLE" = "true" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+              || echo "::warning::mingw-w64 install failed on this job's own runner despite the probe finding a candidate -- transient apt issue, continuing; windows-gnu targets keep their real ToolNotFound errors for this job"
+          else
+            echo "::warning::probe found no installable mingw-w64 candidate on this run's runner image -- skipping the install attempt for this job; windows-gnu targets keep their real ToolNotFound errors"
+          fi
+      - name: Stage C baseline -- check the UNMUTATED tree for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p baseline-out
+          CHECK_PACKAGES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(f"-p {c}" for c in MUTATED_LIBRARY_CRATES))')
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
+          while IFS= read -r TARGET; do
+            echo "=== Stage C baseline: target=$TARGET ==="
+            cargo +nightly check $CHECK_PACKAGES --target "$TARGET" \
+              -Z build-std=core,alloc --keep-going --message-format=json \
+              > "baseline-out/stage-c-$TARGET.json" 2> "baseline-out/stage-c-$TARGET.stderr.txt" || true
+          done < targets-in-batch.txt
+      - name: Download the Secondary layer's mutation artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: secondary-mutation
+          path: mutation
+      - name: Apply the mutation patch to this job's checkout
+        run: git apply mutation/full-mutation.patch
+      - name: Download this batch's dependency-graph artifact (Stage B2 baseline)
+        uses: actions/download-artifact@v4
+        with:
+          name: dependency-graph-batch-${{ matrix.batch_index }}
+          path: primary/dependency-graph-batch-${{ matrix.batch_index }}
+      - name: Download this run's fetched prior-round baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: prior-round-baseline
+          path: prior-round-baseline
+      - name: Compute Stage B and Stage B3 state once per batch (target-independent -- see comments below)
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import load_json
+          from scripts.target_analysis_promotion import STAGE_B3_EXPECTED_MEMBERS, stage_b_lib_rs_filenames
+
+          # Stage B (no_std scaffold): real baseline/sibling lib.rs content
+          # captured by the mutation job, target-independent. larql-cli itself
+          # has no lib.rs (bin-only) so larql-compute is the chosen
+          # representative crate (Task 14's own hardest real case -- largest
+          # leading doc comment). Computed once per batch job, not once per
+          # target, since neither the content nor the postcondition depends
+          # on which target is current.
+          baseline_b_filename, sibling_b_filename = stage_b_lib_rs_filenames()
+          baseline_b = {"lib_rs_content": Path(f"mutation/{baseline_b_filename}").read_text(encoding="utf-8")}
+          sibling_b = {"lib_rs_content": Path(f"mutation/{sibling_b_filename}").read_text(encoding="utf-8")}
+          Path("baseline-stage-b.json").write_text(json.dumps(baseline_b))
+          Path("sibling-stage-b.json").write_text(json.dumps(sibling_b))
+
+          # Stage B3 (workspace trim): baseline is the mutation job's own
+          # pre-Stage-B3 cargo metadata capture (target-independent -- workspace
+          # membership doesn't vary by target); sibling is this job's own
+          # mutated-tree metadata, computed once here (a single `cargo metadata`
+          # call, not once per target) since it too cannot vary by target.
+          expected_members = list(STAGE_B3_EXPECTED_MEMBERS)
+          baseline_metadata = load_json(Path("mutation/baseline-metadata.json"))
+          sibling_metadata = json.loads(subprocess.run(
+              ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+              capture_output=True, text=True,
+          ).stdout)
+          Path("baseline-stage-b3.json").write_text(json.dumps({"metadata": baseline_metadata, "expected_members": expected_members}))
+          Path("sibling-stage-b3.json").write_text(json.dumps({"metadata": sibling_metadata, "expected_members": expected_members}))
+          PYEOF
+      - name: Compute Stage B and Stage B3 promotion verdicts once per batch
+        run: |
+          for STAGE in stage-b stage-b3; do
+            python3 -m scripts.target_analysis_promotion --stage "$STAGE" \
+              --baseline-state-file "baseline-$STAGE.json" \
+              --sibling-state-file "sibling-$STAGE.json" \
+              > "batch-promotion-$STAGE.json"
+          done
+      - name: Stage C and promotion checks for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p out
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
+          CHECK_PACKAGES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(f"-p {c}" for c in MUTATED_LIBRARY_CRATES))')
+          while IFS= read -r TARGET; do
+            echo "=== Stage C: target=$TARGET ==="
+            cargo +nightly check $CHECK_PACKAGES --target "$TARGET" \
+              -Z build-std=core,alloc --keep-going --message-format=json \
+              > "out/stage-c-$TARGET.json" 2> "out/stage-c-$TARGET.stderr.txt" || true
+
+            # Stage B and Stage B3 verdicts are target-independent (see the
+            # comments in the batch-level step above) -- copy the single
+            # result already computed for this whole batch instead of
+            # recomputing it once per target.
+            cp "batch-promotion-stage-b.json" "out/promotion-stage-b-$TARGET.json"
+            cp "batch-promotion-stage-b3.json" "out/promotion-stage-b3-$TARGET.json"
+
+            python3 - "$TARGET" <<'PYEOF'
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import load_json
+          from scripts.target_analysis_promotion import stage_promotes, MUTATED_LIBRARY_CRATES
+
+          target = sys.argv[1]
+
+          # Stage B2 (serde features): baseline is the Primary layer's own
+          # unmutated unit-graph for this target (dependency-graph-batch-N,
+          # already downloaded -- never recomputed, it's real mechanically-
+          # grounded L1 data this job would otherwise have no other source
+          # for); sibling is computed fresh here since the patch is now
+          # applied to this job's own checkout. Genuinely target-dependent
+          # (unlike Stage B/B3 above), so this stays inside the per-target loop.
+          #
+          # Sibling scope is MUTATED_LIBRARY_CRATES (the same 5-crate scope
+          # Task 4 already established for Stage C's own `cargo check`), NOT
+          # `-p larql-cli`: larql-cli's full transitive closure pulls in
+          # larql-inference/larql-vindex, which still declare their own
+          # unpatched `safetensors = "0.7"` -- resolver v2 unifies that
+          # crate's default (std-requiring) feature across the whole
+          # `-p larql-cli` graph and reactivates `std` on the shared
+          # serde/serde_core units even though the mutated crates alone
+          # resolve std-free (confirmed by reproducing this exact
+          # discrepancy locally against a real captured unit graph,
+          # 2026-08-21).
+          baseline_unit_graph_path = next(Path("primary").glob(f"dependency-graph-batch-*/unit-graph-{target}.json"))
+          baseline_unit_graph = load_json(baseline_unit_graph_path)
+          check_package_args = [flag for crate in MUTATED_LIBRARY_CRATES for flag in ("-p", crate)]
+          sibling_unit_graph_raw = subprocess.run(
+              ["cargo", "+nightly", "build", "-Z", "unstable-options", "--unit-graph",
+               *check_package_args, "--target", target],
+              capture_output=True, text=True,
+          ).stdout
+          baseline_state = {"unit_graph": baseline_unit_graph}
+          sibling_state = {"unit_graph": json.loads(sibling_unit_graph_raw)}
+          promotes = stage_promotes("stage-b2", baseline_state, sibling_state)
+          Path(f"out/promotion-stage-b2-{target}.json").write_text(json.dumps({"stage": "stage-b2", "promotes": promotes}))
+          PYEOF
+
+            python3 - "$TARGET" <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_common import error_sites, load_json, load_jsonl
+          from scripts.target_analysis_promotion import depth_advanced
+
+          target = sys.argv[1]
+          sibling_messages = load_jsonl(Path(f"out/stage-c-{target}.json"))
+          baseline_messages = load_jsonl(Path(f"baseline-out/stage-c-{target}.json"))
+          baseline_sites = error_sites(baseline_messages)
+          sibling_sites = error_sites(sibling_messages)
+
+          def build_script_failures(stderr_path):
+              text = Path(stderr_path).read_text(encoding="utf-8") if Path(stderr_path).exists() else ""
+              return sorted({line.strip() for line in text.splitlines() if "failed to run custom build command for" in line})
+
+          baseline_build_failures = build_script_failures(f"baseline-out/stage-c-{target}.stderr.txt")
+          sibling_build_failures = build_script_failures(f"out/stage-c-{target}.stderr.txt")
+          result = {
+              "target": target,
+              "depth_advanced": depth_advanced(baseline_sites, sibling_sites),
+              "baseline_site_count": len(baseline_sites),
+              "sibling_site_count": len(sibling_sites),
+              # Carried forward verbatim so next-round-baseline's fold step
+              # doesn't need to re-download/re-parse this target's full raw
+              # stage-c-<target>.json (potentially thousands of lines) just
+              # to regenerate a value already computed here.
+              "sibling_sites": sorted(list(s) for s in sibling_sites),
+              "resolved_sites": sorted(str(s) for s in (baseline_sites - sibling_sites)),
+              "new_sites": sorted(str(s) for s in (sibling_sites - baseline_sites)),
+              "baseline_build_script_failures": baseline_build_failures,
+              "sibling_build_script_failures": sibling_build_failures,
+          }
+          Path(f"out/depth-decision-{target}.json").write_text(json.dumps(result, indent=2))
+          PYEOF
+          done < targets-in-batch.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: promotion-decision-batch-${{ matrix.batch_index }}
+          path: out/
+      - name: Upload Stage C unmutated-tree baseline captures for this batch (verification/debugging only -- not consumed downstream)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-c-baseline-batch-${{ matrix.batch_index }}
+          path: baseline-out/
+
+  fetch-prior-round-baseline:
+    name: Fetch prior round's baseline (cross-run artifact lookup)
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # gh api /actions/artifacts, cross-run actions/download-artifact
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find the most recent prior run's round-baseline artifact on this branch, if any
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          import subprocess
+          import sys
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import parse_jsonl
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          current_run_id = os.environ["GITHUB_RUN_ID"]
+
+          raw = subprocess.run(
+              ["gh", "api", f"/repos/{repo}/actions/artifacts", "--paginate",
+               "-X", "GET", "-f", "name=round-baseline"],
+              capture_output=True, text=True, check=True,
+          ).stdout
+          # --paginate with multiple pages emits one JSON object per page;
+          # each page's "artifacts" list is concatenated here.
+          artifacts = [a for page in parse_jsonl(raw) for a in page["artifacts"]]
+
+          candidates = [
+              a for a in artifacts
+              if not a["expired"]
+              and a.get("workflow_run") is not None
+              and a["workflow_run"]["head_branch"] == branch
+              and str(a["workflow_run"]["id"]) != str(current_run_id)
+          ]
+          candidates.sort(key=lambda a: a["created_at"], reverse=True)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              if candidates:
+                  f.write("found=true\n")
+                  f.write(f"prior_run_id={candidates[0]['workflow_run']['id']}\n")
+              else:
+                  f.write("found=false\n")
+                  f.write("prior_run_id=\n")
+          PYEOF
+      - name: Download the prior run's round-baseline artifact, if one was found
+        if: steps.find.outputs.found == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: round-baseline
+          run-id: ${{ steps.find.outputs.prior_run_id }}
+          github-token: ${{ github.token }}
+          path: prior-round-baseline-download
+      - name: Republish as a same-run artifact, self-describing what was found
+        run: |
+          mkdir -p out
+          if [ "${{ steps.find.outputs.found }}" = "true" ]; then
+            cp prior-round-baseline-download/round-baseline.json out/round-baseline.json
+            printf '{"prior_run_id": %s}' "${{ steps.find.outputs.prior_run_id }}" > out/provenance.json
+          else
+            printf '{"promoted": {}, "preserved_not_promoted": {}}' > out/round-baseline.json
+            printf '{"prior_run_id": null}' > out/provenance.json
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prior-round-baseline
+          path: out/
+
+  next-round-baseline:
+    name: Fold promoted diffs into next round's baseline
+    needs: [discovery, secondary-stage-c-and-promotion]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+      actions: read    # actions/download-artifact
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all promotion-decision batch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "promotion-decision-batch-*"
+          path: promotion-decisions
+      - name: Fold promoted results, preserve non-promoted results separately, carry real site sets forward
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_common import load_json
+          from scripts.target_analysis_promotion import STAGE_POSTCONDITIONS
+
+          promoted = {}
+          preserved = {}
+          for batch_dir in Path("promotion-decisions").iterdir():
+              if not batch_dir.is_dir():
+                  continue
+              for depth_file in batch_dir.glob("depth-decision-*.json"):
+                  target = re.sub(r"^depth-decision-|\.json$", "", depth_file.name)
+                  # depth_decision already carries its own "sibling_sites"
+                  # (Stage C writes it directly) -- no need to re-download
+                  # or re-parse this target's raw stage-c-<target>.json
+                  # (potentially thousands of lines) just to regenerate it.
+                  depth_decision = load_json(depth_file)
+                  stage_verdicts = {}
+                  for stage in STAGE_POSTCONDITIONS:
+                      stage_file = batch_dir / f"promotion-{stage}-{target}.json"
+                      if stage_file.exists():
+                          stage_verdicts[stage] = load_json(stage_file)
+
+                  record = {**depth_decision, "stage_promotions": stage_verdicts, "signal_type": "cross_round_drift"}
+                  if depth_decision["depth_advanced"]:
+                      promoted[target] = record
+                  else:
+                      preserved[target] = record
+
+          all_targets = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
+          folded_targets = set(promoted) | set(preserved)
+          missing = set(all_targets) - folded_targets
+          if missing:
+              print(f"::error::next-round-baseline is incomplete: {len(missing)} of {len(all_targets)} targets missing (a batch likely failed partway) -- refusing to publish a lossy baseline: {sorted(missing)[:10]}")
+              sys.exit(1)
+
+          Path("round-baseline.json").write_text(
+              json.dumps({"promoted": promoted, "preserved_not_promoted": preserved}, indent=2)
+          )
+          PYEOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: round-baseline
+          path: round-baseline.json
+
+  secondary-layer-self-test:
+    name: Secondary-layer self-test (noise floor, blast radius, ephemerality)
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add clippy rust-src --toolchain nightly
+      - name: "Noise floor: run unmutated Stage C twice, confirm stable findings"
+        run: |
+          for i in 1 2; do
+            CHECK_PACKAGES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(f"-p {c}" for c in MUTATED_LIBRARY_CRATES))')
+            cargo +nightly check $CHECK_PACKAGES --target nvptx64-nvidia-cuda \
+              -Z build-std=core,alloc --message-format=json --keep-going > noise-floor-run-$i.json || true
+          done
+          python3 - <<'PYEOF'
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_common import error_sites, load_jsonl
+
+          run1 = error_sites(load_jsonl(Path("noise-floor-run-1.json")))
+          run2 = error_sites(load_jsonl(Path("noise-floor-run-2.json")))
+          if run1 != run2:
+              print(f"::error::Noise floor violated: run1={run1} run2={run2}")
+              sys.exit(1)
+          print(f"Noise floor stable: {len(run1)} identical error sites across both runs.")
+          PYEOF
+      - name: "Blast-radius containment: assert Stage A only touches its declared crates"
+        run: |
+          CRATES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(MUTATED_LIBRARY_CRATES))')
+          # Stage A0 (prerequisite for Stage A's alloc-path rewrites to resolve)
+          # -- mirrors secondary-mutate's own real "Stage A0" step verbatim, so
+          # this self-test exercises the real A0 -> A sequence production runs,
+          # not Stage A in isolation (fidelity gap found by the final
+          # whole-branch review, 2026-08-22: 2 files touched here vs. 17 real
+          # files across 5 crates in a real production run, without it).
+          for CRATE in $CRATES; do
+            python3 - "$CRATE" <<'PYEOF'
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import insert_alloc_extern_crate
+
+          crate = sys.argv[1]
+          lib_rs = Path(f"crates/{crate}/src/lib.rs")
+          lib_rs.write_text(
+              insert_alloc_extern_crate(lib_rs.read_text(encoding="utf-8")),
+              encoding="utf-8",
+          )
+          PYEOF
+          done
+          for CRATE in $CRATES; do
+            cargo +nightly clippy --fix --allow-dirty --allow-staged \
+              -p "$CRATE" --lib -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
+          done
+          CHANGED=$(git diff --name-only)
+          for f in $CHANGED; do
+            OK=0
+            for CRATE in $CRATES; do
+              case "$f" in crates/$CRATE/src/*) OK=1 ;; esac
+            done
+            if [ "$OK" -ne 1 ]; then
+              echo "::error::Stage A touched a file outside its declared scope: $f"
+              exit 1
+            fi
+          done
+          echo "Blast radius contained to the declared crates' src trees."
+      - name: "Blast-radius containment: assert Stage B2 only touches its declared scope"
+        run: |
+          git checkout -- .
+          FEATURES_TOML=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import STAGE_B2_SERDE_FEATURES; print(", ".join(f"\"{f}\"" for f in STAGE_B2_SERDE_FEATURES))')
+          find crates -name Cargo.toml -exec \
+            sed -i -E "s/serde = \{ workspace = true[^}]*\}/serde = { workspace = true, default-features = false, features = [$FEATURES_TOML] }/" {} \;
+          # Cargo's workspace-dependency-inheritance rule means a member's
+          # own default-features override has no effect unless the root
+          # [workspace.dependencies] entry itself sets it (confirmed via a
+          # minimal isolated repro, 2026-08-21 review) -- patch it here too.
+          sed -i -E "s/serde = \{ version = \"1\", features = \[\"derive\"\] \}/serde = { version = \"1\", default-features = false, features = [$FEATURES_TOML] }/" Cargo.toml
+          sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false, features = ["alloc"] }/' Cargo.toml
+          # thiserror defaults to its "std" feature (registry: default =
+          # ["std"], std = []) and Stage B2 has never patched it -- root-only
+          # is sufficient since every crate declares `thiserror = { workspace
+          # = true }` and inherits from here.
+          sed -i -E 's/^thiserror = "2"$/thiserror = { version = "2", default-features = false }/' Cargo.toml
+          # safetensors's own "std" feature (on by default) requires
+          # serde/default -- reactivating serde's std feature workspace-wide
+          # once larql-models is checked alongside the other mutated crates
+          # in one combined `cargo check` invocation (confirmed via
+          # `cargo tree -i serde -e features`, 2026-08-21 review).
+          sed -i -E 's/^safetensors = "0.7"$/safetensors = { version = "0.7", default-features = false, features = ["alloc"] }/' crates/larql-models/Cargo.toml
+          CHANGED=$(git diff --name-only)
+          for f in $CHANGED; do
+            if [[ "$f" != Cargo.toml && "$f" != crates/*/Cargo.toml ]]; then
+              echo "::error::Stage B2 touched a file outside its declared scope: $f"
+              exit 1
+            fi
+          done
+          echo "Blast radius contained to Cargo.toml manifests only."
+          git checkout -- .
+      - name: "Blast-radius containment: assert Stage B only touches its declared scope"
+        run: |
+          EXPECTED_PATH=$(python3 - <<'PYEOF'
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_promotion import insert_alloc_extern_crate, insert_no_std_attribute, STAGE_B_REPRESENTATIVE_CRATE
+
+          lib_rs = Path(f"crates/{STAGE_B_REPRESENTATIVE_CRATE}/src/lib.rs")
+          lib_rs.write_text(
+              insert_no_std_attribute(insert_alloc_extern_crate(lib_rs.read_text(encoding="utf-8"))),
+              encoding="utf-8",
+          )
+          print(lib_rs)
+          PYEOF
+          )
+          CHANGED=$(git diff --name-only)
+          if [ "$CHANGED" != "$EXPECTED_PATH" ]; then
+            echo "::error::Stage B touched files outside its declared scope: $CHANGED"
+            exit 1
+          fi
+          echo "Blast radius contained to the declared file: $EXPECTED_PATH"
+      - name: "Golden fixture: assert the pipeline reports the known planted outcome"
+        run: |
+          python3 - <<'PYEOF'
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_promotion import insert_alloc_extern_crate, GOLDEN_FIXTURE_CRATE
+
+          lib_rs = Path(f"crates/{GOLDEN_FIXTURE_CRATE}/src/lib.rs")
+          lib_rs.write_text(insert_alloc_extern_crate(lib_rs.read_text(encoding="utf-8")), encoding="utf-8")
+          PYEOF
+          cargo +nightly clippy --fix --allow-dirty --allow-staged \
+            -p "larql-nostd-canary" --lib -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
+          python3 - <<'PYEOF'
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_promotion import insert_no_std_attribute, GOLDEN_FIXTURE_CRATE
+
+          lib_rs = Path(f"crates/{GOLDEN_FIXTURE_CRATE}/src/lib.rs")
+          lib_rs.write_text(insert_no_std_attribute(lib_rs.read_text(encoding="utf-8")), encoding="utf-8")
+          PYEOF
+          cargo +nightly check -p larql-nostd-canary --target thumbv6m-none-eabi \
+            -Z build-std=core,alloc --message-format=json > canary-check.json
+          if grep -q '"level":"error"' canary-check.json; then
+            echo "::error::Golden fixture failed -- the pipeline's own known-good canary does not compile under core+alloc. This means the measurement machinery is broken, not that a real experiment found a negative result."
+            cat canary-check.json
+            exit 1
+          fi
+          echo "Golden fixture passed: the known-good canary compiles cleanly under -Z build-std=core,alloc."
+      - name: "Ephemerality: assert no forbidden git-mutating command exists in this workflow file"
+        run: |
+          if grep -v -E '(echo |::error::|::warning::|^\s*#)' .github/workflows/target-analysis-pipeline.yml | grep -Eq 'git (commit|push)'; then
+            echo "::error::Found a forbidden git-mutating command in the pipeline workflow — mutations must stay ephemeral to the job checkout."
+            exit 1
+          fi
+          echo "No forbidden git-mutating command found in the pipeline workflow."
+      - name: Upload self-test raw probe output (noise floor, golden fixture)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secondary-layer-self-test-output
+          path: |
+            noise-floor-run-1.json
+            noise-floor-run-2.json
+            canary-check.json
+          if-no-files-found: ignore

@@ -1,0 +1,4 @@
+aarch64-apple-darwin
+nvptx64-nvidia-cuda
+wasm32v1-none
+x86_64-unknown-linux-gnu

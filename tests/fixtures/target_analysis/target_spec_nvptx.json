@@ -1,0 +1,9 @@
+{
+  "arch": "nvptx64",
+  "os": "cuda",
+  "only-cdylib": true,
+  "panic-strategy": "abort",
+  "metadata": {
+    "std": false
+  }
+}
