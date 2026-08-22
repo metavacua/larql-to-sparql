@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 
 from scripts.target_analysis_common import load_json
@@ -76,11 +77,20 @@ def test_build_attempt_filenames_first_combo_matches_the_representative_single_f
 
 def test_guaranteed_std_failure_true_when_target_capability_says_no_std():
     target_spec = load_json(FIXTURES / "target_spec_nvptx.json")
-    assert guaranteed_std_failure(target_spec) is True
+    assert guaranteed_std_failure(target_spec, "armv7a-none-eabihf") is True
 
 
 def test_guaranteed_std_failure_false_when_target_has_std():
-    assert guaranteed_std_failure({"metadata": {"std": True}}) is False
+    assert guaranteed_std_failure({"metadata": {"std": True}}, "armv7a-none-eabihf") is False
+
+
+def test_guaranteed_std_failure_false_for_the_sp5_canary_target_even_though_it_lacks_std():
+    # nvptx64-nvidia-cuda is Standing Principle 5's own reference canary
+    # for unexpected_clean_std_build -- it must keep running a real
+    # attempt so that check stays empirically reachable, never silently
+    # short-circuited away just because its own metadata.std is False.
+    target_spec = load_json(FIXTURES / "target_spec_nvptx.json")
+    assert guaranteed_std_failure(target_spec, "nvptx64-nvidia-cuda") is False
 
 
 def test_skip_record_carries_the_marker_key_and_target():
@@ -100,6 +110,41 @@ def test_combined_record_for_target_reports_skip_not_a_contradiction():
     assert record["skipped_no_std_guaranteed_fail"] is True
     assert "contradictions" not in record
     assert "error_counts_by_target" not in record
+
+
+def test_reqwest_remains_unconditional_in_larql_cli_cargo_toml():
+    # guaranteed_std_failure's whole premise (scripts/target_analysis_build_attempt.py)
+    # is that larql-cli's reqwest dependency is unconditional -- not optional,
+    # not gated by any [features] entry -- so a target lacking std is a
+    # guaranteed failure regardless of which of the 6 cmd/feature combos runs.
+    # That was verified twice by direct human inspection (2026-08-21) but never
+    # pinned by code. If this assumption is ever violated (e.g. reqwest becomes
+    # optional behind a new feature), the guaranteed-failure skip would become
+    # wrong and silently under-measure targets that could actually build --
+    # this test exists to make that drift loud instead of silent.
+    cargo_toml_path = (
+        Path(__file__).parent.parent / "crates" / "larql-cli" / "Cargo.toml"
+    )
+    with open(cargo_toml_path, "rb") as handle:
+        data = tomllib.load(handle)
+
+    dependencies = data.get("dependencies", {})
+    assert "reqwest" in dependencies, "reqwest must remain a direct dependency of larql-cli"
+
+    reqwest_entry = dependencies["reqwest"]
+    if isinstance(reqwest_entry, dict):
+        assert reqwest_entry.get("optional") is not True, (
+            "reqwest must not become optional -- that would let a build "
+            "configuration exist where it's absent, invalidating the "
+            "guaranteed-failure skip's premise"
+        )
+    # else: a plain version string is inherently non-optional.
+
+    for feature_name, feature_deps in data.get("features", {}).items():
+        assert "reqwest" not in feature_deps and "dep:reqwest" not in feature_deps, (
+            f"feature '{feature_name}' must not gate reqwest -- that would make "
+            "it conditional, invalidating the guaranteed-failure skip's premise"
+        )
 
 
 def test_combined_record_for_target_preserves_existing_behavior_when_not_skipped():

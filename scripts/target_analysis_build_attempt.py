@@ -28,9 +28,19 @@ SKIP_REASON = (
     "not new information."
 )
 
+# Standing Principle 5 (the design spec's "primary, always-on validation
+# mechanism for the Primary layer") specifically names this target as its
+# own reference canary for unexpected_clean_std_build's contradiction
+# check. Its own metadata.std is also False, so the guaranteed-failure
+# short-circuit below would otherwise skip it too -- silently making
+# that contradiction check permanently unreachable for the one target
+# it's built to protect. Exempted here, deliberately, so it keeps
+# running the real attempt SP5's contradiction check depends on.
+SP5_CANARY_TARGET = "nvptx64-nvidia-cuda"
 
-def guaranteed_std_failure(target_spec: dict[str, Any]) -> bool:
-    return target_spec.get("metadata", {}).get("std") is False
+
+def guaranteed_std_failure(target_spec: dict[str, Any], target: str) -> bool:
+    return target != SP5_CANARY_TARGET and target_spec.get("metadata", {}).get("std") is False
 
 
 def skip_record(target: str) -> dict[str, Any]:

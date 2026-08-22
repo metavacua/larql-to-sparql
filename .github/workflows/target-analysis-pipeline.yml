@@ -334,7 +334,7 @@ jobs:
 
           target = sys.argv[1]
           target_spec = load_json(Path(f"capability/target-spec-{target}.json"))
-          print("true" if guaranteed_std_failure(target_spec) else "false")
+          print("true" if guaranteed_std_failure(target_spec, target) else "false")
           PYEOF
             )
             if [ "$GUARANTEED_FAIL" = "true" ]; then
