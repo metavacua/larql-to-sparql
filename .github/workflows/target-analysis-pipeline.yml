@@ -1057,7 +1057,6 @@ jobs:
             sed -i -E "s/serde = \{ workspace = true[^}]*\}/serde = { workspace = true, default-features = false, features = [$FEATURES_TOML] }/" {} \;
           sed -i -E "s/serde = \{ version = \"1\", features = \[\"derive\"\] \}/serde = { version = \"1\", default-features = false, features = [$FEATURES_TOML] }/" Cargo.toml
           sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false }/' Cargo.toml
-          sed -i '1s/^/# THROWAWAY: deliberately widen Stage B2 for the negative test\n/' scripts/target_analysis_promotion.py
           CHANGED=$(git diff --name-only)
           for f in $CHANGED; do
             if [[ "$f" != Cargo.toml && "$f" != crates/*/Cargo.toml ]]; then
