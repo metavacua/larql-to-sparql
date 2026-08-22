@@ -5,6 +5,7 @@ indexing and promotion scripts."""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -36,6 +37,15 @@ def unit_graph_units_named(unit_graph: dict[str, Any], name: str) -> list[dict[s
     ]
 
 
+def _normalize_site_path(file_name: str) -> str:
+    match = re.search(r"registry/src/[^/]+/([^/]+)-\d[^/]*/(.*)", file_name)
+    if match:
+        crate_name_no_version = match.group(1)
+        rest = match.group(2)
+        return f"{crate_name_no_version}/{rest}"
+    return file_name
+
+
 def error_level_messages(
     compiler_messages: list[dict[str, Any]],
 ) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
@@ -61,7 +71,7 @@ def error_sites(compiler_messages: list[dict[str, Any]]) -> set[tuple[str, int, 
         primary_spans = [s for s in message.get("spans", []) if s.get("is_primary")]
         if primary_spans:
             for span in primary_spans:
-                sites.add((span.get("file_name", ""), span.get("line_start", -1), code))
+                sites.add((_normalize_site_path(span.get("file_name", "")), span.get("line_start", -1), code))
         else:
             sites.add(("<spanless>", -1, code))
     return sites

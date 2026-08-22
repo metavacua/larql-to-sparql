@@ -76,3 +76,11 @@ def test_load_jsonl_and_parse_jsonl_agree_on_the_same_content(tmp_path):
     path = tmp_path / "same.jsonl"
     path.write_text(content, encoding="utf-8")
     assert load_jsonl(path) == parse_jsonl(content)
+
+
+def test_error_sites_normalizes_absolute_registry_paths():
+    messages = [
+        {"reason": "compiler-message", "message": {"level": "error", "code": {"code": "E0463"}, "message": "x", "spans": [{"file_name": "/home/runner/.cargo/registry/src/index.crates.io-abc123/serde_core-1.0.228/src/lib.rs", "line_start": 5, "is_primary": True}]}},
+    ]
+    sites = error_sites(messages)
+    assert sites == {("serde_core/src/lib.rs", 5, "E0463")}
