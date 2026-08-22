@@ -79,6 +79,44 @@ jobs:
             target-list.txt
             target-tiers.json
 
+  runner-capability-probe:
+    name: Probe this run's real runner toolchain capabilities
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # actions/checkout
+    outputs:
+      android-ndk-clang-dir: ${{ steps.probe.outputs.android-ndk-clang-dir }}
+      mingw-w64-installable: ${{ steps.probe.outputs.mingw-w64-installable }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe real runner capabilities -- structurally cannot fail; absence is data, never a job failure
+        id: probe
+        run: |
+          mkdir -p out
+          NDK_DIR=""
+          if [ -n "$ANDROID_NDK_HOME" ] && [ -d "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
+            NDK_DIR="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          else
+            echo "::warning::ANDROID_NDK_HOME is unset or its expected clang directory is missing on this real runner -- the audit's 'ubuntu-latest ships the NDK preinstalled' claim does not hold here."
+          fi
+          echo "android-ndk-clang-dir=$NDK_DIR" >> "$GITHUB_OUTPUT"
+
+          sudo apt-get update -qq || true
+          MINGW_OK="false"
+          if apt-cache policy gcc-mingw-w64-x86-64 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+            MINGW_OK="true"
+          else
+            echo "::warning::gcc-mingw-w64-x86-64 has no installable apt candidate on this runner (or apt-get update failed) -- windows-gnu targets will keep their real ToolNotFound errors."
+          fi
+          echo "mingw-w64-installable=$MINGW_OK" >> "$GITHUB_OUTPUT"
+
+          printf '{"android_ndk_clang_dir": "%s", "mingw_w64_installable": %s}\n' "$NDK_DIR" "$MINGW_OK" > out/runner-capabilities.json
+      - name: "Upload the real runner-capability manifest (L1 data: what this run's own runner image actually had)"
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-capabilities
+          path: out/runner-capabilities.json
+
   target-independent-checks:
     name: "Target-independent checks: fmt (${{ matrix.crate }})"
     needs: [discovery]
@@ -157,7 +195,7 @@ jobs:
 
   dependency-graph:
     name: "Dependency graph: batch ${{ matrix.batch_index }}"
-    needs: [discovery, target-independent-checks]
+    needs: [discovery, target-independent-checks, runner-capability-probe]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -169,6 +207,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install nightly Rust
         run: rustup toolchain install nightly --profile minimal
+      - name: Provision this job's runner from the probed capabilities (gates provisioning only -- never which targets get measured)
+        env:
+          ANDROID_NDK_CLANG_DIR: ${{ needs.runner-capability-probe.outputs.android-ndk-clang-dir }}
+          MINGW_W64_INSTALLABLE: ${{ needs.runner-capability-probe.outputs.mingw-w64-installable }}
+        run: |
+          if [ -n "$ANDROID_NDK_CLANG_DIR" ] && [ -d "$ANDROID_NDK_CLANG_DIR" ]; then
+            echo "PATH=$ANDROID_NDK_CLANG_DIR:$PATH" >> "$GITHUB_ENV"
+            echo "Android NDK confirmed present at $ANDROID_NDK_CLANG_DIR (per this run's own probe); cc-rs now wired to its clang."
+          else
+            echo "::warning::this job's own runner does not have the NDK clang dir the probe reported (image skew between jobs in this same run, or the probe found none) -- android targets keep their real ToolNotFound errors for this job."
+          fi
+
+          if [ "$MINGW_W64_INSTALLABLE" = "true" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+              || echo "::warning::mingw-w64 install failed on this job's own runner despite the probe finding a candidate -- transient apt issue, continuing; windows-gnu targets keep their real ToolNotFound errors for this job"
+          else
+            echo "::warning::probe found no installable mingw-w64 candidate on this run's runner image -- skipping the install attempt for this job; windows-gnu targets keep their real ToolNotFound errors"
+          fi
       - name: Dependency-graph probes for every target in this batch
         env:
           BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
@@ -202,7 +258,7 @@ jobs:
 
   build-attempt:
     name: "Build attempt: batch ${{ matrix.batch_index }}"
-    needs: [discovery, target-capability, target-independent-checks]
+    needs: [discovery, target-capability, target-independent-checks, runner-capability-probe]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -217,6 +273,24 @@ jobs:
         run: |
           rustup toolchain install nightly --profile minimal
           rustup component add clippy --toolchain nightly
+      - name: Provision this job's runner from the probed capabilities (gates provisioning only -- never which targets get measured)
+        env:
+          ANDROID_NDK_CLANG_DIR: ${{ needs.runner-capability-probe.outputs.android-ndk-clang-dir }}
+          MINGW_W64_INSTALLABLE: ${{ needs.runner-capability-probe.outputs.mingw-w64-installable }}
+        run: |
+          if [ -n "$ANDROID_NDK_CLANG_DIR" ] && [ -d "$ANDROID_NDK_CLANG_DIR" ]; then
+            echo "PATH=$ANDROID_NDK_CLANG_DIR:$PATH" >> "$GITHUB_ENV"
+            echo "Android NDK confirmed present at $ANDROID_NDK_CLANG_DIR (per this run's own probe); cc-rs now wired to its clang."
+          else
+            echo "::warning::this job's own runner does not have the NDK clang dir the probe reported (image skew between jobs in this same run, or the probe found none) -- android targets keep their real ToolNotFound errors for this job."
+          fi
+
+          if [ "$MINGW_W64_INSTALLABLE" = "true" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+              || echo "::warning::mingw-w64 install failed on this job's own runner despite the probe finding a candidate -- transient apt issue, continuing; windows-gnu targets keep their real ToolNotFound errors for this job"
+          else
+            echo "::warning::probe found no installable mingw-w64 candidate on this run's runner image -- skipping the install attempt for this job; windows-gnu targets keep their real ToolNotFound errors"
+          fi
       - name: Download this batch's target-capability artifact
         uses: actions/download-artifact@v4
         with:
@@ -646,7 +720,7 @@ jobs:
 
   secondary-stage-c-and-promotion:
     name: "Secondary Stage C + promotion: batch ${{ matrix.batch_index }}"
-    needs: [discovery, indexing, secondary-mutate, dependency-graph, fetch-prior-round-baseline]
+    needs: [discovery, indexing, secondary-mutate, dependency-graph, fetch-prior-round-baseline, runner-capability-probe]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -662,6 +736,24 @@ jobs:
         run: |
           rustup toolchain install nightly --profile minimal
           rustup component add rust-src --toolchain nightly
+      - name: Provision this job's runner from the probed capabilities (gates provisioning only -- never which targets get measured)
+        env:
+          ANDROID_NDK_CLANG_DIR: ${{ needs.runner-capability-probe.outputs.android-ndk-clang-dir }}
+          MINGW_W64_INSTALLABLE: ${{ needs.runner-capability-probe.outputs.mingw-w64-installable }}
+        run: |
+          if [ -n "$ANDROID_NDK_CLANG_DIR" ] && [ -d "$ANDROID_NDK_CLANG_DIR" ]; then
+            echo "PATH=$ANDROID_NDK_CLANG_DIR:$PATH" >> "$GITHUB_ENV"
+            echo "Android NDK confirmed present at $ANDROID_NDK_CLANG_DIR (per this run's own probe); cc-rs now wired to its clang."
+          else
+            echo "::warning::this job's own runner does not have the NDK clang dir the probe reported (image skew between jobs in this same run, or the probe found none) -- android targets keep their real ToolNotFound errors for this job."
+          fi
+
+          if [ "$MINGW_W64_INSTALLABLE" = "true" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+              || echo "::warning::mingw-w64 install failed on this job's own runner despite the probe finding a candidate -- transient apt issue, continuing; windows-gnu targets keep their real ToolNotFound errors for this job"
+          else
+            echo "::warning::probe found no installable mingw-w64 candidate on this run's runner image -- skipping the install attempt for this job; windows-gnu targets keep their real ToolNotFound errors"
+          fi
       - name: Stage C baseline -- check the UNMUTATED tree for every target in this batch
         env:
           BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
