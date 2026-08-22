@@ -1055,8 +1055,23 @@ jobs:
           FEATURES_TOML=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import STAGE_B2_SERDE_FEATURES; print(", ".join(f"\"{f}\"" for f in STAGE_B2_SERDE_FEATURES))')
           find crates -name Cargo.toml -exec \
             sed -i -E "s/serde = \{ workspace = true[^}]*\}/serde = { workspace = true, default-features = false, features = [$FEATURES_TOML] }/" {} \;
+          # Cargo's workspace-dependency-inheritance rule means a member's
+          # own default-features override has no effect unless the root
+          # [workspace.dependencies] entry itself sets it (confirmed via a
+          # minimal isolated repro, 2026-08-21 review) -- patch it here too.
           sed -i -E "s/serde = \{ version = \"1\", features = \[\"derive\"\] \}/serde = { version = \"1\", default-features = false, features = [$FEATURES_TOML] }/" Cargo.toml
-          sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false }/' Cargo.toml
+          sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false, features = ["alloc"] }/' Cargo.toml
+          # thiserror defaults to its "std" feature (registry: default =
+          # ["std"], std = []) and Stage B2 has never patched it -- root-only
+          # is sufficient since every crate declares `thiserror = { workspace
+          # = true }` and inherits from here.
+          sed -i -E 's/^thiserror = "2"$/thiserror = { version = "2", default-features = false }/' Cargo.toml
+          # safetensors's own "std" feature (on by default) requires
+          # serde/default -- reactivating serde's std feature workspace-wide
+          # once larql-models is checked alongside the other mutated crates
+          # in one combined `cargo check` invocation (confirmed via
+          # `cargo tree -i serde -e features`, 2026-08-21 review).
+          sed -i -E 's/^safetensors = "0.7"$/safetensors = { version = "0.7", default-features = false, features = ["alloc"] }/' crates/larql-models/Cargo.toml
           CHANGED=$(git diff --name-only)
           for f in $CHANGED; do
             if [[ "$f" != Cargo.toml && "$f" != crates/*/Cargo.toml ]]; then
