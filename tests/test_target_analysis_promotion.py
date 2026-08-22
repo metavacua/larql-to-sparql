@@ -6,6 +6,7 @@ from scripts.target_analysis_common import error_sites, load_json
 from scripts.target_analysis_promotion import (
     GOLDEN_FIXTURE_CRATE,
     MUTATED_LIBRARY_CRATES,
+    STAGE_B3_EXPECTED_MEMBERS,
     STAGE_B3_REACHABLE_CLOSURE,
     depth_advanced,
     insert_alloc_extern_crate,
@@ -245,3 +246,28 @@ def test_workspace_members_ok_false_for_real_trimmed_workspace_against_old_5_cra
 def test_golden_fixture_crate_is_one_of_the_mutated_crates():
     assert GOLDEN_FIXTURE_CRATE in MUTATED_LIBRARY_CRATES
     assert GOLDEN_FIXTURE_CRATE == "larql-nostd-canary"
+
+
+def test_stage_promotes_stage_b3_true_when_sibling_matches_expected_members_including_golden_fixture():
+    # Regression test for the C-1 finding (final whole-branch review,
+    # 2026-08-22): Stage B3's promotion verdict was pinned False for all
+    # 119 targets because the promotion computation checked the real,
+    # 15-member trimmed workspace (STAGE_B3_REACHABLE_CLOSURE + the golden
+    # fixture crate, which the mutate job's trim step appends explicitly)
+    # against the bare 14-name STAGE_B3_REACHABLE_CLOSURE alone -- an
+    # unsatisfiable postcondition regardless of whether the trim actually
+    # worked. STAGE_B3_EXPECTED_MEMBERS is the fix: the real, full expected
+    # membership set.
+    assert STAGE_B3_EXPECTED_MEMBERS == STAGE_B3_REACHABLE_CLOSURE + (GOLDEN_FIXTURE_CRATE,)
+    untrimmed_metadata = {
+        "packages": [{"id": f"id-{n}", "name": n} for n in STAGE_B3_EXPECTED_MEMBERS]
+        + [{"id": "id-extra", "name": "some-other-crate-not-in-the-trim"}],
+        "workspace_members": [f"id-{n}" for n in STAGE_B3_EXPECTED_MEMBERS] + ["id-extra"],
+    }
+    trimmed_metadata = {
+        "packages": [{"id": f"id-{n}", "name": n} for n in STAGE_B3_EXPECTED_MEMBERS],
+        "workspace_members": [f"id-{n}" for n in STAGE_B3_EXPECTED_MEMBERS],
+    }
+    baseline_state = {"metadata": untrimmed_metadata, "expected_members": list(STAGE_B3_EXPECTED_MEMBERS)}
+    sibling_state = {"metadata": trimmed_metadata, "expected_members": list(STAGE_B3_EXPECTED_MEMBERS)}
+    assert stage_promotes("stage-b3", baseline_state, sibling_state) is True

@@ -695,15 +695,16 @@ jobs:
           from pathlib import Path
 
           sys.path.insert(0, ".")
-          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE
+          from scripts.target_analysis_promotion import STAGE_B3_EXPECTED_MEMBERS
 
           root_toml = Path("Cargo.toml")
           text = root_toml.read_text(encoding="utf-8")
-          # larql-nostd-canary has no path-dependency relationship to the
-          # real 14-crate closure (it depends on nothing), so it is kept
-          # explicitly rather than folded into STAGE_B3_REACHABLE_CLOSURE,
-          # which must stay an honest, derived-from-real-dependencies set.
-          reachable = [f"crates/{name}" for name in STAGE_B3_REACHABLE_CLOSURE] + ["crates/larql-nostd-canary"]
+          # STAGE_B3_EXPECTED_MEMBERS already includes the golden-fixture
+          # crate (larql-nostd-canary) alongside the real 14-crate
+          # dependency closure -- see its definition in
+          # scripts/target_analysis_promotion.py for why it's kept as a
+          # separate constant rather than folded into the closure itself.
+          reachable = [f"crates/{name}" for name in STAGE_B3_EXPECTED_MEMBERS]
           members_block_fmt = "{key} = [\n" + "".join(f'    "{c}",\n' for c in reachable) + "]\n"
           for key in ("members", "default-members"):
               text = re.sub(rf"{key} = \[[^\]]*\]\n", members_block_fmt.format(key=key), text, count=1)
@@ -794,7 +795,7 @@ jobs:
 
           sys.path.insert(0, ".")
           from scripts.target_analysis_common import load_json
-          from scripts.target_analysis_promotion import STAGE_B3_REACHABLE_CLOSURE, stage_b_lib_rs_filenames
+          from scripts.target_analysis_promotion import STAGE_B3_EXPECTED_MEMBERS, stage_b_lib_rs_filenames
 
           # Stage B (no_std scaffold): real baseline/sibling lib.rs content
           # captured by the mutation job, target-independent. larql-cli itself
@@ -814,7 +815,7 @@ jobs:
           # membership doesn't vary by target); sibling is this job's own
           # mutated-tree metadata, computed once here (a single `cargo metadata`
           # call, not once per target) since it too cannot vary by target.
-          expected_members = list(STAGE_B3_REACHABLE_CLOSURE)
+          expected_members = list(STAGE_B3_EXPECTED_MEMBERS)
           baseline_metadata = load_json(Path("mutation/baseline-metadata.json"))
           sibling_metadata = json.loads(subprocess.run(
               ["cargo", "metadata", "--format-version", "1", "--no-deps"],
@@ -1125,6 +1126,28 @@ jobs:
       - name: "Blast-radius containment: assert Stage A only touches its declared crates"
         run: |
           CRATES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(MUTATED_LIBRARY_CRATES))')
+          # Stage A0 (prerequisite for Stage A's alloc-path rewrites to resolve)
+          # -- mirrors secondary-mutate's own real "Stage A0" step verbatim, so
+          # this self-test exercises the real A0 -> A sequence production runs,
+          # not Stage A in isolation (fidelity gap found by the final
+          # whole-branch review, 2026-08-22: 2 files touched here vs. 17 real
+          # files across 5 crates in a real production run, without it).
+          for CRATE in $CRATES; do
+            python3 - "$CRATE" <<'PYEOF'
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, ".")
+          from scripts.target_analysis_promotion import insert_alloc_extern_crate
+
+          crate = sys.argv[1]
+          lib_rs = Path(f"crates/{crate}/src/lib.rs")
+          lib_rs.write_text(
+              insert_alloc_extern_crate(lib_rs.read_text(encoding="utf-8")),
+              encoding="utf-8",
+          )
+          PYEOF
+          done
           for CRATE in $CRATES; do
             cargo +nightly clippy --fix --allow-dirty --allow-staged \
               -p "$CRATE" --lib -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
@@ -1232,3 +1255,13 @@ jobs:
             exit 1
           fi
           echo "No forbidden git-mutating command found in the pipeline workflow."
+      - name: Upload self-test raw probe output (noise floor, golden fixture)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secondary-layer-self-test-output
+          path: |
+            noise-floor-run-1.json
+            noise-floor-run-2.json
+            canary-check.json
+          if-no-files-found: ignore

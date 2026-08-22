@@ -155,6 +155,16 @@ STAGE_B3_REACHABLE_CLOSURE = (
     "larql-vindex-spec",
 )
 
+# The real, full trimmed-workspace membership Stage B3 produces --
+# STAGE_B3_REACHABLE_CLOSURE plus the golden-fixture crate, which the
+# mutate job's own trim step appends explicitly (it has no path-dependency
+# relationship to the closure, so it is not folded into
+# STAGE_B3_REACHABLE_CLOSURE itself). This is what Stage B3's real
+# postcondition must check against -- using the bare closure alone made
+# the check unsatisfiable regardless of whether the trim succeeded
+# (found via the plan's own final whole-branch review, 2026-08-22).
+STAGE_B3_EXPECTED_MEMBERS = STAGE_B3_REACHABLE_CLOSURE + (GOLDEN_FIXTURE_CRATE,)
+
 
 def stage_b_lib_rs_filenames(crate: str = STAGE_B_REPRESENTATIVE_CRATE) -> tuple[str, str]:
     if crate not in MUTATED_LIBRARY_CRATES:
