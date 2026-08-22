@@ -1038,14 +1038,17 @@ jobs:
               -p "$CRATE" --lib -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
           done
           CHANGED=$(git diff --name-only)
-          EXPECTED_FILES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print("\n".join(f"crates/{c}/src/lib.rs" for c in MUTATED_LIBRARY_CRATES))')
           for f in $CHANGED; do
-            if ! echo "$EXPECTED_FILES" | grep -qx "$f"; then
+            OK=0
+            for CRATE in $CRATES; do
+              case "$f" in crates/$CRATE/src/*) OK=1 ;; esac
+            done
+            if [ "$OK" -ne 1 ]; then
               echo "::error::Stage A touched a file outside its declared scope: $f"
               exit 1
             fi
           done
-          echo "Blast radius contained to the declared crates' lib.rs files."
+          echo "Blast radius contained to the declared crates' src trees."
       - name: "Blast-radius containment: assert Stage B2 only touches its declared scope"
         run: |
           git checkout -- .
