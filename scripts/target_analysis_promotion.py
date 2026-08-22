@@ -104,22 +104,6 @@ def insert_no_std_attribute(text: str) -> str:
     return "".join(lines)
 
 
-def insert_no_std_scaffold(text: str) -> str:
-    """DEPRECATED -- kept only because `secondary-layer-self-test`'s
-    "Blast-radius containment" step (out of this task's scope; Task 11's,
-    per the 2026-08-21-stage-c-measurement-validity plan) still imports and
-    calls this name directly, and that step is explicitly left untouched by
-    this task. Provably equivalent to the old combined-scaffold single pass
-    for ANY input: `extern crate alloc;` never matches the `//!`/`#![`/blank
-    classification `_leading_block_end` scans for, so it doesn't shift where
-    the scan halts -- composing insert_alloc_extern_crate then
-    insert_no_std_attribute always lands #![no_std] immediately above
-    extern crate alloc;, byte-for-byte matching this function's old
-    single-pass output. Task 11 removes this function and its one remaining
-    call site together."""
-    return insert_no_std_attribute(insert_alloc_extern_crate(text))
-
-
 # The spec's required positive control (Testing section): a crate with a
 # known-in-advance outcome, run through the real Stage A->C pipeline, so a
 # broken measurement is distinguishable from a genuine experimental result.

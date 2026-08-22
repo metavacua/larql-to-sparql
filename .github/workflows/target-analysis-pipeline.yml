@@ -1030,16 +1030,52 @@ jobs:
               sys.exit(1)
           print(f"Noise floor stable: {len(run1)} identical error sites across both runs.")
           PYEOF
+      - name: "Blast-radius containment: assert Stage A only touches its declared crates"
+        run: |
+          CRATES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(MUTATED_LIBRARY_CRATES))')
+          for CRATE in $CRATES; do
+            cargo +nightly clippy --fix --allow-dirty --allow-staged \
+              -p "$CRATE" --lib -- -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
+          done
+          CHANGED=$(git diff --name-only)
+          EXPECTED_FILES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print("\n".join(f"crates/{c}/src/lib.rs" for c in MUTATED_LIBRARY_CRATES))')
+          for f in $CHANGED; do
+            if ! echo "$EXPECTED_FILES" | grep -qx "$f"; then
+              echo "::error::Stage A touched a file outside its declared scope: $f"
+              exit 1
+            fi
+          done
+          echo "Blast radius contained to the declared crates' lib.rs files."
+      - name: "Blast-radius containment: assert Stage B2 only touches its declared scope"
+        run: |
+          git checkout -- .
+          FEATURES_TOML=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import STAGE_B2_SERDE_FEATURES; print(", ".join(f"\"{f}\"" for f in STAGE_B2_SERDE_FEATURES))')
+          find crates -name Cargo.toml -exec \
+            sed -i -E "s/serde = \{ workspace = true[^}]*\}/serde = { workspace = true, default-features = false, features = [$FEATURES_TOML] }/" {} \;
+          sed -i -E "s/serde = \{ version = \"1\", features = \[\"derive\"\] \}/serde = { version = \"1\", default-features = false, features = [$FEATURES_TOML] }/" Cargo.toml
+          sed -i -E 's/serde_json = "1"/serde_json = { version = "1", default-features = false }/' Cargo.toml
+          CHANGED=$(git diff --name-only)
+          for f in $CHANGED; do
+            if [[ "$f" != Cargo.toml && "$f" != crates/*/Cargo.toml ]]; then
+              echo "::error::Stage B2 touched a file outside its declared scope: $f"
+              exit 1
+            fi
+          done
+          echo "Blast radius contained to Cargo.toml manifests only."
+          git checkout -- .
       - name: "Blast-radius containment: assert Stage B only touches its declared scope"
         run: |
           EXPECTED_PATH=$(python3 - <<'PYEOF'
           import sys
           sys.path.insert(0, ".")
           from pathlib import Path
-          from scripts.target_analysis_promotion import insert_no_std_scaffold, STAGE_B_REPRESENTATIVE_CRATE
+          from scripts.target_analysis_promotion import insert_alloc_extern_crate, insert_no_std_attribute, STAGE_B_REPRESENTATIVE_CRATE
 
           lib_rs = Path(f"crates/{STAGE_B_REPRESENTATIVE_CRATE}/src/lib.rs")
-          lib_rs.write_text(insert_no_std_scaffold(lib_rs.read_text(encoding="utf-8")), encoding="utf-8")
+          lib_rs.write_text(
+              insert_no_std_attribute(insert_alloc_extern_crate(lib_rs.read_text(encoding="utf-8"))),
+              encoding="utf-8",
+          )
           print(lib_rs)
           PYEOF
           )
