@@ -152,7 +152,7 @@ jobs:
 
   target-capability:
     name: "Target capability: batch ${{ matrix.batch_index }}"
-    needs: [discovery, target-independent-checks]
+    needs: [discovery]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -195,7 +195,7 @@ jobs:
 
   dependency-graph:
     name: "Dependency graph: batch ${{ matrix.batch_index }}"
-    needs: [discovery, target-independent-checks, runner-capability-probe]
+    needs: [discovery, runner-capability-probe]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -258,7 +258,7 @@ jobs:
 
   build-attempt:
     name: "Build attempt: batch ${{ matrix.batch_index }}"
-    needs: [discovery, target-capability, target-independent-checks, runner-capability-probe]
+    needs: [discovery, target-capability, runner-capability-probe]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -352,7 +352,7 @@ jobs:
 
   runtime-test:
     name: "Runtime test: batch ${{ matrix.batch_index }}"
-    needs: [discovery, target-independent-checks]
+    needs: [discovery]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # actions/checkout
@@ -597,7 +597,6 @@ jobs:
 
   secondary-mutate:
     name: "Secondary layer: mutate (Stages A, B, B2, B3)"
-    needs: [discovery, indexing]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -721,7 +720,7 @@ jobs:
 
   secondary-stage-c-and-promotion:
     name: "Secondary Stage C + promotion: batch ${{ matrix.batch_index }}"
-    needs: [discovery, indexing, secondary-mutate, dependency-graph, fetch-prior-round-baseline, runner-capability-probe]
+    needs: [discovery, secondary-mutate, dependency-graph, fetch-prior-round-baseline, runner-capability-probe]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -949,7 +948,6 @@ jobs:
 
   fetch-prior-round-baseline:
     name: Fetch prior round's baseline (cross-run artifact lookup)
-    needs: [discovery]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -1092,7 +1090,6 @@ jobs:
 
   secondary-layer-self-test:
     name: Secondary-layer self-test (noise floor, blast radius, ephemerality)
-    needs: [discovery]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
