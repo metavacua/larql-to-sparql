@@ -658,6 +658,23 @@ jobs:
         batch_index: ${{ fromJSON(needs.discovery.outputs.batch-indices) }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+      - name: Stage C baseline -- check the UNMUTATED tree for every target in this batch
+        env:
+          BATCH_TARGETS: ${{ toJSON(fromJSON(needs.discovery.outputs.batches)[matrix.batch_index]) }}
+        run: |
+          mkdir -p baseline-out
+          CHECK_PACKAGES=$(python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_promotion import MUTATED_LIBRARY_CRATES; print(" ".join(f"-p {c}" for c in MUTATED_LIBRARY_CRATES))')
+          echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
+          while IFS= read -r TARGET; do
+            echo "=== Stage C baseline: target=$TARGET ==="
+            cargo +nightly check $CHECK_PACKAGES --target "$TARGET" \
+              -Z build-std=core,alloc --keep-going --message-format=json \
+              > "baseline-out/stage-c-$TARGET.json" || true
+          done < targets-in-batch.txt
       - name: Download the Secondary layer's mutation artifact
         uses: actions/download-artifact@v4
         with:
@@ -665,10 +682,6 @@ jobs:
           path: mutation
       - name: Apply the mutation patch to this job's checkout
         run: git apply mutation/full-mutation.patch
-      - name: Install nightly Rust
-        run: |
-          rustup toolchain install nightly --profile minimal
-          rustup component add rust-src --toolchain nightly
       - name: Download this batch's dependency-graph artifact (Stage B2 baseline)
         uses: actions/download-artifact@v4
         with:
@@ -801,14 +814,8 @@ jobs:
 
           target = sys.argv[1]
           sibling_messages = load_jsonl(Path(f"out/stage-c-{target}.json"))
-          prior_round = load_json(Path("prior-round-baseline/round-baseline.json"))
-          prior_record = (
-              prior_round.get("promoted", {}).get(target)
-              or prior_round.get("preserved_not_promoted", {}).get(target)
-          )
-          baseline_sites = (
-              {tuple(s) for s in prior_record["sibling_sites"]} if prior_record is not None else set()
-          )
+          baseline_messages = load_jsonl(Path(f"baseline-out/stage-c-{target}.json"))
+          baseline_sites = error_sites(baseline_messages)
           sibling_sites = error_sites(sibling_messages)
           result = {
               "target": target,
@@ -831,6 +838,12 @@ jobs:
         with:
           name: promotion-decision-batch-${{ matrix.batch_index }}
           path: out/
+      - name: Upload Stage C unmutated-tree baseline captures for this batch (verification/debugging only -- not consumed downstream)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-c-baseline-batch-${{ matrix.batch_index }}
+          path: baseline-out/
 
   fetch-prior-round-baseline:
     name: Fetch prior round's baseline (cross-run artifact lookup)
