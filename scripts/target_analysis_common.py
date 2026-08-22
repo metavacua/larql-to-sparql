@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from typing import Any, Iterator
 
+SKIP_MARKER_KEY = "skipped_no_std_guaranteed_fail"
+
 
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as handle:
@@ -75,3 +77,17 @@ def error_sites(compiler_messages: list[dict[str, Any]]) -> set[tuple[str, int, 
         else:
             sites.add(("<spanless>", -1, code))
     return sites
+
+
+def is_skip_record(compiler_messages: list[Any]) -> bool:
+    """True iff this is a deliberate build-attempt skip record (see
+    scripts/target_analysis_build_attempt.py's skip_record()), not a real
+    cargo --message-format=json stream. Checked first by anything that
+    would otherwise treat an empty error list as evidence of a clean build
+    -- a skip is neither a pass nor a contradiction, and must never be
+    indistinguishable from either."""
+    return (
+        bool(compiler_messages)
+        and isinstance(compiler_messages[0], dict)
+        and compiler_messages[0].get(SKIP_MARKER_KEY) is True
+    )

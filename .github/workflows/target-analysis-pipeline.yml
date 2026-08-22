@@ -304,6 +304,7 @@ jobs:
           mkdir -p out
           echo "$BATCH_TARGETS" | python3 -c 'import sys; sys.path.insert(0, "."); from scripts.target_analysis_discovery import expand_batch_json; print(expand_batch_json(sys.stdin.read()))' > targets-in-batch.txt
           FAILED=0
+          SKIPPED=0
           while IFS= read -r TARGET; do
             rustup target add "$TARGET" --toolchain nightly 2>&1 || echo "::warning::rustup target add failed for $TARGET (expected for targets with no prebuilt std component, e.g. s390x-unknown-none-softfloat)"
             # Probe-mechanism canary (run 1's real CI evidence): `--crate-type` is
@@ -324,6 +325,35 @@ jobs:
                 --crate-type "$FIRST_CRATE_TYPE" --message-format=json \
                 > "out/crate-type-canary-$TARGET.json" 2>&1 || true
             fi
+            GUARANTEED_FAIL=$(python3 - "$TARGET" <<'PYEOF'
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_common import load_json
+          from scripts.target_analysis_build_attempt import guaranteed_std_failure
+
+          target = sys.argv[1]
+          target_spec = load_json(Path(f"capability/target-spec-{target}.json"))
+          print("true" if guaranteed_std_failure(target_spec) else "false")
+          PYEOF
+            )
+            if [ "$GUARANTEED_FAIL" = "true" ]; then
+              echo "=== target=$TARGET: skipping the 6 cmd/feature closure checks -- target-capability's own metadata already proves std is unavailable and larql-cli's reqwest dependency is unconditional (crates/larql-cli/Cargo.toml, confirmed 2026-08-21) ==="
+              SKIPPED=$((SKIPPED+1))
+              python3 - "$TARGET" <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, ".")
+          from pathlib import Path
+          from scripts.target_analysis_build_attempt import skip_record
+          from scripts.target_analysis_indexing import build_attempt_filenames
+
+          target = sys.argv[1]
+          for filename in build_attempt_filenames(target):
+              Path(f"out/{filename}").write_text(json.dumps(skip_record(target)))
+          PYEOF
+              continue
+            fi
             BUILD_STD=none
             for CARGO_CMD in check clippy build; do
               for FEATURES in default-features no-default-features; do
@@ -337,6 +367,7 @@ jobs:
             done
           done < targets-in-batch.txt
           echo "batch-had-failure=$FAILED" >> "$GITHUB_OUTPUT"
+          echo "batch-skipped-count=$SKIPPED" >> "$GITHUB_OUTPUT"
       - name: Upload full diagnostic JSON for this batch
         if: always()
         uses: actions/upload-artifact@v4
@@ -349,6 +380,7 @@ jobs:
           if [ "${{ steps.attempt.outputs.batch-had-failure }}" = "1" ]; then
             echo "::notice::At least one real build failure in this batch, recorded as a finding in the uploaded JSON, not masked."
           fi
+          echo "batch ${{ matrix.batch_index }} skipped ${{ steps.attempt.outputs.batch-skipped-count }} target(s) via the guaranteed-std-failure short-circuit"
 
   runtime-test:
     name: "Runtime test: batch ${{ matrix.batch_index }}"
@@ -524,12 +556,11 @@ jobs:
           from pathlib import Path
 
           sys.path.insert(0, ".")
-          from scripts.target_analysis_common import error_level_messages, load_json, load_jsonl
+          from scripts.target_analysis_common import load_json, load_jsonl
           from scripts.target_analysis_indexing import (
               build_attempt_filenames,
-              count_errors_by_target,
+              combined_record_for_target,
               missing_artifacts,
-              unexpected_clean_std_build,
           )
 
           target_matrix = json.loads('''${{ needs.discovery.outputs.target-matrix }}''')
@@ -567,16 +598,8 @@ jobs:
                   combined[t] = {"error": f"malformed JSONL in {attempt_file}: {exc}"}
                   any_missing = True
                   continue
-              std_mode_errors = [message for _entry, message in error_level_messages(messages)]
               target_spec = load_json(spec_file)
-
-              combined[t] = {
-                  "error_counts_by_target": count_errors_by_target(messages),
-                  "contradictions": {
-                      "unexpected_clean_std_build": unexpected_clean_std_build(target_spec, std_mode_errors),
-                  },
-                  "missing_artifacts": missing_sorted,
-              }
+              combined[t] = combined_record_for_target(messages, target_spec, missing_sorted)
 
           Path("index.json").write_text(json.dumps(combined, indent=2))
 

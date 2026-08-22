@@ -1,8 +1,10 @@
 from pathlib import Path
 
 from scripts.target_analysis_common import load_json
+from scripts.target_analysis_build_attempt import guaranteed_std_failure, skip_record
 from scripts.target_analysis_indexing import (
     build_attempt_filenames,
+    combined_record_for_target,
     count_errors_by_target,
     missing_artifacts,
     unexpected_clean_std_build,
@@ -70,3 +72,44 @@ def test_build_attempt_filenames_first_combo_matches_the_representative_single_f
     # confirmed here to be the first entry, so both stay in sync by
     # construction rather than by two independently-hand-typed literals.
     assert build_attempt_filenames("t")[0] == "attempt-t-none-check-default-features.json"
+
+
+def test_guaranteed_std_failure_true_when_target_capability_says_no_std():
+    target_spec = load_json(FIXTURES / "target_spec_nvptx.json")
+    assert guaranteed_std_failure(target_spec) is True
+
+
+def test_guaranteed_std_failure_false_when_target_has_std():
+    assert guaranteed_std_failure({"metadata": {"std": True}}) is False
+
+
+def test_skip_record_carries_the_marker_key_and_target():
+    record = skip_record("armv7a-none-eabihf")
+    assert record["skipped_no_std_guaranteed_fail"] is True
+    assert record["target"] == "armv7a-none-eabihf"
+    assert "ring" in record["skip_reason"] or "std" in record["skip_reason"]
+
+
+def test_combined_record_for_target_reports_skip_not_a_contradiction():
+    # Load-bearing case: a skip must NEVER be reported as
+    # unexpected_clean_std_build's contradiction (Standing Principle 5),
+    # which specifically watches for zero errors despite an ACTUAL attempt.
+    target_spec = load_json(FIXTURES / "target_spec_nvptx.json")  # metadata.std is False
+    messages = [skip_record("armv7a-none-eabihf")]
+    record = combined_record_for_target(messages, target_spec, missing_sorted=[])
+    assert record["skipped_no_std_guaranteed_fail"] is True
+    assert "contradictions" not in record
+    assert "error_counts_by_target" not in record
+
+
+def test_combined_record_for_target_preserves_existing_behavior_when_not_skipped():
+    # Exact regression check: a real (non-skip) message list must produce
+    # the identical shape the pre-existing inline workflow logic always did.
+    messages = load_json(FIXTURES / "compiler_messages_baseline.json")
+    target_spec = {"metadata": {"std": True}}
+    record = combined_record_for_target(messages, target_spec, missing_sorted=["x"])
+    assert record == {
+        "error_counts_by_target": {"larql-boundary": 2},
+        "contradictions": {"unexpected_clean_std_build": False},
+        "missing_artifacts": ["x"],
+    }
