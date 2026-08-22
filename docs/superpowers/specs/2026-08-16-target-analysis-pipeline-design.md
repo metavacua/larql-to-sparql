@@ -225,6 +225,8 @@ not inferred from Stage C's pass/fail alone — that diff is the validation sign
 whatever new findings appear at that depth are attributed to having cleared the prior
 layer specifically.
 
+**Corrected 2026-08-21 (independent review + this plan):** this guardrail was honored for Stage B/B2/B3 but not for Stage C, whose "baseline" was wired to the *prior round's own mutated output* rather than a real unmutated checkout -- a fixed point by construction, confirmed via real data across 7 runs and 833 target-measurements (0 ever showing progress). Stage C now computes a genuine within-run unmutated-vs-mutated comparison (this plan's Task 8); the pre-existing cross-run baseline handoff is retained as a separate, explicitly-labeled longitudinal drift signal (`signal_type: "cross_round_drift"`), never merged with the within-run result, per Standing Principle 4.
+
 ## Data flow
 
 **Triggers**: `push` alone, scoped to the relevant branch pattern. `workflow_dispatch`

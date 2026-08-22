@@ -975,7 +975,7 @@ jobs:
                       if stage_file.exists():
                           stage_verdicts[stage] = load_json(stage_file)
 
-                  record = {**depth_decision, "stage_promotions": stage_verdicts}
+                  record = {**depth_decision, "stage_promotions": stage_verdicts, "signal_type": "cross_round_drift"}
                   if depth_decision["depth_advanced"]:
                       promoted[target] = record
                   else:
