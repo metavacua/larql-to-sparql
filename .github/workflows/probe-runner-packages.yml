@@ -9,6 +9,9 @@ name: probe-runner-packages
 
 on:
   workflow_dispatch: {}
+  pull_request:
+    paths:
+      - '.github/workflows/probe-runner-packages.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
