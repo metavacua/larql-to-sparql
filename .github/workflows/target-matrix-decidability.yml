@@ -125,11 +125,17 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: cargo tree (this target's actual dependency graph)
-        run: cargo tree --target ${{ matrix.target }} --all-features -e normal,build,dev -vv > tree.log
+        # Written to RUNNER_TEMP, not the checked-out tree: `cargo clippy
+        # --fix` below refuses to run against a dirty working directory
+        # (confirmed by reproduction: an untracked file here is enough to
+        # trip that precondition), and this workflow deliberately doesn't
+        # pass --allow-dirty. A step's own output file must never become
+        # the reason a later step's precondition fails.
+        run: cargo tree --target ${{ matrix.target }} --all-features -e normal,build,dev -vv > "$RUNNER_TEMP/tree.log"
 
       - name: A. cargo check
         continue-on-error: true
-        run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features -vv 2>&1 | tee check.log
+        run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features -vv 2>&1 | tee "$RUNNER_TEMP/check.log"
 
       - name: B. clippy --fix (allow nothing, broken code included)
         continue-on-error: true
@@ -154,8 +160,8 @@ jobs:
         with:
           name: raw-${{ matrix.target }}
           path: |
-            tree.log
-            check.log
+            ${{ runner.temp }}/tree.log
+            ${{ runner.temp }}/check.log
             fix.log
             fix.patch
             residual.log
