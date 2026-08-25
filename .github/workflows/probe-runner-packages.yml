@@ -1,0 +1,62 @@
+# Throwaway probe: what cross-toolchain packages actually exist on the
+# real GitHub-hosted runners, right now -- not on any local dev machine,
+# which tells us nothing about what these runners ship. Read-only
+# (apt-cache search / choco search / cross-arch clang check), installs
+# nothing. Delete this file once its answer has been read out of the
+# run logs.
+
+name: probe-runner-packages
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: OS identity
+        run: cat /etc/os-release
+      - name: apt package index freshness
+        run: sudo apt-get update
+      - name: cross-gcc packages actually available
+        run: |
+          apt-cache search "^gcc-" | grep -E "aarch64-linux-gnu|powerpc64-linux-gnu|powerpc64le-linux-gnu|powerpc-linux-gnu|riscv64-linux-gnu|s390x-linux-gnu|arm-linux-gnueabihf|arm-linux-gnueabi|i686-linux-gnu|loongarch" || echo "NONE MATCHED"
+      - name: musl packages actually available
+        run: apt-cache search musl || echo "NONE MATCHED"
+      - name: exact apt-get install --dry-run for the ones the analysis claimed exist
+        run: |
+          for pkg in gcc-aarch64-linux-gnu gcc-powerpc64-linux-gnu gcc-powerpc64le-linux-gnu gcc-riscv64-linux-gnu gcc-s390x-linux-gnu gcc-arm-linux-gnueabihf gcc-i686-linux-gnu musl-tools; do
+            echo "=== $pkg ==="
+            apt-get install --dry-run "$pkg" 2>&1 | tail -3
+          done
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: what C compilers are already on PATH
+        shell: bash
+        run: |
+          for c in cl gcc clang; do
+            command -v "$c" && "$c" --version 2>&1 | head -2 || echo "$c: not found"
+          done
+      - name: does choco have a mingw package
+        shell: pwsh
+        run: choco search mingw --exact
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - name: host arch + available clang cross-arch targets
+        run: |
+          uname -m
+          clang --version
+          echo 'int main(){return 0;}' > t.c
+          clang -arch x86_64 t.c -o t_x86_64 && echo "x86_64 cross-compile OK"
+          clang -arch arm64 t.c -o t_arm64 && echo "arm64 native OK"
