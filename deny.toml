@@ -9,19 +9,52 @@
 # Schema targets cargo-deny 0.20.x.
 
 [graph]
-# Evaluate every target the workspace actually supports, so a Windows-only or
-# Linux-only dependency cannot smuggle in an unreviewed licence or advisory.
-#
-# `sparcv9-sun-solaris` added alongside the other four for
-# target-matrix-decidability.yml's probe matrix (see that workflow) -- it
-# was the one probed target this list didn't already cover, so a
-# Solaris-only dependency edge could otherwise slip past this scan.
+# Every rustc Tier 1 target (8) plus every Tier 2-with-host-tools target
+# listed at doc.rust-lang.org/nightly/rustc/platform-support.html as of
+# 2026-08-25 (that page's own summary table says 29; only 28 are actually
+# enumerated in its Tier 2-with-host-tools list -- the 28 below are the
+# ones that page actually names, not a claimed count) -- so a dependency
+# edge gated to any target on either tier cannot smuggle in an unreviewed
+# license or advisory just because that target isn't one of the handful
+# this workspace's own CI happens to build.
 targets = [
+    # Tier 1
     "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
+    "aarch64-pc-windows-msvc",
     "aarch64-unknown-linux-gnu",
+    "i686-pc-windows-msvc",
+    "i686-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu",
     "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    # Tier 2 with host tools
+    "aarch64-pc-windows-gnullvm",
+    "aarch64-unknown-freebsd",
+    "aarch64-unknown-linux-musl",
+    "aarch64-unknown-linux-ohos",
+    "arm-unknown-linux-gnueabi",
+    "arm-unknown-linux-gnueabihf",
+    "armv7-unknown-linux-gnueabihf",
+    "armv7-unknown-linux-ohos",
+    "loongarch64-unknown-linux-gnu",
+    "loongarch64-unknown-linux-musl",
+    "i686-pc-windows-gnu",
+    "powerpc-unknown-linux-gnu",
+    "powerpc64-unknown-linux-gnu",
+    "powerpc64-unknown-linux-musl",
+    "powerpc64le-unknown-linux-gnu",
+    "powerpc64le-unknown-linux-musl",
+    "riscv64gc-unknown-linux-gnu",
+    "riscv64gc-unknown-linux-musl",
+    "s390x-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-gnullvm",
+    "x86_64-unknown-freebsd",
+    "x86_64-unknown-illumos",
+    "x86_64-unknown-linux-musl",
+    "x86_64-unknown-linux-ohos",
+    "x86_64-unknown-netbsd",
+    "x86_64-pc-solaris",
     "sparcv9-sun-solaris",
 ]
 all-features = true
