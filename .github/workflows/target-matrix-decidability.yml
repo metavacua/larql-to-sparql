@@ -1,0 +1,177 @@
+# Cross-target decidability probe for larql-cli (proof of concept).
+#
+# Purpose: partition, per Rust target, what clippy/rustc can and cannot
+# mechanically decide about `larql-cli --all-features`:
+#
+#   A. compiles / does not compile   -- `cargo check` exit code. A
+#      terminating, mechanical verdict, not a claim about runtime
+#      behaviour on that target.
+#   B. mechanically fixable          -- whatever `cargo clippy --fix`
+#      actually changes (rustc's own `MachineApplicable` suggestions).
+#      Bucket B is the direct output of `--fix`, not something this
+#      workflow re-derives.
+#   C. detected but not fixable      -- whatever a second clippy pass
+#      still reports on the tree `--fix` already touched.
+#
+# Deliberately not answered here: whether cfg-selected code is *correct*
+# on a given target (endianness, BLAS numerics, GPU hardware presence).
+# That needs real tests, not a green matrix cell.
+#
+# No cross-toolchain installation of any kind (no apt cross-gcc, no
+# cross-rs/Docker, no linker env vars). `rustup target add` gets a
+# target's prebuilt std; nothing else is provided. `cargo check`/`clippy`
+# don't link, but a dependency's build script (this workspace pulls in
+# `ring` via rustls) can still shell out to a C compiler during `cargo
+# check` itself -- confirmed locally: `aarch64-unknown-linux-gnu` and
+# `sparcv9-sun-solaris` both fail identically with
+# `error occurred in cc-rs: failed to find tool "<target>-gcc"`. That
+# failure IS bucket A ("does not compile", with the exact reason in the
+# log) -- not a problem to engineer around by installing a cross-gcc to
+# force a green result. Manufacturing success would hide the finding,
+# not report it.
+#
+# `--all-features` is used on purpose, unlike the per-crate CI workflows
+# (which pin `--no-default-features` on non-macOS to keep their gate
+# green). Here, a target where `gpu` fails to compile IS the reportable
+# result. No job in this workflow is a required check; every probe step
+# uses `continue-on-error: true` for exactly this reason.
+#
+# Lint policy is "allow nothing": every lint clippy ships allow-by-default
+# (`clippy::cargo`, `clippy::nursery`, `clippy::pedantic`, plus rustc's own
+# allow-by-default lints) is promoted to at least `warn` via explicit `-W`,
+# so the probe's diagnostic surface isn't silently narrowed by defaults.
+# `clippy::restriction` is excluded: it contains mutually contradictory
+# lint pairs (`clippy::pub_with_shorthand` / `clippy::pub_without_shorthand`
+# both live in that group), so enabling it wholesale is unsatisfiable
+# under `-D warnings`, not just noisy.
+#
+# No custom parser script: bucket A is a step's exit code, bucket B is
+# `git diff` after `--fix`, bucket C is a second clippy pass's exit code.
+#
+# `os` per target is just whichever GitHub-hosted runner is closest to
+# native for that target family (ubuntu for linux, macos for darwin,
+# windows for windows) -- not a claim that the target is "supported" on
+# that runner, only where `rustup target add` and a plain `cargo check`
+# get attempted.
+#
+# Manual trigger only (`workflow_dispatch`): this is a proof of concept,
+# not a required gate.
+
+name: target-matrix-decidability
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: sparcv9-sun-solaris
+            os: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust (stable + target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: ${{ matrix.target }}
+
+      - name: A. cargo check
+        id: check
+        continue-on-error: true
+        run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features 2>&1 | tee check.log
+
+      - name: B. clippy --fix (allow nothing)
+        if: steps.check.outcome == 'success'
+        id: fix
+        continue-on-error: true
+        run: >
+          cargo clippy --fix -p larql-cli --bins --tests --target ${{ matrix.target }}
+          --all-features --no-deps
+          -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+
+      - name: B. record whether anything was auto-fixed
+        if: steps.fix.outcome == 'success'
+        id: fixdiff
+        continue-on-error: true
+        run: git diff --stat --exit-code
+
+      - name: C. residual clippy (allow nothing, deny warnings)
+        if: steps.check.outcome == 'success'
+        id: residual
+        continue-on-error: true
+        run: >
+          cargo clippy -p larql-cli --bins --tests --target ${{ matrix.target }}
+          --all-features --no-deps
+          -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo -D warnings
+          2>&1 | tee residual.log
+
+      - name: Record result
+        run: |
+          mkdir -p results
+          FIXED="no"
+          if [ "${{ steps.fixdiff.outcome }}" = "failure" ]; then FIXED="yes"; fi
+          if [ "${{ steps.check.outcome }}" = "success" ]; then
+            COMPILES_CELL="compiles"
+          else
+            COMPILES_CELL="does not compile (see uploaded check.log)"
+          fi
+          if [ "${{ steps.check.outcome }}" != "success" ]; then
+            RESIDUAL_CELL="n/a (bucket A already failed)"
+          elif [ "${{ steps.residual.outcome }}" = "success" ]; then
+            RESIDUAL_CELL="clean (nothing left after fix)"
+          else
+            RESIDUAL_CELL="lints remain (see uploaded residual.log)"
+          fi
+          echo "| \`${{ matrix.target }}\` | $COMPILES_CELL | $FIXED | $RESIDUAL_CELL |" > "results/${{ matrix.target }}.md"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: result-${{ matrix.target }}
+          path: |
+            results/${{ matrix.target }}.md
+            check.log
+            residual.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  summarize:
+    name: summarize
+    needs: probe
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+
+      - name: Build summary table
+        run: |
+          {
+            echo "# Target matrix decidability (PoC)"
+            echo
+            echo "| target | A: compiles | B: auto-fixed | C: residual (unfixable) lints |"
+            echo "|---|---|---|---|"
+            cat results/*.md
+          } >> "$GITHUB_STEP_SUMMARY"
