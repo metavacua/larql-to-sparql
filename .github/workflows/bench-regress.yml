@@ -24,6 +24,13 @@ on:
   # perf changes without waiting for the next merge to main.
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   bench:
     # macos-14 = Apple Silicon (M1+). Required for the metal cells —

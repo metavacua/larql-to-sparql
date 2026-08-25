@@ -40,6 +40,13 @@ env:
   # See `extract::streaming::stages::tensor_audit`.
   LARQL_EXTRACT_STRICT: 1
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test - ${{ matrix.os }}

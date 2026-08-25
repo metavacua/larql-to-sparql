@@ -34,6 +34,13 @@ on:
       - '.github/workflows/larql-lql.yml'
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test - ${{ matrix.os }}
