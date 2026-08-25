@@ -64,13 +64,19 @@
 # that runner, only where `rustup target add` and a plain `cargo check`
 # get attempted.
 #
-# Manual trigger only (`workflow_dispatch`): this is a proof of concept,
-# not a required gate.
+# Triggered on `pull_request`, path-scoped to this file, not
+# `workflow_dispatch`: a newly-added workflow can't be dispatched via
+# the API/UI until it exists on the repo's default branch, and this
+# branch is never getting merged there. Path-scoping to the file
+# itself means pushing a change to this workflow is what re-runs it --
+# not every unrelated commit on the branch. Not a required gate.
 
 name: target-matrix-decidability
 
 on:
-  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - '.github/workflows/target-matrix-decidability.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
