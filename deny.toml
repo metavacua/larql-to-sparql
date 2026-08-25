@@ -11,12 +11,18 @@
 [graph]
 # Evaluate every target the workspace actually supports, so a Windows-only or
 # Linux-only dependency cannot smuggle in an unreviewed licence or advisory.
+#
+# `sparcv9-sun-solaris` added alongside the other four for
+# target-matrix-decidability.yml's probe matrix (see that workflow) -- it
+# was the one probed target this list didn't already cover, so a
+# Solaris-only dependency edge could otherwise slip past this scan.
 targets = [
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
     "x86_64-pc-windows-msvc",
+    "sparcv9-sun-solaris",
 ]
 all-features = true
 
