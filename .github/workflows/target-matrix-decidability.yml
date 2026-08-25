@@ -72,6 +72,10 @@ name: target-matrix-decidability
 on:
   workflow_dispatch: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -82,6 +86,13 @@ jobs:
     timeout-minutes: 30
     env:
       RUST_BACKTRACE: full
+    defaults:
+      run:
+        # windows-latest's default `run:` shell is pwsh, not bash -- the
+        # `2>&1 | tee ...` steps below are bash syntax (no `tee` on pwsh
+        # by default, different redirection semantics). Forcing bash
+        # here keeps every step identical across all three runner OSes.
+        shell: bash
 
     strategy:
       fail-fast: false
