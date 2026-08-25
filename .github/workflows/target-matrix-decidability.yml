@@ -1,0 +1,146 @@
+# Per-target automated fix pipeline for larql-cli (proof of concept).
+#
+# Deliverable is the raw data itself, per target: what compiles, what
+# `cargo clippy --fix` changes on its own (no human judgment), and what's
+# still flagged after that (the residual -- exactly the set of concerns
+# that needs a real decision, which is where splitting target-specific
+# code into cleanly separated modules actually starts). This workflow
+# does not classify, summarize, or render any of that -- it runs the
+# standard toolchain commands and uploads whatever they produce
+# (check.log, fix.log, fix.patch, residual.log, tree.log) as artifacts.
+# Reading and acting on that data happens outside the workflow.
+#
+# No hand-edited `#[cfg(...)]` blocks anywhere in this pipeline, and the
+# workflow never writes to a source file itself -- every change to the
+# tree comes from `cargo clippy --fix`, captured as `fix.patch`, not
+# applied or committed here.
+#
+# Deliberately not answered here: whether cfg-selected code is *correct*
+# on a given target (endianness, BLAS numerics, GPU hardware presence).
+# That needs real tests, not this pipeline.
+#
+# No cross-toolchain installation of any kind (no apt cross-gcc, no
+# cross-rs/Docker, no linker env vars). `rustup target add` gets a
+# target's prebuilt std; nothing else is provided. `cargo check`/`clippy`
+# don't link, but a dependency's build script (this workspace pulls in
+# `ring` via rustls) can still shell out to a C compiler during `cargo
+# check` itself -- confirmed locally: `aarch64-unknown-linux-gnu` and
+# `sparcv9-sun-solaris` both fail identically with
+# `error occurred in cc-rs: failed to find tool "<target>-gcc"`. That
+# failure IS bucket A ("does not compile", with the exact reason in the
+# log) -- not a problem to engineer around by installing a cross-gcc to
+# force a green result. Manufacturing success would hide the finding,
+# not report it.
+#
+# `--all-features` is used on purpose, unlike the per-crate CI workflows
+# (which pin `--no-default-features` on non-macOS to keep their gate
+# green). Here, a target where `gpu` fails to compile IS real data. No
+# job in this workflow is a required check; every probe step uses
+# `continue-on-error: true` so a failure on one step (or one target)
+# never prevents the remaining steps/targets from still running and
+# still producing their own raw data.
+#
+# Lint policy is "allow nothing": every lint clippy ships allow-by-default
+# (`clippy::cargo`, `clippy::nursery`, `clippy::pedantic`, plus rustc's own
+# allow-by-default lints) is promoted to at least `warn` via explicit `-W`,
+# so the probe's diagnostic surface isn't silently narrowed by defaults.
+# `clippy::restriction` is excluded: it contains mutually contradictory
+# lint pairs (`clippy::pub_with_shorthand` / `clippy::pub_without_shorthand`
+# both live in that group), so enabling it wholesale is unsatisfiable
+# under `-D warnings`, not just noisy.
+#
+# `-vv` and `RUST_BACKTRACE=full` are set throughout: a compile failure
+# here is often a dependency's build script (e.g. `ring`, via rustls)
+# unable to find a C compiler for the target, not a code-level error, and
+# the difference is only visible with build-script output unabbreviated.
+# `cargo tree --target <T>` is captured per target because the dependency
+# graph itself is target-conditioned (`[target.'cfg(...)'.dependencies]`)
+# -- the same crate can pull in a different, or no, C dependency
+# depending on the target, and that's part of the raw data too.
+#
+# `os` per target is just whichever GitHub-hosted runner is closest to
+# native for that target family (ubuntu for linux, macos for darwin,
+# windows for windows) -- not a claim that the target is "supported" on
+# that runner, only where `rustup target add` and a plain `cargo check`
+# get attempted.
+#
+# Manual trigger only (`workflow_dispatch`): this is a proof of concept,
+# not a required gate.
+
+name: target-matrix-decidability
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      RUST_BACKTRACE: full
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: sparcv9-sun-solaris
+            os: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust (stable + target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: ${{ matrix.target }}
+
+      - name: cargo tree (this target's actual dependency graph)
+        run: cargo tree --target ${{ matrix.target }} --all-features -e normal,build,dev -vv > tree.log
+
+      - name: A. cargo check
+        continue-on-error: true
+        run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features -vv 2>&1 | tee check.log
+
+      - name: B. clippy --fix (allow nothing, broken code included)
+        continue-on-error: true
+        run: >
+          cargo clippy --fix --broken-code -p larql-cli --bins --tests --target ${{ matrix.target }}
+          --all-features --no-deps -vv
+          -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+          2>&1 | tee fix.log
+
+      - name: B. capture the actual fix diff
+        run: git diff > fix.patch
+
+      - name: C. residual clippy (allow nothing, deny warnings)
+        continue-on-error: true
+        run: >
+          cargo clippy -p larql-cli --bins --tests --target ${{ matrix.target }}
+          --all-features --no-deps -vv
+          -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo -D warnings
+          2>&1 | tee residual.log
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: raw-${{ matrix.target }}
+          path: |
+            tree.log
+            check.log
+            fix.log
+            fix.patch
+            residual.log
+          retention-days: 14
+          if-no-files-found: warn
