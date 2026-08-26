@@ -225,7 +225,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libssl-dev:arm64 pkg-config
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
+          # Real evidence, not a guess: an unscoped PKG_CONFIG_PATH also
+          # leaked into openblas-src's build script (which compiles for
+          # the HOST during cross-compilation, not the target), making
+          # it link the host binary against arm64 OpenSSL objects.
+          # pkg-config's own docs specify the fix: PKG_CONFIG_PATH (and
+          # _LIBDIR/_SYSROOT_DIR) can be scoped to one target triple via
+          # a `_<target-with-underscores>` suffix, so it's absent for
+          # the host-native build-script compilation. ALLOW_CROSS isn't
+          # scopeable this way, but that's fine -- it's only consulted
+          # when cargo's own TARGET differs from HOST for that specific
+          # compilation unit, which is never true for a build script.
+          echo "PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
 
       # Fixed for real, once, at the source (root Cargo.toml), not here:
       # cargo resolves features for a shared dependency as the union of
