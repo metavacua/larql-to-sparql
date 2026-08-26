@@ -165,66 +165,43 @@ jobs:
       # `-p larql-cli`'s own -- so larql-server's HTTP stack,
       # larql-python's pyo3 bindings, larql-router, and model-compute
       # (none of which larql-cli depends on) can still influence what
-      # larql-cli actually builds against. This computes larql-cli's
-      # real workspace-internal dependency closure from `cargo metadata`
-      # itself (not a hardcoded crate list, which could silently drift
-      # from the real graph the same way the toolchain-slot mismatch
-      # did) and trims `members`/`default-members` down to exactly that
-      # closure -- ephemeral to this checkout only, never committed.
+      # larql-cli actually builds against.
+      #
+      # The closure is `cargo tree -p larql-cli`'s own traversal, piped
+      # through plain text filtering (grep/awk/sort) -- not a hand-
+      # written graph walk over `cargo metadata` JSON, which would be
+      # reimplementing exactly what `cargo tree` already computes.
+      # `members`/`default-members` are trimmed to that closure with
+      # `awk`, ephemeral to this checkout only, never committed to the
+      # real workspace. No separate validation step either: the very
+      # next `cargo tree`/`cargo check` invocation is what actually
+      # proves the rewritten Cargo.toml is well-formed -- if it isn't,
+      # cargo fails loudly right there, which is the real check, not a
+      # second, unauthoritative one written here.
       - name: Isolate larql-cli from unrelated workspace members
         run: |
-          python3 - <<'PYEOF'
-          import json, re, subprocess, tomllib
+          KEEP=$(cargo tree -p larql-cli --all-features -e normal,build,dev --prefix none 2>/dev/null \
+            | grep -oE '^(larql-[a-z-]+|model-compute) v' \
+            | awk '{print $1}' \
+            | sort -u)
+          echo "larql-cli's real workspace closure:"
+          echo "$KEEP"
 
-          meta = json.loads(subprocess.check_output(
-              ["cargo", "metadata", "--format-version=1", "--all-features"]
-          ))
-          ws_ids = set(meta["workspace_members"])
-          pkgs = {p["id"]: p for p in meta["packages"]}
-          resolve = {n["id"]: n for n in meta["resolve"]["nodes"]}
-          cli_id = next(i for i in ws_ids if pkgs[i]["name"] == "larql-cli")
-
-          closure = set()
-          stack = [cli_id]
-          while stack:
-              cur = stack.pop()
-              if cur in closure:
-                  continue
-              closure.add(cur)
-              for dep in resolve[cur]["deps"]:
-                  if dep["pkg"] in ws_ids:
-                      stack.append(dep["pkg"])
-
-          keep = sorted(pkgs[i]["name"] for i in closure)
-          dropped = sorted(pkgs[i]["name"] for i in ws_ids - closure)
-          print("larql-cli's real workspace closure:", keep)
-          print("Dropping from members/default-members (this checkout only):", dropped)
-
-          text = open("Cargo.toml").read()
-
-          def trim_array(text, key):
-              pattern = re.compile(rf'^{key}\s*=\s*\[.*?\]', re.DOTALL | re.MULTILINE)
-              m = pattern.search(text)
-              if not m:
-                  return text
-              lines = [f'{key} = [']
-              for name in keep:
-                  lines.append(f'    "crates/{name}",')
-              lines.append(']')
-              return text[:m.start()] + "\n".join(lines) + text[m.end():]
-
-          text = trim_array(text, "members")
-          text = trim_array(text, "default-members")
-
-          with open("Cargo.toml", "w") as f:
-              f.write(text)
-
-          # Verified with a real TOML parser, not eyeballed.
-          with open("Cargo.toml", "rb") as f:
-              parsed = tomllib.load(f)
-          assert sorted(parsed["workspace"]["members"]) == sorted(f"crates/{n}" for n in keep)
-          print("Cargo.toml re-parsed successfully; members trimmed as expected.")
-          PYEOF
+          for key in members default-members; do
+            awk -v key="$key" -v keep="$KEEP" '
+              BEGIN { n = split(keep, arr, "\n") }
+              $0 ~ "^" key " = \\[" {
+                print key " = ["
+                for (i = 1; i <= n; i++) print "    \"crates/" arr[i] "\","
+                print "]"
+                skip = 1
+                next
+              }
+              skip && /^\]/ { skip = 0; next }
+              skip { next }
+              { print }
+            ' Cargo.toml > Cargo.toml.new && mv Cargo.toml.new Cargo.toml
+          done
 
       - name: cargo tree (this target's actual dependency graph)
         # No tee to a file: GitHub Actions already captures every step's
