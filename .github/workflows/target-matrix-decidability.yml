@@ -190,8 +190,22 @@ jobs:
       # apt-get-based approach as the gcc package above, just one more
       # architecture added to dpkg first.
       - name: Install libssl-dev for arm64 (real, standard, multiarch)
+        # First attempt failed with real evidence, not a guess:
+        # `dpkg --add-architecture arm64` alone isn't enough on
+        # ubuntu-latest -- its default sources.list only has
+        # archive.ubuntu.com/security.ubuntu.com, which are amd64-only.
+        # arm64 packages live on the separate ports.ubuntu.com mirror
+        # (standard, well-documented Ubuntu infrastructure, not
+        # anything specific to this workflow). Existing entries are
+        # restricted to [arch=amd64] so apt stops also trying (and
+        # failing) to fetch arm64 from the amd64-only mirror.
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
+          sudo sed -i -E 's/^deb(-src)? http/deb\1 [arch=amd64] http/' /etc/apt/sources.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe restricted multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-updates main universe restricted multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-security main universe restricted multiverse" \
+            | sudo tee /etc/apt/sources.list.d/arm64-ports.list
           sudo dpkg --add-architecture arm64
           sudo apt-get update
           sudo apt-get install -y libssl-dev:arm64 pkg-config
