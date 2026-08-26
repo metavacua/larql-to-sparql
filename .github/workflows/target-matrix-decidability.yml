@@ -156,42 +156,32 @@ jobs:
       - name: Add target to the ACTUALLY active toolchain
         run: rustup target add ${{ matrix.target }}
 
-      # Not fixed here, deliberately: cargo resolves features for a
-      # shared dependency as the union of every `[workspace].members`
-      # crate's request for it, not just `-p larql-cli`'s own -- so
-      # larql-server's HTTP stack, larql-python's pyo3 bindings,
-      # larql-router, and model-compute (none of which larql-cli
-      # depends on) can still influence what larql-cli actually builds
-      # against. Filed upstream as chrishayuk/larql#314; independently
-      # documented on this fork's experiment/cuda-nvptx-lint-build
-      # branch, commit 7c00c1df.
+      # Fixed for real, once, at the source (root Cargo.toml), not here:
+      # cargo resolves features for a shared dependency as the union of
+      # every `[workspace].members` crate's request for it, not just
+      # `-p larql-cli`'s own, so larql-server/larql-python/larql-router/
+      # larql-demos/model-compute -- none of which larql-cli depends on
+      # -- used to influence every larql-cli build regardless of what
+      # larql-cli's own Cargo.toml asked for. Filed upstream as
+      # chrishayuk/larql#314 (this branch cares about one binary,
+      # larql-cli, so it made the permanent workspace-membership change
+      # locally rather than wait); independently documented on this
+      # fork's experiment/cuda-nvptx-lint-build branch, commit 7c00c1df.
       #
-      # An earlier version of this workflow tried to work around it by
-      # rewriting `members`/`default-members` down to larql-cli's real
-      # closure, ephemeral to the checkout. Reverted: doing that
-      # correctly requires deciding which crates belong in the trimmed
-      # workspace, and every way to compute that decision was either a
-      # hand-written script (a graph walk over `cargo metadata` JSON,
-      # or an awk rewrite of the TOML array) or, per actual research,
-      # nonexistent as a real tool -- confirmed against the Cargo
-      # book's own guidance ("-p" does not isolate you; the documented
-      # fix is "build them via separate cargo invocations", i.e. a
-      # genuinely different workspace boundary) and against cargo-hack/
-      # cargo-hackerman, neither of which does this (cargo-hack tests
-      # feature powersets to detect leakage, it doesn't avoid it;
-      # cargo-hackerman forces unification consistency, the opposite
-      # goal). There is no clippy-equivalent for workspace-manifest
-      # configuration -- no tool with `--fix`'s actual guarantee
-      # (rustc's own MachineApplicable classification, not a script
-      # that merely looks correct on the cases already tested) exists
-      # for this problem. That absence is itself the honest finding;
-      # a hand-rolled substitute doesn't count as mechanically
-      # deciding anything, and claiming otherwise would misrepresent
-      # what this workflow is for.
-      #
-      # So this probe's `-p larql-cli` results are genuinely subject to
-      # workspace-wide feature unification from crates it doesn't
-      # depend on. That's real, disclosed data, not silently absorbed.
+      # This is deliberately a real, reviewed commit to the workspace
+      # manifest, not something this workflow computes or rewrites at
+      # runtime. An earlier version tried the runtime-rewrite approach
+      # and was reverted: deciding which crates belong in a trimmed
+      # workspace has no tool with `--fix`'s actual guarantee (rustc's
+      # own MachineApplicable classification) behind it -- confirmed by
+      # research, not assumed (the Cargo book's own guidance is that
+      # `-p` doesn't isolate you and the fix is a genuinely different
+      # workspace boundary; cargo-hack tests feature powersets to
+      # detect leakage, it doesn't avoid it; cargo-hackerman forces
+      # unification consistency, the opposite goal). A hand-rolled
+      # script making that decision unattended on every run doesn't
+      # meet that bar; a human, informed by `cargo tree`'s real output,
+      # deciding it once and committing the result does.
 
       - name: cargo tree (this target's actual dependency graph)
         # No tee to a file: GitHub Actions already captures every step's
