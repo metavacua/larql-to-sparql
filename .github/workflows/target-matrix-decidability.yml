@@ -254,7 +254,17 @@ jobs:
         # shows THAT files changed, not a clean, directly `git apply`-able
         # diff). Written after the fix step, so it can't affect that
         # step's own dirty-tree precondition.
-        run: git diff > fix.patch
+        #
+        # Scoped to crates/ only, not a bare `git diff`: the workspace-
+        # isolation step above rewrites the root Cargo.toml (and cargo
+        # then prunes Cargo.lock to match on its next invocation) --
+        # confirmed directly, an unscoped `git diff` produced the exact
+        # same ~23KB Cargo.toml/Cargo.lock patch for every target
+        # regardless of what --fix actually did to the source, making
+        # fix.patch worthless as a per-target signal. Only crates/ is
+        # ever a `--fix` output; the workspace files are this workflow's
+        # own ephemeral setup, not part of what's being probed.
+        run: git diff -- crates/ > fix.patch
 
       - name: C. residual clippy (allow nothing, deny warnings)
         continue-on-error: true
