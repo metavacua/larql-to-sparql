@@ -193,8 +193,15 @@
 #     build-script's C compilation doesn't need rustc's own
 #     target-feature distinction between the two.
 #   - x86_64-unknown-linux-musl: `musl-tools` provides a *native*
-#     musl-gcc (the runner itself is x86_64) -- no cross toolchain at
-#     all, unlike every other target here.
+#     musl-gcc (the runner itself is x86_64) -- no cross *C compiler*
+#     at all, unlike every other target here. A real first run (job
+#     98074714304) found a second, separate requirement missed in this
+#     paragraph originally: openssl-sys needs libssl-dev/pkg-config,
+#     which ubuntu-latest doesn't ship by default, plus
+#     PKG_CONFIG_ALLOW_CROSS for the target-triple probe (pkg-config-rs
+#     treats musl vs. gnu as cross-compilation by triple string alone,
+#     same guard the arm64 step below already clears) -- see that
+#     step's own comment.
 #   - i686-pc-windows-gnu: cross-compiled on ubuntu-latest via
 #     `gcc-mingw-w64-i686`/`g++-mingw-w64-i686`, the same "closest real
 #     toolchain available, not a native runner" pattern already used for
@@ -420,10 +427,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.gcc_pkg }}
 
-      # x86_64-unknown-linux-musl needs no cross toolchain at all -- the
-      # runner itself is x86_64, so `musl-tools`' *native* musl-gcc is
-      # the whole requirement. This is the one Linux libc variant here
-      # with no ports.ubuntu.com step below: Ubuntu ships no cross-musl-
+      # x86_64-unknown-linux-musl needs no cross *C compiler* at all --
+      # the runner itself is x86_64, so `musl-tools`' *native* musl-gcc
+      # is the whole gcc-side requirement. Ubuntu ships no cross-musl-
       # gcc for any other architecture, which is exactly why every other
       # Tier 2 musl target (aarch64/loongarch64/powerpc64/powerpc64le/
       # riscv64gc-unknown-linux-musl) has no matrix row.
@@ -432,6 +438,38 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
+
+      # A second, genuinely separate requirement, found from a real run's
+      # own log (job 98074714304, x86_64-unknown-linux-musl): openssl-sys
+      # failed with "Could not find directory of OpenSSL installation" on
+      # BOTH the host triple and the musl target triple in the same job
+      # -- ubuntu-latest doesn't ship libssl-dev/pkg-config by default at
+      # all (the x86_64-unknown-linux-gnu row never hits this because
+      # larql-cli's own dependency tree only pulls openssl-sys in on
+      # `cfg(target_env = "musl")`, not on gnu, where rustls-tls is used
+      # instead -- confirmed by this being the only target where the
+      # failure appears). Installing libssl-dev/pkg-config alone isn't
+      # enough for the second (target-triple) failure, though: the
+      # `pkg-config` crate refuses a cross probe -- and treats
+      # HOST=x86_64-unknown-linux-gnu vs. TARGET=x86_64-unknown-linux-musl
+      # as cross-compilation purely by triple-string mismatch, regardless
+      # of the identical CPU architecture -- unless PKG_CONFIG_ALLOW_CROSS
+      # is set, the same guard the arm64 step below already has to clear.
+      # Pointed at the native /usr/lib/x86_64-linux-gnu/pkgconfig, not a
+      # musl-built one: there is no musl-built libssl.pc anywhere on this
+      # runner (see the musl-gcc note above -- Ubuntu ships no musl cross
+      # toolchain for anything, including its own host arch's libssl),
+      # and `cargo check`/`clippy` never reach the link stage, so the
+      # glibc build's headers/version metadata are sufficient for what
+      # this probe actually exercises, same reasoning as the "no
+      # CARGO_TARGET_*_LINKER needed" note above.
+      - name: Install libssl-dev + pkg-config for musl (native x86_64, cross pkg-config probe)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH_x86_64_unknown_linux_musl=/usr/lib/x86_64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
 
       # A deeper, genuinely different layer of the same category,
       # confirmed via a real run once ring's blocker was cleared:
