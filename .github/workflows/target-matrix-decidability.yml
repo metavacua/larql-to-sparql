@@ -156,52 +156,42 @@ jobs:
       - name: Add target to the ACTUALLY active toolchain
         run: rustup target add ${{ matrix.target }}
 
-      # Isolate larql-cli from the rest of the workspace's feature
-      # unification (filed upstream as chrishayuk/larql#314, with the
-      # same finding independently documented on this fork's
-      # experiment/cuda-nvptx-lint-build branch, commit 7c00c1df):
-      # Cargo resolves features for a shared dependency as the union of
-      # every `[workspace].members` crate's request for it, not just
-      # `-p larql-cli`'s own -- so larql-server's HTTP stack,
-      # larql-python's pyo3 bindings, larql-router, and model-compute
-      # (none of which larql-cli depends on) can still influence what
-      # larql-cli actually builds against.
+      # Not fixed here, deliberately: cargo resolves features for a
+      # shared dependency as the union of every `[workspace].members`
+      # crate's request for it, not just `-p larql-cli`'s own -- so
+      # larql-server's HTTP stack, larql-python's pyo3 bindings,
+      # larql-router, and model-compute (none of which larql-cli
+      # depends on) can still influence what larql-cli actually builds
+      # against. Filed upstream as chrishayuk/larql#314; independently
+      # documented on this fork's experiment/cuda-nvptx-lint-build
+      # branch, commit 7c00c1df.
       #
-      # The closure is `cargo tree -p larql-cli`'s own traversal, piped
-      # through plain text filtering (grep/awk/sort) -- not a hand-
-      # written graph walk over `cargo metadata` JSON, which would be
-      # reimplementing exactly what `cargo tree` already computes.
-      # `members`/`default-members` are trimmed to that closure with
-      # `awk`, ephemeral to this checkout only, never committed to the
-      # real workspace. No separate validation step either: the very
-      # next `cargo tree`/`cargo check` invocation is what actually
-      # proves the rewritten Cargo.toml is well-formed -- if it isn't,
-      # cargo fails loudly right there, which is the real check, not a
-      # second, unauthoritative one written here.
-      - name: Isolate larql-cli from unrelated workspace members
-        run: |
-          KEEP=$(cargo tree -p larql-cli --all-features -e normal,build,dev --prefix none 2>/dev/null \
-            | grep -oE '^(larql-[a-z-]+|model-compute) v' \
-            | awk '{print $1}' \
-            | sort -u)
-          echo "larql-cli's real workspace closure:"
-          echo "$KEEP"
-
-          for key in members default-members; do
-            awk -v key="$key" -v keep="$KEEP" '
-              BEGIN { n = split(keep, arr, "\n") }
-              $0 ~ "^" key " = \\[" {
-                print key " = ["
-                for (i = 1; i <= n; i++) print "    \"crates/" arr[i] "\","
-                print "]"
-                skip = 1
-                next
-              }
-              skip && /^\]/ { skip = 0; next }
-              skip { next }
-              { print }
-            ' Cargo.toml > Cargo.toml.new && mv Cargo.toml.new Cargo.toml
-          done
+      # An earlier version of this workflow tried to work around it by
+      # rewriting `members`/`default-members` down to larql-cli's real
+      # closure, ephemeral to the checkout. Reverted: doing that
+      # correctly requires deciding which crates belong in the trimmed
+      # workspace, and every way to compute that decision was either a
+      # hand-written script (a graph walk over `cargo metadata` JSON,
+      # or an awk rewrite of the TOML array) or, per actual research,
+      # nonexistent as a real tool -- confirmed against the Cargo
+      # book's own guidance ("-p" does not isolate you; the documented
+      # fix is "build them via separate cargo invocations", i.e. a
+      # genuinely different workspace boundary) and against cargo-hack/
+      # cargo-hackerman, neither of which does this (cargo-hack tests
+      # feature powersets to detect leakage, it doesn't avoid it;
+      # cargo-hackerman forces unification consistency, the opposite
+      # goal). There is no clippy-equivalent for workspace-manifest
+      # configuration -- no tool with `--fix`'s actual guarantee
+      # (rustc's own MachineApplicable classification, not a script
+      # that merely looks correct on the cases already tested) exists
+      # for this problem. That absence is itself the honest finding;
+      # a hand-rolled substitute doesn't count as mechanically
+      # deciding anything, and claiming otherwise would misrepresent
+      # what this workflow is for.
+      #
+      # So this probe's `-p larql-cli` results are genuinely subject to
+      # workspace-wide feature unification from crates it doesn't
+      # depend on. That's real, disclosed data, not silently absorbed.
 
       - name: cargo tree (this target's actual dependency graph)
         # No tee to a file: GitHub Actions already captures every step's
@@ -218,28 +208,6 @@ jobs:
         continue-on-error: true
         run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features -vv
 
-      # Same bug class as finding 1, confirmed via a real run's raw job
-      # log (`* Cargo.toml (dirty)`, `* Cargo.lock (dirty)`), same root
-      # cause (a workflow step's own write sits uncommitted in the tree
-      # when --fix runs next), different fix shape: the isolation step's
-      # edit can't be relocated outside the tree the way tee'd logs were
-      # -- cargo needs Cargo.toml/Cargo.lock at their real paths -- so
-      # the fix here is to commit it instead. Placed after `cargo tree`
-      # and `cargo check`, not right after the trim itself: cargo only
-      # prunes Cargo.lock to match the trimmed members on its next
-      # invocation, so committing any earlier would miss that later
-      # change and still leave Cargo.lock dirty when --fix runs.
-      # Local-only commit, on an ephemeral checkout that's discarded
-      # when the job ends -- never pushed anywhere.
-      - name: Commit the ephemeral workspace trim (local only, never pushed)
-        run: |
-          git config user.email "target-matrix-decidability@localhost"
-          git config user.name "target-matrix-decidability"
-          if [ -n "$(git status --porcelain)" ]; then
-            git add Cargo.toml Cargo.lock
-            git commit -q -m "ephemeral: isolate larql-cli from unrelated workspace members"
-          fi
-
       - name: B. clippy --fix (allow nothing, broken code included)
         continue-on-error: true
         run: >
@@ -254,15 +222,11 @@ jobs:
         # diff). Written after the fix step, so it can't affect that
         # step's own dirty-tree precondition.
         #
-        # Scoped to crates/ only, not a bare `git diff`: the workspace-
-        # isolation step above rewrites the root Cargo.toml (and cargo
-        # then prunes Cargo.lock to match on its next invocation) --
-        # confirmed directly, an unscoped `git diff` produced the exact
-        # same ~23KB Cargo.toml/Cargo.lock patch for every target
-        # regardless of what --fix actually did to the source, making
-        # fix.patch worthless as a per-target signal. Only crates/ is
-        # ever a `--fix` output; the workspace files are this workflow's
-        # own ephemeral setup, not part of what's being probed.
+        # Scoped to crates/ only, not a bare `git diff`: --fix never
+        # touches anything outside the source tree, but Cargo.lock can
+        # legitimately drift on its own (e.g. a routine resolver update)
+        # for reasons unrelated to what --fix did -- scoping keeps
+        # fix.patch a clean per-target signal regardless.
         run: git diff -- crates/ > fix.patch
 
       - name: C. residual clippy (allow nothing, deny warnings)
