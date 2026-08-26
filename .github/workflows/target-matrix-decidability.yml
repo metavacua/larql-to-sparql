@@ -169,17 +169,21 @@ jobs:
       # exists anywhere for sparcv9-sun-solaris -- that target's
       # compile failure stays real, unfixable information, not
       # something to route around.
-      - name: Install gcc-aarch64-linux-gnu (real, standard, confirmed-available)
+      - name: Install gcc/g++-aarch64-linux-gnu (real, standard, confirmed-available)
         # No CARGO_TARGET_*_LINKER needed: `cargo check`/`clippy` never
-        # reach the linking stage. Only `ring`'s build script (via
+        # reach the linking stage. Only a dependency's build script (via
         # cc-rs, at build-script-execution time, which runs regardless
         # of check vs. build) needs the compiler binary on PATH -- and
-        # its own error message already named the exact binary this
-        # package provides: "failed to find tool aarch64-linux-gnu-gcc".
+        # the error messages already named the exact binaries these
+        # packages provide: `ring` needed "aarch64-linux-gnu-gcc"
+        # (this step's original scope); confirmed via a real run,
+        # `esaxx-rs`'s C++ build needs "aarch64-linux-gnu-g++" too --
+        # a distinct package (g++-aarch64-linux-gnu), not covered by
+        # the C one.
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       # A deeper, genuinely different layer of the same category,
       # confirmed via a real run once ring's blocker was cleared:
