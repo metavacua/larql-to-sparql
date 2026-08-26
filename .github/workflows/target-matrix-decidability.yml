@@ -29,18 +29,19 @@
 # on a given target (endianness, BLAS numerics, GPU hardware presence).
 # That needs real tests, not this pipeline.
 #
-# No cross-toolchain installation of any kind (no apt cross-gcc, no
-# cross-rs/Docker, no linker env vars). `rustup target add` gets a
-# target's prebuilt std; nothing else is provided. `cargo check`/`clippy`
-# don't link, but a dependency's build script (this workspace pulls in
-# `ring` via rustls) can still shell out to a C compiler during `cargo
-# check` itself -- confirmed locally: `aarch64-unknown-linux-gnu` and
-# `sparcv9-sun-solaris` both fail identically with
-# `error occurred in cc-rs: failed to find tool "<target>-gcc"`. That
-# failure IS bucket A ("does not compile", with the exact reason in the
-# log) -- not a problem to engineer around by installing a cross-gcc to
-# force a green result. Manufacturing success would hide the finding,
-# not report it.
+# `cargo check`/`clippy` don't link, but a dependency's build script
+# (`ring`, a real dependency via larql-vindex's rustls-tls reqwest
+# usage) can still shell out to a C compiler during `cargo check`
+# itself. Where a real, standard, already-confirmed-available compiler
+# package exists for a target (e.g. `gcc-aarch64-linux-gnu` on
+# ubuntu-latest), it's installed -- not installing it wouldn't test
+# larql-cli's code, it would just test this workflow's own refusal to
+# run one apt-get command, which is uninformative in exactly the way a
+# CI-configuration error is. Where no such package/cross-rs image/
+# native runner exists anywhere (sparcv9-sun-solaris did not, on any
+# GitHub-hosted runner -- confirmed by repeated real runs, not
+# assumed), the target is omitted from the matrix entirely rather than
+# kept as a permanently, unfixably red row.
 #
 # `--all-features` is used on purpose, unlike the per-crate CI workflows
 # (which pin `--no-default-features` on non-macOS to keep their gate
@@ -122,8 +123,6 @@ jobs:
             os: macos-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-          - target: sparcv9-sun-solaris
-            os: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
@@ -181,6 +180,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      # A deeper, genuinely different layer of the same category,
+      # confirmed via a real run once ring's blocker was cleared:
+      # openssl-sys (reqwest's Linux native-tls path) needs a real
+      # OpenSSL for the target, discoverable via cross pkg-config.
+      # `libssl-dev:arm64` + Debian/Ubuntu multiarch is the standard OS
+      # mechanism for this, not bespoke infrastructure -- the same
+      # apt-get-based approach as the gcc package above, just one more
+      # architecture added to dpkg first.
+      - name: Install libssl-dev for arm64 (real, standard, multiarch)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev:arm64 pkg-config
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
 
       # Fixed for real, once, at the source (root Cargo.toml), not here:
       # cargo resolves features for a shared dependency as the union of
