@@ -402,8 +402,62 @@ jobs:
         # needed for tree/check/fix/residual output.
         run: cargo tree --target ${{ matrix.target }} ${{ matrix.feature_flags }} -e normal,build,dev -vv
 
+      # "Allow nothing" applies here too, not just to the clippy-based
+      # steps below: `cargo check` never runs clippy-driver, so the
+      # `-W clippy::*` flags in `lint_flags` are meaningless to it --
+      # the equivalent for plain rustc is its own allow-by-default
+      # lints (`missing_docs`, `unsafe_code`, `unreachable_pub`, etc),
+      # which `cargo check` otherwise leaves silently narrowed by
+      # defaults exactly like clippy's would be. This list is the
+      # complete set of rustc's own allow-by-default lints, extracted
+      # directly from the actual installed rustc/clippy (1.98.0/0.1.98,
+      # matching this workflow's toolchain) via `-W help`, not
+      # hand-assembled from memory -- and re-verified against that same
+      # toolchain a second time: the first extraction included 8 names
+      # (`deprecated_llvm_intrinsic`, `implicit_provenance_casts`,
+      # `multiple_supertrait_upcastable`, `must_not_suspend`,
+      # `non_exhaustive_omitted_patterns`,
+      # `resolving_to_items_shadowing_supertrait_items`,
+      # `shadowing_supertrait_items`, `unqualified_local_imports`) that
+      # `-W help` lists but stable rustc doesn't actually recognize
+      # ("unknown lint" warnings, harmless but sloppy) -- removed,
+      # leaving only the 52 that a real `cargo check` accepts cleanly.
+      # `-D warnings` (verified empirically,
+      # not assumed: `RUSTFLAGS="-D warnings" cargo check`, both with a
+      # dependency crate's own pre-existing warning and with a
+      # workspace path-sibling's own violation) denies exactly the
+      # crate(s) actually being checked -- cargo's `--cap-lints warn`
+      # protects real external (crates.io) dependencies regardless, but
+      # does NOT shield workspace path-dependency siblings, which
+      # `--workspace` treats as primary targets, not dependencies.
+      # Scoped to this step's own `env:`, not the job's, so it doesn't
+      # also apply to steps B/C's `cargo clippy` invocations below,
+      # which already have their own, clippy-specific "allow nothing"
+      # policy via `lint_flags`.
       - name: A. cargo check
         continue-on-error: true
+        env:
+          RUSTFLAGS: >-
+            -W absolute-paths-not-starting-with-crate -W ambiguous-negative-literals
+            -W closure-returning-async-block -W dead-code-pub-in-binary -W deprecated-in-future
+            -W deprecated-safe-2024 -W deref-into-dyn-supertrait
+            -W edition-2024-expr-fragment-specifier -W elided-lifetimes-in-paths
+            -W explicit-outlives-requirements -W ffi-unwind-calls -W if-let-rescope
+            -W impl-trait-overcaptures -W impl-trait-redundant-captures
+            -W keyword-idents-2018 -W keyword-idents-2024 -W let-underscore-drop -W linker-info
+            -W macro-use-extern-crate -W meta-variable-misuse -W missing-copy-implementations
+            -W missing-debug-implementations -W missing-docs -W missing-unsafe-on-extern
+            -W non-ascii-idents -W redundant-imports -W redundant-lifetimes
+            -W rust-2021-incompatible-closure-captures
+            -W rust-2021-incompatible-or-patterns -W rust-2021-prefixes-incompatible-syntax
+            -W rust-2021-prelude-collisions -W rust-2024-guarded-string-incompatible-syntax
+            -W rust-2024-incompatible-pat -W rust-2024-prelude-collisions
+            -W single-use-lifetimes -W tail-expr-drop-order -W trivial-casts -W trivial-numeric-casts
+            -W unit-bindings -W unnameable-types -W unreachable-pub
+            -W unsafe-attr-outside-unsafe -W unsafe-code -W unstable-features
+            -W unused-crate-dependencies -W unused-extern-crates -W unused-import-braces
+            -W unused-lifetimes -W unused-macro-rules -W unused-qualifications -W unused-results
+            -W variant-size-differences -D warnings
         run: cargo check --workspace --bins --tests --examples --target ${{ matrix.target }} ${{ matrix.feature_flags }} -vv
 
       # Same bug class as finding 1, from a source that can't be
