@@ -179,7 +179,7 @@
 # ports.ubuntu.com's real per-architecture repo listings, not assumed --
 # before being added.
 #
-# Included (8), all via a real, standard, confirmed-available package:
+# Included (7), all via a real, standard, confirmed-available package:
 #   - arm-unknown-linux-gnueabihf, armv7-unknown-linux-gnueabihf,
 #     powerpc64le-unknown-linux-gnu, riscv64gc-unknown-linux-gnu,
 #     s390x-unknown-linux-gnu: same mechanism as the existing
@@ -192,16 +192,6 @@
 #     ship two separate ARM hard-float cross toolchains, and a
 #     build-script's C compilation doesn't need rustc's own
 #     target-feature distinction between the two.
-#   - x86_64-unknown-linux-musl: `musl-tools` provides a *native*
-#     musl-gcc (the runner itself is x86_64) -- no cross *C compiler*
-#     at all, unlike every other target here. A real first run (job
-#     98074714304) found a second, separate requirement missed in this
-#     paragraph originally: openssl-sys needs libssl-dev/pkg-config,
-#     which ubuntu-latest doesn't ship by default, plus
-#     PKG_CONFIG_ALLOW_CROSS for the target-triple probe (pkg-config-rs
-#     treats musl vs. gnu as cross-compilation by triple string alone,
-#     same guard the arm64 step below already clears) -- see that
-#     step's own comment.
 #   - i686-pc-windows-gnu: cross-compiled on ubuntu-latest via
 #     `gcc-mingw-w64-i686`/`g++-mingw-w64-i686`, the same "closest real
 #     toolchain available, not a native runner" pattern already used for
@@ -212,7 +202,7 @@
 #     -- identical to why aarch64-apple-darwin's own row installs
 #     nothing beyond the base image.
 #
-# Excluded (20), each for a real, checked reason, not "not implemented
+# Excluded (21), each for a real, checked reason, not "not implemented
 # yet":
 #   - arm-unknown-linux-gnueabi, powerpc-unknown-linux-gnu,
 #     powerpc64-unknown-linux-gnu (big-endian), loongarch64-unknown-
@@ -224,11 +214,26 @@
 #     by any standard mechanism, the same class of gap as the arm64 one
 #     the existing aarch64-unknown-linux-gnu row had to solve, just with
 #     no solution available.
-#   - aarch64-unknown-linux-musl, loongarch64-unknown-linux-musl,
-#     powerpc64-unknown-linux-musl, powerpc64le-unknown-linux-musl,
-#     riscv64gc-unknown-linux-musl: `musl-tools` ships only a native
-#     (x86_64) musl-gcc; Ubuntu carries no cross-musl-gcc package for
-#     any other architecture.
+#   - x86_64-unknown-linux-musl, aarch64-unknown-linux-musl,
+#     loongarch64-unknown-linux-musl, powerpc64-unknown-linux-musl,
+#     powerpc64le-unknown-linux-musl, riscv64gc-unknown-linux-musl:
+#     `musl-tools` ships only a native (x86_64) musl-gcc, so
+#     x86_64-unknown-linux-musl was tried first (real run, job
+#     98074714304) -- it got further than the other five (no cross
+#     toolchain needed at all), but openssl-sys still failed, on a
+#     *second* real run (job 98082401334, after installing
+#     libssl-dev/pkg-config and setting PKG_CONFIG_ALLOW_CROSS), with
+#     `/usr/include/openssl/macros.h:14:10: fatal error:
+#     openssl/opensslconf.h: No such file or directory`. Debian/Ubuntu's
+#     libssl-dev ships a glibc-multiarch header layout -- the real
+#     opensslconf.h lives under /usr/include/x86_64-linux-gnu/openssl/,
+#     found automatically by native gcc's default include search but
+#     not by musl-gcc's (different libc, different default search path,
+#     and that generated header is itself gated on glibc-specific
+#     macros, so pointing musl-gcc at it directly would be dubious even
+#     if it compiled). No musl-native OpenSSL package exists in
+#     Ubuntu's repos for any architecture, so all six musl targets are
+#     excluded for the same underlying gap the other five already were.
 #   - aarch64-unknown-linux-ohos, armv7-unknown-linux-ohos,
 #     x86_64-unknown-linux-ohos: OpenHarmony targets need the OHOS
 #     SDK/NDK, which isn't an apt or choco package.
@@ -285,7 +290,6 @@ jobs:
           - powerpc64le-unknown-linux-gnu
           - riscv64gc-unknown-linux-gnu
           - s390x-unknown-linux-gnu
-          - x86_64-unknown-linux-musl
           - i686-pc-windows-gnu
           - x86_64-apple-darwin
         lint_scope: [functional, perf, allow-nothing]
@@ -336,8 +340,6 @@ jobs:
             gcc_pkg: gcc-s390x-linux-gnu g++-s390x-linux-gnu
             deb_arch: s390x
             multiarch_triplet: s390x-linux-gnu
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
           - target: i686-pc-windows-gnu
             os: ubuntu-latest
             gcc_pkg: gcc-mingw-w64-i686 g++-mingw-w64-i686
@@ -426,50 +428,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.gcc_pkg }}
-
-      # x86_64-unknown-linux-musl needs no cross *C compiler* at all --
-      # the runner itself is x86_64, so `musl-tools`' *native* musl-gcc
-      # is the whole gcc-side requirement. Ubuntu ships no cross-musl-
-      # gcc for any other architecture, which is exactly why every other
-      # Tier 2 musl target (aarch64/loongarch64/powerpc64/powerpc64le/
-      # riscv64gc-unknown-linux-musl) has no matrix row.
-      - name: Install musl-tools (native musl-gcc, no cross toolchain needed)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-
-      # A second, genuinely separate requirement, found from a real run's
-      # own log (job 98074714304, x86_64-unknown-linux-musl): openssl-sys
-      # failed with "Could not find directory of OpenSSL installation" on
-      # BOTH the host triple and the musl target triple in the same job
-      # -- ubuntu-latest doesn't ship libssl-dev/pkg-config by default at
-      # all (the x86_64-unknown-linux-gnu row never hits this because
-      # larql-cli's own dependency tree only pulls openssl-sys in on
-      # `cfg(target_env = "musl")`, not on gnu, where rustls-tls is used
-      # instead -- confirmed by this being the only target where the
-      # failure appears). Installing libssl-dev/pkg-config alone isn't
-      # enough for the second (target-triple) failure, though: the
-      # `pkg-config` crate refuses a cross probe -- and treats
-      # HOST=x86_64-unknown-linux-gnu vs. TARGET=x86_64-unknown-linux-musl
-      # as cross-compilation purely by triple-string mismatch, regardless
-      # of the identical CPU architecture -- unless PKG_CONFIG_ALLOW_CROSS
-      # is set, the same guard the arm64 step below already has to clear.
-      # Pointed at the native /usr/lib/x86_64-linux-gnu/pkgconfig, not a
-      # musl-built one: there is no musl-built libssl.pc anywhere on this
-      # runner (see the musl-gcc note above -- Ubuntu ships no musl cross
-      # toolchain for anything, including its own host arch's libssl),
-      # and `cargo check`/`clippy` never reach the link stage, so the
-      # glibc build's headers/version metadata are sufficient for what
-      # this probe actually exercises, same reasoning as the "no
-      # CARGO_TARGET_*_LINKER needed" note above.
-      - name: Install libssl-dev + pkg-config for musl (native x86_64, cross pkg-config probe)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
-          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH_x86_64_unknown_linux_musl=/usr/lib/x86_64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
 
       # A deeper, genuinely different layer of the same category,
       # confirmed via a real run once ring's blocker was cleared:
