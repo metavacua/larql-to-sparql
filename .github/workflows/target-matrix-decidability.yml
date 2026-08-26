@@ -192,16 +192,31 @@ jobs:
       - name: Install libssl-dev for arm64 (real, standard, multiarch)
         # First attempt failed with real evidence, not a guess:
         # `dpkg --add-architecture arm64` alone isn't enough on
-        # ubuntu-latest -- its default sources.list only has
+        # ubuntu-latest -- its default sources only have
         # archive.ubuntu.com/security.ubuntu.com, which are amd64-only.
         # arm64 packages live on the separate ports.ubuntu.com mirror
         # (standard, well-documented Ubuntu infrastructure, not
-        # anything specific to this workflow). Existing entries are
-        # restricted to [arch=amd64] so apt stops also trying (and
-        # failing) to fetch arm64 from the amd64-only mirror.
+        # anything specific to this workflow).
+        #
+        # Second attempt also failed with real evidence: restricting
+        # the legacy /etc/apt/sources.list to [arch=amd64] didn't stop
+        # apt querying security.ubuntu.com for arm64. ubuntu-latest is
+        # 24.04 ("noble"), which ships its default sources in the
+        # newer DEB822 format at /etc/apt/sources.list.d/ubuntu.sources
+        # instead -- the legacy file is unused there. ubuntu.sources
+        # has separate stanzas (archive mirror for main/updates/
+        # backports, a distinct one for security.ubuntu.com); each
+        # needs its own `Architectures: amd64` field, the standard
+        # DEB822 way to scope a source, added after every `Types: deb`
+        # line.
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo sed -i -E 's/^deb(-src)? http/deb\1 [arch=amd64] http/' /etc/apt/sources.list
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          echo "=== sources.list ==="; cat /etc/apt/sources.list
+          echo "=== ubuntu.sources (post-edit, if present) ==="; cat /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || echo "(absent)"
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe restricted multiverse
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-updates main universe restricted multiverse
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-security main universe restricted multiverse" \
