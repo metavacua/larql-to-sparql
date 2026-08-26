@@ -128,28 +128,33 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Root cause (confirmed against a real run's raw job log, then
-      # reproduced locally with a clean, never-touched target): the
-      # @stable ref always installs into a toolchain slot literally named
-      # "stable-<host>", but this repo's rust-toolchain.toml overrides the
-      # ACTIVE toolchain to "1.98.0-<host>" -- a different rustup slot.
-      # rustup tracks installed targets per exact slot name, not per
-      # resolved version, so a target added via @stable is invisible to
-      # the toolchain that actually runs. dtolnay/rust-toolchain's own
-      # README confirms it never auto-detects rust-toolchain.toml, so the
-      # fix is to read the one real source of truth (the file itself) and
-      # pass it explicitly -- not to hardcode a second, driftable copy of
-      # "1.98.0" in this workflow.
-      - name: Read the pinned toolchain channel
-        id: pin
-        run: echo "channel=$(grep '^channel' rust-toolchain.toml | sed -E 's/.*"(.*)".*/\1/')" >> "$GITHUB_OUTPUT"
-
-      - name: Install Rust (pinned channel + target)
-        uses: dtolnay/rust-toolchain@master
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ steps.pin.outputs.channel }}
           components: clippy
-          targets: ${{ matrix.target }}
+
+      # This is the general fix for the whole class of bug, not a
+      # patch for one instance of it: `dtolnay/rust-toolchain`'s own
+      # `targets:` input always installs into a toolchain slot named
+      # after its own `toolchain:`/`@ref` value (e.g. "stable-<host>"),
+      # independent of whatever toolchain a repo's own override (a
+      # rust-toolchain.toml, or any future mechanism) actually selects
+      # as ACTIVE -- confirmed against a real run's raw job log, where
+      # the target landed in "stable-<host>" while "1.98.0-<host>" was
+      # the toolchain actually in use, so cargo/rustc never saw it.
+      # `rustup target add` with no --toolchain flag always resolves
+      # and targets whichever toolchain is ACTUALLY active (respecting
+      # any override, present or future, whatever it's named) --
+      # confirmed by direct reproduction. No continue-on-error: if this
+      # fails, it's a genuine toolchain/workspace misconfiguration, not
+      # a compilability finding about the target, and it must fail
+      # loudly and distinctly from the probe steps below rather than
+      # silently produce misleading "does not compile" data (exactly
+      # what happened before this was found: E0463 "can't find crate
+      # for core" looked like a real compile failure and was actually
+      # this).
+      - name: Add target to the ACTUALLY active toolchain
+        run: rustup target add ${{ matrix.target }}
 
       - name: cargo tree (this target's actual dependency graph)
         # No tee to a file: GitHub Actions already captures every step's
