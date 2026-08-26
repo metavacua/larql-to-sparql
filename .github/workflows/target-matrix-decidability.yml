@@ -208,6 +208,29 @@ jobs:
         continue-on-error: true
         run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features -vv
 
+      # Same bug class as finding 1, from a source that can't be
+      # eliminated: `cargo check`/`cargo tree` are real, standard tool
+      # behavior, not anything this workflow writes, and without
+      # --locked they can legitimately rewrite Cargo.lock in place
+      # during ordinary resolution (a new platform-specific entry for
+      # this target, a semver-compatible registry update since the
+      # committed lockfile was generated). Confirmed against a real
+      # run's raw job log: `* Cargo.lock (dirty)` was the sole reported
+      # file, on a target whose own worktree Cargo.lock is otherwise
+      # clean and untouched by any step here. --fix's own precondition
+      # then correctly refuses. Committing it (local only, discarded
+      # when the job ends, never pushed) is the same fix as finding 1
+      # for the same reason: whatever changed the tree before --fix
+      # runs must not be the reason --fix can't run.
+      - name: Commit any Cargo.lock drift from cargo's own resolution (local only, never pushed)
+        run: |
+          git config user.email "target-matrix-decidability@localhost"
+          git config user.name "target-matrix-decidability"
+          if [ -n "$(git status --porcelain -- Cargo.lock)" ]; then
+            git add Cargo.lock
+            git commit -q -m "ephemeral: cargo's own Cargo.lock resolution for this target"
+          fi
+
       - name: B. clippy --fix (allow nothing, broken code included)
         continue-on-error: true
         run: >
