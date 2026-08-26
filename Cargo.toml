@@ -1,47 +1,36 @@
 [workspace]
 resolver = "2"
 members = [
-    # larql-specific
-    "crates/larql-models",
+    "crates/larql-boundary",
+    "crates/larql-cli",
     "crates/larql-compute",
     "crates/larql-compute-metal",
     "crates/larql-core",
-    "crates/larql-vindex",
-    "crates/larql-vindex-spec",
     "crates/larql-execution",
     "crates/larql-factory",
     "crates/larql-inference",
     "crates/larql-kv",
     "crates/larql-lql",
-    "crates/larql-cli",
-    "crates/larql-demos",
-    "crates/larql-server",
-    "crates/larql-router",
+    "crates/larql-models",
     "crates/larql-router-protocol",
-    "crates/larql-python",
-    # boundary codec (Phase 1-3 of BOUNDARY_REF_PROTOCOL)
-    "crates/larql-boundary",
-    # portable (extract to sibling repos later, names stable)
-    "crates/model-compute",
+    "crates/larql-vindex",
+    "crates/larql-vindex-spec",
 ]
 default-members = [
-    "crates/larql-models",
+    "crates/larql-boundary",
+    "crates/larql-cli",
     "crates/larql-compute",
     "crates/larql-compute-metal",
     "crates/larql-core",
-    "crates/larql-vindex",
-    "crates/larql-vindex-spec",
+    "crates/larql-execution",
     "crates/larql-factory",
     "crates/larql-inference",
     "crates/larql-kv",
     "crates/larql-lql",
-    "crates/larql-cli",
-    "crates/larql-demos",
-    "crates/larql-server",
-    "crates/larql-router",
+    "crates/larql-models",
     "crates/larql-router-protocol",
-    "crates/larql-boundary",
-    "crates/model-compute",
+    "crates/larql-vindex",
+    "crates/larql-vindex-spec",
 ]
 
 # Workspace-wide lint policy, inherited by every member via
