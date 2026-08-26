@@ -43,10 +43,43 @@
 # assumed), the target is omitted from the matrix entirely rather than
 # kept as a permanently, unfixably red row.
 #
-# `--all-features` is used on purpose, unlike the per-crate CI workflows
-# (which pin `--no-default-features` on non-macOS to keep their gate
-# green). Here, a target where `gpu` fails to compile IS real data. No
-# job in this workflow is a required check; every probe step uses
+# `features` is a third matrix axis (`with-gpu` / `without-gpu`), not
+# just `--all-features` everywhere: larql-cli's only optional feature
+# is `gpu`, and it's already `default = ["gpu"]` -- so `--all-features`
+# and default-features are identical here, and neither one, alone,
+# probes what changes when `gpu` is off. chrishayuk/larql#169
+# documents real, different error counts under `--no-default-features`
+# (mostly `large_enum_variant`/`dead_code` on metal-only paths) --
+# feature-conditional reachability is one of the two axes (alongside
+# target) this whole project cares about, so it gets its own tier
+# rather than being collapsed into a single always-on choice.
+#
+# `--examples` is added to every cargo invocation below for the same
+# reason `--tests` already was: it's real, uninspected compilable
+# surface, not a hypothetical one. #169 itself names a concrete,
+# already-known instance -- `convert_moe_to_per_layer` "excluded from
+# CI due to an API break, which hides its clippy errors" -- so this
+# isn't speculative scope, it's a disclosed gap with a known example
+# behind it. No `--benches`: larql-cli has no bench targets to select.
+#
+# `--workspace` replaces `-p larql-cli` in steps B and C (not A, where
+# `-p larql-cli` already transitively compiles every workspace
+# sibling as a dependency, so a hard compile error there already
+# surfaces): `--no-deps` scopes clippy's LINTING to workspace members
+# only, but `-p larql-cli` was scoping it further, to larql-cli alone
+# -- a genuinely target-specific correctness lint living in
+# `larql-vindex` or `larql-compute` was invisible as a *lint* finding
+# even though a hard error in the same code would not have been. This
+# expansion is only sound now because the `#314` workspace-membership
+# trim already happened -- before that fix, `--workspace` would have
+# reintroduced exactly the feature-unification contamination `#314`
+# removed (larql-server/larql-python/etc. polluting the build). `A.`
+# also now checks `--workspace`, for the same reason: a sibling
+# crate's own standalone tests/examples (not part of larql-cli's
+# dependency chain, e.g. larql-vindex's own `#[cfg(test)]` code) were
+# never reached by `-p larql-cli` at all, `--workspace` closes that.
+#
+# No job in this workflow is a required check; every probe step uses
 # `continue-on-error: true` so a failure on one step (or one target)
 # never prevents the remaining steps/targets from still running and
 # still producing their own raw data.
@@ -147,7 +180,7 @@ permissions:
 
 jobs:
   probe:
-    name: probe (${{ matrix.target }}, ${{ matrix.lint_scope }}, broken_code=${{ matrix.broken_code }})
+    name: probe (${{ matrix.target }}, ${{ matrix.features }}, ${{ matrix.lint_scope }}, broken_code=${{ matrix.broken_code }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -170,6 +203,7 @@ jobs:
           - aarch64-unknown-linux-gnu
         lint_scope: [functional, perf, allow-nothing]
         broken_code: [true, false]
+        features: [with-gpu, without-gpu]
         include:
           # Merged into every combination matching `target`, regardless
           # of lint_scope/broken_code -- standard GitHub Actions matrix
@@ -191,6 +225,12 @@ jobs:
             lint_flags: '-A clippy::style -A clippy::complexity'
           - lint_scope: allow-nothing
             lint_flags: '-W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo'
+          # Merged into every combination matching `features`,
+          # regardless of target/lint_scope/broken_code.
+          - features: with-gpu
+            feature_flags: '--all-features'
+          - features: without-gpu
+            feature_flags: '--no-default-features'
 
     steps:
       - uses: actions/checkout@v7
@@ -360,11 +400,11 @@ jobs:
         # what caused the dirty-tree bug (twice) that blocked `--fix` from
         # ever running. The job log is the raw data; nothing else is
         # needed for tree/check/fix/residual output.
-        run: cargo tree --target ${{ matrix.target }} --all-features -e normal,build,dev -vv
+        run: cargo tree --target ${{ matrix.target }} ${{ matrix.feature_flags }} -e normal,build,dev -vv
 
       - name: A. cargo check
         continue-on-error: true
-        run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features -vv
+        run: cargo check --workspace --bins --tests --examples --target ${{ matrix.target }} ${{ matrix.feature_flags }} -vv
 
       # Same bug class as finding 1, from a source that can't be
       # eliminated: `cargo check`/`cargo tree` are real, standard tool
@@ -393,8 +433,8 @@ jobs:
         continue-on-error: true
         run: >
           cargo clippy --fix ${{ matrix.broken_code == true && '--broken-code' || '' }}
-          -p larql-cli --bins --tests --target ${{ matrix.target }}
-          --all-features --no-deps -vv
+          --workspace --bins --tests --examples --target ${{ matrix.target }}
+          ${{ matrix.feature_flags }} --no-deps -vv
           -- ${{ matrix.lint_flags }}
 
       - name: B. capture the actual fix diff
@@ -414,13 +454,13 @@ jobs:
       - name: C. residual clippy (${{ matrix.lint_scope }}, deny warnings)
         continue-on-error: true
         run: >
-          cargo clippy -p larql-cli --bins --tests --target ${{ matrix.target }}
-          --all-features --no-deps -vv
+          cargo clippy --workspace --bins --tests --examples --target ${{ matrix.target }}
+          ${{ matrix.feature_flags }} --no-deps -vv
           -- ${{ matrix.lint_flags }} -D warnings
 
       - uses: actions/upload-artifact@v7
         with:
-          name: fix-patch-${{ matrix.target }}-${{ matrix.lint_scope }}-broken-${{ matrix.broken_code }}
+          name: fix-patch-${{ matrix.target }}-${{ matrix.features }}-${{ matrix.lint_scope }}-broken-${{ matrix.broken_code }}
           path: fix.patch
           retention-days: 14
           if-no-files-found: warn
