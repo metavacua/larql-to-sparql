@@ -110,8 +110,23 @@
 #     `clippy::all`, already active in every tier below), so enabling
 #     `clippy::restriction` wouldn't just add a second opt-in
 #     conflicting lint, it would collide with something already on.
+#   - `inline_asm_x86_att_syntax` / `inline_asm_x86_intel_syntax` -- a
+#     sixth pair, same structure as the rest: the first's own
+#     description reads "prefer Intel x86 assembly syntax," the
+#     second's "prefer AT&T x86 assembly syntax" -- each demands the
+#     syntax the other forbids.
 # Enabling the group wholesale is unsatisfiable under `-D warnings` for
 # any of these constructs, not just noisy.
+#
+# Also noted, not a two-way contradiction but the same "pick at most
+# one" shape three-wide: `big_endian_bytes` / `little_endian_bytes` /
+# `host_endian_bytes` each individually forbid one specific
+# `to_*_bytes` method; enabling all three together leaves no legal way
+# to do explicit endian conversion via any of them. Not excluded for
+# this reason alone (unlike the pairs above, no single pair of them is
+# separately unsatisfiable -- enabling any one or two together is
+# fine), but worth recording alongside the pairs since it's the same
+# underlying pattern.
 #
 # Three `clippy::restriction` members are carved back out and added
 # explicitly to every `lint_scope` tier below, despite the group
