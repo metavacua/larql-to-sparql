@@ -55,10 +55,30 @@
 # (`clippy::cargo`, `clippy::nursery`, `clippy::pedantic`, plus rustc's own
 # allow-by-default lints) is promoted to at least `warn` via explicit `-W`,
 # so the probe's diagnostic surface isn't silently narrowed by defaults.
-# `clippy::restriction` is excluded: it contains mutually contradictory
-# lint pairs (`clippy::pub_with_shorthand` / `clippy::pub_without_shorthand`
-# both live in that group), so enabling it wholesale is unsatisfiable
-# under `-D warnings`, not just noisy.
+# `clippy::restriction` is excluded from every lint_scope tier below:
+# it contains multiple lint pairs that demand literally opposite things
+# for the same construct, verified directly against the actual installed
+# clippy (0.1.98, matching this workflow's rustc 1.98.0) rather than
+# assumed:
+#   - `pub_with_shorthand` / `pub_without_shorthand` -- one disallows
+#     `pub(loc)`, the other disallows `pub(in loc)`.
+#   - `semicolon_inside_block` / `semicolon_outside_block` -- one wants
+#     `unsafe { foo(); }`, the other wants `unsafe { foo() };`.
+#   - `separated_literal_suffix` / `unseparated_literal_suffix` -- one
+#     flags `1_u32` (wants `1u32`), the other flags `1u32` (wants
+#     `1_u32`).
+#   - `mod_module_files` / `self_named_module_files` -- clippy's own
+#     source (`module_style.rs`) states one *forbids* `mod.rs`
+#     entirely, the other *requires* it; designed as alternative
+#     policies, not a joint one.
+#   - `implicit_return` / `needless_return` -- opposite requirements
+#     for a function's final expression, and the more consequential
+#     pair of the five: `needless_return` is warn-by-default (part of
+#     `clippy::all`, already active in every tier below), so enabling
+#     `clippy::restriction` wouldn't just add a second opt-in
+#     conflicting lint, it would collide with something already on.
+# Enabling the group wholesale is unsatisfiable under `-D warnings` for
+# any of these constructs, not just noisy.
 #
 # `-vv` and `RUST_BACKTRACE=full` are set throughout: a compile failure
 # here is often a dependency's build script (e.g. `ring`, via rustls)
