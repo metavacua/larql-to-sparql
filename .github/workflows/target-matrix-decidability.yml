@@ -139,11 +139,19 @@ jobs:
 
       - name: B. clippy --fix (allow nothing, broken code included)
         continue-on-error: true
+        # `| tee fix.log` inside the checked-out tree was itself the bug:
+        # tee creates/holds fix.log open for this whole command's duration,
+        # so by the time `cargo fix`'s own dirty-tree precondition check
+        # runs (which happens near the end, after collecting suggestions,
+        # not at process start -- confirmed by reproduction), fix.log has
+        # existed the entire time and IS the reported dirty file. The
+        # output-capture mechanism was dirtying the tree for the very
+        # command it was capturing.
         run: >
           cargo clippy --fix --broken-code -p larql-cli --bins --tests --target ${{ matrix.target }}
           --all-features --no-deps -vv
           -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
-          2>&1 | tee fix.log
+          2>&1 | tee "$RUNNER_TEMP/fix.log"
 
       - name: B. capture the actual fix diff
         run: git diff > fix.patch
@@ -154,7 +162,7 @@ jobs:
           cargo clippy -p larql-cli --bins --tests --target ${{ matrix.target }}
           --all-features --no-deps -vv
           -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo -D warnings
-          2>&1 | tee residual.log
+          2>&1 | tee "$RUNNER_TEMP/residual.log"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -162,8 +170,8 @@ jobs:
           path: |
             ${{ runner.temp }}/tree.log
             ${{ runner.temp }}/check.log
-            fix.log
+            ${{ runner.temp }}/fix.log
             fix.patch
-            residual.log
+            ${{ runner.temp }}/residual.log
           retention-days: 14
           if-no-files-found: warn
