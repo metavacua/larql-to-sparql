@@ -234,7 +234,7 @@ jobs:
           - x86_64-pc-windows-msvc
           - aarch64-apple-darwin
           - aarch64-unknown-linux-gnu
-        lint_scope: [functional, perf, allow-nothing]
+        lint_scope: [functional, perf, allow-nothing, maximal]
         broken_code: [true, false]
         features: [with-gpu, without-gpu]
         include:
@@ -267,6 +267,76 @@ jobs:
               -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
               -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
               -W clippy::alloc_instead_of_core
+          # `allow-nothing`, plus every remaining `clippy::restriction`
+          # member that doesn't force a choice between mutually
+          # exclusive options -- the 7 contradictory pairs (14 lints:
+          # pub_with/without_shorthand, semicolon_inside/outside_block,
+          # separated/unseparated_literal_suffix, mod_module_files/
+          # self_named_module_files, implicit_return (its partner,
+          # needless_return, isn't in `restriction`),
+          # inline_asm_x86_att/intel_syntax, get_unwrap/indexing_slicing)
+          # and the endianness triple (big/little/host_endian_bytes,
+          # not a two-way contradiction but the same "pick at most one"
+          # shape three-wide) are the only members left out. Whether
+          # `--fix` produces something useful for the other 112 isn't
+          # decided here by guessing which ones would be "too noisy" --
+          # that's exactly the discretion this workflow exists to
+          # replace with a real answer. Enabling all of them and
+          # observing the actual --fix/residual output is what actually
+          # answers it, mechanically, per this project's own standard.
+          - lint_scope: maximal
+            lint_flags: >-
+              -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+              -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
+              -W clippy::alloc_instead_of_core
+              -W clippy::allow_attributes -W clippy::allow_attributes_without_reason
+              -W clippy::arbitrary_source_item_ordering -W clippy::arithmetic_side_effects
+              -W clippy::as_conversions -W clippy::as_pointer_underscore
+              -W clippy::assertions_on_result_states -W clippy::as_underscore
+              -W clippy::cfg_not_test -W clippy::clone_on_ref_ptr -W clippy::cognitive_complexity
+              -W clippy::create_dir -W clippy::dbg_macro -W clippy::decimal_literal_representation
+              -W clippy::default_numeric_fallback -W clippy::default_union_representation
+              -W clippy::deref_by_slicing -W clippy::disallowed_script_idents
+              -W clippy::doc_include_without_cfg -W clippy::doc_paragraphs_missing_punctuation
+              -W clippy::else_if_without_else -W clippy::empty_drop
+              -W clippy::empty_enum_variants_with_brackets -W clippy::empty_structs_with_brackets
+              -W clippy::error_impl_error -W clippy::exhaustive_enums -W clippy::exhaustive_structs
+              -W clippy::exit -W clippy::expect_used -W clippy::field_scoped_visibility_modifiers
+              -W clippy::filetype_is_file -W clippy::float_arithmetic -W clippy::float_cmp_const
+              -W clippy::fn_to_numeric_cast_any -W clippy::if_then_some_else_none
+              -W clippy::impl_trait_in_params -W clippy::infinite_loop -W clippy::inline_modules
+              -W clippy::inline_trait_bounds -W clippy::integer_division
+              -W clippy::integer_division_remainder_used -W clippy::iter_over_hash_type
+              -W clippy::large_include_file -W clippy::let_underscore_must_use
+              -W clippy::let_underscore_untyped -W clippy::lossy_float_literal
+              -W clippy::map_err_ignore -W clippy::map_with_unused_argument_over_ranges
+              -W clippy::mem_forget -W clippy::min_ident_chars -W clippy::missing_assert_message
+              -W clippy::missing_asserts_for_indexing -W clippy::missing_docs_in_private_items
+              -W clippy::missing_inline_in_public_items -W clippy::missing_trait_methods
+              -W clippy::mixed_read_write_in_expression -W clippy::module_name_repetitions
+              -W clippy::modulo_arithmetic -W clippy::multiple_inherent_impl
+              -W clippy::multiple_unsafe_ops_per_block -W clippy::mutex_atomic
+              -W clippy::mutex_integer -W clippy::needless_raw_strings -W clippy::non_ascii_literal
+              -W clippy::non_zero_suggestions -W clippy::panic -W clippy::panic_in_result_fn
+              -W clippy::partial_pub_fields -W clippy::pathbuf_init_then_push
+              -W clippy::pattern_type_mismatch -W clippy::pointer_format -W clippy::precedence_bits
+              -W clippy::print_stderr -W clippy::print_stdout -W clippy::pub_use
+              -W clippy::question_mark_used -W clippy::rc_buffer -W clippy::rc_mutex
+              -W clippy::redundant_test_prefix -W clippy::redundant_type_annotations
+              -W clippy::ref_patterns -W clippy::renamed_function_params
+              -W clippy::rest_pat_in_fully_bound_structs -W clippy::return_and_then
+              -W clippy::same_name_method -W clippy::shadow_reuse -W clippy::shadow_same
+              -W clippy::shadow_unrelated -W clippy::single_call_fn
+              -W clippy::single_char_lifetime_names -W clippy::string_add
+              -W clippy::string_lit_chars_any -W clippy::string_slice -W clippy::str_to_string
+              -W clippy::suspicious_xor_used_as_pow -W clippy::tests_outside_test_module
+              -W clippy::todo -W clippy::try_err -W clippy::undocumented_unsafe_blocks
+              -W clippy::unimplemented -W clippy::unnecessary_safety_comment
+              -W clippy::unnecessary_safety_doc -W clippy::unnecessary_self_imports
+              -W clippy::unneeded_field_pattern -W clippy::unreachable
+              -W clippy::unused_result_ok -W clippy::unused_trait_names
+              -W clippy::unwrap_in_result -W clippy::unwrap_used -W clippy::use_debug
+              -W clippy::verbose_file_reads -W clippy::wildcard_enum_match_arm
           # Merged into every combination matching `features`,
           # regardless of target/lint_scope/broken_code.
           - features: with-gpu
