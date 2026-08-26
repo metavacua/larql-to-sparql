@@ -5,10 +5,20 @@
 # still flagged after that (the residual -- exactly the set of concerns
 # that needs a real decision, which is where splitting target-specific
 # code into cleanly separated modules actually starts). This workflow
-# does not classify, summarize, or render any of that -- it runs the
-# standard toolchain commands and uploads whatever they produce
-# (check.log, fix.log, fix.patch, residual.log, tree.log) as artifacts.
-# Reading and acting on that data happens outside the workflow.
+# does not classify, summarize, or render any of that.
+#
+# `cargo tree`/`check`/`fix`/residual `clippy` all print straight to the
+# step's own stdout/stderr -- no `tee`-to-a-file. GitHub Actions already
+# captures every step's full output verbatim (confirmed directly: pulling
+# a job's raw log via the API showed complete -vv output, file:line
+# included), so teeing the same content into a tracked-tree file was
+# pure indirection -- and it's what caused `cargo fix` to see a dirty
+# working directory and refuse to run, twice, before this was found. The
+# job log is the raw data for those four; `fix.patch` (the one thing
+# that doesn't already exist in any command's stdout -- a clean,
+# directly `git apply`-able diff, versus the log merely showing that
+# files changed) is the only uploaded artifact. Reading and acting on
+# any of this happens outside the workflow.
 #
 # No hand-edited `#[cfg(...)]` blocks anywhere in this pipeline, and the
 # workflow never writes to a source file itself -- every change to the
@@ -125,35 +135,33 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: cargo tree (this target's actual dependency graph)
-        # Written to RUNNER_TEMP, not the checked-out tree: `cargo clippy
-        # --fix` below refuses to run against a dirty working directory
-        # (confirmed by reproduction: an untracked file here is enough to
-        # trip that precondition), and this workflow deliberately doesn't
-        # pass --allow-dirty. A step's own output file must never become
-        # the reason a later step's precondition fails.
-        run: cargo tree --target ${{ matrix.target }} --all-features -e normal,build,dev -vv > "$RUNNER_TEMP/tree.log"
+        # No tee to a file: GitHub Actions already captures every step's
+        # full stdout/stderr verbatim (confirmed directly -- pulling this
+        # exact job's raw log via the API showed the complete -vv output,
+        # file:line included, with nothing missing). Teeing the same
+        # content into a tracked-tree file was pure indirection, and it's
+        # what caused the dirty-tree bug (twice) that blocked `--fix` from
+        # ever running. The job log is the raw data; nothing else is
+        # needed for tree/check/fix/residual output.
+        run: cargo tree --target ${{ matrix.target }} --all-features -e normal,build,dev -vv
 
       - name: A. cargo check
         continue-on-error: true
-        run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features -vv 2>&1 | tee "$RUNNER_TEMP/check.log"
+        run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features -vv
 
       - name: B. clippy --fix (allow nothing, broken code included)
         continue-on-error: true
-        # `| tee fix.log` inside the checked-out tree was itself the bug:
-        # tee creates/holds fix.log open for this whole command's duration,
-        # so by the time `cargo fix`'s own dirty-tree precondition check
-        # runs (which happens near the end, after collecting suggestions,
-        # not at process start -- confirmed by reproduction), fix.log has
-        # existed the entire time and IS the reported dirty file. The
-        # output-capture mechanism was dirtying the tree for the very
-        # command it was capturing.
         run: >
           cargo clippy --fix --broken-code -p larql-cli --bins --tests --target ${{ matrix.target }}
           --all-features --no-deps -vv
           -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
-          2>&1 | tee "$RUNNER_TEMP/fix.log"
 
       - name: B. capture the actual fix diff
+        # This is the one thing worth uploading: `git diff` produces
+        # content that doesn't exist in any command's stdout (the log
+        # shows THAT files changed, not a clean, directly `git apply`-able
+        # diff). Written after the fix step, so it can't affect that
+        # step's own dirty-tree precondition.
         run: git diff > fix.patch
 
       - name: C. residual clippy (allow nothing, deny warnings)
@@ -162,16 +170,10 @@ jobs:
           cargo clippy -p larql-cli --bins --tests --target ${{ matrix.target }}
           --all-features --no-deps -vv
           -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo -D warnings
-          2>&1 | tee "$RUNNER_TEMP/residual.log"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: raw-${{ matrix.target }}
-          path: |
-            ${{ runner.temp }}/tree.log
-            ${{ runner.temp }}/check.log
-            ${{ runner.temp }}/fix.log
-            fix.patch
-            ${{ runner.temp }}/residual.log
+          name: fix-patch-${{ matrix.target }}
+          path: fix.patch
           retention-days: 14
           if-no-files-found: warn
