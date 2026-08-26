@@ -242,6 +242,20 @@ jobs:
           # compilation unit, which is never true for a build script.
           echo "PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
 
+      # larql-router-protocol's own build.rs already documents this
+      # exact requirement (`#[cfg(windows)] fn set_protoc()` is a
+      # no-op, relying on protoc being on PATH), and larql-cli.yml
+      # already carries the real, working fix for it -- this step is
+      # that same fix, not a new one. Without it, the whole workspace
+      # build fails at larql-router-protocol before any lint runs,
+      # and because A/B/C below are all continue-on-error, that
+      # failure was being silently swallowed into a green "pass" with
+      # an empty fix.patch, on every past run of this workflow.
+      - name: Install protoc (Windows)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
       # Fixed for real, once, at the source (root Cargo.toml), not here:
       # cargo resolves features for a shared dependency as the union of
       # every `[workspace].members` crate's request for it, not just
