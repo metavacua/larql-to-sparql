@@ -163,6 +163,90 @@
 # branch is never getting merged there. Path-scoping to the file
 # itself means pushing a change to this workflow is what re-runs it --
 # not every unrelated commit on the branch. Not a required gate.
+#
+# --- Tier 2 (with Host Tools) extension ---
+#
+# Scope is every target on doc.rust-lang.org/nightly/rustc/platform-
+# support.html's "Tier 2 with Host Tools" table (28 targets there, not
+# the 29 the page's own prose claims -- same discrepancy, and the same
+# "use what's actually named" resolution, as deny.toml's Tier 1 + Tier 2
+# cargo-deny expansion on the companion fix/target-matrix-decidability-
+# findings branch). cargo-deny only needs the dependency graph, so all
+# 28 went in there. This workflow needs a real per-target C toolchain at
+# build-script time (see the `ring`/aarch64 finding above), so each of
+# the 28 was checked against what's actually installable on a
+# GitHub-hosted runner -- via packages.ubuntu.com/noble and
+# ports.ubuntu.com's real per-architecture repo listings, not assumed --
+# before being added.
+#
+# Included (7), all via a real, standard, confirmed-available package:
+#   - arm-unknown-linux-gnueabihf, armv7-unknown-linux-gnueabihf,
+#     powerpc64le-unknown-linux-gnu, riscv64gc-unknown-linux-gnu,
+#     s390x-unknown-linux-gnu: same mechanism as the existing
+#     aarch64-unknown-linux-gnu row (cross gcc/g++ package + a
+#     ports.ubuntu.com libssl-dev multiarch repo), generalized via
+#     matrix.gcc_pkg/deb_arch/multiarch_triplet instead of duplicated
+#     five more times. `arm-unknown-linux-gnueabihf` and
+#     `armv7-unknown-linux-gnueabihf` share Debian's one armhf port and
+#     its one gcc-arm-linux-gnueabihf cross package -- Debian doesn't
+#     ship two separate ARM hard-float cross toolchains, and a
+#     build-script's C compilation doesn't need rustc's own
+#     target-feature distinction between the two.
+#   - i686-pc-windows-gnu: cross-compiled on ubuntu-latest via
+#     `gcc-mingw-w64-i686`/`g++-mingw-w64-i686`, the same "closest real
+#     toolchain available, not a native runner" pattern already used for
+#     aarch64-unknown-linux-gnu.
+#   - x86_64-apple-darwin: runs on the same macos-latest (arm64
+#     hardware) image as aarch64-apple-darwin. Xcode's clang is already
+#     a universal (multi-arch) compiler, so no extra package is needed
+#     -- identical to why aarch64-apple-darwin's own row installs
+#     nothing beyond the base image.
+#
+# Excluded (21), each for a real, checked reason, not "not implemented
+# yet":
+#   - arm-unknown-linux-gnueabi, powerpc-unknown-linux-gnu,
+#     powerpc64-unknown-linux-gnu (big-endian), loongarch64-unknown-
+#     linux-gnu: a cross gcc/g++ package exists for every one of these,
+#     but ports.ubuntu.com carries no `noble` repo for armel, powerpc,
+#     ppc64 (big-endian), or loong64 (confirmed: HTTP 404 on
+#     ports.ubuntu.com/ubuntu-ports/dists/noble/main/binary-<arch>/
+#     Packages.gz for each) -- so libssl-dev:<arch> is not installable
+#     by any standard mechanism, the same class of gap as the arm64 one
+#     the existing aarch64-unknown-linux-gnu row had to solve, just with
+#     no solution available.
+#   - x86_64-unknown-linux-musl, aarch64-unknown-linux-musl,
+#     loongarch64-unknown-linux-musl, powerpc64-unknown-linux-musl,
+#     powerpc64le-unknown-linux-musl, riscv64gc-unknown-linux-musl:
+#     `musl-tools` ships only a native (x86_64) musl-gcc, so
+#     x86_64-unknown-linux-musl was tried first (real run, job
+#     98074714304) -- it got further than the other five (no cross
+#     toolchain needed at all), but openssl-sys still failed, on a
+#     *second* real run (job 98082401334, after installing
+#     libssl-dev/pkg-config and setting PKG_CONFIG_ALLOW_CROSS), with
+#     `/usr/include/openssl/macros.h:14:10: fatal error:
+#     openssl/opensslconf.h: No such file or directory`. Debian/Ubuntu's
+#     libssl-dev ships a glibc-multiarch header layout -- the real
+#     opensslconf.h lives under /usr/include/x86_64-linux-gnu/openssl/,
+#     found automatically by native gcc's default include search but
+#     not by musl-gcc's (different libc, different default search path,
+#     and that generated header is itself gated on glibc-specific
+#     macros, so pointing musl-gcc at it directly would be dubious even
+#     if it compiled). No musl-native OpenSSL package exists in
+#     Ubuntu's repos for any architecture, so all six musl targets are
+#     excluded for the same underlying gap the other five already were.
+#   - aarch64-unknown-linux-ohos, armv7-unknown-linux-ohos,
+#     x86_64-unknown-linux-ohos: OpenHarmony targets need the OHOS
+#     SDK/NDK, which isn't an apt or choco package.
+#   - aarch64-pc-windows-gnullvm, x86_64-pc-windows-gnullvm: need
+#     llvm-mingw, which (unlike gcc-mingw-w64-i686/x86_64) isn't a
+#     standard apt or choco package.
+#   - aarch64-unknown-freebsd, x86_64-unknown-freebsd,
+#     x86_64-unknown-netbsd, x86_64-unknown-illumos, x86_64-pc-solaris,
+#     sparcv9-sun-solaris: no GitHub-hosted native runner and no
+#     standard cross toolchain package for any of them --
+#     sparcv9-sun-solaris was already excluded from the original PR's
+#     4-target scope for exactly this reason, before this Tier 2 pass
+#     added the other five.
 
 name: target-matrix-decidability
 
@@ -201,6 +285,13 @@ jobs:
           - x86_64-pc-windows-msvc
           - aarch64-apple-darwin
           - aarch64-unknown-linux-gnu
+          - arm-unknown-linux-gnueabihf
+          - armv7-unknown-linux-gnueabihf
+          - powerpc64le-unknown-linux-gnu
+          - riscv64gc-unknown-linux-gnu
+          - s390x-unknown-linux-gnu
+          - i686-pc-windows-gnu
+          - x86_64-apple-darwin
         lint_scope: [functional, perf, allow-nothing]
         broken_code: [true, false]
         features: [with-gpu, without-gpu]
@@ -209,6 +300,7 @@ jobs:
           # of lint_scope/broken_code -- standard GitHub Actions matrix
           # semantics for a partial-key include entry, not a custom
           # mechanism.
+          # Tier 1
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
           - target: x86_64-pc-windows-msvc
@@ -217,6 +309,43 @@ jobs:
             os: macos-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            gcc_pkg: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            deb_arch: arm64
+            multiarch_triplet: aarch64-linux-gnu
+
+          # Tier 2 (with Host Tools) -- see the header comment for what
+          # was excluded and why.
+          - target: arm-unknown-linux-gnueabihf
+            os: ubuntu-latest
+            gcc_pkg: gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+            deb_arch: armhf
+            multiarch_triplet: arm-linux-gnueabihf
+          - target: armv7-unknown-linux-gnueabihf
+            os: ubuntu-latest
+            gcc_pkg: gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+            deb_arch: armhf
+            multiarch_triplet: arm-linux-gnueabihf
+          - target: powerpc64le-unknown-linux-gnu
+            os: ubuntu-latest
+            gcc_pkg: gcc-powerpc64le-linux-gnu g++-powerpc64le-linux-gnu
+            deb_arch: ppc64el
+            multiarch_triplet: powerpc64le-linux-gnu
+          - target: riscv64gc-unknown-linux-gnu
+            os: ubuntu-latest
+            gcc_pkg: gcc-riscv64-linux-gnu g++-riscv64-linux-gnu
+            deb_arch: riscv64
+            multiarch_triplet: riscv64-linux-gnu
+          - target: s390x-unknown-linux-gnu
+            os: ubuntu-latest
+            gcc_pkg: gcc-s390x-linux-gnu g++-s390x-linux-gnu
+            deb_arch: s390x
+            multiarch_triplet: s390x-linux-gnu
+          - target: i686-pc-windows-gnu
+            os: ubuntu-latest
+            gcc_pkg: gcc-mingw-w64-i686 g++-mingw-w64-i686
+          - target: x86_64-apple-darwin
+            os: macos-latest
+
           # Merged into every combination matching `lint_scope`,
           # regardless of target/broken_code, by the same mechanism.
           - lint_scope: functional
@@ -270,14 +399,21 @@ jobs:
       # infrastructure" -- it's the difference between testing
       # larql-cli's actual code on this target versus testing nothing
       # but this workflow's own choice not to run one apt-get command.
-      # `gcc-aarch64-linux-gnu` is confirmed installable on the real
-      # ubuntu-latest image (verified directly via
-      # probe-runner-packages.yml's `apt-get install --dry-run`, not
+      # Parameterized on matrix.gcc_pkg (one apt package list per
+      # target family) instead of one `if: matrix.target == '...'` step
+      # per target: it's the identical operation for every Linux-cross
+      # and mingw-cross row here, confirmed package-by-package against
+      # packages.ubuntu.com/noble (see the header comment), not guessed.
+      # `gcc-aarch64-linux-gnu` was the first of these, confirmed
+      # installable on the real ubuntu-latest image (verified directly
+      # via probe-runner-packages.yml's `apt-get install --dry-run`, not
       # assumed). No equivalent package/cross-rs image/native runner
       # exists anywhere for sparcv9-sun-solaris -- that target's
       # compile failure stays real, unfixable information, not
-      # something to route around.
-      - name: Install gcc/g++-aarch64-linux-gnu (real, standard, confirmed-available)
+      # something to route around, which is why it (and the other 19
+      # excluded Tier 2 targets) has no matrix row at all rather than a
+      # `gcc_pkg` that would fail to install.
+      - name: Install cross gcc/g++ (real, standard, confirmed-available)
         # No CARGO_TARGET_*_LINKER needed: `cargo check`/`clippy` never
         # reach the linking stage. Only a dependency's build script (via
         # cc-rs, at build-script-execution time, which runs regardless
@@ -288,20 +424,24 @@ jobs:
         # `esaxx-rs`'s C++ build needs "aarch64-linux-gnu-g++" too --
         # a distinct package (g++-aarch64-linux-gnu), not covered by
         # the C one.
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        if: matrix.gcc_pkg != ''
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y ${{ matrix.gcc_pkg }}
 
       # A deeper, genuinely different layer of the same category,
       # confirmed via a real run once ring's blocker was cleared:
       # openssl-sys (reqwest's Linux native-tls path) needs a real
       # OpenSSL for the target, discoverable via cross pkg-config.
-      # `libssl-dev:arm64` + Debian/Ubuntu multiarch is the standard OS
-      # mechanism for this, not bespoke infrastructure -- the same
-      # apt-get-based approach as the gcc package above, just one more
-      # architecture added to dpkg first.
-      - name: Install libssl-dev for arm64 (real, standard, multiarch)
+      # `libssl-dev:<arch>` + Debian/Ubuntu multiarch is the standard OS
+      # mechanism for this, not bespoke infrastructure. Parameterized on
+      # matrix.deb_arch/multiarch_triplet for the same reason as the gcc
+      # step above: identical mechanism, five real architectures
+      # (confirmed each has a ports.ubuntu.com/noble repo -- arm64,
+      # armhf, ppc64el, riscv64, s390x -- unlike armel/powerpc/ppc64
+      # (big-endian)/loong64, which don't, and are excluded for exactly
+      # that reason).
+      - name: Install libssl-dev for ${{ matrix.deb_arch }} (real, standard, multiarch)
         # First attempt failed with real evidence, not a guess:
         # `dpkg --add-architecture arm64` alone isn't enough on
         # ubuntu-latest -- its default sources only have
@@ -321,7 +461,7 @@ jobs:
         # needs its own `Architectures: amd64` field, the standard
         # DEB822 way to scope a source, added after every `Types: deb`
         # line.
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        if: matrix.deb_arch != ''
         run: |
           sudo sed -i -E 's/^deb(-src)? http/deb\1 [arch=amd64] http/' /etc/apt/sources.list
           if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
@@ -329,26 +469,28 @@ jobs:
           fi
           echo "=== sources.list ==="; cat /etc/apt/sources.list
           echo "=== ubuntu.sources (post-edit, if present) ==="; cat /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || echo "(absent)"
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe restricted multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-updates main universe restricted multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-security main universe restricted multiverse" \
-            | sudo tee /etc/apt/sources.list.d/arm64-ports.list
-          sudo dpkg --add-architecture arm64
+          echo "deb [arch=${{ matrix.deb_arch }}] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe restricted multiverse
+          deb [arch=${{ matrix.deb_arch }}] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-updates main universe restricted multiverse
+          deb [arch=${{ matrix.deb_arch }}] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-security main universe restricted multiverse" \
+            | sudo tee /etc/apt/sources.list.d/${{ matrix.deb_arch }}-ports.list
+          sudo dpkg --add-architecture ${{ matrix.deb_arch }}
           sudo apt-get update
-          sudo apt-get install -y libssl-dev:arm64 pkg-config
+          sudo apt-get install -y libssl-dev:${{ matrix.deb_arch }} pkg-config
           echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
           # Real evidence, not a guess: an unscoped PKG_CONFIG_PATH also
           # leaked into openblas-src's build script (which compiles for
           # the HOST during cross-compilation, not the target), making
-          # it link the host binary against arm64 OpenSSL objects.
-          # pkg-config's own docs specify the fix: PKG_CONFIG_PATH (and
-          # _LIBDIR/_SYSROOT_DIR) can be scoped to one target triple via
-          # a `_<target-with-underscores>` suffix, so it's absent for
-          # the host-native build-script compilation. ALLOW_CROSS isn't
-          # scopeable this way, but that's fine -- it's only consulted
-          # when cargo's own TARGET differs from HOST for that specific
-          # compilation unit, which is never true for a build script.
-          echo "PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
+          # it link the host binary against the cross architecture's
+          # OpenSSL objects. pkg-config's own docs specify the fix:
+          # PKG_CONFIG_PATH (and _LIBDIR/_SYSROOT_DIR) can be scoped to
+          # one target triple via a `_<target-with-underscores>`
+          # suffix, so it's absent for the host-native build-script
+          # compilation. ALLOW_CROSS isn't scopeable this way, but
+          # that's fine -- it's only consulted when cargo's own TARGET
+          # differs from HOST for that specific compilation unit, which
+          # is never true for a build script.
+          target_env="${{ matrix.target }}"
+          echo "PKG_CONFIG_PATH_${target_env//-/_}=/usr/lib/${{ matrix.multiarch_triplet }}/pkgconfig" >> "$GITHUB_ENV"
 
       # larql-router-protocol's own build.rs already documents this
       # exact requirement (`#[cfg(windows)] fn set_protoc()` is a
