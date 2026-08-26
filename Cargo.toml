@@ -1,36 +1,46 @@
 [workspace]
 resolver = "2"
+# Trimmed to larql-cli's real dependency closure on this branch only --
+# larql-demos, larql-python, larql-router, larql-server, and
+# model-compute removed. This branch cares about one binary
+# (larql-cli); the other five crates were pulling their own feature
+# requests on shared dependencies into every larql-cli build via
+# Cargo's workspace-wide feature unification (see
+# chrishayuk/larql#314), even though none of them are larql-cli
+# dependencies. Makefile targets for the removed crates
+# (`demos`, `larql-router-*`, `larql-python-*`) no longer resolve by
+# `-p <name>` on this branch as a result -- accepted, deliberately,
+# for this branch's scope.
 members = [
-    "crates/larql-boundary",
-    "crates/larql-cli",
+    "crates/larql-models",
     "crates/larql-compute",
     "crates/larql-compute-metal",
     "crates/larql-core",
+    "crates/larql-vindex",
+    "crates/larql-vindex-spec",
     "crates/larql-execution",
     "crates/larql-factory",
     "crates/larql-inference",
     "crates/larql-kv",
     "crates/larql-lql",
-    "crates/larql-models",
+    "crates/larql-cli",
     "crates/larql-router-protocol",
-    "crates/larql-vindex",
-    "crates/larql-vindex-spec",
+    "crates/larql-boundary",
 ]
 default-members = [
-    "crates/larql-boundary",
-    "crates/larql-cli",
+    "crates/larql-models",
     "crates/larql-compute",
     "crates/larql-compute-metal",
     "crates/larql-core",
-    "crates/larql-execution",
+    "crates/larql-vindex",
+    "crates/larql-vindex-spec",
     "crates/larql-factory",
     "crates/larql-inference",
     "crates/larql-kv",
     "crates/larql-lql",
-    "crates/larql-models",
+    "crates/larql-cli",
     "crates/larql-router-protocol",
-    "crates/larql-vindex",
-    "crates/larql-vindex-spec",
+    "crates/larql-boundary",
 ]
 
 # Workspace-wide lint policy, inherited by every member via
