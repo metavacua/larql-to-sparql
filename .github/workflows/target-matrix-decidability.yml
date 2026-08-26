@@ -156,6 +156,32 @@ jobs:
       - name: Add target to the ACTUALLY active toolchain
         run: rustup target add ${{ matrix.target }}
 
+      # `ring` (a real dependency of larql-cli's tree, via larql-vindex's
+      # rustls-tls reqwest usage) needs a C compiler for whatever target
+      # it's built for. Installing a real, standard, already-confirmed
+      # cross-gcc package where one exists isn't "unnecessary
+      # infrastructure" -- it's the difference between testing
+      # larql-cli's actual code on this target versus testing nothing
+      # but this workflow's own choice not to run one apt-get command.
+      # `gcc-aarch64-linux-gnu` is confirmed installable on the real
+      # ubuntu-latest image (verified directly via
+      # probe-runner-packages.yml's `apt-get install --dry-run`, not
+      # assumed). No equivalent package/cross-rs image/native runner
+      # exists anywhere for sparcv9-sun-solaris -- that target's
+      # compile failure stays real, unfixable information, not
+      # something to route around.
+      - name: Install gcc-aarch64-linux-gnu (real, standard, confirmed-available)
+        # No CARGO_TARGET_*_LINKER needed: `cargo check`/`clippy` never
+        # reach the linking stage. Only `ring`'s build script (via
+        # cc-rs, at build-script-execution time, which runs regardless
+        # of check vs. build) needs the compiler binary on PATH -- and
+        # its own error message already named the exact binary this
+        # package provides: "failed to find tool aarch64-linux-gnu-gcc".
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       # Fixed for real, once, at the source (root Cargo.toml), not here:
       # cargo resolves features for a shared dependency as the union of
       # every `[workspace].members` crate's request for it, not just
