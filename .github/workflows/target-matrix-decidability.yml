@@ -241,6 +241,28 @@ jobs:
         continue-on-error: true
         run: cargo check -p larql-cli --bins --tests --target ${{ matrix.target }} --all-features -vv
 
+      # Same bug class as finding 1, confirmed via a real run's raw job
+      # log (`* Cargo.toml (dirty)`, `* Cargo.lock (dirty)`), same root
+      # cause (a workflow step's own write sits uncommitted in the tree
+      # when --fix runs next), different fix shape: the isolation step's
+      # edit can't be relocated outside the tree the way tee'd logs were
+      # -- cargo needs Cargo.toml/Cargo.lock at their real paths -- so
+      # the fix here is to commit it instead. Placed after `cargo tree`
+      # and `cargo check`, not right after the trim itself: cargo only
+      # prunes Cargo.lock to match the trimmed members on its next
+      # invocation, so committing any earlier would miss that later
+      # change and still leave Cargo.lock dirty when --fix runs.
+      # Local-only commit, on an ephemeral checkout that's discarded
+      # when the job ends -- never pushed anywhere.
+      - name: Commit the ephemeral workspace trim (local only, never pushed)
+        run: |
+          git config user.email "target-matrix-decidability@localhost"
+          git config user.name "target-matrix-decidability"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add Cargo.toml Cargo.lock
+            git commit -q -m "ephemeral: isolate larql-cli from unrelated workspace members"
+          fi
+
       - name: B. clippy --fix (allow nothing, broken code included)
         continue-on-error: true
         run: >
