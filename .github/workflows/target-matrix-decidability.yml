@@ -75,6 +75,35 @@
 # that runner, only where `rustup target add` and a plain `cargo check`
 # get attempted.
 #
+# `lint_scope` x `broken_code` is a second, orthogonal matrix axis,
+# crossed with every target, so the same code can be compared across
+# fix strategies rather than just across targets. The three
+# `lint_scope` tiers are cumulative subsets of clippy's own default
+# lint groups (`functional` subset `perf` subset `allow-nothing`):
+#   - `functional`: clippy::correctness (deny by default) +
+#     clippy::suspicious (warn by default) only -- lints that flag
+#     code that is already wrong, not code that merely could be
+#     written differently.
+#   - `perf`: functional, plus clippy::perf -- still behavior-
+#     preserving by definition, but its suggested rewrites are often
+#     API substitutions (e.g. build a Vec via `with_capacity` instead
+#     of `push`-in-a-loop), carrying the same kind of mechanical-fix
+#     risk as style lints rather than correctness lints, hence its own
+#     tier instead of being folded into `functional`.
+#   - `allow-nothing`: the existing, unchanged full policy (every
+#     allow-by-default group except `clippy::restriction`).
+# The reason to separate these: every "clippy --fix produced code that
+# doesn't compile" case found so far traced to a pedantic/nursery-tier
+# suggestion (`chunks_exact_to_as_chunks`, `missing_const_for_fn` +
+# `cast_lossless` combining unsafely, an incomplete `wildcard_imports`
+# rewrite) -- never to a correctness or suspicious lint. Mixing style-
+# lint auto-fixes into the "residual" signal conflates two different
+# findings ("there's a real unfixed bug" vs. "clippy broke the build
+# trying to rename a cast") into one number. `broken_code` isolates a
+# second, independent question per tier: does allowing `--fix` to
+# apply changes that might not compile actually change the outcome at
+# this lint scope, or only at the wider ones?
+#
 # Triggered on `pull_request`, path-scoped to this file, not
 # `workflow_dispatch`: a newly-added workflow can't be dispatched via
 # the API/UI until it exists on the repo's default branch, and this
@@ -98,7 +127,7 @@ permissions:
 
 jobs:
   probe:
-    name: probe (${{ matrix.target }})
+    name: probe (${{ matrix.target }}, ${{ matrix.lint_scope }}, broken_code=${{ matrix.broken_code }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -114,7 +143,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-pc-windows-msvc
+          - aarch64-apple-darwin
+          - aarch64-unknown-linux-gnu
+        lint_scope: [functional, perf, allow-nothing]
+        broken_code: [true, false]
         include:
+          # Merged into every combination matching `target`, regardless
+          # of lint_scope/broken_code -- standard GitHub Actions matrix
+          # semantics for a partial-key include entry, not a custom
+          # mechanism.
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
           - target: x86_64-pc-windows-msvc
@@ -123,6 +163,14 @@ jobs:
             os: macos-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+          # Merged into every combination matching `lint_scope`,
+          # regardless of target/broken_code, by the same mechanism.
+          - lint_scope: functional
+            lint_flags: '-A clippy::style -A clippy::complexity -A clippy::perf'
+          - lint_scope: perf
+            lint_flags: '-A clippy::style -A clippy::complexity'
+          - lint_scope: allow-nothing
+            lint_flags: '-W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo'
 
     steps:
       - uses: actions/checkout@v7
@@ -321,12 +369,13 @@ jobs:
             git commit -q -m "ephemeral: cargo's own Cargo.lock resolution for this target"
           fi
 
-      - name: B. clippy --fix (allow nothing, broken code included)
+      - name: B. clippy --fix (${{ matrix.lint_scope }}, broken_code=${{ matrix.broken_code }})
         continue-on-error: true
         run: >
-          cargo clippy --fix --broken-code -p larql-cli --bins --tests --target ${{ matrix.target }}
+          cargo clippy --fix ${{ matrix.broken_code == true && '--broken-code' || '' }}
+          -p larql-cli --bins --tests --target ${{ matrix.target }}
           --all-features --no-deps -vv
-          -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+          -- ${{ matrix.lint_flags }}
 
       - name: B. capture the actual fix diff
         # This is the one thing worth uploading: `git diff` produces
@@ -342,16 +391,16 @@ jobs:
         # fix.patch a clean per-target signal regardless.
         run: git diff -- crates/ > fix.patch
 
-      - name: C. residual clippy (allow nothing, deny warnings)
+      - name: C. residual clippy (${{ matrix.lint_scope }}, deny warnings)
         continue-on-error: true
         run: >
           cargo clippy -p larql-cli --bins --tests --target ${{ matrix.target }}
           --all-features --no-deps -vv
-          -- -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo -D warnings
+          -- ${{ matrix.lint_flags }} -D warnings
 
       - uses: actions/upload-artifact@v7
         with:
-          name: fix-patch-${{ matrix.target }}
+          name: fix-patch-${{ matrix.target }}-${{ matrix.lint_scope }}-broken-${{ matrix.broken_code }}
           path: fix.patch
           retention-days: 14
           if-no-files-found: warn
