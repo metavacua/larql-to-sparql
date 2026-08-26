@@ -234,7 +234,7 @@ jobs:
           - x86_64-pc-windows-msvc
           - aarch64-apple-darwin
           - aarch64-unknown-linux-gnu
-        lint_scope: [functional, perf, allow-nothing, maximal]
+        lint_scope: [functional, perf, allow-nothing, maximal, control]
         broken_code: [true, false]
         features: [with-gpu, without-gpu]
         include:
@@ -337,6 +337,26 @@ jobs:
               -W clippy::unused_result_ok -W clippy::unused_trait_names
               -W clippy::unwrap_in_result -W clippy::unwrap_used -W clippy::use_debug
               -W clippy::verbose_file_reads -W clippy::wildcard_enum_match_arm
+          # Experimental control, not a curated tier: the naive,
+          # unfiltered `-W clippy::restriction` -- the whole group,
+          # contradictory pairs and the endianness triple included,
+          # exactly what the exclusion reasoning above says should
+          # collide, no-op, or fail. That reasoning has been wrong
+          # about `--fix`/`-D warnings` behavior before this session
+          # (confirmed empirically: `--broken-code` doesn't relax which
+          # suggestions apply, it disables cargo's own verify-and-
+          # revert loop -- a materially different mechanism than
+          # first assumed), so the exclusion argument gets the same
+          # treatment as everything else here: run it and observe,
+          # don't take the reasoning as self-certifying. `maximal`
+          # stays the curated tier; this is the deliberately naive
+          # baseline run through the identical --fix/residual/
+          # broken_code machinery, to see what actually happens rather
+          # than what the argument above predicts.
+          - lint_scope: control
+            lint_flags: >-
+              -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+              -W clippy::restriction
           # Merged into every combination matching `features`,
           # regardless of target/lint_scope/broken_code.
           - features: with-gpu
