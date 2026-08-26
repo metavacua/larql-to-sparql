@@ -128,9 +128,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust (stable + target)
-        uses: dtolnay/rust-toolchain@stable
+      # Root cause (confirmed against a real run's raw job log, then
+      # reproduced locally with a clean, never-touched target): the
+      # @stable ref always installs into a toolchain slot literally named
+      # "stable-<host>", but this repo's rust-toolchain.toml overrides the
+      # ACTIVE toolchain to "1.98.0-<host>" -- a different rustup slot.
+      # rustup tracks installed targets per exact slot name, not per
+      # resolved version, so a target added via @stable is invisible to
+      # the toolchain that actually runs. dtolnay/rust-toolchain's own
+      # README confirms it never auto-detects rust-toolchain.toml, so the
+      # fix is to read the one real source of truth (the file itself) and
+      # pass it explicitly -- not to hardcode a second, driftable copy of
+      # "1.98.0" in this workflow.
+      - name: Read the pinned toolchain channel
+        id: pin
+        run: echo "channel=$(grep '^channel' rust-toolchain.toml | sed -E 's/.*"(.*)".*/\1/')" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust (pinned channel + target)
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.pin.outputs.channel }}
           components: clippy
           targets: ${{ matrix.target }}
 
