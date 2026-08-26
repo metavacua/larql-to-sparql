@@ -113,6 +113,24 @@
 # Enabling the group wholesale is unsatisfiable under `-D warnings` for
 # any of these constructs, not just noisy.
 #
+# Three `clippy::restriction` members are carved back out and added
+# explicitly to every `lint_scope` tier below, despite the group
+# exclusion above: `std_instead_of_core`, `std_instead_of_alloc`,
+# `alloc_instead_of_core`. These aren't part of any contradictory pair
+# -- they're a consistent, complementary hierarchy (always prefer the
+# narrowest available crate) -- so excluding the whole group took them
+# down as collateral, not by intent. They matter for a reason none of
+# clippy's other groups capture: whether code uses `std::` where
+# `core`/`alloc` would suffice is a *portability* fact, not a style
+# preference -- `std` is unavailable on genuinely restrictive targets
+# (`no_std`-only ones; confirmed in this repo's own history,
+# `nvptx64-nvidia-cuda`'s `-Zbuild-std=std` fails outright, no
+# `Os::Cuda` branch in libstd), so passing this trio is a precondition
+# for code to even compile there, not an opinion about how it's
+# written. That's a third axis orthogonal to the `functional`/`perf`
+# effectiveness-efficiency ladder below, not a rung on it, so it's
+# added to all three tiers uniformly rather than folded into one.
+#
 # `-vv` and `RUST_BACKTRACE=full` are set throughout: a compile failure
 # here is often a dependency's build script (e.g. `ring`, via rustls)
 # unable to find a C compiler for the target, not a code-level error, and
@@ -220,11 +238,20 @@ jobs:
           # Merged into every combination matching `lint_scope`,
           # regardless of target/broken_code, by the same mechanism.
           - lint_scope: functional
-            lint_flags: '-A clippy::style -A clippy::complexity -A clippy::perf'
+            lint_flags: >-
+              -A clippy::style -A clippy::complexity -A clippy::perf
+              -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
+              -W clippy::alloc_instead_of_core
           - lint_scope: perf
-            lint_flags: '-A clippy::style -A clippy::complexity'
+            lint_flags: >-
+              -A clippy::style -A clippy::complexity
+              -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
+              -W clippy::alloc_instead_of_core
           - lint_scope: allow-nothing
-            lint_flags: '-W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo'
+            lint_flags: >-
+              -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+              -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
+              -W clippy::alloc_instead_of_core
           # Merged into every combination matching `features`,
           # regardless of target/lint_scope/broken_code.
           - features: with-gpu
