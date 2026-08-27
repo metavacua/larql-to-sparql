@@ -1,0 +1,586 @@
+# Strategy matrix: 6 approaches x 13 legs for adding/improving tool-calling in the
+# larql-driven Goose coding agent, plus one prerequisite decode-path-parity leg
+# (residual Q5: does larql run's cached-KV-decode path diverge from larql lql
+# INFER's full-reforward path on identical input, independent of the
+# chat-template/decoding-strategy hypotheses -- see
+# docs/specs/2026-07-16-larql-goose-toolcalling-research-residual.md's D
+# section, which orders this leg's answer as a precondition for interpreting
+# every other leg's result). Single workflow for the whole larql+goose+VM
+# pipeline -- previously split across this file and a separate
+# goose-larql-vm-pipeline.yml, each with its own build-larql/build-goose/
+# prepare-vindex jobs; both targeted `main`, so any PR touching either would run
+# the entire build-to-vindex-extraction pipeline twice for no reason. Consolidated
+# into this one file instead of trimming the duplication down. kvm-capability-check.yml
+# (a one-off diagnostic whose own header said to delete it once KVM support was
+# confirmed and folded into a real pipeline -- both now true) was deleted for the
+# same reason.
+#
+# This is the CI counterpart of docs/specs/2026-07-16-larql-goose-toolcalling-design.md
+# (ADR-4: shape follows lql-strategy-matrix.yml's plan/build/matrix/aggregate
+# convention; ADR-6: the leg table, since reduced from 12 to 10 -- see below).
+# lql-strategy-matrix.yml lives on this same GitHub repo's separate, not-yet-merged
+# lql-strategy-matrix branch, not on main or this branch -- confirmed via
+# `git cat-file -e origin/main:.github/workflows/lql-strategy-matrix.yml` (missing).
+#
+# Legs 1-2 (emulate-stream-harness, IMPLEMENTED this session -- see
+# crates/goose-local-inference/src/larql_tool_emulation.rs in metavacua/goose) run a
+# real `goose run` coding task inside the QEMU/KVM VM boundary and assert a real
+# ToolRequest actually dispatched (a proof-of-exec value only readable via the
+# ACTUALLY-EXECUTED shell tool, not just text resembling a shell command -- an
+# earlier in-prompt sentinel design was a false-positive: the sentinel string was
+# embedded in the prompt itself, so it passed even when the model only echoed the
+# prompt back and the run timed out with no real tool dispatch at all).
+#
+# Legs 1a-2a (sampled variants, same emulate-stream-harness approach) A/B test
+# whether decoding strategy, not tool-call-convention or chat-template rendering,
+# is the actual blocker. Residual Q5's de-confounded run (LARQL_RAW_PROMPT=1)
+# confirmed the cached-KV-decode engine is correct (matches INFER's full-reforward
+# top-1 exactly) and --verbose confirmed the chat-template render is well-formed
+# ChatML with the correct assistant generation-prompt suffix -- yet the model still
+# echoed the user's turn verbatim under greedy decoding on that same well-formed
+# prompt. Small-LM echo/repetition under greedy decoding is a documented failure
+# mode (arxiv 2504.20131), so these two legs set LARQL_TEMPERATURE/LARQL_TOP_P on
+# the `goose run` invocation -- confirmed to propagate through to the spawned
+# `larql chat` subprocess (goose-local-inference/src/larql.rs's Command::new never
+# calls .env_clear(), so the child inherits the full parent environment) -- to test
+# that hypothesis directly, side by side with the existing greedy baseline legs
+# rather than replacing them (this project's own "matrix multiple approaches
+# instead of guessing one fix" rule).
+#
+# emulate-buffered-harness (previously legs 3-4) is dropped from this matrix: it was
+# never implemented (tracked as plan Task 3, not started), and a leg whose only
+# output is a static "not_implemented" placeholder tests nothing -- reducing the
+# matrix is more honest than keeping TODO-shaped legs around. Implement it for real
+# first, then add it back as a leg.
+#
+# Legs 3-4 (native-template-wiring, previously 5-6) measure whether
+# SmolLM2-135M-Instruct's own chat template satisfies Goose's native-tool-calling-
+# support predicate at all (residual Q5) — a cheap, VM-free template-render check,
+# not a live agent run, since the wiring to actually USE native tool-calling in
+# larql.rs is an explicit follow-on (plan Task 4).
+#
+# Legs 5-10 (patch-chain-single-token, patch-ensemble-trigger, introspect-then-patch,
+# previously 7-12) are LARQL-CLI-only discovery/measurement legs per ADR-3 — their
+# outcome is data, not a pass/fail gate (this workflow's `aggregate` job reports them
+# descriptively, matching lql-strategy-matrix.yml's conformance.py convention). The
+# last leg's causal-ablation half (`larql dev ov-rd`) is scoped down honestly to
+# circuit-discover clustering only this phase — ov-rd's own README states it is
+# experimental and scoped to one research line, and fabricating unverified
+# ablation-flag syntax would risk a misleadingly "green" CI leg for a step that never
+# really ran the described technique.
+name: goose-larql-toolcalling-matrix
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [feat/larql-goose-selfplay]
+    paths:
+      - '.github/workflows/goose-larql-toolcalling-matrix.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/goose-larql-toolcalling-matrix.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: "1"
+  GOOSE_REF: feat/larql-local-inference-backend
+  TOOLCALL_MODEL: HuggingFaceTB/SmolLM2-135M-Instruct
+
+jobs:
+  # Enumerate the 13 legs (ADR-6's table, plus the sampled-* A/B pair). Hand-authored, not a generator script (ADR-4):
+  # the leg count is fixed and small enough to review directly in this file.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      legs: ${{ steps.gen.outputs.legs }}
+    steps:
+      - id: gen
+        run: |
+          cat > legs.json <<'EOF'
+          [
+            {"leg_id": "smol135.decode-path.infer-vs-run",                "approach_id": "decode-path-parity",        "kind": "cli-measurement", "config": "compare", "script": "run_infer_vs_run_comparison.sh"},
+            {"leg_id": "smol135.emulate-stream.shell-conv",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "shell-command", "sampling": "greedy"},
+            {"leg_id": "smol135.emulate-stream.fenced-tool",              "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "fenced-json", "sampling": "greedy"},
+            {"leg_id": "smol135.emulate-stream.sampled-shell-conv",       "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "shell-command", "sampling": "temp0.7-topp0.9"},
+            {"leg_id": "smol135.emulate-stream.sampled-fenced-tool",      "approach_id": "emulate-stream-harness",    "kind": "vm-coding-task",  "config": "fenced-json", "sampling": "temp0.7-topp0.9"},
+            {"leg_id": "smol135.native-template.compact-tools",           "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "compact-tools", "script": ""},
+            {"leg_id": "smol135.native-template.full-schema",             "approach_id": "native-template-wiring",    "kind": "cli-measurement", "config": "full-schema", "script": ""},
+            {"leg_id": "smol135.patch-chain.tool-open-tag",                "approach_id": "patch-chain-single-token",  "kind": "cli-measurement", "config": "tool-open-tag", "script": "run_patch_chain.sh"},
+            {"leg_id": "smol135.patch-chain.json-key-tokens",              "approach_id": "patch-chain-single-token",  "kind": "cli-measurement", "config": "json-key-tokens", "script": "run_patch_chain.sh"},
+            {"leg_id": "smol135.patch-ensemble.trigger-5prompt-shared-slot", "approach_id": "patch-ensemble-trigger",  "kind": "cli-measurement", "config": "shared-slot", "script": "run_patch_ensemble.sh"},
+            {"leg_id": "smol135.patch-ensemble.trigger-multi-layer-slots",  "approach_id": "patch-ensemble-trigger",  "kind": "cli-measurement", "config": "multi-layer-slots", "script": "run_patch_ensemble.sh"},
+            {"leg_id": "smol135.introspect-patch.walk-rank-only",          "approach_id": "introspect-then-patch",    "kind": "cli-measurement", "config": "walk-rank-only", "script": "run_introspect_patch.sh"},
+            {"leg_id": "smol135.introspect-patch.circuit-ablate-apply",    "approach_id": "introspect-then-patch",    "kind": "cli-measurement", "config": "circuit-ablate-apply", "script": "run_introspect_patch.sh"}
+          ]
+          EOF
+          legs=$(python3 -c "import json; print(json.dumps(json.load(open('legs.json'))))")
+          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+          echo "$legs" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{len(d)} legs planned')"
+
+  build-larql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-larql-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-larql-
+      - name: Install BLAS
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas-dev
+      - name: Build larql-cli (release)
+        run: cargo build --release -p larql-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: larql-bin
+          path: target/release/larql
+          retention-days: 1
+          if-no-files-found: error
+
+  build-goose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: metavacua/goose
+          ref: ${{ env.GOOSE_REF }}
+          path: goose-fork
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            goose-fork/target
+          key: ${{ runner.os }}-cargo-goose-${{ hashFiles('goose-fork/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-goose-
+      - name: Install libclang (needed by llama-cpp-sys-2's bindgen build step)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libclang-dev
+      - name: Build goose-cli (debug, minimal features — local-inference + rustls-tls only)
+        working-directory: goose-fork
+        run: cargo build -p goose-cli --no-default-features --features local-inference,rustls-tls
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goose-bin
+          path: goose-fork/target/debug/goose
+          retention-days: 1
+          if-no-files-found: error
+
+  prepare-vindex:
+    needs: build-larql
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: larql-bin
+          path: bin
+      - run: chmod +x bin/larql
+      - name: Install runtime libs larql needs to RUN (not just build)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0
+      - name: Cache HF model snapshot
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/huggingface/hub
+          key: ${{ runner.os }}-hf-smollm2-135m-instruct
+          restore-keys: |
+            ${{ runner.os }}-hf-smollm2-
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Pre-download HF model snapshot
+        run: |
+          pip install --quiet huggingface_hub
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('${{ env.TOOLCALL_MODEL }}')"
+      - name: Extract SmolLM2-135M-Instruct vindex
+        run: |
+          ./bin/larql extract ${{ env.TOOLCALL_MODEL }} --level inference -o smollm2-135m-instruct.vindex
+          ./bin/larql show smollm2-135m-instruct.vindex
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smollm2-vindex
+          path: smollm2-135m-instruct.vindex/
+          retention-days: 1
+          if-no-files-found: error
+
+  matrix:
+    needs: [plan, build-larql, build-goose, prepare-vindex]
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        leg: ${{ fromJSON(needs.plan.outputs.legs) }}
+    runs-on: ubuntu-latest
+    # Generous, not tightly clipped, for the vm-coding-task legs -- the objective is
+    # an autonomous closed-loop coding agent that gets real room to work, closing its
+    # own loop (guest cloud-init poweroff after goose exits) rather than being raced
+    # against an external clock. cli-measurement legs finish in seconds regardless;
+    # this ceiling is a safety net, not the normal path.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v6
+        with: { name: larql-bin, path: bin }
+      - run: chmod +x bin/larql
+      - uses: actions/download-artifact@v6
+        with: { name: smollm2-vindex, path: smollm2-135m-instruct.vindex }
+      - name: Install runtime libs larql needs to RUN
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0
+
+      # ---- kind: vm-coding-task (legs 1-2) ----
+      - name: Confirm KVM acceleration
+        if: matrix.leg.kind == 'vm-coding-task'
+        run: |
+          ls -la /dev/kvm
+          # No `apt-get update` here -- the "Install runtime libs" step just
+          # above already refreshed the package index on this same runner;
+          # re-running it is a redundant network round-trip.
+          sudo apt-get install -y -qq cpu-checker qemu-system-x86 qemu-utils cloud-image-utils libguestfs-tools
+          sudo kvm-ok
+          sudo chmod 666 /dev/kvm
+
+      - uses: actions/download-artifact@v6
+        if: matrix.leg.kind == 'vm-coding-task'
+        with: { name: goose-bin, path: bake/goose-data }
+      - name: Prep bake inputs
+        if: matrix.leg.kind == 'vm-coding-task'
+        run: |
+          mkdir -p bake/larql-data
+          cp bin/larql bake/larql-data/larql
+          cp -r smollm2-135m-instruct.vindex bake/larql-data/smollm2-135m-instruct.vindex
+          chmod +x bake/larql-data/larql bake/goose-data/goose
+
+      - name: Model registry entry (tools enabled — leg needs request.tools non-empty)
+        if: matrix.leg.kind == 'vm-coding-task'
+        run: |
+          mkdir -p bake/goose-config
+          cat > bake/goose-config/registry.json <<'EOF'
+          {
+            "models": [
+              {
+                "id": "smollm2-135m-instruct-larql",
+                "repo_id": "local/smollm2-135m-instruct-larql",
+                "filename": "smollm2-135m-instruct.vindex",
+                "quantization": "none",
+                "local_path": "/opt/larql-data/smollm2-135m-instruct.vindex",
+                "source_url": "",
+                "backend_id": "larql",
+                "storage": "manual_path",
+                "settings": {},
+                "size_bytes": 516000000,
+                "mmproj_checked": false,
+                "shard_files": []
+              }
+            ]
+          }
+          EOF
+          cat > bake/goose-config/config.yaml <<'EOF'
+          GOOSE_TELEMETRY_ENABLED: false
+          extensions:
+            developer:
+              enabled: true
+              type: platform
+              name: developer
+              description: Write and edit files, and execute shell commands
+              display_name: Developer
+              bundled: true
+              available_tools: []
+          active_provider: local
+          providers:
+            local:
+              enabled: true
+              model: smollm2-135m-instruct-larql
+              configured: true
+          GOOSE_MODE: auto
+          EOF
+
+      - name: Download base cloud image
+        if: matrix.leg.kind == 'vm-coding-task'
+        run: curl -fL -o base.qcow2 https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+
+      - name: Bake larql + goose + vindex + config into the guest image
+        if: matrix.leg.kind == 'vm-coding-task'
+        run: |
+          qemu-img create -f qcow2 -b base.qcow2 -F qcow2 overlay.qcow2 8G
+          sudo virt-customize --no-network -a overlay.qcow2 \
+            --run-command 'growpart /dev/sda 1' \
+            --run-command 'resize2fs /dev/sda1' \
+            --mkdir /opt/larql-data \
+            --copy-in bake/larql-data/larql:/opt/larql-data \
+            --copy-in bake/larql-data/smollm2-135m-instruct.vindex:/opt/larql-data \
+            --chmod 0755:/opt/larql-data/larql \
+            --run-command 'ln -sf /opt/larql-data/larql /usr/local/bin/larql' \
+            --mkdir /opt/goose-data \
+            --copy-in bake/goose-data/goose:/opt/goose-data \
+            --chmod 0755:/opt/goose-data/goose \
+            --mkdir /root/.config/goose \
+            --copy-in bake/goose-config/config.yaml:/root/.config/goose \
+            --mkdir /root/.local/share/goose/models \
+            --copy-in bake/goose-config/registry.json:/root/.local/share/goose/models
+
+      - name: Cloud-init seed — run a tool-call-eliciting task with a verifiable sentinel
+        if: matrix.leg.kind == 'vm-coding-task'
+        run: |
+          cat > user-data <<EOF
+          #cloud-config
+          write_files:
+            - path: /root/.proof_of_exec
+              permissions: '0600'
+              content: REAL_EXEC_PROOF_9f2b7d1a4c
+            - path: /root/run_goose_test.sh
+              permissions: '0755'
+              content: |
+                #!/bin/bash
+                set -u
+                echo "=== installing runtime libs ===" > /dev/console
+                apt-get update -qq > /dev/console 2>&1
+                apt-get install -y -qq libopenblas0-pthread libgfortran5 libquadmath0 > /dev/console 2>&1
+                echo "=== runtime libs installed ===" > /dev/console
+                # Bare `larql chat` smoke test, bypassing goose entirely: goose's
+                # own subprocess handling (goose-local-inference/src/larql.rs)
+                # pipes the child's stdout/stderr internally and never forwards
+                # them to this VM's console, so a prior run's JSON log (RUST_LOG=
+                # debug) showed the model load itself finishing in ~1.1s, then
+                # ZERO further log activity for the remaining ~1197s until the
+                # outer timeout killed the whole process -- ruling out slow
+                # model-loading and a visibly-repeating retry loop, but leaving
+                # "is the larql-chat subprocess itself stuck/slow" vs "is goose's
+                # own stdio piping/orchestration the actual bug" unresolved. This
+                # invokes the exact same binary+vindex goose spawns, directly,
+                # with a bounded timeout, so its raw output is visible here.
+                echo "=== bare larql chat smoke test (bypassing goose) ===" > /dev/console
+                BARE_START=\$(date +%s)
+                echo "What is 2+2?" | timeout 90 /opt/larql-data/larql chat /opt/larql-data/smollm2-135m-instruct.vindex > /root/bare_chat.log 2>&1
+                BARE_EC=\$?
+                BARE_ELAPSED=\$(( \$(date +%s) - BARE_START ))
+                echo "bare larql chat: exit=\$BARE_EC elapsed=\${BARE_ELAPSED}s" > /dev/console
+                cat /root/bare_chat.log > /dev/console
+                echo "=== end bare larql chat smoke test ===" > /dev/console
+                # Second bare smoke test: a long, single-line, tool-description-shaped
+                # prompt approximating what goose actually sends (flatten_prompt joins
+                # the tool-schema system text + task into ONE line, since run_chat
+                # reads exactly one stdin line per turn -- goose-local-inference/src/
+                # larql.rs's flatten_prompt). available_tools: [] in this leg's config
+                # means "all tools available" (confirmed: extension_manager.rs's own
+                # test comment, "Empty available_tools means all tools are available by
+                # default"), so goose's real turn DOES carry a much longer tool-schema
+                # system prompt than the trivial "What is 2+2?" control above -- this
+                # isolates prompt length/complexity as a variable, independent of
+                # goose's own stdin/stdout piping, using the same direct-CLI method.
+                TOOL_PROMPT="# Tools You have access to the following tools: shell(command: string) - Execute a shell command and return its stdout and stderr, useful for running scripts, checking file contents, installing packages, and other system operations. text_editor(path: string, command: string, file_text: string) - View, create, and edit files on the local filesystem; supports view, create, str_replace, and insert commands for precise file manipulation. list_windows() - List all currently open application windows visible on the desktop, returning their titles and identifiers for reference in subsequent screen interactions. screen_capture(window_title: string) - Capture a screenshot of the specified window or the entire screen if no window title is given, returning image data for visual inspection. | User: /grind Run the shell command: cat /root/.proof_of_exec and show me its output. Keep trying until you have actually run it and can show the real output."
+                echo "=== bare larql chat smoke test with a long tool-augmented prompt (\${#TOOL_PROMPT} chars) ===" > /dev/console
+                LONG_START=\$(date +%s)
+                echo "\$TOOL_PROMPT" | timeout 90 /opt/larql-data/larql chat /opt/larql-data/smollm2-135m-instruct.vindex > /root/bare_chat_long.log 2>&1
+                LONG_EC=\$?
+                LONG_ELAPSED=\$(( \$(date +%s) - LONG_START ))
+                echo "bare larql chat (long prompt): exit=\$LONG_EC elapsed=\${LONG_ELAPSED}s" > /dev/console
+                cat /root/bare_chat_long.log > /dev/console
+                echo "=== end long-prompt smoke test ===" > /dev/console
+                # Third bare smoke test: same long tool-augmented prompt, but this
+                # time with LARQL_SYSTEM set -- the one remaining structural gap
+                # between the two smoke tests above and goose's real invocation.
+                # goose ALWAYS sets LARQL_SYSTEM at spawn (its own tiny-model system
+                # prompt, larql.rs's tiny_model_prompt()). Inside render_user_prompt
+                # (larql-inference/src/chat/mod.rs in the larql repo),
+                # user_system.is_some() routes EVERY turn onto the multi-message
+                # chat-template path (render_chat_template_multi) instead of the
+                # simple single-turn wrap_chat_prompt the two smoke tests above
+                # exercised (neither set LARQL_SYSTEM). If there's a hang or
+                # infinite loop specific to that multi-message render path, or to
+                # how it interacts with a long single user turn, this is the last
+                # remaining difference that could explain it.
+                export LARQL_SYSTEM=\$'You are goose, an AI coding assistant. Answer directly and briefly, do not list test cases, do not explain your plan, do not ask clarifying questions unless the request is genuinely ambiguous.\n\nThe OS is linux, the shell is bin-bash, and the working directory is root.\n\nWhen asked to write code, output ONLY the code itself.\n\nFor any other question, answer in one or two sentences.'
+                echo "=== bare larql chat smoke test with LARQL_SYSTEM + long prompt ===" > /dev/console
+                SYS_START=\$(date +%s)
+                echo "\$TOOL_PROMPT" | timeout 90 /opt/larql-data/larql chat /opt/larql-data/smollm2-135m-instruct.vindex > /root/bare_chat_sys.log 2>&1
+                SYS_EC=\$?
+                SYS_ELAPSED=\$(( \$(date +%s) - SYS_START ))
+                echo "bare larql chat (LARQL_SYSTEM + long prompt): exit=\$SYS_EC elapsed=\${SYS_ELAPSED}s" > /dev/console
+                cat /root/bare_chat_sys.log > /dev/console
+                echo "=== end LARQL_SYSTEM smoke test ===" > /dev/console
+                unset LARQL_SYSTEM
+                # 1200s (20 min), not a tight clip: an autonomous closed-loop
+                # coding agent needs real room to work, closing its own loop
+                # rather than racing an external stopwatch. Safety net against a
+                # genuinely hung process, not the expected normal-completion path.
+                # /grind (not a plain instruction): sets a persistent goal that
+                # re-nudges the agent every non-tool-call turn ("Keep working,
+                # the grind goal is not yet complete") until max_turns, unlike
+                # a plain prompt which exits after exactly one turn with no
+                # tool call (agent.rs's no_tools_called -> exit_chat path).
+                # Directly tests loop-continuation, not just single-turn output,
+                # per this project's own "get the loop to properly close rather
+                # than quit after one turn" priority -- combined here with the
+                # LARQL_SYSTEM prompt-construction fix (larql.rs) in the same run.
+                #
+                # The proof value lives ONLY in /root/.proof_of_exec, never in
+                # this prompt string -- a prior version asked the model to
+                # `echo TOOLCALL_SENTINEL_...` with that same literal sentinel
+                # embedded in the prompt text, so a pure echo/copy of the
+                # prompt (no tool dispatch at all) made the sentinel appear in
+                # the transcript regardless of whether the shell command ever
+                # ran. Confirmed false-positive: a real run timed out
+                # (exit=124) after only echoing the prompt back, and the old
+                # grep-based check still reported "pass". Reading the file's
+                # content requires the shell command to have actually
+                # executed; the model has no way to produce that exact string
+                # by echoing or hallucinating the prompt.
+                # LARQL_TEMPERATURE/LARQL_TOP_P: empty string on the greedy-baseline
+                # legs, which sampling_config_from_env() treats identically to unset
+                # (str::parse fails on "", .ok() turns that into None -- see
+                # walk_cmd.rs). Set only on the sampled-* legs, testing whether
+                # decoding strategy (not tool-call convention or chat-template
+                # rendering, both already cleared by Q5) is the actual blocker.
+                # RUST_LOG: goose-cli's own logging is JSON-file-only (console: false
+                # in logging.rs), so nothing about internal retries/timeouts ever
+                # reaches stderr regardless of RUST_LOG -- the only way to see it is
+                # to read the JSON log file goose itself writes under
+                # Paths::state_dir()/logs/cli/ (etcetera XDG strategy -> under
+                # /root/.local/state/goose here, since this runs as root) and cat
+                # it out below. Two identical
+                # timeout=124 runs with bit-for-bit identical truncated stdout
+                # ("> Run the shell command: cat /root/.proof_of...") regardless of
+                # decoding strategy or the ChatState per-turn-reload fix pointed at
+                # generate()'s own hard-coded 120s per-turn GENERATE_TIMEOUT
+                # (goose-local-inference/src/larql.rs) repeatedly firing with /grind
+                # retrying -- this captures goose's internal log to confirm or rule
+                # that out with actual evidence instead of more blind fix attempts.
+                GOOSE_PROVIDER=local GOOSE_MODEL=smollm2-135m-instruct-larql \
+                  LARQL_LOAD_TIMEOUT_SECS=150 \
+                  LARQL_TOOL_CALL_CONVENTION=${{ matrix.leg.config == 'fenced-json' && 'fenced-json' || 'shell-command' }} \
+                  LARQL_TEMPERATURE=${{ matrix.leg.sampling == 'temp0.7-topp0.9' && '0.7' || '' }} \
+                  LARQL_TOP_P=${{ matrix.leg.sampling == 'temp0.7-topp0.9' && '0.9' || '' }} \
+                  RUST_LOG=goose=debug,goose_local_inference=debug,mcp_client=info \
+                  timeout 1200 /opt/goose-data/goose run --no-session --quiet --text \
+                  "/grind Run the shell command: cat /root/.proof_of_exec and show me its output. Keep trying until you have actually run it and can show the real output." \
+                  > /root/goose_stdout.log 2> /root/goose_stderr.log
+                GOOSE_EXIT=\$?
+                echo "GOOSE_TEST_DONE exit=\$GOOSE_EXIT" >> /root/goose_stderr.log
+                echo "=== GOOSE STDOUT ===" > /dev/console
+                cat /root/goose_stdout.log > /dev/console
+                echo "=== GOOSE STDERR ===" > /dev/console
+                cat /root/goose_stderr.log > /dev/console
+                echo "=== GOOSE INTERNAL JSON LOG (RUST_LOG=debug) ===" > /dev/console
+                find /root/.local/state/goose/logs/cli -type f -name '*.log' 2>/dev/null | while read -r f; do
+                  echo "--- \$f ---" > /dev/console
+                  cat "\$f" > /dev/console
+                done
+                echo "GOOSE_TEST_DONE_MARKER" > /dev/console
+                poweroff
+          runcmd:
+            - /root/run_goose_test.sh
+          EOF
+          cat > meta-data <<EOF
+          instance-id: toolcall-${{ matrix.leg.config }}
+          local-hostname: toolcall-vm
+          EOF
+          cloud-localds seed.iso user-data meta-data
+
+      - name: Boot and run the coding task
+        if: matrix.leg.kind == 'vm-coding-task'
+        run: |
+          # 1800s outer ceiling gives headroom over the inner 1200s goose
+          # timeout plus boot/apt-get/shutdown overhead -- the guest's own
+          # cloud-init script closes its own loop (poweroff after goose exits).
+          timeout 1800 qemu-system-x86_64 \
+            -enable-kvm -m 4096M -smp 2 -cpu host \
+            -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \
+            -drive file=overlay.qcow2,if=virtio \
+            -drive file=seed.iso,if=virtio,format=raw \
+            -display none -serial file:console.log -no-reboot
+
+      - name: Assert a real tool dispatch happened (proof value only readable via actual execution)
+        if: matrix.leg.kind == 'vm-coding-task'
+        run: |
+          mkdir -p out
+          cat console.log
+          outcome="fail"
+          detail="GOOSE_TEST_DONE_MARKER not found — run never completed"
+          if grep -q "GOOSE_TEST_DONE_MARKER" console.log; then
+            # REAL_EXEC_PROOF_9f2b7d1a4c lives only in /root/.proof_of_exec on
+            # the guest, never in the prompt text sent to the model (see the
+            # cloud-init step above for why the prior in-prompt sentinel was
+            # a false-positive-prone design). Its presence in the transcript
+            # can only come from the shell command actually having run.
+            if grep -q "REAL_EXEC_PROOF_9f2b7d1a4c" console.log; then
+              outcome="pass"
+              detail="proof-of-exec value found in transcript — real shell-tool dispatch confirmed"
+            else
+              outcome="fail"
+              detail="run completed but proof-of-exec value never appeared — no real tool dispatch"
+            fi
+          fi
+          printf '{"leg_id":"%s","approach_id":"%s","outcome":"%s","detail":"%s"}\n' \
+            "${{ matrix.leg.leg_id }}" "${{ matrix.leg.approach_id }}" "$outcome" "$detail" \
+            > out/result-${{ matrix.leg.leg_id }}.json
+          cat out/result-${{ matrix.leg.leg_id }}.json
+          [ "$outcome" = "pass" ]
+
+      # ---- kind: cli-measurement (legs 5-12) ----
+      - uses: actions/setup-python@v6
+        if: matrix.leg.kind == 'cli-measurement'
+        with:
+          python-version: '3.12'
+
+      - name: native-template measurement (legs 3-4)
+        if: matrix.leg.kind == 'cli-measurement' && matrix.leg.approach_id == 'native-template-wiring'
+        run: |
+          mkdir -p out
+          pip install --quiet huggingface_hub jinja2
+          python3 scripts/toolcalling_matrix/native_template_check.py \
+            --model "${{ env.TOOLCALL_MODEL }}" \
+            --schema-mode "${{ matrix.leg.config }}" \
+            --leg-id "${{ matrix.leg.leg_id }}" \
+            --approach-id "${{ matrix.leg.approach_id }}" \
+            --out out/result-${{ matrix.leg.leg_id }}.json
+          cat out/result-${{ matrix.leg.leg_id }}.json
+
+      - name: LARQL-native measurement (legs 5-10 -- one generic step, dispatched by matrix.leg.script)
+        if: matrix.leg.kind == 'cli-measurement' && matrix.leg.script != ''
+        run: |
+          mkdir -p out
+          chmod +x scripts/toolcalling_matrix/${{ matrix.leg.script }}
+          scripts/toolcalling_matrix/${{ matrix.leg.script }} \
+            "${{ matrix.leg.leg_id }}" "${{ matrix.leg.approach_id }}" "${{ matrix.leg.config }}" \
+            ./bin/larql smollm2-135m-instruct.vindex out/result-${{ matrix.leg.leg_id }}.json
+          cat out/result-${{ matrix.leg.leg_id }}.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-${{ matrix.leg.leg_id }}
+          retention-days: 7
+          path: |
+            out/result-${{ matrix.leg.leg_id }}.json
+            console.log
+
+  aggregate:
+    needs: matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+      - name: Build matrix report
+        run: |
+          python3 scripts/toolcalling_matrix/aggregate.py "artifacts/result-*/result-*.json" toolcalling-matrix.md
+          cat toolcalling-matrix.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toolcalling-matrix-report
+          retention-days: 7
+          path: toolcalling-matrix.md

@@ -453,6 +453,98 @@ fn run_with_vindex_weights(
     run_predict_inner(&weights, &tokenizer, args, index)
 }
 
+/// Model state loaded once for the interactive `larql chat` REPL, reused
+/// across every turn.
+///
+/// Before this existed, `run_chat`'s loop called the top-level `run()` (via
+/// `walk_cmd::run`) fresh for every line of stdin input, which re-ran
+/// `VectorIndex::load_vindex` + `load_model_weights_with_opts` from scratch
+/// per turn — a full reload of the vindex's weight tensors (hundreds of MB)
+/// on every single conversational turn. Under a `/grind`-driven multi-turn
+/// session (Goose re-nudging every non-tool-call turn) this reload cost
+/// compounds across turns and, on slower/virtualized disk, can consume the
+/// entire wall-clock budget before the model ever finishes even one
+/// response. `ChatState::load` does the load once; `run_turn` reuses it.
+/// (BitNet's own chat loop in `run_bitnet` already worked this way — this
+/// brings the dense/Q4K path to the same shape, not a novel design.)
+enum ChatModel {
+    Dense {
+        weights: ModelWeights,
+        tokenizer: tokenizers::Tokenizer,
+    },
+    Q4K {
+        weights: ModelWeights,
+        tokenizer: tokenizers::Tokenizer,
+    },
+}
+
+pub struct ChatState {
+    vindex_path: PathBuf,
+    index: VectorIndex,
+    model: ChatModel,
+}
+
+impl ChatState {
+    /// Load the vindex index + model weights once. Mirrors `run()`'s index
+    /// load and `run_with_vindex_weights`'s weight load/quant dispatch
+    /// exactly, just without the per-call `run_predict_inner` at the end.
+    pub fn load(
+        vindex_path: &std::path::Path,
+        verbose: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let index = if verbose {
+            let mut cb = VerboseLoadCallbacks;
+            VectorIndex::load_vindex(vindex_path, &mut cb)?
+        } else {
+            let mut cb = SilentLoadCallbacks;
+            VectorIndex::load_vindex(vindex_path, &mut cb)?
+        };
+
+        let mut cb: Box<dyn IndexLoadCallbacks> = if verbose {
+            Box::new(VerboseLoadCallbacks)
+        } else {
+            Box::new(SilentLoadCallbacks)
+        };
+        let cfg = larql_vindex::load_vindex_config(vindex_path)?;
+        let model = if cfg.quant == larql_vindex::QuantFormat::Q4K {
+            let weights = larql_vindex::load_model_weights_kquant(vindex_path, &mut *cb)?;
+            let tokenizer = load_vindex_tokenizer(vindex_path)?;
+            ChatModel::Q4K { weights, tokenizer }
+        } else {
+            let weights = larql_vindex::load_model_weights_with_opts(
+                vindex_path,
+                &mut *cb,
+                larql_vindex::LoadWeightsOptions::default(),
+            )?;
+            let tokenizer = load_vindex_tokenizer(vindex_path)?;
+            ChatModel::Dense { weights, tokenizer }
+        };
+
+        Ok(ChatState {
+            vindex_path: vindex_path.to_path_buf(),
+            index,
+            model,
+        })
+    }
+
+    /// Run one turn against the already-loaded model/index. Same dispatch
+    /// `run_with_vindex_weights` does per call, minus the reload.
+    pub fn run_turn(&mut self, args: &WalkArgs) -> Result<(), Box<dyn std::error::Error>> {
+        match &mut self.model {
+            ChatModel::Dense { weights, tokenizer } => {
+                run_predict_inner(weights, tokenizer, args, &self.index)
+            }
+            ChatModel::Q4K { weights, tokenizer } => {
+                if args.ffn_remote.is_some() {
+                    run_predict_q4k_remote(weights, tokenizer, args, &self.vindex_path)
+                } else {
+                    run_predict_q4k(weights, tokenizer, args, &self.index)
+                }
+            }
+        }
+    }
+}
+
 /// Build the Metal compute backend for `--metal`, or a clear error when the
 /// crate was built without the `gpu` feature (or off macOS). Split by `cfg`
 /// so the gpu-off build rejects through a normal `Result` — a diverging
@@ -760,14 +852,43 @@ fn run_predict_inner(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let verbose = args.verbose;
 
+    // Chat-template wrapping (the same `render_user_prompt` the remote-MoE
+    // and Metal-dense predict paths already apply -- this default dense CPU
+    // path, the one `larql run`/`larql chat` actually exercises for a plain
+    // vindex with no --moe-shards/--ffn-remote/--metal, previously tokenized
+    // `args.prompt` completely raw, with no chat template at all. Confirmed
+    // via SmolLM2-135M-Instruct's own chat_template.jinja: an instruct model
+    // given text with none of its trained-on <|im_start|>/<|im_end|> turn
+    // structure is operating far outside its instruction-tuning
+    // distribution, which plausibly explains persistent degenerate
+    // (echo/copy) completions seen from this exact path. `render_user_prompt`
+    // itself no-ops back to the raw string on any failure (missing
+    // chat_template.jinja, unknown family, etc.) -- never a regression for
+    // a vindex without one.
+    let wrapped_prompt = match args.index.as_deref() {
+        Some(vindex_path) => larql_inference::chat::render_user_prompt(
+            vindex_path,
+            weights.arch.family(),
+            &args.prompt,
+        )
+        .unwrap_or_else(|e| {
+            vlog!(
+                verbose,
+                "chat-template render failed ({e}), using raw prompt"
+            );
+            args.prompt.clone()
+        }),
+        None => args.prompt.clone(),
+    };
+
     let encoding = tokenizer
-        .encode(args.prompt.as_str(), true)
+        .encode(wrapped_prompt.as_str(), true)
         .map_err(|e| format!("tokenize error: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
     vlog!(
         verbose,
         "Prompt: {:?} ({} tokens)",
-        args.prompt,
+        wrapped_prompt,
         token_ids.len()
     );
 
@@ -1135,18 +1256,41 @@ fn generate_stream(
         },
     };
     let mut engine = kind.build(backend);
-    let generated = larql_kv::generation::generate_with_engine(
-        &mut engine,
-        weights,
-        tokenizer,
-        ffn,
-        initial_ids,
-        max_tokens,
-        |_id, tok| {
-            print!("{tok}");
-            let _ = stdout.flush();
-        },
-    );
+    let sampling = sampling_config_from_env();
+    // `is_greedy()` alone doesn't check frequency_penalty/presence_penalty
+    // (it only looks at temperature/top_k/top_p) -- a repetition-penalty-only
+    // config (LARQL_FREQUENCY_PENALTY set, temperature left at 0) would
+    // otherwise silently dispatch to the untouched greedy path below, never
+    // reaching the sampler that would apply it. Confirmed via absence-detection
+    // this session before any test exercised that combination.
+    let generated = if sampling.is_greedy() && !sampling.has_repetition_penalty() {
+        larql_kv::generation::generate_with_engine(
+            &mut engine,
+            weights,
+            tokenizer,
+            ffn,
+            initial_ids,
+            max_tokens,
+            |_id, tok| {
+                print!("{tok}");
+                let _ = stdout.flush();
+            },
+        )
+    } else {
+        larql_kv::generation::generate_with_engine_sampled(
+            &mut engine,
+            weights,
+            tokenizer,
+            ffn,
+            initial_ids,
+            max_tokens,
+            sampling,
+            |_id, tok| {
+                print!("{tok}");
+                let _ = stdout.flush();
+            },
+        )
+    };
     println!();
     if verbose {
         // Honest reporting: the backend is `backend.name()` but the
@@ -1163,6 +1307,62 @@ fn generate_stream(
         );
     }
     generated
+}
+
+/// Builds a `SamplingConfig` from env vars, defaulting to greedy (the
+/// pre-existing, always-on behavior) when none are set — additive-only,
+/// zero behavior change for any caller that doesn't opt in.
+///
+///   LARQL_TEMPERATURE       f32, e.g. "0.7"  (0 or unset = greedy)
+///   LARQL_TOP_P             f32, e.g. "0.9"  (nucleus threshold)
+///   LARQL_TOP_K             usize, e.g. "40" (restrict to top-k before top-p)
+///   LARQL_FREQUENCY_PENALTY f32, e.g. "0.5"  (OpenAI-style, penalizes by count)
+///   LARQL_PRESENCE_PENALTY  f32, e.g. "0.5"  (OpenAI-style, penalizes any repeat)
+///   LARQL_SAMPLE_SEED       u64             (reproducible sampling for evals)
+///
+/// Frequency/presence penalties apply even under an otherwise-greedy
+/// temperature (see `SamplingConfig::greedy().with_frequency_penalty(...)` in
+/// `sampling.rs`) — deterministic but repetition-resistant, a real middle
+/// ground between pure argmax and full stochastic sampling.
+fn sampling_config_from_env() -> larql_inference::layer_graph::generate::SamplingConfig {
+    use larql_inference::layer_graph::generate::SamplingConfig;
+
+    let temperature: f32 = std::env::var("LARQL_TEMPERATURE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
+    let mut cfg = SamplingConfig::temperature(temperature);
+    if let Some(top_k) = std::env::var("LARQL_TOP_K")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg = cfg.with_top_k(top_k);
+    }
+    if let Some(top_p) = std::env::var("LARQL_TOP_P")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg = cfg.with_top_p(top_p);
+    }
+    if let Some(freq) = std::env::var("LARQL_FREQUENCY_PENALTY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg = cfg.with_frequency_penalty(freq);
+    }
+    if let Some(pres) = std::env::var("LARQL_PRESENCE_PENALTY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg = cfg.with_presence_penalty(pres);
+    }
+    if let Some(seed) = std::env::var("LARQL_SAMPLE_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg = cfg.with_seed(seed);
+    }
+    cfg
 }
 
 fn is_stop_token(s: &str) -> bool {
@@ -1247,4 +1447,31 @@ fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>
         }
     }
     Ok(layers)
+}
+
+#[cfg(test)]
+mod chat_state_tests {
+    use super::ChatState;
+    use std::path::PathBuf;
+
+    // ChatState::load fixtures require a real on-disk vindex (weight tensors
+    // in the loader's exact binary format) that this crate has no synthetic
+    // builder for -- the behavioral claim this refactor makes (load once,
+    // not once per turn) is validated by CI's actual VM-coding-task legs,
+    // not a local unit test. This test covers the one thing cheaply
+    // testable without real weight fixtures: a missing vindex path fails
+    // cleanly through ChatState::load instead of panicking, matching how
+    // the pre-refactor per-turn `walk_cmd::run` path already failed on a
+    // bad path (VectorIndex::load_vindex's own error, unchanged by this
+    // refactor).
+    #[test]
+    fn load_nonexistent_vindex_path_errors_cleanly() {
+        let bogus = PathBuf::from("/this/path/does/not/exist/for/chat/state/test");
+        // ChatState has no Debug impl (holds ModelWeights/VectorIndex), so
+        // match instead of unwrap_err().
+        match ChatState::load(&bogus, false) {
+            Err(e) => assert!(!e.to_string().is_empty()),
+            Ok(_) => panic!("expected an error loading a nonexistent vindex path"),
+        }
+    }
 }
