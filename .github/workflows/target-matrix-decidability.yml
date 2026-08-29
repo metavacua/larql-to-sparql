@@ -43,6 +43,26 @@
 # assumed), the target is omitted from the matrix entirely rather than
 # kept as a permanently, unfixably red row.
 #
+# The 7 riscv*-unknown-none-elf targets are bare-metal, `no_std`-only
+# (rustc's own platform-support page notes std is unavailable, not
+# merely unused, on every one of them) -- and larql-cli is an ordinary
+# std-using binary, not `#![no_std]`-annotated. Every one of them is
+# therefore expected to fail immediately with "can't find crate for
+# `std`", before reaching anything ISA-specific (multiply/atomics/
+# float availability, the actual reason each of the 7 was chosen
+# individually -- see the commit that added them). That's not a defect
+# in scope, it's the same class of expected-red baseline `#290`'s
+# wasm32v1-none job documented for larql-cli: real information (std is
+# categorically absent here) captured as raw data, not hidden or
+# pre-empted by adding `#![no_std]` scaffolding this workflow was
+# never asked to build. If a future iteration wants the ISA-specific
+# signal these targets are actually chosen for, that requires the same
+# three-stage approach this repo's own `nvptx64-nvidia-cuda`
+# experiment already used (host-side std/alloc/core --fix, inject
+# `#![no_std]`+`extern crate alloc`, only then compile against the
+# real target) -- a distinct, larger piece of work, not implied by
+# just adding the targets to this matrix.
+#
 # `features` is a third matrix axis (`with-gpu` / `without-gpu`), not
 # just `--all-features` everywhere: larql-cli's only optional feature
 # is `gpu`, and it's already `default = ["gpu"]` -- so `--all-features`
@@ -234,6 +254,13 @@ jobs:
           - x86_64-pc-windows-msvc
           - aarch64-apple-darwin
           - aarch64-unknown-linux-gnu
+          - riscv32i-unknown-none-elf
+          - riscv32im-unknown-none-elf
+          - riscv32imc-unknown-none-elf
+          - riscv32imac-unknown-none-elf
+          - riscv32imafc-unknown-none-elf
+          - riscv64imac-unknown-none-elf
+          - riscv64gc-unknown-none-elf
         lint_scope: [functional, perf, allow-nothing, maximal, control]
         broken_code: [true, false]
         features: [with-gpu, without-gpu]
@@ -249,6 +276,32 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          # The 7 riscv*-none-elf targets rustup actually distributes a
+          # `rust-std` component for on stable -- confirmed directly,
+          # not assumed: `rustup target add` for each of the 6 Tier 3
+          # riscv*-none-elf targets (riscv32e/em/emc, riscv32ima,
+          # riscv32imfc, riscv64im) fails outright on stable, no
+          # component to fetch, so those 6 are omitted, same reasoning
+          # as `sparcv9-sun-solaris`. Bare-metal ELF cross-compilation
+          # needs no native toolchain package the way
+          # aarch64-unknown-linux-gnu's C dependencies do -- LLVM's
+          # RISC-V backend ships with any standard rustc, so
+          # ubuntu-latest with no extra install is the real, correct
+          # runner choice, not an assumption.
+          - target: riscv32i-unknown-none-elf
+            os: ubuntu-latest
+          - target: riscv32im-unknown-none-elf
+            os: ubuntu-latest
+          - target: riscv32imc-unknown-none-elf
+            os: ubuntu-latest
+          - target: riscv32imac-unknown-none-elf
+            os: ubuntu-latest
+          - target: riscv32imafc-unknown-none-elf
+            os: ubuntu-latest
+          - target: riscv64imac-unknown-none-elf
+            os: ubuntu-latest
+          - target: riscv64gc-unknown-none-elf
             os: ubuntu-latest
           # Merged into every combination matching `lint_scope`,
           # regardless of target/broken_code, by the same mechanism.
