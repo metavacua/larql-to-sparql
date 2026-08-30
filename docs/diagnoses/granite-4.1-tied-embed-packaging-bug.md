@@ -2,7 +2,7 @@
 
 Status: **diagnosed**, no workaround needed in LARQL (loader honours
 the present tensor when one is shipped, falls back to the tied embed
-otherwise — `crates/larql-models/src/loading/safetensors.rs:329`).
+otherwise — `crates/larql-models/src/loading/safetensors/`).
 MLX's `mlx_lm` rejects the model and needs an upstream fix. Last
 updated 2026-05-17.
 
@@ -45,7 +45,7 @@ Three consumer behaviours follow:
 | Consumer | Behaviour |
 |---|---|
 | `transformers.AutoModelForCausalLM` | Loads both, silently overwrites the tied head with the redundant `lm_head.weight`. Forward pass is correct (the tensors are identical, so the choice doesn't matter), but loading is ~10 s slower and uses an extra ~822 MB of host RAM during the load. |
-| LARQL (this repo) | `crates/larql-models/src/loading/safetensors.rs:329` prefers an explicit `lm_head.weight` when present; falls back to `embed.clone()` otherwise. Behaves like HF. Forward correct, 0.000 % bits/char delta to HF on the Frankenstein gate. |
+| LARQL (this repo) | `crates/larql-models/src/loading/safetensors/` prefers an explicit `lm_head.weight` when present; falls back to `embed.clone()` otherwise. Behaves like HF. Forward correct, 0.000 % bits/char delta to HF on the Frankenstein gate. |
 | `mlx_lm` (Apple MLX, ≥ v0.x) | `mlx.nn.Module.load_weights(..., strict=True)` rejects the load with `ValueError: Received 1 parameters not in model: lm_head.weight`. The MLX Granite implementation sets up tied embeddings from `tie_word_embeddings=true` and then has no slot for the redundant tensor. **Cannot load the 8B at all** without patching the safetensors or `mlx_lm`. |
 
 ## Reproduction
@@ -152,7 +152,7 @@ the model packaging, not the loader.
 
 ## LARQL impact
 
-None — LARQL Rust loads the 8B cleanly because `safetensors.rs:329`
+None — LARQL Rust loads the 8B cleanly because `loading/safetensors/`
 prefers the present `lm_head.weight` and `shannon verify` passes at
 0.000 % delta vs HF on the Frankenstein 1 KB corpus (263 tokens,
 3.9126 bits/token; PR #TBD). Q4K vindex generation through `larql

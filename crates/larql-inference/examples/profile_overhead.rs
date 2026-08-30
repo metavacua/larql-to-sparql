@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Embedding ──
     let t0 = Instant::now();
     for _ in 0..100 {
-        let scale = weights.arch.embed_scale();
+        let scale = weights.arch.embed_scale_multiplier();
         let mut h = Array2::<f32>::zeros((seq_len, hidden));
         for (i, &tok_id) in token_ids.iter().enumerate() {
             let row = weights.embed.row(tok_id as usize);

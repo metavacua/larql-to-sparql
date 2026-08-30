@@ -33,11 +33,23 @@ pub struct AttentionKernels {
 
     pub kv_attend_pipeline: ComputePipelineState,
     pub kv_attend_long_pipeline: ComputePipelineState,
+    /// KV-B1 sequence-parallel phase 3 (span <= 1024 / <= 4096).
+    pub kv_attend_seqpar_pipeline: ComputePipelineState,
+    pub kv_attend_seqpar_long_pipeline: ComputePipelineState,
+    /// Measurement-only phase-1-2 arm of `kv_attention`; see the shader.
+    /// Retained under ADR-017 as a diagnostic, never dispatched by decode.
+    pub kv_attend_phase12_only_pipeline: ComputePipelineState,
     pub kv_append_pipeline: ComputePipelineState,
     /// Default-on; opt out via `LARQL_FUSED_KV_APPEND_ATTEND=0`.
     pub kv_append_attend_fused_pipeline: ComputePipelineState,
+    /// KV-B1 sequence-parallel phase 3 for the fused append+attend path,
+    /// selected when `LARQL_KV_SEQPAR` requests more than one slice.
+    pub kv_append_attend_fused_seqpar_pipeline: ComputePipelineState,
     /// Default-on; opt out via `LARQL_FUSED_ATTN=0`.
     pub attn_fused_pipeline: ComputePipelineState,
+    /// Element-wise `out += bias` for the attention projection biases
+    /// (GPT-OSS Q/K/V/O). Dispatched only when the layer has the bias.
+    pub bias_add_pipeline: ComputePipelineState,
 
     pub rope_at_pos_pipeline: ComputePipelineState,
     pub rope_at_pos_batched_pipeline: ComputePipelineState,
@@ -69,11 +81,24 @@ impl AttentionKernels {
 
             kv_attend_pipeline: r::<shaders::kv_attention::AttendKernel>(device, library),
             kv_attend_long_pipeline: r::<shaders::kv_attention::AttendLongKernel>(device, library),
+            kv_attend_seqpar_pipeline: r::<shaders::kv_attention::AttendSeqParKernel>(
+                device, library,
+            ),
+            kv_attend_seqpar_long_pipeline: r::<shaders::kv_attention::AttendSeqParLongKernel>(
+                device, library,
+            ),
+            kv_attend_phase12_only_pipeline: r::<shaders::kv_attention::AttendPhase12OnlyKernel>(
+                device, library,
+            ),
             kv_append_pipeline: r::<shaders::kv_attention::AppendKernel>(device, library),
             kv_append_attend_fused_pipeline: r::<shaders::kv_append_attend_fused::Kernel>(
                 device, library,
             ),
+            kv_append_attend_fused_seqpar_pipeline: r::<
+                shaders::kv_append_attend_fused::SeqParKernel,
+            >(device, library),
             attn_fused_pipeline: r::<shaders::attn_fused::Kernel>(device, library),
+            bias_add_pipeline: r::<shaders::bias_add::BiasAddKernel>(device, library),
 
             rope_at_pos_pipeline: r::<shaders::rope::RopeAtPosKernel>(device, library),
             rope_at_pos_batched_pipeline: r::<shaders::rope::RopeAtPosBatchedKernel>(

@@ -4,7 +4,7 @@
 **Date:** 2026-04-01  
 **Status:** Implemented (~98%)  
 **Implementation:** `larql-vindex` crate (Rust)  
-**Companion specs:** [Format](vindex-format-spec.md), [Ecosystem](vindex-ecosystem-spec.md), [LQL](lql-spec.md)
+**Companion specs:** [Format](format-spec.md), [Ecosystem](ecosystem-spec.md), [LQL](../../larql-lql/docs/spec.md)
 
 **Implementation coverage:** All core operations (load, KNN, walk, describe, mutate, compile), full patch lifecycle, build pipeline (safetensors/GGUF/MLX), Vindexfile, HuggingFace publish/download — all implemented. Readonly base with auto-patch overlay. GateIndex trait for transparent patched/unpatched access. 600 tests.
 
@@ -44,7 +44,7 @@ Computes `gate_matrix @ residual` via BLAS matmul, returns top-K feature indices
 
 Both `VectorIndex` and `PatchedVindex` implement the `GateIndex` trait, which provides `gate_knn`, `feature_meta`, and `num_features`. This allows consumers like `WalkFfn` to work transparently with patched or unpatched indexes — INSERT/DELETE/UPDATE to the vindex immediately affect KNN results and inference output.
 
-**Performance:** 0.008ms per layer on CPU (M-series Mac). 34 layers = 0.3ms for a full walk.
+**Performance:** exact brute-force BLAS gemv, M3 Max: 22.7 µs/layer at the reduced 1024×256 synthetic shape, **2.64 ms/layer at the Gemma 3 4B production shape (10240×2560)** — criterion `benches/vindex_ops.rs` (`gate_knn_per_layer`); full tables in `README.md`/`PERFORMANCE.md`. (An earlier revision quoted 0.008 ms/layer — that was the pre-2026-04-05 `vindex_bench` example at the reduced synthetic shape, not the production shape.)
 
 ### 1.3 Walk
 
@@ -640,16 +640,21 @@ When loading an MXFP4-quantized model, LARQL detects `ExpertFormat::PackedMxfp4`
 
 ## 7. Benchmarks
 
+Criterion `benches/vindex_ops.rs`, M3 Max, synthetic data (exact
+brute-force BLAS gemv — see `README.md` for the full per-shape tables):
+
 | Operation | Latency |
 |---|---|
-| Gate KNN (per layer) | 0.008ms |
-| Walk (34 layers) | 0.3ms |
-| Feature lookup | <1ns |
-| Save gates (8 MB) | 1.1ms |
-| Load vindex | 8ms |
-| Mutate (meta + gate) | 617ns |
-| Checksum (SHA256) | 23ms |
-| MoE 8x scaling | 6.6x (sub-linear) |
+| Gate KNN, per layer (1024f × 256h synthetic) | 22.7 µs |
+| Gate KNN, per layer (10240f × 2560h — Gemma 3 4B shape) | 2.64 ms |
+| Walk (8L × 1024f × 256h synthetic) | 216 µs |
+| Walk (8L × 10240f × 2560h — Gemma band) | 21.2 ms |
+| Feature meta lookup | ~245 ns |
+| Save gates (8 MB) | 2.0 ms |
+| Load vindex (mmap) | 261 µs |
+| Mutate (meta + gate) | 301 ns |
+| Checksum (SHA256) | 19.9 ms (1024×256 synthetic — `PERFORMANCE.md` core-ops table) |
+| MoE 8x scaling | 17.6× for 8× features (sub-linear) |
 
 ---
 

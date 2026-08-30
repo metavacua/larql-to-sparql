@@ -127,19 +127,19 @@ impl Session {
         order: Option<&OrderBy>,
         limit: Option<u32>,
     ) -> Result<Vec<String>, LqlError> {
-        let (path, config, patched) = self.require_vindex()?;
+        let ctx = self.browse()?;
 
         if let Some(nc) = nearest {
-            return self.exec_select_nearest(patched, path, nc, limit);
+            return self.exec_select_nearest(&ctx, nc, limit);
         }
 
         let filters = EdgeFilters::from_conditions(conditions);
 
-        let all_layers = patched.loaded_layers();
+        let all_layers = ctx.source.loaded_layers();
         // With a feature filter the user expects to see that feature at
         // every layer; otherwise the page-size default applies.
         let default_limit = if filters.feature.is_some() {
-            patched.num_layers()
+            ctx.num_layers
         } else {
             EDGES_DEFAULT_LIMIT as usize
         };
@@ -155,8 +155,7 @@ impl Session {
 
         let mut rows: Vec<EdgeRow> = Vec::new();
         collect_edges(
-            patched,
-            path,
+            &ctx,
             classifier,
             filters.entity,
             filters.relation,
@@ -183,7 +182,7 @@ impl Session {
                     // at its layer — but a full forward, so opt-in). See
                     // docs/diagnoses/fr3-explicit-rewrite.md.
                     let resolved = self
-                        .resolve_relation_synonym(path, relations.clone(), rel)
+                        .resolve_relation_synonym(ctx.path, relations.clone(), rel)
                         .map(|(c, conf)| (c, conf, "meaning"))
                         .or_else(|| {
                             // Tier 2 candidates = the frequency-ranked relations
@@ -191,16 +190,17 @@ impl Session {
                             let cands = rc.relation_labels_ranked(
                                 crate::executor::relation_resolver::MAX_RELATIONS,
                             );
-                            self.resolve_relation_explicit(path, config, &cands, rel)
-                                .map(|(c, conf)| (c, conf, "explicit classification"))
+                            ctx.config.and_then(|config| {
+                                self.resolve_relation_explicit(ctx.path, config, &cands, rel)
+                                    .map(|(c, conf)| (c, conf, "explicit classification"))
+                            })
                         });
                     if let Some((canonical, conf, how)) = resolved {
                         notes.push(format!(
                             "  (relation '{rel}' resolved to '{canonical}' by {how}, confidence {conf:.2})"
                         ));
                         collect_edges(
-                            patched,
-                            path,
+                            &ctx,
                             classifier,
                             filters.entity,
                             Some(canonical.as_str()),
@@ -334,8 +334,7 @@ fn match_relation_top1(relations: &[String], top1: &str) -> Option<String> {
 /// it against the resolved canonical relation.
 #[allow(clippy::too_many_arguments)]
 fn collect_edges(
-    patched: &larql_vindex::PatchedVindex,
-    path: &std::path::Path,
+    ctx: &crate::executor::knowledge::BrowseCtx<'_>,
     classifier: Option<&crate::relations::RelationClassifier>,
     entity: Option<&str>,
     relation: Option<&str>,
@@ -344,19 +343,10 @@ fn collect_edges(
     rows: &mut Vec<EdgeRow>,
 ) -> Result<(), LqlError> {
     if let (Some(entity), Some(rel)) = (entity, relation) {
-        collect_via_walk(
-            patched,
-            path,
-            classifier,
-            entity,
-            rel,
-            feature,
-            scan_layers,
-            rows,
-        )?;
+        collect_via_walk(ctx, classifier, entity, rel, feature, scan_layers, rows)?;
     } else {
         collect_via_scan(
-            patched,
+            &ctx.source,
             classifier,
             entity,
             relation,
@@ -372,8 +362,7 @@ fn collect_edges(
 /// layer, filter hits by the relation label.
 #[allow(clippy::too_many_arguments)]
 fn collect_via_walk(
-    patched: &larql_vindex::PatchedVindex,
-    path: &std::path::Path,
+    ctx: &crate::executor::knowledge::BrowseCtx<'_>,
     classifier: Option<&crate::relations::RelationClassifier>,
     entity: &str,
     rel: &str,
@@ -381,9 +370,8 @@ fn collect_via_walk(
     scan_layers: &[usize],
     rows: &mut Vec<EdgeRow>,
 ) -> Result<(), LqlError> {
-    let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-        .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
-    let tokenizer = larql_vindex::load_vindex_tokenizer(path)
+    let (embed, embed_scale) = ctx.embeddings()?;
+    let tokenizer = larql_vindex::load_vindex_tokenizer(ctx.path)
         .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
     let Some(query) =
@@ -392,7 +380,7 @@ fn collect_via_walk(
         return Ok(());
     };
 
-    let trace = patched.walk(&query, scan_layers, EDGES_WALK_TOP_K);
+    let trace = ctx.source.walk(&query, scan_layers, EDGES_WALK_TOP_K);
 
     for (layer_idx, hits) in &trace.layers {
         for hit in hits {
@@ -425,7 +413,7 @@ fn collect_via_walk(
 /// Direct metadata scan: enumerate features at the requested layers
 /// and apply optional entity/relation/feature filters.
 fn collect_via_scan(
-    patched: &larql_vindex::PatchedVindex,
+    source: &crate::executor::knowledge::KnowledgeSource<'_>,
     classifier: Option<&crate::relations::RelationClassifier>,
     entity_filter: Option<&str>,
     relation_filter: Option<&str>,
@@ -434,14 +422,14 @@ fn collect_via_scan(
     rows: &mut Vec<EdgeRow>,
 ) {
     for layer in scan_layers {
-        let nf = patched.num_features(*layer);
+        let nf = source.num_features(*layer);
         for feat_idx in 0..nf {
             if let Some(ff) = feature_filter {
                 if feat_idx != ff {
                     continue;
                 }
             }
-            let Some(meta) = patched.feature_meta(*layer, feat_idx) else {
+            let Some(meta) = source.feature_meta(*layer, feat_idx) else {
                 continue;
             };
             if let Some(ent) = entity_filter {

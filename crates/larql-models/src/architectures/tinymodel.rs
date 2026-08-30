@@ -32,8 +32,8 @@ impl ModelArchitecture for TinyModelArch {
     }
 
     // ── Embedding scaling (Gemma-style) ──
-    fn embed_scale(&self) -> f32 {
-        (self.config.hidden_size as f32).sqrt()
+    fn embed_scale(&self) -> Option<f32> {
+        Some((self.config.hidden_size as f32).sqrt())
     }
 
     // ── Native key layout (no `model.` prefix, flat attn/ffn) ──

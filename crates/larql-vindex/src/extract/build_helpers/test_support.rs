@@ -57,6 +57,8 @@ pub(super) fn weights_with_embed(embed: ndarray::Array2<f32>, vocab_size: usize)
         skipped_tensors: Vec::new(),
         packed_mmaps: HashMap::new(),
         packed_byte_ranges: HashMap::new(),
+        per_layer_ffn_format: Default::default(),
+        per_layer_ffn_arrangement: Default::default(),
         embed: embed.into_shared(),
         lm_head: lm_head.into_shared(),
         position_embed: None,

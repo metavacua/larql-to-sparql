@@ -112,6 +112,36 @@ async fn http_stats_returns_model_info() {
 }
 
 #[tokio::test]
+async fn http_stats_reports_the_server_block() {
+    let app = single_model_router(state(vec![model("test")]));
+    let resp = get(app, "/v1/stats").await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp.into_body()).await;
+    let server = &body["server"];
+    assert!(server.is_object(), "{body}");
+    assert!(server["uptime_secs"].is_u64(), "{server}");
+    assert!(server["requests_served"].as_u64().unwrap() >= 1, "{server}");
+    assert_eq!(server["sessions"]["active"], 0, "{server}");
+    assert!(
+        server["sessions"]["ttl_secs"].as_u64().unwrap() > 0,
+        "{server}"
+    );
+    assert_eq!(server["responses_stored"]["entries"], 0, "{server}");
+    assert!(
+        server["responses_stored"]["capacity"].as_u64().unwrap() > 0,
+        "{server}"
+    );
+    let v3_kv = &server["v3_kv"];
+    assert_eq!(v3_kv["enabled"], true, "{server}");
+    assert_eq!(v3_kv["entries"], 0, "{server}");
+    assert!(v3_kv["capacity"].as_u64().unwrap() > 0, "{server}");
+    assert_eq!(v3_kv["hits"], 0, "{server}");
+    assert_eq!(v3_kv["misses"], 0, "{server}");
+    assert_eq!(v3_kv["resumptions"], 0, "{server}");
+    assert_eq!(v3_kv["reused_tokens_total"], 0, "{server}");
+}
+
+#[tokio::test]
 async fn http_stats_mode_full_by_default() {
     let app = single_model_router(state(vec![model("test")]));
     let resp = get(app, "/v1/stats").await;
@@ -350,13 +380,24 @@ async fn http_load_probe_labels_roundtrip() {
 async fn http_warmup_no_model_returns_404() {
     // single_model_router with empty model list → model(None) returns None → 404.
     let st = Arc::new(AppState {
-        models: vec![],
+        model_set: std::sync::RwLock::new(larql_server::state::ModelSet {
+            models: vec![],
+            v3_models: Vec::new(),
+        }),
+        router_topology: larql_server::state::RouterTopology::SingleModel,
+        lifecycle: std::sync::Mutex::new(larql_server::state::LifecycleState::Idle),
         started_at: std::time::Instant::now(),
         requests_served: AtomicU64::new(0),
         api_key: None,
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(0),
         infer_timeout: std::time::Duration::from_secs(60),
+        responses: larql_server::response_store::ResponseStore::new(),
+        v3_kv: larql_server::response_kv::ResponseKvCache::new(
+            larql_server::response_kv::DEFAULT_MAX_ENTRIES,
+            larql_server::response_kv::DEFAULT_TTL_SECS,
+        ),
+        runtime: Arc::new(larql_server::runtime_stats::RuntimeRecorder::new()),
     });
     let app = single_model_router(st);
     let resp = post_json(app, "/v1/warmup", serde_json::json!({})).await;

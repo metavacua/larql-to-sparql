@@ -93,27 +93,49 @@ fn decide_headroom(limit: u64, estimate_bytes: u64, headroom_bytes: u64) -> MemC
 /// on a numeric limit, `Ok(None)` if it is `"max"` (unlimited), or
 /// `Err` if the cgroup hierarchy can't be discovered.
 pub fn read_cgroup_v2_memory_max() -> Result<Option<u64>, String> {
-    let path = locate_memory_max()?;
-    let s = std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    parse_memory_max(s.trim())
+    let cgroup = std::fs::read_to_string(PROC_SELF_CGROUP)
+        .map_err(|e| format!("read {PROC_SELF_CGROUP}: {e}"))?;
+    let path = memory_max_path(&cgroup, Path::new(CGROUP_V2_ROOT))?;
+    read_memory_max_at(&path)
 }
 
-fn locate_memory_max() -> Result<PathBuf, String> {
-    let cgroup = std::fs::read_to_string("/proc/self/cgroup")
-        .map_err(|e| format!("read /proc/self/cgroup: {e}"))?;
-    let cgroup_rel =
-        parse_cgroup_v2_path(&cgroup).ok_or_else(|| "no cgroup v2 unified entry".to_string())?;
+/// Where the kernel publishes this process's cgroup membership.
+const PROC_SELF_CGROUP: &str = "/proc/self/cgroup";
+/// Mount point of the cgroup v2 unified hierarchy.
+const CGROUP_V2_ROOT: &str = "/sys/fs/cgroup";
+/// The limit file within a cgroup directory.
+const MEMORY_MAX_FILE: &str = "memory.max";
+
+/// The `memory.max` path for the cgroup `cgroup_text` names, under
+/// `unified_root`.
+///
+/// The root is a parameter rather than a constant so this is exercisable
+/// against a temporary hierarchy. It previously read `/proc/self/cgroup`
+/// and joined `/sys/fs/cgroup` inline, which made every branch here
+/// reachable only on a Linux host that happened to be running under cgroup
+/// v2 — so on any other machine the resolution rules went untested while
+/// looking covered by the caller's tests.
+fn memory_max_path(cgroup_text: &str, unified_root: &Path) -> Result<PathBuf, String> {
+    let cgroup_rel = parse_cgroup_v2_path(cgroup_text)
+        .ok_or_else(|| "no cgroup v2 unified entry".to_string())?;
+    // The unified entry is absolute (`/`, `/user.slice/...`); joining it
+    // as-is would discard `unified_root` entirely.
     let trimmed = cgroup_rel.trim_start_matches('/');
-    let unified_root = Path::new("/sys/fs/cgroup");
     let candidate = if trimmed.is_empty() {
-        unified_root.join("memory.max")
+        unified_root.join(MEMORY_MAX_FILE)
     } else {
-        unified_root.join(trimmed).join("memory.max")
+        unified_root.join(trimmed).join(MEMORY_MAX_FILE)
     };
     if !candidate.exists() {
         return Err(format!("{} not found", candidate.display()));
     }
     Ok(candidate)
+}
+
+/// Parse a `memory.max` file that is already known to exist.
+fn read_memory_max_at(path: &Path) -> Result<Option<u64>, String> {
+    let s = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    parse_memory_max(s.trim())
 }
 
 fn parse_memory_max(s: &str) -> Result<Option<u64>, String> {
@@ -308,5 +330,75 @@ mod tests {
         // Only legacy v1 lines (non-zero hierarchy ids) → no unified entry.
         let content = "11:memory:/docker/abc\n4:cpu,cpuacct:/docker/abc\n";
         assert_eq!(parse_cgroup_v2_path(content), None);
+    }
+
+    /// The resolver joins the unified entry under the given root, and
+    /// refuses when the file is not there.
+    ///
+    /// The `trim_start_matches('/')` is the load-bearing line: `Path::join`
+    /// with an absolute argument REPLACES the base, so without the trim the
+    /// candidate would be `/user.slice/memory.max` on the real filesystem
+    /// regardless of where the hierarchy is mounted — a path that does not
+    /// exist, reported as "not found" rather than as the bug it is.
+    #[test]
+    fn memory_max_path_joins_the_unified_entry_under_the_root() {
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("user.slice/session.scope");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("memory.max"), "1048576\n").unwrap();
+
+        let cgroup = "0::/user.slice/session.scope\n";
+        let got = memory_max_path(cgroup, root.path()).unwrap();
+        assert_eq!(got, nested.join("memory.max"));
+        assert!(
+            got.starts_with(root.path()),
+            "an absolute cgroup entry must not escape the root: {got:?}"
+        );
+    }
+
+    /// A process in the root cgroup (`0::/`) reads the root's own file.
+    #[test]
+    fn the_root_cgroup_resolves_to_the_roots_own_limit_file() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("memory.max"), "max\n").unwrap();
+        let got = memory_max_path("0::/\n", root.path()).unwrap();
+        assert_eq!(got, root.path().join("memory.max"));
+    }
+
+    #[test]
+    fn a_missing_limit_file_is_reported_with_its_path() {
+        let root = tempfile::tempdir().unwrap();
+        let err = memory_max_path("0::/nowhere\n", root.path()).unwrap_err();
+        assert!(err.contains("nowhere"), "{err}");
+        assert!(err.contains("not found"), "{err}");
+    }
+
+    #[test]
+    fn a_cgroup_file_with_no_unified_entry_is_refused() {
+        // v1-only hierarchy: no `0::` line at all.
+        let root = tempfile::tempdir().unwrap();
+        let err = memory_max_path("11:memory:/docker/abc\n", root.path()).unwrap_err();
+        assert!(err.contains("no cgroup v2 unified entry"), "{err}");
+    }
+
+    /// Reading a limit file goes through the same parser as the caller,
+    /// including the unlimited sentinel.
+    #[test]
+    fn reading_a_limit_file_handles_both_a_number_and_max() {
+        let dir = tempfile::tempdir().unwrap();
+        let numeric = dir.path().join("memory.max");
+        std::fs::write(&numeric, "2097152\n").unwrap();
+        assert_eq!(read_memory_max_at(&numeric).unwrap(), Some(2_097_152));
+
+        let unlimited = dir.path().join("unlimited.max");
+        std::fs::write(&unlimited, "max\n").unwrap();
+        assert_eq!(read_memory_max_at(&unlimited).unwrap(), None);
+    }
+
+    #[test]
+    fn reading_an_absent_limit_file_reports_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_memory_max_at(&dir.path().join("gone.max")).unwrap_err();
+        assert!(err.contains("gone.max"), "{err}");
     }
 }

@@ -106,7 +106,7 @@ When `down_features.bin` is not available, the walk falls back to gate KNN + spa
 
 ```bash
 # Convert gate vectors to f32 (zero-copy mmap for KNN)
-cargo run --release -p larql-vindex --example convert_gates_f32 -- path/to/vindex/
+cargo run --release -p larql-vindex --example build_convert_gates_f32 -- path/to/vindex/
 
 # Build feature-major down vectors (zero-copy mmap for down projection)
 cargo run --release -p larql-vindex --example build_down_features -- path/to/vindex/
@@ -121,7 +121,8 @@ use larql_inference::vindex::WalkFfn;
 let walk_ffn = WalkFfn::new(weights, &index, top_k);
 let result = predict_with_ffn(weights, tokenizer, &token_ids, 5, &walk_ffn);
 
-// With trace (for analysis — re-runs gate KNN lazily on take_trace)
+// With trace (for analysis — runtime records folded from the executed
+// path; take_trace() drains them, 2026-07-30 review item 17)
 let walk_ffn = WalkFfn::new_with_trace(weights, &index, top_k);
 let result = predict_with_ffn(weights, tokenizer, &token_ids, 5, &walk_ffn);
 let trace = walk_ffn.take_trace();
@@ -291,10 +292,10 @@ let model = InferenceModel::load_walk_only("google/gemma-3-4b-it")?;
 | File | Purpose |
 |------|---------|
 | `larql-server` | HTTP server with walk/dense/compare inference modes |
-| `larql-vindex/examples/convert_gates_f32.rs` | f16 → f32 gate vector converter |
+| `larql-vindex/examples/build_convert_gates_f32.rs` | f16 → f32 gate vector converter |
 | `larql-vindex/examples/build_down_features.rs` | Feature-major down vector builder |
 | `larql-vindex/examples/build_up_features.rs` | Feature-major up vector builder |
 | `larql-inference/examples/bench_walk_inference.rs` | Walk benchmark (dense vs walk vs HNSW) |
-| `larql-inference/examples/walk_boundary_sweep.rs` | Correctness sweep (all 34 layers) |
+| `chris-experiments/larql_probes/examples/misc/walk_boundary_sweep.rs` | Correctness sweep (all 34 layers) |
 | `larql-inference/examples/profile_overhead.rs` | Forward pass bottleneck profiler |
 | `larql-inference/examples/memory_analysis.rs` | Memory profiling (RSS, mmap, walk-only) |

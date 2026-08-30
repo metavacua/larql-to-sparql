@@ -6,7 +6,20 @@ These files are not full regression gates yet. They capture the exact command
 surface and first measured numbers so the CPU baseline work can move from
 "not started" to repeatable.
 
-## Current measurement (post-fix)
+## Superseded measurement (2026-05; kept for the series, not as current)
+
+> **This section was headed "Current measurement (post-fix)" until
+> 2026-08-22 and had been stale for two months.** Its sibling
+> `COMPARISON.md` (2026-06-22) revised the decode comparison from *1.69×
+> behind* to **~1.1× ahead** (~42 vs ~38 tok/s) after the q4k-direct
+> prefill work. Read `COMPARISON.md` for the standing CPU numbers.
+>
+> Two further reasons not to quote these: the whole May/June CPU series was
+> taken on the one thread configuration that avoids the spin-pool E-core
+> collapse (`docs/diagnoses/memory-bandwidth-roofline.md`), and
+> `larql-compute/CHANGELOG.md` records that criterion's default sampling
+> flattered the same pool by ~1.8×. They are a baseline to compare a
+> re-run against, not a present-tense claim.
 
 - LARQL Gemma 3 4B Q4K CPU decode: **24.5 tok/s** (was 0.36; ~68× over baseline).
 - llama.cpp Gemma 3 4B Q4_K_M CPU decode: 42.53 tok/s.

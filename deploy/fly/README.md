@@ -24,7 +24,7 @@ so they never consume physical RAM.
 ## Step 1 — Publish the expert-server slice to HuggingFace
 
 The `expert-server` preset includes everything the server needs: embeddings,
-norms, dense FFN (`interleaved_q4k.bin`), per-layer expert weights (`layers/`),
+norms, dense FFN (`interleaved_kquant.bin`), per-layer expert weights (`layers/`),
 and tokenizer. Total: ~14.1 GB.
 
 ```bash

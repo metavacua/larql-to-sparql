@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "CLI for LARQL knowledge graph extraction and querying"
 
 [[bin]]
@@ -19,6 +20,8 @@ larql-kv = { path = "../larql-kv" }
 larql-models = { path = "../larql-models" }
 larql-lql = { path = "../larql-lql" }
 larql-vindex = { path = "../larql-vindex" }
+larql-vindex-spec = { path = "../larql-vindex-spec" }
+larql-factory = { path = "../larql-factory" }
 clap = { version = "4", features = ["derive", "env"] }
 indicatif = "0.17"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
@@ -29,6 +32,7 @@ memmap2 = "0.9"
 ndarray = "0.16"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = "0.10"
 thiserror = { workspace = true }
 minijinja = "2"
 libc = "0.2"
@@ -37,6 +41,9 @@ rayon = "1.10"
 # Pruned features — we only need JPEG/PNG/WebP. Skipping TIFF/AVIF/HDR/etc
 # avoids dragging in libavif, libtiff, openexr, and a 2 MB binary tax.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+# Default scratch directory for `larql recipe build` when --scratch-dir
+# is omitted — not test-only, the CLI needs this at runtime.
+tempfile = "3"
 
 [features]
 default = ["gpu"]
@@ -48,8 +55,14 @@ gpu = [
 ]
 
 [dev-dependencies]
-tempfile = "3"
 # `test-utils` exposes `larql_models::test_fixtures::make_test_weights`,
 # used by run_cmd_image tests to borrow a real ModelConfig without
 # enumerating every field by hand. Production builds don't compile it.
 larql-models = { path = "../larql-models", features = ["test-utils"] }
+# `test-utils` exposes `larql_vindex_spec::test_fixtures::sample_manifest`,
+# used by card_cmd tests to build a real VindexManifest without
+# enumerating every field by hand.
+larql-vindex-spec = { path = "../larql-vindex-spec", features = ["test-utils"] }
+
+[lints]
+workspace = true

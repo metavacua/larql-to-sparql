@@ -1,0 +1,648 @@
+//! The backend seam (V3-G5b-3b): what *executes* a plan, versus what the
+//! plan *means*.
+//!
+//! One [`ComponentOpPlan`](super::super::ComponentOpPlan), one interpreter,
+//! many backends. The interpreter in [`super`] owns every decision that is
+//! semantics — operation ordering, residual ordering, layer traversal,
+//! whether an optional operation exists at all, and how position and span
+//! policy dispatch. A [`PlanBackend`] owns only the numerical realisation
+//! of work it is handed.
+//!
+//! **Nothing in this file mentions a model family, and nothing in it takes
+//! a plan type.** Backends receive primitives, judged enums, and *already
+//! loaded* weight slices — never a `LayerPlan`, an `OperandRef`, or the
+//! `OperandStore`. That is deliberate and load-bearing: a backend that
+//! could resolve its own operands by name, or read the layer structure,
+//! could quietly grow into a second implementation of the model and
+//! disagree with the IR while still passing. It cannot reach the bytes,
+//! so it cannot reinterpret them.
+//!
+//! The corollary for anyone adding a method: if a backend needs to ask
+//! *whether* to do something, the seam is in the wrong place. It should
+//! only ever be told what to compute.
+
+use larql_models::config::{
+    Activation, AttentionGateSpec, AttentionSinkSpec, ExpertRoutingPolicy, GateUpLayout,
+    MoeRouterKind, NormType, ParameterFreeQkNorm, PositionPolicy, QkNormScope,
+};
+
+use super::super::super::graph::policy::AttentionSpan;
+use super::cpu::WeightRows;
+use crate::error::VindexError;
+
+/// The numerical representation a backend wants matrix operands in.
+///
+/// Asked once by the interpreter (a capability, like [`PlanBackend::name`],
+/// not a per-call decision): the interpreter loads every matrix operand in
+/// the declared format and the backend receives what it asked for. Norm
+/// and QK-norm weights and the embedding table are always f32 — they are
+/// elementwise glue, not matrix traffic, and narrowing them buys nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WeightFormat {
+    /// Widened f32 — the constitutional representation.
+    F32,
+    /// Stored bf16, kept EXACTLY as the checkpoint holds it.
+    ///
+    /// Not a conversion and not a quantisation: bf16 is the top 16 bits
+    /// of the f32 it denotes, so a consumer widens with `(bits as u32) <<
+    /// 16` — no rounding, no table, no loss. Declaring this removes the
+    /// artificial F32 materialisation (107.6 GB resident against a 53.8
+    /// GB checkpoint) rather than introducing a new numeric format.
+    ///
+    /// Only worth declaring for matrices large enough to STREAM. A
+    /// cache-resident matrix has no RAM traffic to halve, and the
+    /// measured `48 x 5120` case runs 3.8x faster through BLAS f32 — see
+    /// `exec::cpu::kernels::FusedBf16`.
+    Bf16,
+    /// Symmetric int8, one f32 scale per [`Q8_BLOCK`] elements along the
+    /// input axis.
+    ///
+    /// **The first LOSSY residency format.** `Bf16` keeps the
+    /// checkpoint's own bytes and changes no value; this one quantises at
+    /// load and the model it decodes is not quite the model that was
+    /// stored. Everything about it is therefore judged on logits, KL, a
+    /// trajectory and recurrent-state drift, not on residency alone.
+    ///
+    /// Blocked along the input axis so a kernel accumulates a block and
+    /// scales once. 8.5 bits/weight with the scales counted.
+    ///
+    /// Worth declaring only where the BF16 image is too big for cache —
+    /// measured, `1024 x 5120` runs 0.81x through Q8 because at 10.5 MB
+    /// it is already L2-resident and the extra unpacking is pure cost.
+    Q8,
+    /// IEEE 754 half, little-endian. Exactly representable from stored
+    /// bf16 for all normal-range values (bf16's 7 mantissa bits fit in
+    /// f16's 10); conversion fails closed on overflow. A device backend
+    /// declares this so weights can stay resident in half the bytes.
+    F16,
+    /// OCP microscaling 4-bit float: e2m1 codes two-per-byte plus one
+    /// e8m0 scale per 32-element group, in separate streams. A lossy
+    /// realisation — quantised at load, judged by the parity gates —
+    /// that quarters the bytes every decoded token must read.
+    Mxfp4,
+    /// The same e2m1 elements under a different scale geometry: 16-element
+    /// groups with **E4M3** scales, plus one f32 per matrix. 4.5 bpw
+    /// against MXFP4's 4.25.
+    ///
+    /// Present as its own format rather than a parameter of [`Self::Mxfp4`]
+    /// because the difference is the point: E8M0 forces a group's scale to
+    /// a power of two, and a weight-reconstruction sweep over Muse-Glimmer
+    /// with an equal-bit-budget control (E8M0 at group 16) found the group
+    /// size worth nothing and the scale format worth 1.27x in relative RMS
+    /// and 1.7x in worst-element error.
+    Nvfp4,
+}
+
+/// Which matrix a format question is about. Formats are declared per
+/// class because the classes have different numerical stakes: the
+/// output head feeds logits directly, attention feeds the softmax, and
+/// the FFN is the bulk of the bytes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MatrixClass {
+    AttentionProjection,
+    FfnProjection,
+    OutputHead,
+    /// One stored tensor holding every expert's matrix, sliced at load.
+    ///
+    /// Its own class because it is not one matrix: the bank is split into
+    /// `experts` matrices and may be quantised on the way, so the path has
+    /// already widened to f32 by the time a format could be applied. A
+    /// question about "how big is this matrix" has no answer here, which
+    /// is exactly why answering it as an `FfnProjection` would be wrong.
+    RoutedExpertBank,
+}
+
+/// What the interpreter knows about one matrix operand before loading
+/// it: enough to choose a representation, never enough to reinterpret
+/// the tensor.
+///
+/// The class alone stopped being sufficient at Qwen3.8. Its `48 x 5120`
+/// delta gates and its `10240 x 5120` fused projection are both
+/// attention-class operands separated by a factor of 213 in size, and
+/// the measured answer for one is the wrong answer for the other by
+/// 3.8x. A per-class declaration cannot express that; a per-operand one
+/// can.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct MatrixOperand {
+    pub class: MatrixClass,
+    /// The matrix's element count — `out_dim * in_dim`.
+    pub elements: usize,
+    /// Whether the container holds this operand as bf16 AND it can be
+    /// read unwidened. A physical fact about the checkpoint, not a
+    /// preference: a backend that wants compact bytes where there are
+    /// none would have to quantise to get them.
+    pub stored_bf16: bool,
+}
+
+/// A backend's declared format per matrix class.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WeightFormats {
+    pub attention: WeightFormat,
+    pub ffn: WeightFormat,
+    pub head: WeightFormat,
+}
+
+impl WeightFormats {
+    /// The same format everywhere.
+    pub fn uniform(format: WeightFormat) -> Self {
+        Self {
+            attention: format,
+            ffn: format,
+            head: format,
+        }
+    }
+
+    pub fn for_class(&self, class: MatrixClass) -> WeightFormat {
+        match class {
+            MatrixClass::AttentionProjection => self.attention,
+            // A device backend places the bank exactly as it places any
+            // other FFN matrix — the distinction the class draws is about
+            // the HOST load path, not about device residency.
+            MatrixClass::FfnProjection | MatrixClass::RoutedExpertBank => self.ffn,
+            MatrixClass::OutputHead => self.head,
+        }
+    }
+}
+
+/// One matrix operand, in the representation the backend declared.
+///
+/// An `F16` slice may be longer than the matrix needs (page-padded for
+/// zero-copy device wrapping); geometry always travels separately.
+#[derive(Clone, Copy)]
+pub enum WeightSlice<'a> {
+    F32(&'a [f32]),
+    /// Stored bf16 code units, still compact.
+    Bf16(&'a [u16]),
+    /// Symmetric int8 codes and their per-block f32 scales.
+    Q8 {
+        codes: &'a [i8],
+        scales: &'a [f32],
+        block: usize,
+    },
+    /// Little-endian IEEE f16 bytes.
+    F16(&'a [u8]),
+    /// MXFP4: packed e2m1 codes (`[n, k/32, 16]`, lo nibble first) and
+    /// e8m0 scales (`[n, k/32]`) as two streams.
+    Mxfp4 {
+        packed: &'a [u8],
+        scales: &'a [u8],
+    },
+    /// NVFP4: packed e2m1 codes (`[n, k/16, 8]`, lo nibble first), E4M3
+    /// group scales (`[n, k/16]`), and the single f32 both scale levels
+    /// are expressed relative to.
+    Nvfp4 {
+        packed: &'a [u8],
+        scales: &'a [u8],
+        tensor_scale: f32,
+    },
+}
+
+impl<'a> WeightSlice<'a> {
+    /// The f32 view a CPU backend computes with. A backend that declared
+    /// `F32` can never legitimately receive `F16`, so this is fail-closed
+    /// evidence of an interpreter bug, not a conversion point.
+    /// The stored bf16 code units, when that is what was loaded.
+    ///
+    /// Deliberately NOT a widening accessor. A `Bf16` variant whose only
+    /// consumer called `as_f32()` would give a tidy type and zero
+    /// benefit: the whole point is that the compact bytes reach a kernel
+    /// still compact.
+    pub fn as_bf16(&self) -> Result<&'a [u16], VindexError> {
+        match self {
+            WeightSlice::Bf16(w) => Ok(w),
+            _ => Err(VindexError::Parse(
+                "backend declared bf16 weights but was handed another format — interpreter \
+                 loaded the wrong representation"
+                    .to_string(),
+            )),
+        }
+    }
+
+    /// The row-range view a CPU kernel consumes, cut to the matrix's
+    /// real geometry.
+    ///
+    /// **The truncation is load-bearing.** A resident slice may be LONGER
+    /// than `out_dim * in_dim`: `AlignedBytes` pads every allocation up to
+    /// the device page so a Metal buffer can wrap it zero-copy, and the
+    /// padding is zeros. A kernel handed the whole slice would compute
+    /// `len / in_dim` rows — more rows than the matrix has — and the
+    /// executor would partition the wrong total across its workers.
+    ///
+    /// Qwen3.8 cannot show this. Every one of its matrices happens to be
+    /// an exact multiple of the 16 KiB page, so the padded and logical
+    /// lengths coincide and a version of this that forgot to truncate
+    /// would decode the model perfectly. The gate uses a shape that is
+    /// not a page multiple for exactly that reason.
+    pub fn rows(&self, out_dim: usize, in_dim: usize) -> Result<WeightRows<'a>, VindexError> {
+        let want = out_dim * in_dim;
+        let short = |have: usize| {
+            VindexError::Parse(format!(
+                "a {out_dim} x {in_dim} projection needs {want} weights but only {have} are                  resident"
+            ))
+        };
+        match self {
+            WeightSlice::F32(w) => w
+                .get(..want)
+                .map(WeightRows::F32)
+                .ok_or_else(|| short(w.len())),
+            WeightSlice::Bf16(w) => w
+                .get(..want)
+                .map(WeightRows::Bf16)
+                .ok_or_else(|| short(w.len())),
+            WeightSlice::Q8 {
+                codes,
+                scales,
+                block,
+            } => {
+                let per_row = in_dim.div_ceil(*block);
+                match (codes.get(..want), scales.get(..out_dim * per_row)) {
+                    (Some(codes), Some(scales)) => Ok(WeightRows::Q8 {
+                        codes,
+                        scales,
+                        block: *block,
+                    }),
+                    _ => Err(short(codes.len())),
+                }
+            }
+            other => Err(VindexError::Parse(format!(
+                "no CPU projection kernel consumes {} weights — the backend declared a \
+                 representation only a device can run, so this refuses rather than converting \
+                 mid-decode",
+                other.representation()
+            ))),
+        }
+    }
+
+    /// This slice's representation, for diagnostics. Never dispatched on
+    /// — a backend that branched on the name instead of the variant would
+    /// be one `match` away from silently accepting a format it cannot run.
+    pub fn representation(&self) -> &'static str {
+        match self {
+            WeightSlice::F32(_) => "f32",
+            WeightSlice::Bf16(_) => "bf16",
+            WeightSlice::Q8 { .. } => "q8",
+            WeightSlice::F16(_) => "f16",
+            WeightSlice::Mxfp4 { .. } => "mxfp4",
+            WeightSlice::Nvfp4 { .. } => "nvfp4",
+        }
+    }
+
+    pub fn as_f32(&self) -> Result<&'a [f32], VindexError> {
+        match self {
+            WeightSlice::F32(w) => Ok(w),
+            WeightSlice::Bf16(_)
+            | WeightSlice::Q8 { .. }
+            | WeightSlice::F16(_)
+            | WeightSlice::Mxfp4 { .. }
+            | WeightSlice::Nvfp4 { .. } => Err(VindexError::Parse(
+                "backend declared f32 weights but was handed another format — interpreter \
+                 loaded the wrong representation"
+                    .to_string(),
+            )),
+        }
+    }
+}
+
+/// One normalisation, fully resolved.
+///
+/// `weight` empty means a parameter-free application (statistic only) —
+/// the interpreter decides that from the plan, never the backend.
+pub struct NormCall<'a> {
+    pub kind: NormType,
+    pub x: &'a [f32],
+    pub weight: &'a [f32],
+    pub weight_offset: f32,
+    pub eps: f64,
+}
+
+/// One `[out, in]` row-major projection applied to one vector.
+pub struct ProjectCall<'a> {
+    pub weight: WeightSlice<'a>,
+    pub out_dim: usize,
+    pub in_dim: usize,
+    pub x: &'a [f32],
+}
+
+/// QK normalisation weights and scope, when the plan binds them.
+pub struct QkNormCall<'a> {
+    pub scope: QkNormScope,
+    pub weight_offset: f32,
+    pub q_weight: &'a [f32],
+    pub k_weight: &'a [f32],
+}
+
+/// The attention output gate, when the surface judged one.
+pub struct GateCall<'a> {
+    pub spec: AttentionGateSpec,
+    pub weight: WeightSlice<'a>,
+}
+
+/// The judged attention-sink semantics plus the per-query-head logits,
+/// f32 like every other elementwise operand.
+pub struct SinkCall<'a> {
+    pub spec: AttentionSinkSpec,
+    /// `num_q_heads` logits.
+    pub logits: &'a [f32],
+}
+
+/// The additive projection biases, all four present or none — closure
+/// guarantees the pairing with the surface's `attention_bias`. Each is
+/// one value per output row of its projection.
+pub struct BiasCall<'a> {
+    pub q: &'a [f32],
+    pub k: &'a [f32],
+    pub v: &'a [f32],
+    pub o: &'a [f32],
+}
+
+/// One attention operation over a whole sequence, fully resolved.
+///
+/// `inputs` are the attention *inputs* — already normalised by the
+/// interpreter — because the judged gate reads that same vector, and
+/// handing the backend one operand for both uses removes any chance of
+/// the two drifting apart.
+/// What a whole-sequence attention pass produces.
+///
+/// `outputs[p]` is position `p`'s attention output post
+/// output-projection; `keys[p]` / `values[p]` are the conditioned rows
+/// for that position — the rows a [`KvState`](super::kv::KvState)
+/// provider caches, in the same form [`PlanBackend::attention_step`]
+/// returns.
+///
+/// Positions are the sequence's own, starting at zero: a batched pass
+/// conditions position `p` as the `p`-th token, so it cannot express a
+/// prefill resuming part-way through a sequence. That is why the
+/// executor still steps when extending a populated provider.
+pub struct AttentionOut {
+    pub outputs: Vec<Vec<f32>>,
+    pub keys: Vec<Vec<f32>>,
+    pub values: Vec<Vec<f32>>,
+}
+
+pub struct AttentionCall<'a> {
+    pub inputs: &'a [Vec<f32>],
+    pub hidden: usize,
+    pub num_q_heads: usize,
+    pub num_kv_heads: usize,
+    pub head_dim: usize,
+    pub w_q: WeightSlice<'a>,
+    pub w_k: WeightSlice<'a>,
+    pub w_v: WeightSlice<'a>,
+    pub w_o: WeightSlice<'a>,
+    pub qk_norm: Option<QkNormCall<'a>>,
+    pub parameter_free_qk_norm: ParameterFreeQkNorm,
+    /// Epsilon for both QK-norm forms; rides with the layer's norm
+    /// surface because neither form declares its own.
+    pub qk_norm_eps: f64,
+    /// `None` = no query-scale operation, never an invented 1.0.
+    pub query_scale: Option<f64>,
+    pub score_scale: f64,
+    pub logit_softcapping: Option<f32>,
+    pub position: PositionPolicy,
+    pub span: AttentionSpan,
+    pub window: Option<usize>,
+    pub gate: Option<GateCall<'a>>,
+    /// Q/K/V/O biases: Q and K added right after projection (before
+    /// QK-norm and rope), V before caching, O after the output
+    /// projection. `None` = the op has no biases.
+    pub bias: Option<BiasCall<'a>>,
+    /// Attention sinks; `None` = ordinary softmax.
+    pub sinks: Option<SinkCall<'a>>,
+}
+
+/// One feed-forward operation over one vector, fully resolved.
+///
+/// `gate` present means gated; absent means standard. Again the
+/// interpreter reads that from the plan.
+pub struct FfnCall<'a> {
+    pub x: &'a [f32],
+    pub hidden: usize,
+    pub intermediate: usize,
+    pub gate: Option<WeightSlice<'a>>,
+    pub up: WeightSlice<'a>,
+    pub down: WeightSlice<'a>,
+    pub activation: Activation,
+    /// How `gate` combines with `up`. Every backend must honour it or
+    /// refuse: computing `activation(gate) * up` for a `ClampedGlu` plan
+    /// runs a different model.
+    pub gate_policy: larql_models::ExpertGatePolicy,
+}
+
+/// One routed feed-forward operation over one vector, fully resolved:
+/// the router in f32 (glue-sized), every expert's projections in the
+/// backend's declared FFN format, and every judged semantic as an
+/// argument. The backend routes, runs the selected experts and combines
+/// — nothing here is re-derived from the plan.
+pub struct RoutedFfnCall<'a> {
+    pub x: &'a [f32],
+    pub hidden: usize,
+    /// Per-expert intermediate width.
+    pub intermediate: usize,
+    pub experts: usize,
+    pub top_k: usize,
+    pub router_kind: MoeRouterKind,
+    pub routing_policy: ExpertRoutingPolicy,
+    pub activation: Activation,
+    pub gate_policy: larql_models::ExpertGatePolicy,
+    /// How each expert's fused `gate_up` rows split into gate and up.
+    pub gate_up_layout: GateUpLayout,
+    /// Router logits matrix `[experts, hidden]`, row-major.
+    pub router: &'a [f32],
+    /// Additive router bias `[experts]`.
+    pub router_bias: Option<&'a [f32]>,
+    /// One `[2·intermediate, hidden]` matrix per expert.
+    pub gate_up: &'a [WeightSlice<'a>],
+    /// Fused gate/up bias, `[experts · 2·intermediate]` flat, in the
+    /// operand's own row layout.
+    pub gate_up_bias: Option<&'a [f32]>,
+    /// One `[hidden, intermediate]` matrix per expert.
+    pub down: &'a [WeightSlice<'a>],
+    /// Down bias, `[experts · hidden]` flat.
+    pub down_bias: Option<&'a [f32]>,
+    /// What the router reads. Every family but Gemma 4 routes on the same
+    /// vector the experts consume (`x`); Gemma 4's router reads the RAW
+    /// post-attention residual and conditions it itself. `None` = `x`.
+    pub router_input: Option<&'a [f32]>,
+    /// `MoeRouterKind::Gemma4Hybrid` conditioning, present iff the plan
+    /// carries it: `router_input` is RMS-normalised without a weight
+    /// (`router_norm_eps`), multiplied by `router_scale` `[hidden]` and by
+    /// `hidden^-0.5` before the projection; the renormalised top-k weights
+    /// are multiplied by `router_per_expert_scale[selected]`.
+    pub router_scale: Option<&'a [f32]>,
+    pub router_per_expert_scale: Option<&'a [f32]>,
+    pub router_norm_eps: Option<f64>,
+}
+
+/// One position's attention against interpreter-owned K/V state — the
+/// decode step.
+///
+/// `op.inputs` holds exactly one row: this position's already-normalised
+/// attention input. `keys`/`values` are the post-norm, post-rope K and V
+/// rows of every earlier position, exactly as this backend returned them
+/// from earlier steps — the interpreter owns the cache; the backend owns
+/// only the arithmetic of one step.
+pub struct AttentionStepCall<'a> {
+    /// The resolved attention operation, identical in meaning to the
+    /// batch call — one struct so the two paths cannot drift apart in
+    /// what they carry.
+    pub op: AttentionCall<'a>,
+    /// Absolute position of the row in `op.inputs`.
+    pub position: usize,
+    /// Cached K rows for positions `0..position`.
+    pub keys: &'a [Vec<f32>],
+    /// Cached V rows for positions `0..position`.
+    pub values: &'a [Vec<f32>],
+}
+
+/// One position's projected, conditioned (Q, K, V) — the intermediate
+/// every backend's projection helper produces.
+pub type ProjectedQkv = (Vec<f32>, Vec<f32>, Vec<f32>);
+
+/// What one decode step returns: this position's K and V rows (for the
+/// interpreter to append to its cache) and the attention output
+/// (post gate, post output-projection).
+pub struct AttentionStepOut {
+    pub key: Vec<f32>,
+    pub value: Vec<f32>,
+    pub output: Vec<f32>,
+}
+
+/// The numerical realisation of a plan's operations.
+///
+/// Every method is total over its arguments: the caller has already
+/// decided the operation happens. A backend may fail on work it cannot
+/// perform (an unimplemented QK-norm scope, a device error), but it may
+/// not decline work on semantic grounds — that judgment was made before
+/// the call.
+///
+/// `Sync` because the interpreter issues per-position calls from
+/// worker threads. Positions are independent through every operation
+/// (attention reads other positions' K/V but never writes them), so
+/// this parallelism reorders nothing within any one position's
+/// arithmetic — results stay bit-identical to a serial execution.
+/// What a backend spent inside its own dispatch calls, for attributing a
+/// token's latency between device work and the interpreter's glue.
+///
+/// Exists because "the part that does not scale with weight bytes" is not
+/// automatically submission overhead: the elementwise glue (norms, RoPE,
+/// softmax over the KV cache, activations, residuals) is also a fixed
+/// per-token cost, and optimising the wrong one of the two is free to
+/// look like progress on a fit that cannot tell them apart.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DispatchStats {
+    /// Wall nanoseconds inside device dispatch calls — submission,
+    /// device execution, and the wait, together.
+    pub device_nanos: u64,
+    /// Device submissions made (one per command buffer).
+    pub submissions: u64,
+}
+
+pub trait PlanBackend: Sync {
+    /// A name for diagnostics and parity reports. Not dispatched on.
+    fn name(&self) -> &str;
+
+    /// Cumulative device-dispatch accounting, when the backend keeps it.
+    /// `None` for backends with no device to account for.
+    fn dispatch_stats(&self) -> Option<DispatchStats> {
+        None
+    }
+
+    /// The representation this backend wants one matrix operand loaded
+    /// in. A capability, asked per operand at load time — not a per-call
+    /// decision, and not a per-model one.
+    fn weight_format(&self, _operand: MatrixOperand) -> WeightFormat {
+        WeightFormat::F32
+    }
+
+    /// How this backend performs a Gated DeltaNet layer's dense
+    /// projections.
+    ///
+    /// Defaults to the literal scalar transcription, so a backend that
+    /// says nothing gets the reference arithmetic rather than inheriting
+    /// somebody else's. The recurrence itself is not selectable — only
+    /// the five matrix products around it.
+    fn dense_projector(&self) -> &dyn super::gated_delta::DenseProjections {
+        &super::gated_delta::ScalarProjections
+    }
+
+    /// Residency hint before a decode run: every matrix operand the
+    /// session will read, already loaded. Computes nothing and must
+    /// change no number — a backend may warm caches or wire device
+    /// memory, or ignore it entirely. The default does nothing.
+    fn prepare(&self, _weights: &[WeightSlice<'_>]) {}
+
+    /// Look up one embedding row, applying the scale operation when the
+    /// plan carries one. `scale` `None` = no such operation, so the row
+    /// is returned unscaled rather than multiplied by an identity.
+    fn embed(&self, table: &[f32], hidden: usize, token: u32, scale: Option<f32>) -> Vec<f32>;
+
+    fn norm(&self, call: NormCall<'_>) -> Vec<f32>;
+
+    /// Fallible for the same reason as [`Self::attention`]: a device
+    /// backend may be unable to perform the work, and it must say so
+    /// rather than borrow another backend's arithmetic.
+    fn project(&self, call: ProjectCall<'_>) -> Result<Vec<f32>, VindexError>;
+
+    /// Attention over the whole sequence.
+    ///
+    /// Returns the conditioned K/V rows alongside the outputs because
+    /// the realisation already computes them: it must, to attend at
+    /// all. Discarding them is what forced a caller that wanted a
+    /// populated K/V cache down [`Self::attention_step`] instead —
+    /// coupling "I want KV" to "run attention one position at a time"
+    /// (V3-SERVE-2).
+    ///
+    /// The rows must be the same rows [`Self::attention_step`] would
+    /// produce for the same position and input; both realisations of a
+    /// backend answer for one program, and the attention-parity gates
+    /// pin them together.
+    fn attention(&self, call: AttentionCall<'_>) -> Result<AttentionOut, VindexError>;
+
+    /// One position's attention against cached K/V — the decode step.
+    ///
+    /// Must realise exactly the arithmetic its own [`Self::attention`]
+    /// applies to a single position: the decode-vs-batch parity tests
+    /// pin the two paths together per backend, and a backend may not
+    /// borrow another backend's step to fill the gap.
+    fn attention_step(&self, call: AttentionStepCall<'_>) -> Result<AttentionStepOut, VindexError>;
+
+    /// Fallible for the same reason as [`Self::attention`]: a backend
+    /// with no kernel for a judged variant must say so, not borrow
+    /// another backend's arithmetic to fill the gap.
+    fn ffn(&self, call: FfnCall<'_>) -> Result<Vec<f32>, VindexError>;
+
+    /// The routed FFN — a mixture of experts. Required of every backend
+    /// for the same reason as [`Self::ffn`]: a backend without the
+    /// arithmetic must refuse, never borrow it.
+    /// Multiply one hidden row by a scalar in place — Gemma 4's
+    /// `layer_scalar` on the whole layer output. Elementwise glue like
+    /// [`Self::residual_add`]; a backend overrides only to keep the row on
+    /// its device.
+    fn scale_row(&self, row: &mut [f32], scale: f32) {
+        for value in row {
+            *value *= scale;
+        }
+    }
+
+    fn routed_ffn(&self, call: RoutedFfnCall<'_>) -> Result<Vec<f32>, VindexError>;
+
+    /// Vocabulary projection plus the head's optional multiplier and
+    /// softcap, in that order.
+    fn output_head(
+        &self,
+        projection: WeightSlice<'_>,
+        vocab: usize,
+        hidden: usize,
+        x: &[f32],
+        multiplier: Option<f64>,
+        softcapping: Option<f32>,
+    ) -> Result<Vec<f32>, VindexError>;
+
+    /// Add `delta` into `acc` elementwise — the residual write.
+    ///
+    /// A method rather than a loop in the interpreter because residual
+    /// accumulation order is exactly the kind of thing a fused production
+    /// kernel wants to own, and because a backend that reassociates it
+    /// should have to say so.
+    fn residual_add(&self, acc: &mut [f32], delta: &[f32]);
+}

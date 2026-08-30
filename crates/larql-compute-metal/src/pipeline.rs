@@ -39,8 +39,8 @@ mod tests {
     fn multi_layer_q4_ffn_dispatches_two_layers() {
         let m = backend();
         let block_bytes = 18usize;
-        let hidden = 32usize;
-        let inter = 64usize;
+        let hidden = 256usize;
+        let inter = 512usize;
         let blocks_per_row = hidden / 32;
         let gate = vec![0u8; inter * blocks_per_row * block_bytes];
         let up = vec![0u8; inter * blocks_per_row * block_bytes];

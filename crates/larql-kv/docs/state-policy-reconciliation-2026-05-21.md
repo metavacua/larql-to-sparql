@@ -22,7 +22,7 @@ slot — different perf shape.
 | `MarkovResidual` (windowless) | **derivative** | None | 98.0 | +0.4% |
 | `MarkovResidualCodec` (windowless) | **derivative** | None | 98.1 | +0.5% |
 | `BoundaryPerLayer` (windowless) | **derivative** | None | 98.7 | +1.1% |
-| `UnlimitedContext` (window=256) | **derivative** | HOnly | 94.2 | -3.5% |
+| `WindowedCheckpoint` (window=256) | **derivative** | HOnly | 94.2 | -3.5% |
 | `TurboQuant` (bits=4) | canonical (destructive codec) | n/a | 85.0 | -12.9% |
 | `NoCache` | canonical (no K/V; re-forward) | n/a | n/a | (debug fallback) |
 | `BoundaryKv` | canonical (composes `Standard`) | n/a | — | no live Q4K bench (2026-05-21: `Q4K engine prefill failed`) |
@@ -56,7 +56,7 @@ explicit prediction-test.
 -|---|---|---|---:|
 -| `MarkovResidualEngine` | residual stream | `hot_kv`; (`rs.stored` too when `window=None`) | 106.8 (None) |
 -| `MarkovResidualCodecEngine` | codec residuals | same | 98.5 (None) |
--| `UnlimitedContextEngine` | KV within window | `current_window_kv` (CPU shadow of the Metal cache) | 92.8 (HOnly) |
+-| `WindowedCheckpointEngine` | KV within window | `current_window_kv` (CPU shadow of the Metal cache) | 92.8 (HOnly) |
 -| `TurboQuantEngine` | compressed K/V (destructive) | nothing — K/V IS canonical | — |
 -| `StandardEngine` | KV tensors | n/a — backend-managed already | (reference, ~100) |
 +| Engine | Canonical | Derivative dropped under W10 | W10 tok/s |
@@ -65,7 +65,7 @@ explicit prediction-test.
 +| `MarkovResidualEngine` | residual stream | `hot_kv`; (`rs.stored` too when `window=None`) | **98.0** (None) |
 +| `MarkovResidualCodecEngine` | codec residuals | same | **98.1** (None) |
 +| `BoundaryPerLayerEngine` | per-layer codec residuals | same | **98.7** (None) |
-+| `UnlimitedContextEngine` | KV within window | `current_window_kv` (CPU shadow) | 94.2 (HOnly) |
++| `WindowedCheckpointEngine` | KV within window | `current_window_kv` (CPU shadow) | 94.2 (HOnly) |
 +| `TurboQuantEngine` | compressed K/V (destructive) | nothing — K/V IS canonical | 85.0 (Full) |
 ```
 
@@ -127,8 +127,8 @@ prediction.
 +| `BoundaryKvEngine` | KV tensors + chunk frames | — | `exact_logits` | no live Q4K bench (2026-05-21) |
 -| `BoundaryPerLayerEngine` | per-layer codec policy over residuals | hot KV | `bounded_KL(ε_l)` per-layer; calibrated |
 +| `BoundaryPerLayerEngine` | per-layer codec residuals | `rs.stored` (windowless) — no hot KV shadow | `bounded_KL(ε_l)` per-layer; calibrated | **yes** |
--| `UnlimitedContextEngine` | KV tensors (within window) + per-window checkpoints + token archive | — | `exact_logits` within window |
-+| `UnlimitedContextEngine` | KV (within window) + per-window checkpoints + token archive | `current_window_kv` (CPU shadow of Metal cache) | `exact_logits` within window | **yes** (HOnly only) |
+-| `WindowedCheckpointEngine` | KV tensors (within window) + per-window checkpoints + token archive | — | `exact_logits` within window |
++| `WindowedCheckpointEngine` | KV (within window) + per-window checkpoints + token archive | `current_window_kv` (CPU shadow of Metal cache) | `exact_logits` within window | **yes** (HOnly only) |
 -| `TurboQuantEngine` | quantised KV (in-place) | — | `bounded_KL` — codec round-trip ≥ cos 0.991 on real distributions |
 +| `TurboQuantEngine` | quantised KV (in-place; destructive codec) | — | `bounded_KL` — cos ≥ 0.991 | **no** — K/V is canonical; see task #31 for the derivative-KV variant |
 -| `Apollo` | boundary retrieval / residual injection store | — | `task_level_retrieval` |
@@ -201,7 +201,7 @@ but aren't on the production bench path.
 +| `MarkovResidual { window_size }` | `--engine markov-rs[:window=N]` | Stores residuals, recomputes K/V at decode | **98.0** (None) | On live path |
 +| `MarkovResidualCodec { window_size, codec }` | `--engine markov-rs-codec[:window=N]` | `MarkovResidual` + bf16-encoded cold-tier residuals (2× cold saving) | **98.1** (None) | On live path |
 +| `BoundaryPerLayer { window_size, num_layers }` | `--engine boundary-per-layer[:window=N,layers=L]` | Per-layer codec policy on cold tier; calibration-driven; cold-start convenience constructor | **98.7** (None) | On live path |
-+| `UnlimitedContext { window_size }` | `--engine unlimited-context:window=N` | Per-window K/V checkpoints + token archive | 94.2 (HOnly only) | On live path |
++| `WindowedCheckpoint { window_size }` | `--engine unlimited-context:window=N` | Per-window K/V checkpoints + token archive | 94.2 (HOnly only) | On live path |
 +| `TurboQuant { bits }` | `--engine turbo-quant:bits=N` | WHT + Lloyd-Max 3/4-bit K/V codec (canonical K/V — destructive) | 85.0 (Full) | On live path; see §7.2 for the derivative-KV variant proposal |
 ```
 

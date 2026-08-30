@@ -1,12 +1,18 @@
+// tonic-generated services return `tonic::Status` (>128 bytes) by contract;
+// the error shape is prost/tonic's, not ours to box (clippy::result_large_err,
+// rust 1.98).
 pub mod proto {
+    #![allow(clippy::result_large_err)]
     tonic::include_proto!("larql.grid.v1");
 }
 
 pub mod expert_proto {
+    #![allow(clippy::result_large_err)]
     tonic::include_proto!("larql.expert.v1");
 }
 
 pub mod shard_proto {
+    #![allow(clippy::result_large_err)]
     tonic::include_proto!("larql.shard.v1");
 }
 

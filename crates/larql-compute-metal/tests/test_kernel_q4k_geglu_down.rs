@@ -182,3 +182,41 @@ fn q4k_geglu_silu_down_gemma4_31b_ffn() {
 fn q4k_geglu_gelu_tanh_down_gemma4_31b_ffn() {
     assert_fused_geglu_down_matches_separated("gemma4-31b ffn (gelu_tanh)", 5376, 21504, false);
 }
+
+/// Regression for the missing tanh clamp (capability audit F1).
+///
+/// Apple Silicon's `tanh` is `(exp(2y)-1)/(exp(2y)+1)` and returns NaN
+/// once `|y| ≳ 44`; gate values around ±10 push the GELU-tanh argument
+/// past that. The separated `geglu_gelu_tanh` kernel has clamped at ±15
+/// since the incident that discovered this; the fused kernel shipped
+/// without the clamp, which is the mechanical explanation for the
+/// recorded fused-path NaN incidents (Gemma 4 31B layer 11; the
+/// "every hidden value NaN" prefill report). Rust's `tanh` is exact, so
+/// the CPU reference stays finite — pre-fix this test fails with NaN in
+/// every output row.
+#[test]
+fn q4k_geglu_gelu_tanh_down_survives_large_gate_values() {
+    let n = 32usize;
+    let inter = 256usize;
+    let metal = get_metal();
+    let cpu = larql_compute::cpu::CpuBackend;
+
+    let down_f32 = synth_matrix_q4k_friendly(n, inter, 0.21);
+    // Gate magnitudes ~±12: tanh argument ≈ ±71, past the ≈44 NaN
+    // threshold, well past the ±15 clamp (tanh(15) − 1 < 1e-13).
+    let gate: Vec<f32> = (0..inter)
+        .map(|i| if i % 2 == 0 { 12.0 } else { -12.0 })
+        .collect();
+    let up = synth_vec(inter, 0.83);
+    let down_q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(&down_f32);
+
+    let cpu_ref = cpu_geglu_then_matvec(&cpu, &down_q4k, &gate, &up, false, n, inter);
+    let fused = metal_fused_geglu_down(&metal, &down_q4k, &gate, &up, false, n, inter);
+
+    assert!(
+        fused.iter().all(|v| v.is_finite()),
+        "fused GELU-tanh output contains non-finite values on large gates"
+    );
+    let cos = cos_sim(&cpu_ref, &fused);
+    assert!(cos > 0.999, "large-gate parity: cos={cos:.6}");
+}

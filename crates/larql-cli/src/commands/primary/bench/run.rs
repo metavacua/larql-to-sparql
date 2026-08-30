@@ -19,6 +19,51 @@ use super::remote_moe_runtime::run_concurrent_moe;
 use super::row::{BenchJsonLatency, BenchJsonResult, BenchJsonRow, BenchJsonStages, BenchRow};
 
 pub fn run(mut args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
+    // QUARANTINED — and NOT because `--repeat` causes anything. It does
+    // not; that attribution was made and falsified on 2026-08-16 and the
+    // correction is the point of this comment.
+    //
+    // gpt-oss-20b on Metal intermittently begins a process in a state
+    // where decode short-circuits to ~0.5 ms/token (~2000 tok/s, which a
+    // 20B MoE cannot do) and generates DIFFERENT text. Measured across
+    // fresh processes, same command, same prompt, `--repeat 1`:
+    //
+    //   run 1   0.50 ms/tok   fp=72f97535…   broken
+    //   run 2  17.69 ms/tok   fp=8a2986f7…   sane latency
+    //   run 3  18.65 ms/tok   fp=e9a47f8b…   sane latency, third output
+    //   run 4   0.64 ms/tok   fp=72f97535…   broken
+    //
+    // So the fault exists before `--repeat` enters the picture. Call it a
+    // process-scoped startup fault and no more: where it is selected --
+    // process start, backend construction, buffer acquisition, first
+    // encoding, first use of a stale allocation -- is NOT established, and
+    // only provenance can say. It was first seen under `--repeat 8` merely
+    // because every repeat inherits its process's state, which is why all
+    // eight repeats carried one fingerprint.
+    //
+    // THAT is the reason for the refusal: N repeats inside one process are
+    // N correlated observations of a single draw, not N independent
+    // samples. A process-scoped fault is precisely what repeats cannot
+    // sample, and they silently multiply one outcome into a row count that
+    // reads like replication. Any determinism or independent-sample claim
+    // needs one process per sample.
+    //
+    // Note runs 2 and 3 above: sane latency, different fingerprints. There
+    // are two distinct defects here — the catastrophic short-circuit and a
+    // lower-grade output nondeterminism — and a step-count gate certifies
+    // both, since the 0.50 ms run completed all its steps. See
+    // docs/kv-attention-scaling.md §Run hygiene for the validity gate that
+    // catches them.
+    if args.repeat > 1 {
+        return Err("`--repeat > 1` is quarantined: all repeats inherit one \
+             process's state, so they are correlated observations of a single \
+             draw rather than independent samples — and gpt-oss-20b on Metal \
+             intermittently starts a process in a broken state. Use one \
+             process per sample. See docs/kv-attention-scaling.md and the \
+             note in bench/run.rs."
+            .into());
+    }
+
     // Configure rayon's global thread pool up front. Auto-select picks
     // 8 on Apple silicon — empirically the sweet spot for Q4_K × Q8_K
     // matvec on M3 Max's LPDDR5 controllers (12-thread default
@@ -142,7 +187,7 @@ pub fn run(mut args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     if want_metal {
         if is_q4k {
-            rows.push(run_larql(&vindex_path, &args, /* metal */ true)?);
+            rows.extend(run_larql(&vindex_path, &args, /* metal */ true)?);
         } else if !want_engine {
             return Err(format!(
                 "GPU bench requires a Q4K vindex (got quant={:?}). \
@@ -154,7 +199,7 @@ pub fn run(mut args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
     if want_cpu && !arch_is_moe {
         if is_q4k {
-            rows.push(run_larql(&vindex_path, &args, /* metal */ false)?);
+            rows.extend(run_larql(&vindex_path, &args, /* metal */ false)?);
         } else if !want_engine {
             return Err(format!(
                 "CPU bench requires a Q4K vindex (got quant={:?}).",
@@ -416,7 +461,7 @@ pub fn run(mut args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
 fn vindex_is_hybrid_moe(dir: &std::path::Path) -> bool {
     let mut cb = larql_vindex::SilentLoadCallbacks;
     larql_vindex::load_model_weights_kquant(dir, &mut cb)
-        .map(|w| w.arch.is_hybrid_moe())
+        .map(|w| w.arch.is_moe() || w.arch.is_hybrid_moe())
         .unwrap_or(false)
 }
 

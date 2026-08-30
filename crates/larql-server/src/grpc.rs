@@ -92,7 +92,6 @@ impl VindexService for VindexGrpcService {
             .state
             .model(None)
             .ok_or_else(|| Status::not_found("no model loaded"))?;
-        let model = Arc::clone(model);
 
         let result = tokio::task::spawn_blocking(move || grpc_describe(&model, &req))
             .await
@@ -108,7 +107,6 @@ impl VindexService for VindexGrpcService {
             .state
             .model(None)
             .ok_or_else(|| Status::not_found("no model loaded"))?;
-        let model = Arc::clone(model);
 
         let result = tokio::task::spawn_blocking(move || grpc_walk(&model, &req))
             .await
@@ -127,7 +125,6 @@ impl VindexService for VindexGrpcService {
             .state
             .model(None)
             .ok_or_else(|| Status::not_found("no model loaded"))?;
-        let model = Arc::clone(model);
 
         let result = tokio::task::spawn_blocking(move || grpc_select(&model, &req))
             .await
@@ -151,7 +148,6 @@ impl VindexService for VindexGrpcService {
             return Err(Status::unavailable("inference disabled (--no-infer)"));
         }
 
-        let model = Arc::clone(model);
         let result = tokio::task::spawn_blocking(move || grpc_infer(&model, &req))
             .await
             .map_err(|e| Status::internal(e.to_string()))??;
@@ -168,7 +164,6 @@ impl VindexService for VindexGrpcService {
             .state
             .model(None)
             .ok_or_else(|| Status::not_found("no model loaded"))?;
-        let model = Arc::clone(model);
 
         let result = tokio::task::spawn_blocking(move || grpc_relations(&model))
             .await
@@ -187,7 +182,6 @@ impl VindexService for VindexGrpcService {
             .state
             .model(None)
             .ok_or_else(|| Status::not_found("no model loaded"))?;
-        let model = Arc::clone(model);
 
         let result = tokio::task::spawn_blocking(move || grpc_walk_ffn(&model, &req))
             .await
@@ -208,7 +202,6 @@ impl VindexService for VindexGrpcService {
             .state
             .model(None)
             .ok_or_else(|| Status::not_found("no model loaded"))?;
-        let model = Arc::clone(model);
 
         let (tx, rx) = tokio::sync::mpsc::channel(64);
 

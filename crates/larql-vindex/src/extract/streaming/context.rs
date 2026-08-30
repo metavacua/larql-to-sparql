@@ -97,7 +97,7 @@ impl<'a> StreamingContext<'a> {
         let num_layers = cfg.num_layers;
         let hidden_size = cfg.hidden_size;
         let intermediate_size = cfg.intermediate_size;
-        let embed_scale = arch.embed_scale();
+        let embed_scale = arch.embed_scale_multiplier();
         let is_moe = arch.is_moe();
         let n_experts = arch.num_experts();
         let expert_format = arch.expert_format();

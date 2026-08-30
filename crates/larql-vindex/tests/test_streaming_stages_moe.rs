@@ -216,7 +216,9 @@ fn streaming_extract_mixtral_exercises_moe_arms() {
         QuantFormat::None,
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
-        false, // drop_gate_vectors
+        false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None, // expert_banks_out
         &mut cb,
     )
     .expect("streaming extract on mixtral fixture");
@@ -457,6 +459,8 @@ fn streaming_extract_gemma4_hybrid_moe_exercises_packed_bf16_arms() {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .expect("streaming extract on gemma4 hybrid MoE fixture");
@@ -704,6 +708,8 @@ fn streaming_extract_gpt_oss_exercises_packed_mxfp4_arms() {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .expect("streaming extract on gpt-oss MXFP4 fixture");
@@ -823,6 +829,8 @@ fn streaming_extract_mixtral_resumes_when_run_twice_on_same_output_dir() {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .expect("first-pass extract");
@@ -855,6 +863,8 @@ fn streaming_extract_mixtral_resumes_when_run_twice_on_same_output_dir() {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb2,
     )
     .expect("second-pass extract reuses checkpoint");
@@ -908,6 +918,8 @@ fn streaming_extract_mixtral_with_real_tokenizer_records_top_k_entries() {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .expect("streaming extract with real tokenizer");
@@ -972,7 +984,9 @@ fn streaming_extract_mixtral_with_drop_gate_vectors_removes_zero_byte_file() {
             skip_ffn: false,
         },
         KquantWriteOptions::default(),
-        true, // drop_gate_vectors
+        true,
+        larql_vindex::ExtractionRequest::Legacy,
+        None, // expert_banks_out
         &mut cb,
     )
     .expect("streaming extract with drop_gate_vectors=true");
@@ -1037,6 +1051,8 @@ fn streaming_extract_mixtral_with_summary_k_runs_svd_and_caps_down_meta() {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .expect("streaming extract on mixtral fixture with summary_k");
@@ -1183,7 +1199,9 @@ fn streaming_extract_gguf_llama_browse_runs_end_to_end() {
         QuantFormat::None,
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
-        false, // drop_gate_vectors
+        false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None, // expert_banks_out
         &mut cb,
     )
     .expect("streaming extract on GGUF llama fixture");
@@ -1232,6 +1250,8 @@ fn streaming_extract_gguf_single_file_path_is_accepted() {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .expect("streaming extract on single-file GGUF");
@@ -1263,7 +1283,9 @@ fn streaming_extract_drop_gate_without_q4k_is_rejected() {
         QuantFormat::None, // not Q4K — drop_gate is invalid here
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
-        true, // drop_gate_vectors
+        true,
+        larql_vindex::ExtractionRequest::Legacy,
+        None, // expert_banks_out
         &mut cb,
     )
     .expect_err("drop_gate_vectors without Q4K must be rejected");
@@ -1307,6 +1329,8 @@ fn streaming_extract_dense_with_missing_ffn_down_skips_down_projection() {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .expect("extract should succeed even when ffn_down is absent");
@@ -1343,6 +1367,8 @@ fn streaming_extract_moe_with_missing_expert_down_skips_layer() {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .expect("extract should succeed when expert down tensors are absent");
@@ -1383,6 +1409,8 @@ fn streaming_extract_resumes_and_skips_down_meta_when_checkpoint_marks_it() {
             WriteWeightsOptions::default(),
             KquantWriteOptions::default(),
             false,
+            larql_vindex::ExtractionRequest::Legacy,
+            None,
             &mut cb,
         )
         .expect("streaming extract");

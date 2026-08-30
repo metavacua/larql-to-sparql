@@ -134,14 +134,33 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
     let num_kv_heads = text_config["num_key_value_heads"]
         .as_u64()
         .unwrap_or(DEFAULT_NUM_KV_HEADS) as usize;
-    // RoPE base: check rope_parameters.full_attention.rope_theta (Gemma 4),
-    // then top-level rope_theta, then default.
+    // RoPE base, in declaration-specificity order:
+    //  1. rope_parameters.full_attention.rope_theta — Gemma 4's structured
+    //     per-layer-type form;
+    //  2. rope_parameters.rope_theta — the transformers-5.x flat form
+    //     (`rope_parameters: {rope_theta: N, rope_type: "default"}`), which
+    //     replaces the legacy top-level field in new checkpoints;
+    //  3. rope_theta at the top level — the legacy flat form;
+    //  4. the architecture-class default.
+    //
+    // Form 2 was silently skipped until the Muse-Glimmer inventory caught the
+    // fallthrough: a checkpoint declaring θ=500000 in the flat 5.x form
+    // resolved to the 10000 default — the §4.7.8 shape on a brand-new key
+    // spelling. Any transformers-5.x checkpoint hits this, not one family.
     let rope_params = text_config.get("rope_parameters");
     let rope_base = rope_params
         .and_then(|rp| rp.get("full_attention"))
         .and_then(|fa| fa["rope_theta"].as_f64())
+        .or_else(|| rope_params.and_then(|rp| rp["rope_theta"].as_f64()))
         .or_else(|| text_config["rope_theta"].as_f64())
         .unwrap_or(rope_default);
+    // Per-layer declared theta array (`layer_rope_theta`), kept verbatim —
+    // including `0.0` NoPE sentinels. The sentinel is interpreted exactly
+    // once, in `ModelArchitecture::position_policy_for_layer`.
+    let layer_rope_theta = text_config.get("layer_rope_theta").and_then(|lt| {
+        lt.as_array()
+            .map(|arr| arr.iter().filter_map(serde_json::Value::as_f64).collect())
+    });
     // Local RoPE base for sliding window layers: check rope_parameters.sliding_attention,
     // then rope_local_base_freq.
     let rope_local_base = rope_params
@@ -150,6 +169,12 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         .or_else(|| text_config["rope_local_base_freq"].as_f64());
     let vocab_size = text_config["vocab_size"].as_u64().map(|v| v as usize);
     let sliding_window = text_config["sliding_window"].as_u64().map(|v| v as usize);
+    // Read from the *outer* config too: some families declare it at the top
+    // level next to `architectures` rather than inside `text_config`.
+    let tie_word_embeddings = text_config
+        .get("tie_word_embeddings")
+        .or_else(|| config.get("tie_word_embeddings"))
+        .and_then(|v| v.as_bool());
 
     // MoE fields
     let num_experts = field_u64(text_config, NUM_EXPERTS_KEYS).map(|v| v as usize);
@@ -162,6 +187,14 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
     let moe_intermediate_size = text_config["moe_intermediate_size"]
         .as_u64()
         .map(|v| v as usize);
+    // GPT-OSS clamps both halves of the fused gate/up projection at ±this
+    // value before the GLU. Read rather than hardcoded: it is a published
+    // config field and a future checkpoint may pick a different bound.
+    let swiglu_limit = text_config["swiglu_limit"].as_f64();
+    // Whether the router renormalises its selected top-k probabilities.
+    // Read rather than assumed: the same architecture ships both settings, and
+    // the two differ by a rescale of the whole expert branch.
+    let norm_topk_prob = text_config["norm_topk_prob"].as_bool();
 
     // MLA fields
     let kv_lora_rank = text_config["kv_lora_rank"].as_u64().map(|v| v as usize);
@@ -181,7 +214,17 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
     //    scaling — sliding layers use plain RoPE — so we lift its `rope_type`
     //    + `factor` and mark `gemma3_global_only = true`.
     // 4. Missing entirely (older Llama, Mistral) → `None`.
-    let rope_scaling = text_config.get("rope_scaling").and_then(|rs| {
+    //
+    // And two *homes* for any of those shapes: the legacy `rope_scaling`
+    // key, and transformers-5.x's `rope_parameters`, which carries theta AND
+    // scaling in one block (`{rope_theta, rope_type: "yarn", factor, …}`).
+    // The theta read above already prefers `rope_parameters`; the scaling
+    // read must too, or a 5.x checkpoint's YaRN block is dropped at parse
+    // while its theta is honoured — the §4.7.8 shape again, caught by the
+    // VINDEX3 carriage test on a Glimmer-shaped fixture. A `rope_parameters`
+    // block that declares no scaling (`rope_type: "default"`, no `factor`)
+    // parses to `None` and the legacy key is consulted.
+    let parse_rope_scaling = |rs: &serde_json::Value| -> Option<RopeScaling> {
         // Gemma 3 per-layer-type form.
         if let Some(full) = rs.get("full_attention") {
             let scaling_type = full
@@ -196,10 +239,15 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
                 llama3_low_freq_factor: None,
                 llama3_high_freq_factor: None,
                 llama3_original_max_position_embeddings: None,
+                yarn_beta_fast: None,
+                yarn_beta_slow: None,
+                yarn_truncate: None,
+                yarn_mscale: None,
+                yarn_mscale_all_dim: None,
                 gemma3_global_only: true,
             });
         }
-        // Flat form (Llama, Mistral, Gemma 1/2, etc.).
+        // Flat form (Llama, Mistral, Gemma 1/2, GPT-OSS, DeepSeek, etc.).
         let scaling_type = rs
             .get("type")
             .or_else(|| rs.get("rope_type"))
@@ -211,15 +259,39 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         let llama3_old_ctx = rs
             .get("original_max_position_embeddings")
             .and_then(|v| v.as_f64());
+        // YaRN band bounds. Absent means "use the paper's defaults" (32 / 1),
+        // which is what `_compute_yarn_parameters` falls back to — so `None`
+        // here is a real value downstream, not a missing one. `truncate`
+        // decides whether the correction range is rounded outward to integer
+        // dimensions; HF defaults it to true and GPT-OSS ships false.
+        let yarn_beta_fast = rs.get("beta_fast").and_then(|v| v.as_f64());
+        let yarn_beta_slow = rs.get("beta_slow").and_then(|v| v.as_f64());
+        let yarn_truncate = rs.get("truncate").and_then(|v| v.as_bool());
+        // DeepSeek's two extra amplitude knobs. They must be parsed even
+        // though no R1 checkpoint uses them: when *both* are present HF
+        // computes the attention factor as a *ratio* that typically collapses
+        // to 1.0, where the single-argument form would give 1.35. Reading
+        // yarn without reading these would newly apply a wrong amplitude to
+        // every DeepSeek layer.
+        let yarn_mscale = rs.get("mscale").and_then(|v| v.as_f64());
+        let yarn_mscale_all_dim = rs.get("mscale_all_dim").and_then(|v| v.as_f64());
         Some(RopeScaling {
             scaling_type,
             factor,
             llama3_low_freq_factor: llama3_low,
             llama3_high_freq_factor: llama3_high,
             llama3_original_max_position_embeddings: llama3_old_ctx,
+            yarn_beta_fast,
+            yarn_beta_slow,
+            yarn_truncate,
+            yarn_mscale,
+            yarn_mscale_all_dim,
             gemma3_global_only: false,
         })
-    });
+    };
+    let rope_scaling = rope_params
+        .and_then(parse_rope_scaling)
+        .or_else(|| text_config.get("rope_scaling").and_then(parse_rope_scaling));
 
     // RMS-norm / LayerNorm epsilon. Field-name aliases across families:
     //  - `rms_norm_eps`           — Llama, Mistral, Gemma
@@ -281,7 +353,88 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         .map(|v| v as usize)
         .filter(|&v| v > 0);
 
+    // The rest of the PLE family, verbatim (see `ModelConfig`).
+    let use_double_wide_mlp = text_config["use_double_wide_mlp"].as_bool();
+    let vocab_size_per_layer_input = text_config["vocab_size_per_layer_input"].as_u64();
+
     let has_vision_config = config.get("vision_config").is_some();
+
+    // Attention/output scaling + norm shape. Declared per checkpoint;
+    // families that don't declare them get `None` and their own defaults.
+    let qk_scale_factor = text_config["qk_scale_factor"].as_f64();
+    let output_multiplier = text_config["output_multiplier"].as_f64();
+    let post_norm_eps = text_config["post_norm_eps"].as_f64();
+    let attention_bias = text_config["attention_bias"].as_bool();
+    let mlp_bias = text_config["mlp_bias"].as_bool();
+    // Both HF spellings; verbatim — the Activation mapping (and its failure
+    // on unrecognised names) lives on the architecture trait.
+    let hidden_act = text_config["hidden_act"]
+        .as_str()
+        .or_else(|| text_config["hidden_activation"].as_str())
+        .map(str::to_string);
+    let max_position_embeddings = text_config["max_position_embeddings"]
+        .as_u64()
+        .map(|v| v as usize);
+
+    // Multimodal protocol + adapter geometry — root-level HF fields.
+    let image_token_id = config["image_token_id"].as_u64();
+    let video_token_id = config["video_token_id"].as_u64();
+    let out_hidden_size = config["out_hidden_size"].as_u64().map(|v| v as usize);
+    let projector_hidden_size = config["projector_hidden_size"].as_u64().map(|v| v as usize);
+    let projector_hidden_act = config["projector_hidden_act"].as_str().map(str::to_string);
+
+    // Drafter interface declaration. `block_size` is read only alongside
+    // `target_layer_ids`: the pair is one declaration (a DFlash-style
+    // hidden-state consumer); a bare `block_size` elsewhere is a different
+    // concept and stays unconsumed rather than misread.
+    let target_layer_ids: Option<Vec<usize>> = text_config.get("target_layer_ids").and_then(|v| {
+        v.as_array().map(|arr| {
+            arr.iter()
+                .filter_map(serde_json::Value::as_u64)
+                .map(|v| v as usize)
+                .collect()
+        })
+    });
+    let draft_block_size = target_layer_ids
+        .as_ref()
+        .and_then(|_| text_config["block_size"].as_u64().map(|v| v as usize));
+    let mask_token_id = text_config["mask_token_id"].as_u64();
+
+    // Hybrid linear-attention + multi-token-prediction (declared,
+    // R2/Kimi-Linear-rung prep). Read verbatim — no semantics judged here.
+    let linear_conv_kernel_dim = text_config["linear_conv_kernel_dim"]
+        .as_u64()
+        .map(|v| v as usize);
+    let linear_key_head_dim = text_config["linear_key_head_dim"]
+        .as_u64()
+        .map(|v| v as usize);
+    let linear_value_head_dim = text_config["linear_value_head_dim"]
+        .as_u64()
+        .map(|v| v as usize);
+    let linear_num_key_heads = text_config["linear_num_key_heads"]
+        .as_u64()
+        .map(|v| v as usize);
+    let linear_num_value_heads = text_config["linear_num_value_heads"]
+        .as_u64()
+        .map(|v| v as usize);
+    let mamba_ssm_dtype = text_config["mamba_ssm_dtype"].as_str().map(str::to_string);
+    let attn_output_gate = text_config["attn_output_gate"].as_bool();
+    let output_gate_type = text_config["output_gate_type"].as_str().map(str::to_string);
+    let mtp_num_hidden_layers = text_config["mtp_num_hidden_layers"]
+        .as_u64()
+        .map(|v| v as usize);
+    let mtp_use_dedicated_embeddings = text_config["mtp_use_dedicated_embeddings"].as_bool();
+    // mRoPE sectioning (Qwen-VL-style multi-axis position encoding),
+    // declared under the same `rope_parameters` block the flat-form
+    // rope_theta/rope_type/partial_rotary_factor already read.
+    let mrope_interleaved = rope_params.and_then(|rp| rp["mrope_interleaved"].as_bool());
+    let mrope_section = rope_params.and_then(|rp| {
+        rp["mrope_section"].as_array().map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                .collect()
+        })
+    });
 
     ModelConfig {
         model_type,
@@ -295,6 +448,7 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         vocab_size,
         rope_base,
         rope_local_base,
+        layer_rope_theta,
         sliding_window,
         num_experts,
         num_experts_per_token,
@@ -323,6 +477,38 @@ pub(super) fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         enable_moe_block,
         top_k_experts,
         moe_intermediate_size,
+        swiglu_limit,
+        norm_topk_prob,
         has_vision_config,
+        tie_word_embeddings,
+        qk_scale_factor,
+        output_multiplier,
+        post_norm_eps,
+        attention_bias,
+        mlp_bias,
+        hidden_act,
+        max_position_embeddings,
+        image_token_id,
+        video_token_id,
+        out_hidden_size,
+        projector_hidden_size,
+        projector_hidden_act,
+        target_layer_ids,
+        draft_block_size,
+        mask_token_id,
+        use_double_wide_mlp,
+        vocab_size_per_layer_input,
+        linear_conv_kernel_dim,
+        linear_key_head_dim,
+        linear_value_head_dim,
+        linear_num_key_heads,
+        linear_num_value_heads,
+        mamba_ssm_dtype,
+        attn_output_gate,
+        output_gate_type,
+        mtp_num_hidden_layers,
+        mtp_use_dedicated_embeddings,
+        mrope_interleaved,
+        mrope_section,
     }
 }

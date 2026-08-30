@@ -29,11 +29,21 @@ pub struct InsertRequest {
     pub confidence: f32,
 }
 
+/// Default `alpha` (down-vector scale on the target embedding) when the
+/// request omits it.
+const DEFAULT_INSERT_ALPHA: f32 = 0.25;
+/// Default `confidence` (stored as the feature's `c_score` and top-k logit)
+/// when the request omits it.
+const DEFAULT_INSERT_CONFIDENCE: f32 = 0.9;
+/// Max gate-matrix rows sampled when estimating the average gate-vector norm
+/// used to rescale a residual-derived gate vector.
+const GATE_NORM_SAMPLE_CAP: usize = 100;
+
 fn default_alpha() -> f32 {
-    0.25
+    DEFAULT_INSERT_ALPHA
 }
 fn default_confidence() -> f32 {
-    0.9
+    DEFAULT_INSERT_CONFIDENCE
 }
 
 /// Compute insert layers and residuals from a forward pass.
@@ -120,7 +130,7 @@ fn apply_insert(
             if let Some((_, ref residual)) = residuals.iter().find(|(l, _)| *l == layer) {
                 let mut gv = residual.clone();
                 if let Some(gate_matrix) = patched.base().gate_vectors_at(layer) {
-                    let sample = gate_matrix.nrows().min(100);
+                    let sample = gate_matrix.nrows().min(GATE_NORM_SAMPLE_CAP);
                     if sample > 0 {
                         let avg_norm: f32 = (0..sample)
                             .map(|i| gate_matrix.row(i).dot(&gate_matrix.row(i)).sqrt())
@@ -206,14 +216,15 @@ fn run_insert(
         let mut sessions = state.sessions.sessions_blocking_write();
         let now = std::time::Instant::now();
 
-        let session = sessions.entry(sid.to_string()).or_insert_with(|| {
-            let base = model.patched.blocking_read();
-            crate::session::SessionState::new(base.base().clone(), now)
-        });
-        session.touch(now);
+        let session = state
+            .sessions
+            .bind_in_guard(&mut sessions, sid, &model.id, now);
+        // Inserting writes to the overlay, so materialise it here if this
+        // is the session's first mutation.
+        let patched = session.overlay_mut(|| model.patched.blocking_read().base().clone());
 
-        let residuals = compute_residuals(model, &session.patched, req, &insert_layers);
-        apply_insert(model, &mut session.patched, req, &insert_layers, &residuals)
+        let residuals = compute_residuals(model, patched, req, &insert_layers);
+        apply_insert(model, patched, req, &insert_layers, &residuals)
     } else {
         // Global: read from global for residuals, write to global for insert
         let residuals = {
@@ -254,7 +265,7 @@ pub async fn handle_insert(
     Json(req): Json<InsertRequest>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     state.bump_requests();
-    let model = Arc::clone(state.model_or_err(None)?);
+    let model = state.model_or_err(None)?;
     let sid = extract_session_id(&headers);
     let state2 = Arc::clone(&state);
     let result =
@@ -283,7 +294,7 @@ pub async fn handle_insert_multi(
     Json(req): Json<InsertRequest>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     state.bump_requests();
-    let model = Arc::clone(state.model_or_err(Some(&model_id))?);
+    let model = state.model_or_err(Some(&model_id))?;
     let sid = extract_session_id(&headers);
     let state2 = Arc::clone(&state);
     let result =

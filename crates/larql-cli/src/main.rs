@@ -19,6 +19,7 @@
 use clap::{Parser, Subcommand};
 
 mod anyres_tiler;
+mod backend_select;
 mod commands;
 mod formatting;
 mod image_input;
@@ -86,11 +87,26 @@ enum Commands {
     /// Publish a vindex to HuggingFace — full vindex plus slice siblings.
     Publish(publish_cmd::PublishArgs),
 
+    /// Validate the VINDEX3 production registry (registry/index.json +
+    /// registry/models/*.json).
+    #[command(subcommand)]
+    Registry(registry_cmd::RegistryCommand),
+
     /// Remove a cached vindex.
     Rm(rm_cmd::RmArgs),
 
     /// Benchmark decode throughput on a real vindex (Metal / CPU / Ollama).
     Bench(bench::BenchArgs),
+
+    /// DEC residual-replay loadgen — capture real per-layer residuals, then
+    /// replay batch × wire × dispatch sweeps against an expert server
+    /// (docs/dec-funnel.md).
+    DecBench(dec_bench::DecBenchArgs),
+
+    /// K3 serving ledger — miss budget, weight touch, dense-precision
+    /// frontier and speculative block economics, derived from the
+    /// checkpoint's own tensor table (docs/dec-funnel.md).
+    K3Ledger(k3_ledger::K3LedgerArgs),
 
     /// Split-axis accuracy suite — parametric vs in-context vs conflict,
     /// scored with top-1 match and Shannon bits-per-token.
@@ -150,6 +166,38 @@ enum Commands {
     #[command(next_help_heading = "Build")]
     /// Cross-backend numerical parity diff (CPU vs Metal vs reference).
     Parity(parity::ParityArgs),
+
+    #[command(next_help_heading = "Build")]
+    /// Expert-selection locality over a routing trace: does speculative
+    /// decoding amortise the expert bank, and can a hot cache work?
+    /// Collect the trace with `LARQL_MOE_ROUTE_TRACE=<path> larql shannon score`.
+    MoeLocality(moe_locality::MoeLocalityArgs),
+
+    // ── Factory (docs/vindex-factory.md) ─────────────────────────────
+    #[command(next_help_heading = "Factory", subcommand)]
+    /// Vindex Factory recipe tooling — validate a recipe, compute its
+    /// build_id (docs/vindex-factory.md).
+    Recipe(recipe_cmd::RecipeCommand),
+
+    #[command(next_help_heading = "Factory")]
+    /// Print this release's capability manifest as JSON — which
+    /// architectures it recognises and what each one supports.
+    Capabilities,
+
+    #[command(next_help_heading = "Factory", name = "inspect-hf")]
+    /// Machine-readable architecture inventory of an HF checkpoint dir —
+    /// identity, per-layer attention policy, tensors, and every config key
+    /// this build does not consume.
+    InspectHf(inspect_hf_cmd::InspectHfArgs),
+
+    #[command(next_help_heading = "Factory", subcommand)]
+    /// VINDEX3 container programme verbs (`plan`: semantic
+    /// representability check before conversion).
+    Vindex3(vindex3_cmd::Vindex3Command),
+
+    #[command(next_help_heading = "Factory", subcommand)]
+    /// Render a Hub model card for a build (docs/vindex-factory.md §9).
+    Card(card_cmd::CardCommand),
 
     // ── Query (legacy, pre-LQL graph-file surface) ──────────────────
     #[command(next_help_heading = "Query")]
@@ -285,6 +333,7 @@ struct ChatArgs {
     /// Route FFN to a remote larql-server.
     #[arg(long, value_name = "URL")]
     ffn: Option<String>,
+    routed_from: Option<String>,
 
     /// HTTP timeout in seconds for --ffn.
     #[arg(long, default_value = "60")]
@@ -306,6 +355,8 @@ impl From<ChatArgs> for run_cmd::RunArgs {
             context_window: 0,
             engine: None,
             ffn: c.ffn,
+            routed_from: c.routed_from,
+            emit_ids: false,
             ffn_timeout_secs: c.ffn_timeout_secs,
             metal: false,
             verbose: c.verbose,
@@ -324,6 +375,17 @@ impl From<ChatArgs> for run_cmd::RunArgs {
             // ChatArgs struct will grow its own --image flag.
             image: Vec::new(),
             mm_weights: None,
+            // Chat is text-only today; speech arrives via `run --speak`
+            // (and later a chat session feeding the speech stream).
+            speak: false,
+            voice: None,
+            codec_cmd: None,
+            speech_out: None,
+            play: false,
+            max_frames: 0,
+            greedy: false,
+            seed: 0,
+            q4: false,
         }
     }
 }
@@ -487,7 +549,6 @@ const LEGACY_DEV_NAMES: &[&str] = &[
     "residuals",
     "predict",
     "index-gates",
-    "extract-routes",
     "walk",
     "attention-capture",
     "qk-templates",
@@ -496,11 +557,9 @@ const LEGACY_DEV_NAMES: &[&str] = &[
     "ov-gate",
     "circuit-discover",
     "attn-bottleneck",
-    "ffn-bench",
     "ffn-bottleneck",
     "ffn-overlap",
     "kg-bench",
-    "ffn-throughput",
     "trajectory-trace",
     "projection-test",
     "fingerprint-extract",
@@ -534,6 +593,9 @@ fn main() {
         .expect("spawn larql-main thread")
         .join()
         .expect("larql-main thread panicked");
+    // Flush the latent-mask channel survival counts, if that probe was
+    // collecting them. No-op unless `LARQL_MOE_LATENT_STATS` is set.
+    larql_compute::cpu::ops::moe::latent_mask::dump_stats();
     std::process::exit(code);
 }
 
@@ -547,6 +609,8 @@ fn real_main() -> i32 {
         Commands::Run(args) => run_cmd::run(args),
         Commands::Chat(args) => run_cmd::run(args.into()),
         Commands::Bench(args) => bench::run(args),
+        Commands::DecBench(args) => dec_bench::run(args),
+        Commands::K3Ledger(args) => k3_ledger::run(args),
         Commands::Accuracy(args) => accuracy_cmd::run(args),
         Commands::Shannon(cmd) => shannon_cmd::run(cmd),
         Commands::Pull(args) => pull_cmd::run(args),
@@ -556,6 +620,7 @@ fn real_main() -> i32 {
         Commands::Show(args) => show_cmd::run(args),
         Commands::Slice(args) => slice_cmd::run(args),
         Commands::Publish(args) => publish_cmd::run(args),
+        Commands::Registry(cmd) => registry_cmd::run(cmd),
         Commands::Rm(args) => rm_cmd::run(args),
 
         // ── Build / extract ──
@@ -568,6 +633,7 @@ fn real_main() -> i32 {
         Commands::Verify(args) => verify_cmd::run(args),
         Commands::Diag(args) => diag_cmd::run(args),
         Commands::Parity(args) => parity::run(args),
+        Commands::MoeLocality(args) => moe_locality::run(args),
 
         // ── Query (legacy graph-file surface) ──
         Commands::Query(args) => query_cmd::run(args),
@@ -591,6 +657,13 @@ fn real_main() -> i32 {
             }
             Err(e) => Err(e),
         },
+
+        // ── Factory ──
+        Commands::Recipe(cmd) => recipe_cmd::run(cmd),
+        Commands::Capabilities => capabilities_cmd::run(),
+        Commands::InspectHf(args) => inspect_hf_cmd::run(args),
+        Commands::Vindex3(cmd) => vindex3_cmd::run(cmd),
+        Commands::Card(cmd) => card_cmd::run(cmd),
 
         // ── Serve (exec into larql-server) ──
         Commands::Serve(args) => run_serve(args),
@@ -639,13 +712,17 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
 fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd_args = Vec::new();
     if let Some(ref path) = args.vindex_path {
-        // Resolve cache shorthands / owner-name / hf:// → actual path
-        // so `larql serve gemma3-4b-v2` works the same as `larql run`.
-        // Explicit directories and already-resolved paths pass through.
-        let resolved = commands::primary::cache::resolve_model(path)
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| path.clone());
-        cmd_args.push(resolved);
+        // Resolve cache shorthands / owner-name / hf:// → actual path so
+        // `larql serve gemma3-4b-v2` works the same as `larql run`. A
+        // name the VINDEX3 registry has claimed resolves through it
+        // exclusively (no fallback on failure); everything else keeps
+        // today's cache-shorthand/hf:///local-path behaviour, and a real
+        // resolution failure now propagates instead of being silently
+        // replaced by the raw, unresolved string. See
+        // `commands::primary::serve_resolve` module docs.
+        cmd_args.push(commands::primary::serve_resolve::resolve_serve_target(
+            path,
+        )?);
     }
     if let Some(ref dir) = args.dir {
         cmd_args.push("--dir".into());
@@ -829,6 +906,37 @@ mod trampoline_tests {
                 "hi",
                 "--predict"
             ])
+        );
+    }
+
+    /// Every legacy name must rewrite to a subcommand that ACTUALLY
+    /// EXISTS.
+    ///
+    /// `legacy_research_flag_names_all_rewrite` below only asserts that
+    /// the rewrite happens — it passes just as happily when the target
+    /// is gone, and three dead entries (`extract-routes`, `ffn-bench`,
+    /// `ffn-throughput`) survived behind it until 2026-08-22. The
+    /// failure mode is user-visible and confusing: `larql ffn-bench`
+    /// was rewritten to `larql dev ffn-bench`, which clap then rejected
+    /// with a "did you mean" for a *different* command.
+    #[test]
+    fn every_legacy_name_maps_to_a_real_dev_subcommand() {
+        use clap::CommandFactory;
+        let cli = Cli::command();
+        let dev = cli
+            .get_subcommands()
+            .find(|c| c.get_name() == "dev")
+            .expect("`dev` subcommand exists");
+        let live: Vec<&str> = dev.get_subcommands().map(|c| c.get_name()).collect();
+        let dead: Vec<&&str> = LEGACY_DEV_NAMES
+            .iter()
+            .filter(|n| !live.contains(&**n))
+            .collect();
+        assert!(
+            dead.is_empty(),
+            "LEGACY_DEV_NAMES rewrites these to `larql dev <name>`, but no such \
+             subcommand exists — the rewrite turns a clean top-level error into a \
+             misleading one: {dead:?}"
         );
     }
 

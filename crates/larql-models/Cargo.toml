@@ -4,11 +4,13 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Model architecture definitions for LARQL — traits, config parsing, tensor key mappings"
 keywords = ["transformer", "model-config", "llm", "architecture"]
 categories = ["data-structures"]
 
 [dependencies]
+larql-vindex-spec = { path = "../larql-vindex-spec" }
 ndarray = "0.16"
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -33,3 +35,6 @@ tempfile = "3"
 [[bench]]
 name = "models"
 harness = false
+
+[lints]
+workspace = true

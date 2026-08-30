@@ -56,7 +56,8 @@ pub fn dispatch(
     );
     enc.end_encoding();
     cmd.commit();
-    cmd.wait_until_completed();
+    let _ =
+        crate::cb_status::wait_checked(cmd, "crates/larql-compute-metal/src/ops/q4_matvec.rs:59");
 
     crate::buffers::read_buffer_f32(&buf_out, num_rows)
 }
@@ -75,6 +76,12 @@ pub fn encode(
     k_val: u32,
     num_rows: usize,
 ) {
+    assert!(
+        (k_val as usize) <= crate::shaders::q4_matvec_v4::MAX_K,
+        "q4_matvec stages its Q8 input in threadgroup memory capped at K = {}; \
+         K {k_val} would corrupt threadgroup memory (audit F13)",
+        crate::shaders::q4_matvec_v4::MAX_K,
+    );
     enc.set_compute_pipeline_state(&kernel.state);
     enc.set_buffer(0, Some(buf_q4), 0);
     enc.set_buffer(1, Some(buf_q8), 0);

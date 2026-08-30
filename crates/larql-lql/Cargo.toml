@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "LQL parser, executor, and REPL for LARQL"
 
 [dependencies]
@@ -11,6 +12,7 @@ larql-compute = { path = "../larql-compute" }
 larql-compute-metal = { path = "../larql-compute-metal", optional = true }
 larql-core = { path = "../larql-core" }
 larql-inference = { path = "../larql-inference" }
+larql-kv = { path = "../larql-kv" }
 larql-models = { path = "../larql-models" }
 larql-vindex = { path = "../larql-vindex" }
 ndarray = "0.16"
@@ -50,3 +52,6 @@ harness = false
 [[bench]]
 name = "compile"
 harness = false
+
+[lints]
+workspace = true

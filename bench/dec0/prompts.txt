@@ -1,0 +1,68 @@
+# DEC-0 fixed prompt set — 64 short prompts, one per line (docs/dec-funnel.md §3).
+# Diverse topics so B-row replay batches carry realistic, decorrelated
+# residuals (MoE routing union realism). Do not reorder — prompt index i is
+# row i of every replayed batch; edits invalidate captured pools.
+Explain why the sky appears blue during the day.
+Write a haiku about a mountain river in autumn.
+What is the capital of Australia and why is it often mistaken?
+Summarise the plot of Romeo and Juliet in two sentences.
+How does a refrigerator keep food cold?
+List three uses for a paperclip besides holding paper.
+What causes tides in the ocean?
+Translate the phrase "good morning, my friend" into French.
+Describe the taste of fresh sourdough bread.
+Why do cats purr?
+Explain the difference between speed and velocity.
+Name the planets of the solar system in order from the sun.
+What ingredients go into a classic margherita pizza?
+How do bees communicate the location of flowers?
+Write the opening line of a mystery novel set in Lisbon.
+What is compound interest and why does it matter?
+Describe how a bill becomes a law in the United Kingdom.
+Why is the Mona Lisa considered famous?
+Explain photosynthesis to a ten-year-old.
+What is the tallest mountain on Earth measured from base to peak?
+Give two arguments for and against remote work.
+How does a suspension bridge stay up?
+What is the difference between weather and climate?
+Recommend a book for someone who loved The Martian.
+Why do onions make people cry when chopped?
+Explain what a prime number is with an example.
+Describe the rules of chess castling.
+What happened at the Library of Alexandria?
+How do vaccines train the immune system?
+Write a two-line poem about the sea at night.
+What makes a violin sound different from a cello?
+Explain the water cycle step by step.
+Why did the Roman Empire split in two?
+What is the fastest land animal and how fast can it run?
+Describe how to make a good cup of tea.
+What is machine learning in one paragraph?
+Why do leaves change colour in autumn?
+Explain the offside rule in football simply.
+What is the deepest part of the ocean called?
+Give a short toast for a friend's graduation.
+How does a compass work?
+What are the three states of matter and an example of each?
+Describe the feeling of walking into a quiet library.
+Why is the Dead Sea so salty?
+Explain what inflation does to savings over time.
+What is the difference between a crocodile and an alligator?
+Write a one-sentence summary of the moon landing.
+How do noise-cancelling headphones work?
+What language has the most native speakers worldwide?
+Describe a traditional Japanese tea ceremony briefly.
+Why do we dream during sleep?
+Explain gravity using an everyday example.
+What is the longest river in the world?
+Give three tips for learning a new language quickly.
+How is glass made from sand?
+What causes a rainbow to appear after rain?
+Describe the sound of a thunderstorm approaching.
+Why are flamingos pink?
+Explain what an eclipse is and the two main types.
+What is the smallest country in the world by area?
+Write a friendly reminder note about a dentist appointment.
+How does yeast make bread rise?
+What is the speed of light and why is it important?
+Describe the smell of rain on dry earth and its name.

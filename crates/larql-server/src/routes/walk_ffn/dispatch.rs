@@ -85,13 +85,13 @@ pub(crate) fn run_walk_ffn(
     validate_residual(req, hidden)?;
 
     let scan_layers = collect_scan_layers(req)?;
-    validate_owned(model, &scan_layers)?;
+    validate_owned(&model, &scan_layers)?;
 
     let start = std::time::Instant::now();
 
     if req.full_output {
-        run_full_output(model, req, &scan_layers, start)
+        run_full_output(&model, req, &scan_layers, start)
     } else {
-        run_features_only(model, req, &scan_layers, start)
+        run_features_only(&model, req, &scan_layers, start)
     }
 }

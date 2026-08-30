@@ -1,0 +1,17 @@
+# Pin the toolchain so local lints are the lints CI runs.
+#
+# Every workflow installs `dtolnay/rust-toolchain@stable`, i.e. whatever
+# stable is on the day the job runs, while a developer's `stable` is
+# whenever they last ran `rustup update`. That drift is silent and it
+# only ever surfaces as a red CI on a branch that was green locally:
+# on 2026-08-22 CI ran clippy 1.98 against a local 1.95, and 47 lint
+# errors across five crates were invisible to `cargo clippy` here while
+# failing every push.
+#
+# With this file, cargo uses the same compiler in both places (rustup
+# fetches it on demand, CI included), so a clean local run means a clean
+# CI run. Bumping it is then a deliberate commit that lands the new
+# edition's lints all at once, instead of a surprise on someone's branch.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]

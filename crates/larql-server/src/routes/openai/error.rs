@@ -37,6 +37,8 @@
 //! | `NotFound`              | 404         | `not_found_error`          |
 //! | `InferenceUnavailable`  | 503         | `service_unavailable_error`|
 //! | `Internal`              | 500         | `server_error`             |
+//! | `Timeout`               | 504         | `timeout_error`            |
+//! | `Conflict`              | 409         | `conflict_error`           |
 //!
 //! See `docs/server-spec.md` for the LARQL-vs-OpenAI envelope split.
 
@@ -110,6 +112,16 @@ impl OpenAIError {
             code: None,
         }
     }
+
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: message.into(),
+            error_type: "conflict_error",
+            param: None,
+            code: None,
+        }
+    }
 }
 
 impl From<ServerError> for OpenAIError {
@@ -120,6 +132,7 @@ impl From<ServerError> for OpenAIError {
             ServerError::InferenceUnavailable(m) => OpenAIError::service_unavailable(m),
             ServerError::Internal(m) => OpenAIError::server_error(m),
             ServerError::Timeout(m) => OpenAIError::timeout(m),
+            ServerError::Conflict(m) => OpenAIError::conflict(m),
         }
     }
 }
@@ -205,6 +218,15 @@ mod tests {
         assert_eq!(v["error"]["type"], "server_error");
     }
 
+    #[tokio::test]
+    async fn conflict_renders_409() {
+        let resp = OpenAIError::conflict("a load is already in progress").into_response();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        let v = body_json(resp).await;
+        assert_eq!(v["error"]["type"], "conflict_error");
+        assert_eq!(v["error"]["message"], "a load is already in progress");
+    }
+
     #[test]
     fn from_server_error_preserves_status_and_message() {
         let cases = [
@@ -231,6 +253,18 @@ mod tests {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "oops",
+            ),
+            (
+                ServerError::Timeout("to".into()),
+                StatusCode::GATEWAY_TIMEOUT,
+                "timeout_error",
+                "to",
+            ),
+            (
+                ServerError::Conflict("cf".into()),
+                StatusCode::CONFLICT,
+                "conflict_error",
+                "cf",
             ),
         ];
         for (input, want_status, want_type, want_msg) in cases {

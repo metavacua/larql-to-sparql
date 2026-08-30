@@ -26,11 +26,12 @@ mod walk;
 
 pub use generate::{
     generate, generate_constrained, generate_constrained_streaming,
-    generate_constrained_streaming_sampled, generate_streaming, generate_with_sampling,
-    lm_head_topk, try_generate, try_generate_constrained, try_generate_constrained_streaming,
-    try_generate_constrained_streaming_sampled, try_generate_streaming, try_generate_with_sampling,
-    ChatMLRenderer, ChatSession, Detokenizer, EosConfig, GemmaRenderer, GenerateError,
-    GenerateResult, Llama3Renderer, Sampler, SamplingConfig, StageTimings, TurnRenderer,
+    generate_constrained_streaming_sampled, generate_routed, generate_streaming,
+    generate_with_sampling, lm_head_topk, try_generate, try_generate_constrained,
+    try_generate_constrained_streaming, try_generate_constrained_streaming_sampled,
+    try_generate_streaming, try_generate_with_sampling, ChatMLRenderer, ChatSession, Detokenizer,
+    EosConfig, GemmaRenderer, GenerateError, GenerateResult, Llama3Renderer, Sampler,
+    SamplingConfig, StageTimings, TurnRenderer,
 };
 
 use ndarray::Array2;

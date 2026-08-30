@@ -1,0 +1,195 @@
+# Experiment: how far does larql-cli's dependency tree get toward
+# actually compiling against the riscv*-unknown-none-elf family once
+# mechanically rewritten and scaffolded as no_std?
+#
+# "std fails on these targets" is already known and uninformative on its
+# own (confirmed directly: target-matrix-decidability.yml's own plain
+# cargo check hits E0463 "can't find crate for std" immediately, before
+# reaching anything ISA-specific, on all 7 rustup-stable-installable
+# riscv*-none-elf targets). What's actually wanted is WHERE and HOW it
+# fails past that wall -- which requires getting past the wall first.
+#
+# All 13 riscv*-unknown-none-elf targets from rustc's platform-support
+# page are in scope here, not just the 7 with a prebuilt rustup `stable`
+# component: `-Zbuild-std=core,alloc` compiles core/alloc from source via
+# the `rust-src` component, which is toolchain-wide, not per-target --
+# it doesn't need `rustup target add` to have succeeded at all. This is
+# the same reason nvptx64-nvidia-cuda (also not rustup-target-add-able)
+# was testable via this exact mechanism in
+# experiment-cuda-nvptx-nostd-fix.yml, which this workflow is a direct
+# adaptation of. RISC-V's ISA variant is already encoded in the target
+# triple itself (riscv32i vs riscv32imac vs ...), so unlike avr-none
+# (which needs a separate -Ctarget-cpu=<chip> flag for its single
+# generic triple), no extra target-cpu flag is needed here.
+#
+# Scoped to the same 5 crates in larql-cli's dependency tree already
+# confirmed (via source-verified build.rs inspection for
+# experiment-cuda-nvptx-nostd-fix.yml, not target-specific) to have zero
+# real native-link blockers: larql-models, larql-compute,
+# larql-boundary, larql-vindex-spec, larql-execution. Whether a crate
+# needs a C compiler is a property of the crate's own build.rs, not of
+# which no-OS target it's being pointed at, so the same "clean" list
+# applies here rather than needing fresh verification.
+#
+# Three-stage pipeline per (target, crate, profile), run entirely within
+# one ephemeral CI checkout (nothing committed or pushed):
+#
+#   Stage A (host target): mechanical `std::X` -> `core::X`/`alloc::X`
+#   rewrite via `cargo clippy --fix` with std_instead_of_core /
+#   std_instead_of_alloc / alloc_instead_of_core. Has to run on the HOST
+#   target -- confirmed in the nvptx experiment, and true here for the
+#   identical reason: rustc can't resolve a `std::` path at all once the
+#   sysroot is core+alloc-only, so clippy never gets far enough to
+#   suggest a rewrite under -Zbuild-std=core,alloc.
+#
+#   Stage B: scaffold `#![no_std]` + `extern crate alloc;` onto the now
+#   mechanically-rewritten lib.rs. Cannot be skipped: without it the
+#   crate still implicitly pulls in the std prelude regardless of how
+#   many explicit std:: paths got rewritten.
+#
+#   Stage C (the real riscv*-none-elf target, -Zbuild-std=core,alloc):
+#   the only stage that can produce honest dead_code/unused_imports/
+#   unused_variables/unsafe_code/improper_ctypes signal for that
+#   specific target -- those lints are per-compilation, not
+#   per-source-text, and this is exactly the mechanism
+#   target-matrix-decidability.yml's own header already establishes for
+#   why per-ISA-variant testing matters (multiply/atomics/float
+#   availability differ per triple).
+#
+# Two fix profiles per (target, crate) -- 13 x 5 x 2 = 130 jobs,
+# fail-fast disabled:
+#   mechanical-only        -- Stage A + B + C, nothing else.
+#   mechanical-plus-hygiene -- adds a host-side, pre-target deny check
+#     for print_stdout/print_stderr/exit/dbg_macro: none of these have a
+#     core/alloc replacement (there's no such thing as "core stdout"),
+#     so Stage A's fixer can't touch them. Catching them as denied
+#     errors on host is cheap and immediate, rather than waiting to
+#     rediscover them as opaque unresolved-item errors in Stage C.
+#
+# One known gap this pipeline does not close, by design, same as the
+# nvptx experiment: std::collections::HashMap/HashSet have no core
+# equivalent at all (no lint fires -- there's no "use core instead" to
+# suggest), so any crate using them will still fail in Stage C even
+# after a clean Stage A/B. That failure IS the informative signal Stage
+# C exists to produce, not a bug in the pipeline.
+#
+# This is deliberately a separate workflow from
+# target-matrix-decidability.yml, not an extra lint_scope/target
+# addition to it: -Zbuild-std requires a nightly toolchain, and nightly
+# work stays cleanly apart from the stable-only workflow, per explicit
+# instruction earlier in this branch's history.
+
+name: experiment-riscv-nostd-fix
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/experiment-riscv-nostd-fix.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  nostd-fix-attempt:
+    name: no_std fix attempt (${{ matrix.target }}, ${{ matrix.crate }}, ${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - riscv32i-unknown-none-elf
+          - riscv32im-unknown-none-elf
+          - riscv32imc-unknown-none-elf
+          - riscv32imac-unknown-none-elf
+          - riscv32imafc-unknown-none-elf
+          - riscv64imac-unknown-none-elf
+          - riscv64gc-unknown-none-elf
+          - riscv32e-unknown-none-elf
+          - riscv32em-unknown-none-elf
+          - riscv32emc-unknown-none-elf
+          - riscv32ima-unknown-none-elf
+          - riscv32imfc-unknown-none-elf
+          - riscv64im-unknown-none-elf
+        crate:
+          - larql-models
+          - larql-compute
+          - larql-boundary
+          - larql-vindex-spec
+          - larql-execution
+        profile: [mechanical-only, mechanical-plus-hygiene]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy, rust-src, llvm-tools
+
+      - name: Install llvm-bitcode-linker
+        run: rustup component add llvm-bitcode-linker --toolchain nightly
+
+      # Stage A -- host target, mechanical rewrite only.
+      - name: "Stage A: mechanical std->core/alloc rewrite (host target)"
+        run: |
+          cargo +nightly clippy -p ${{ matrix.crate }} --lib --fix --allow-dirty --allow-staged -- \
+            -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
+
+      # mechanical-plus-hygiene profile only: cheap host-side check for the
+      # std APIs that have no core/alloc replacement to mechanically fix to.
+      - name: "Stage A2: hygiene deny check (host target, mechanical-plus-hygiene only)"
+        if: matrix.profile == 'mechanical-plus-hygiene'
+        id: hygiene
+        continue-on-error: true
+        run: |
+          cargo +nightly clippy -p ${{ matrix.crate }} --lib --message-format=json -- \
+            -D clippy::print_stdout -D clippy::print_stderr -D clippy::exit -D clippy::dbg_macro > hygiene.json
+
+      - name: "Stage B: inject #![no_std] scaffold"
+        run: |
+          LIB="crates/${{ matrix.crate }}/src/lib.rs"
+          printf '#![no_std]\nextern crate alloc;\n%s\n' "$(cat "$LIB")" > "$LIB.new"
+          mv "$LIB.new" "$LIB"
+
+      # Stage C -- the only stage whose dead_code/unused_*/unsafe_code
+      # signal is honest for this specific target. -D on the mechanical
+      # lints too: anything Stage A's fixer couldn't rewrite becomes a
+      # visible, named error here instead of an opaque unresolved-path
+      # error.
+      - name: "Stage C: target-relative check against ${{ matrix.target }}"
+        id: nostd_check
+        continue-on-error: true
+        run: |
+          cargo +nightly clippy -p ${{ matrix.crate }} --lib \
+            --target ${{ matrix.target }} -Zbuild-std=core,alloc --keep-going --message-format=json -- \
+            -W dead_code -W unused_imports -W unused_variables -W unsafe_code \
+            -W improper_ctypes -W improper_ctypes_definitions \
+            -D clippy::std_instead_of_core -D clippy::std_instead_of_alloc > nostd_check.json
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.target }} / ${{ matrix.crate }} / ${{ matrix.profile }}"
+            if [ -f hygiene.json ]; then
+              echo "#### Stage A2 (host hygiene) findings"
+              echo '```'
+              jq -r 'select(.reason=="compiler-message") | .message.rendered' hygiene.json 2>/dev/null
+              echo '```'
+            fi
+            echo "#### Stage C (${{ matrix.target }}, core+alloc) result"
+            echo '```'
+            jq -r 'select(.reason=="compiler-message" and .message.level=="error") | .message.message' nostd_check.json 2>/dev/null \
+              | sort | uniq -c | sort -rn
+            echo '```'
+            echo "<details><summary>Stage C rendered diagnostics</summary>"
+            echo ''
+            echo '```'
+            jq -r 'select(.reason=="compiler-message") | .message.rendered' nostd_check.json 2>/dev/null
+            echo '```'
+            echo '</details>'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -26,7 +26,7 @@ O(K) — for Gemma 4B walks (K=10, N=10240), 5.4 MB → 16 KB per token.
 
 `cargo bench -p larql-vindex --bench vindex_ops -- gate_knn_per_layer`
 
-### W2. Feature-major Q4_K down (`down_features_q4k.bin`)
+### W2. Feature-major Q4_K down (`down_features_kquant.bin`)
 
 Down-proj is stored `[hidden, intermediate]` on disk, so per-feature
 decode requires gathering across `hidden` separate rows. The legacy
@@ -153,8 +153,8 @@ File                              VSIZE   RSDNT   madvise
 gate_vectors.bin            1.7 GB     0 K   RANDOM       ← pure demand-paged
 down_meta.bin                29 M    544 K   RANDOM       ← only touched layers paged
 embeddings.bin              1.3 G    1.3 G   SEQ+WILLNEED ← prefaulted
-interleaved_q4k.bin         1.6 G    1.6 G   RANDOM (warmed by decode)
-attn_weights_q4k.bin       309 M    309 M   SEQ+WILLNEED
+interleaved_kquant.bin         1.6 G    1.6 G   RANDOM (warmed by decode)
+attn_weights_kquant.bin       309 M    309 M   SEQ+WILLNEED
 heap (MALLOC_LARGE)          3.0 G   3.0 G   ← KV cache + GPU intermediates
                              ─────
 Physical footprint            3.1 G   (peak 3.4 G)
@@ -279,9 +279,9 @@ Vindex stores raw quantized bytes. Compute kernels dequant + multiply at inferen
 ```
 Vindex Storage              → Inference Wiring         → Compute Kernel
 ──────────────                ────────────────           ──────────────
-attn_weights_q4k.bin (Q4_K) → QuantFormat::Q4_K       → q4k_qkv_proj shader    ✅
-attn_weights_q4k.bin (Q6_K) → QuantFormat::Q6_K       → q6k_matvec shader      ✅
-interleaved_q4k.bin  (Q4_K) → QuantFormat::Q4_K       → Q4_K FFN dispatch      ✅ NEW
+attn_weights_kquant.bin (Q4_K) → QuantFormat::Q4_K       → q4k_qkv_proj shader    ✅
+attn_weights_kquant.bin (Q6_K) → QuantFormat::Q6_K       → q6k_matvec shader      ✅
+interleaved_kquant.bin  (Q4_K) → QuantFormat::Q4_K       → Q4_K FFN dispatch      ✅ NEW
 interleaved_q4.bin   (Q4_0) → QuantFormat::Q4_0       → q4_matvec_v4 (fallback)✅
 lm_head_q4.bin       (Q4_0) → q4_matvec                                        ✅
 embeddings.bin (f16) → synthesize_lm_head_q4() → Q4_0 in RAM → q4_matvec     ✅ NEW

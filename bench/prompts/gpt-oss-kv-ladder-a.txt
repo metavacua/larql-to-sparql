@@ -1,0 +1,1 @@
+Write a detailed technical essay explaining how virtual memory works in modern operating systems, covering page tables, the TLB, and demand paging.

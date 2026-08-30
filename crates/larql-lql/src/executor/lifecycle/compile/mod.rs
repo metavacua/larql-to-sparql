@@ -10,6 +10,7 @@ mod atomic;
 mod bake;
 mod into_model;
 mod into_vindex;
+mod into_vindex_v3;
 
 impl Session {
     #[allow(clippy::too_many_arguments)]
@@ -23,6 +24,14 @@ impl Session {
     ) -> Result<Vec<String>, LqlError> {
         match vindex {
             VindexRef::Current => {
+                if matches!(self.backend, Backend::Vindex3 { .. }) {
+                    return match target {
+                        CompileTarget::Vindex => self.exec_compile_into_vindex_v3(output),
+                        CompileTarget::Model => Err(crate::executor::vindex3::unsupported(
+                            "COMPILE INTO MODEL (container → checkpoint export)",
+                        )),
+                    };
+                }
                 let vindex_path = match &self.backend {
                     Backend::Vindex { path, .. } => path.clone(),
                     _ => return Err(LqlError::NoBackend),

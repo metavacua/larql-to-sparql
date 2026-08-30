@@ -1,7 +1,7 @@
 # Metal shader inventory + retention survey
 
 **Date**: 2026-05-09
-**Purpose**: Per-shader audit of `crates/larql-compute/src/metal/shaders/` under the model-agnosticity constraint — shaders need to support not just Gemma 3/4 but Llama 1/2/3, Mistral, DeepSeek, Qwen, and other transformer LM families. The previous Gemma-A/B-falsification cleanup pattern (e.g. NR2 deletion) over-prioritised current-Gemma performance and risks deleting capability that other models need.
+**Purpose**: Per-shader audit of `crates/larql-compute-metal/src/shaders/` under the model-agnosticity constraint — shaders need to support not just Gemma 3/4 but Llama 1/2/3, Mistral, DeepSeek, Qwen, and other transformer LM families. The previous Gemma-A/B-falsification cleanup pattern (e.g. NR2 deletion) over-prioritised current-Gemma performance and risks deleting capability that other models need.
 
 This doc is the **retention rationale** for each shader: what it does, which model families it serves, and whether it's currently load-bearing or kept as defensible capability.
 
@@ -54,8 +54,8 @@ This doc is the **retention rationale** for each shader: what it does, which mod
 
 | shader | role | status | retention reason |
 |---|---|---|---|
-| `q6k_matvec` | Q6_K mat-vec (4sg, original) | production fallback | Default fallback when `LARQL_Q6K_8SG=0`. Same kernel shape works for any Q6_K-quantised matrix. |
-| `q6k_matvec_8sg` | Q6_K mat-vec (8sg) | production-default for `q6k_matvec_pipeline` | Default since 2026-04-28 — `q6k_matvec_pipeline` aliases this. Bit-identical to 4sg, slightly better occupancy. |
+| `q6k_matvec` | Q6_K mat-vec (4sg) | **production default** | Same kernel shape works for any Q6_K-quantised matrix. |
+| `q6k_matvec_8sg` | Q6_K mat-vec (8sg) | **opt-in** via `LARQL_Q6K_8SG=1` | Bit-identical to 4sg, better occupancy — but the win did not translate end-to-end on M3 Max, so it stays opt-in. |
 | `q6k_geglu_down` | Q6_K fused GEGLU + down (SiLU) | production | All SiLU-FFN models with Q6_K down (Llama 2 / Mistral with Q6_K down convention). |
 | `q6k_geglu_gelu_tanh_down_cached` | Q6_K fused GEGLU + GELU-tanh down + TG-cached activation | opt-in (`LARQL_FUSED_DOWN=1`, blocked) | Production NaN bug on Gemma 3 4B / 31B production weights (D-FFN-FUSE blocked). Kernel correctness verified on synthetic data. **Retained** — the TG-cached activation pattern is sound and applicable to any GELU-tanh FFN once the data-shape bug is found. |
 
@@ -203,3 +203,5 @@ ADR-017: **Shader retention under model agnosticity**. Codifies: shaders aren't 
 - `crates/larql-compute/docs/adr/016-defused-rms-norm-qkv.md` — the QKV defuse decision.
 - `crates/larql-compute/docs/llama-cpp-comparison.md` — kernel-architecture comparison; documents the rope-variant coverage gap.
 - `crates/larql-compute/docs/shaders.md` — older shader reference doc (may need consolidation with this one).
+
+> **Corrected 2026-08-23 — this table had the q6k default INVERTED.** `q6k_use_8sg` is `env_opt_in(LARQL_Q6K_8SG)`, i.e. **default-OFF**, and the shader's own header says so: *"Status: opt-in via `LARQL_Q6K_8SG=1`. Default-OFF (4sg)"* — the 8sg occupancy win did not translate end-to-end on M3 Max. **4sg is the production default; 8sg is the opt-in arm.** (The *q4k* 8sg rows on this page are correct — that one is default-on. Do not "fix" them to match.)

@@ -169,6 +169,8 @@ fn attend(
         num_q,
         scale,
         window,
+        None,
+        0.0,
     );
     enc.end_encoding();
     cmd.commit();

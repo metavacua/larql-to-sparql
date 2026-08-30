@@ -39,6 +39,14 @@ use crate::engines::markov_residual_codec::codec::ColdResidualCodec;
 /// `cold_abs_pos` must be the absolute position at which the new
 /// overflow lands — caller MUST snapshot this BEFORE appending the
 /// overflow to `cold_encoded` (which would advance `n_positions`).
+///
+/// Atomicity invariant: either EVERY layer's cold K/V is extended, or
+/// `rs.cold_kv` is dropped wholesale and `None` is returned. A partial
+/// per-layer failure must never leave `cold_kv` desynced from
+/// `cold_encoded` (which the caller extends for all layers) — the walk
+/// paths trust `cold_kv[layer]` row counts to line up across layers.
+/// `cold_kv` is a derived cache: dropping it costs a recompute from
+/// `cold_encoded` on the next decode step, never correctness.
 pub(super) fn extend_cold_kv_with_overflow(
     weights: larql_inference::WeightsView,
     backend: &dyn ComputeBackend,
@@ -52,13 +60,26 @@ pub(super) fn extend_cold_kv_with_overflow(
     if n_new == 0 {
         return Some(());
     }
+    // Phase 1 (fallible): compute K/V for every layer BEFORE touching
+    // `rs.cold_kv`, so a mid-loop failure cannot partially extend it.
+    let mut new_kv: Vec<SharedKV> = Vec::with_capacity(num_layers);
+    for (layer, overflow) in overflow_per_layer.iter().enumerate() {
+        let codec = policy.codec_for(layer);
+        let decoded = roundtrip(overflow, codec);
+        match recompute_kv(weights, &decoded, layer, cold_abs_pos, backend, None) {
+            Some(kv) => new_kv.push(kv),
+            None => {
+                // See the atomicity invariant above: drop the whole cache
+                // and surface the failure to the caller.
+                rs.cold_kv = None;
+                return None;
+            }
+        }
+    }
+    // Phase 2 (infallible): splice the pre-computed rows in.
     match rs.cold_kv.as_mut() {
         Some(cold_kv) => {
-            for (layer, overflow) in overflow_per_layer.iter().enumerate() {
-                let codec = policy.codec_for(layer);
-                let decoded = roundtrip(overflow, codec);
-                let (k_new, v_new) =
-                    recompute_kv(weights, &decoded, layer, cold_abs_pos, backend, None)?;
+            for (layer, (k_new, v_new)) in new_kv.into_iter().enumerate() {
                 let (k_old, v_old) = &cold_kv[layer];
                 let kv_dim = k_old.shape()[1];
                 let l_old = k_old.shape()[0];
@@ -73,14 +94,7 @@ pub(super) fn extend_cold_kv_with_overflow(
             }
         }
         None => {
-            let mut new_cold_kv: Vec<SharedKV> = Vec::with_capacity(num_layers);
-            for (layer, overflow) in overflow_per_layer.iter().enumerate() {
-                let codec = policy.codec_for(layer);
-                let decoded = roundtrip(overflow, codec);
-                let (k, v) = recompute_kv(weights, &decoded, layer, cold_abs_pos, backend, None)?;
-                new_cold_kv.push((k, v));
-            }
-            rs.cold_kv = Some(new_cold_kv);
+            rs.cold_kv = Some(new_kv);
         }
     }
     Some(())
@@ -215,6 +229,61 @@ mod tests {
         for (k, _v) in cold_kv {
             assert_eq!(k.shape()[0], 2, "K/V should match overflow row count");
         }
+    }
+
+    #[test]
+    fn extend_cold_kv_partial_failure_is_atomic() {
+        // A per-layer failure mid-extend must not leave `cold_kv` desynced
+        // (some layers extended, others not, while `cold_encoded` advanced
+        // for all). Contract: either every layer extends, or `cold_kv` is
+        // dropped wholesale so the next decode rebuilds from `cold_encoded`.
+        let mut weights = make_test_weights();
+        assert!(
+            weights.num_layers >= 2,
+            "test needs ≥2 layers to observe partial extension"
+        );
+        let policy = BoundaryLayerPolicy::bf16_uniform("test", weights.num_layers);
+        let mut rs = empty_store(weights.num_layers, weights.hidden_size);
+
+        // Seed cold_kv with 2 rows per layer while all tensors are intact.
+        let first_overflow: Vec<Array2<f32>> = (0..weights.num_layers)
+            .map(|_| Array2::<f32>::from_elem((2, weights.hidden_size), 0.5f32))
+            .collect();
+        extend_cold_kv_with_overflow(
+            larql_inference::WeightsView::dense(&weights),
+            &CpuBackend,
+            &policy,
+            &mut rs,
+            &first_overflow,
+            0,
+        )
+        .expect("initial extend with intact tensors");
+
+        // Break layer 1's K projection: `recompute_kv` returns None for that
+        // layer only, so layer 0 would succeed and layer 1 fail.
+        let k_key = weights.arch.attn_k_key(1);
+        assert!(
+            weights.tensors.remove(&k_key).is_some(),
+            "fixture must carry the K projection we are removing"
+        );
+
+        let second_overflow: Vec<Array2<f32>> = (0..weights.num_layers)
+            .map(|_| Array2::<f32>::from_elem((3, weights.hidden_size), 0.7f32))
+            .collect();
+        let result = extend_cold_kv_with_overflow(
+            larql_inference::WeightsView::dense(&weights),
+            &CpuBackend,
+            &policy,
+            &mut rs,
+            &second_overflow,
+            2,
+        );
+        assert!(result.is_none(), "the per-layer failure must be reported");
+        assert!(
+            rs.cold_kv.is_none(),
+            "partial failure must drop cold_kv wholesale (no layer desync); \
+             the cold_encoded recompute path then covers the next decode"
+        );
     }
 
     #[test]

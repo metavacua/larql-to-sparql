@@ -49,9 +49,15 @@ pub(super) fn prefill_for_streaming(
         for pos in 0..seq_len {
             let x_pos: Vec<f32> = x[pos * hidden..(pos + 1) * hidden].to_vec();
             upload(token_ids[pos], &x_pos);
+            // A step that produced no hidden state is a failed GPU step
+            // (#229: a faulted or ignored command buffer). Substituting
+            // zeros here would let the pass continue on poisoned KV and
+            // surface later as EOS at token 1 or an out-of-range token id.
             last_h = backend
                 .decode_token(layers, &x_pos, hidden, intermediate)
-                .unwrap_or_else(|| vec![0.0f32; hidden]);
+                .ok_or_else(|| {
+                    GenerateError::prefill_failed("GPU decode step failed during prompt pass")
+                })?;
         }
         let mut out = vec![0.0f32; seq_len * hidden];
         out[(seq_len - 1) * hidden..].copy_from_slice(&last_h);
@@ -102,9 +108,16 @@ fn prefill_kquant_moe(
         let x_pos: Vec<f32> = x[pos * hidden..(pos + 1) * hidden].to_vec();
         let get_expert =
             |layer_idx, expert_idx| weights.get_layer_entry_bytes(layer_idx, expert_idx);
+        // See the PLE branch above: `None` is a failed GPU step, not an
+        // empty one, and the prompt pass must stop rather than continue
+        // on poisoned KV.
         last_h = backend
             .decode_token_q4k_moe(layers, &x_pos, hidden, intermediate, norm_eps, &get_expert)
-            .unwrap_or_else(|| vec![0.0f32; hidden]);
+            .ok_or_else(|| {
+                GenerateError::prefill_failed(format!(
+                    "GPU decode step failed during prompt pass at position {pos}"
+                ))
+            })?;
     }
     let mut out = vec![0.0f32; seq_len * hidden];
     out[(seq_len - 1) * hidden..].copy_from_slice(&last_h);

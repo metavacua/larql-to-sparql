@@ -151,11 +151,23 @@ pub fn refine_gates(inputs: &[RefineInput], decoy_residuals: &[Array1<f32>]) -> 
 /// template-dominated residuals this produced cross-slot interference
 /// strong enough to collapse compose to ~10 usable facts.
 fn orthogonalise(target: &Array1<f32>, suppress: &[&Array1<f32>]) -> Array1<f32> {
+    // Bitwise-duplicate suppress vectors add nothing to the span but
+    // are a numerical hazard: a duplicate's Gram-Schmidt remainder is
+    // pure rounding residue that lands NEAR the 1e-6 drop threshold
+    // (measured 5.2e-7 on a norm-7 vector), so whether it is dropped
+    // depends on the platform's last-ulp behaviour. A remainder that
+    // survives is normalised rounding garbage — a random basis
+    // direction that rotates every refined gate. Deduplicate first so
+    // the basis is identical on every platform.
+    let mut suppress: Vec<&Array1<f32>> = suppress.to_vec();
+    let mut seen: std::collections::HashSet<Vec<u32>> = std::collections::HashSet::new();
+    suppress.retain(|u| seen.insert(u.iter().map(|v| v.to_bits()).collect()));
+
     // Step 1: build an orthonormal basis of span(suppress) via
     // Gram-Schmidt over the suppress set itself. Numerical
     // near-dependencies are dropped (||q|| < 1e-6 after projection).
     let mut basis: Vec<Array1<f32>> = Vec::with_capacity(suppress.len());
-    for u in suppress {
+    for u in &suppress {
         let mut q = (*u).clone();
         for b in &basis {
             let coef = q.dot(b);
@@ -185,6 +197,29 @@ mod tests {
 
     fn vec(xs: &[f32]) -> Array1<f32> {
         Array1::from_vec(xs.to_vec())
+    }
+
+    #[test]
+    fn duplicate_decoys_refine_exactly_like_one() {
+        // Bitwise-identical decoys must not change the result: a
+        // duplicate's Gram-Schmidt remainder is rounding residue that
+        // straddles the near-dependency drop threshold per platform,
+        // and a surviving remainder is a garbage basis direction (this
+        // rotated a composed gate below its walk ranking on Windows CI
+        // while unix passed).
+        let inputs = vec![RefineInput {
+            layer: 0,
+            feature: 0,
+            gate: vec(&[3.0, 1.0, 0.5, -2.0]),
+        }];
+        let decoy = vec(&[7.0, -1.5, 4.0, 0.25]);
+        let once = refine_gates(&inputs, std::slice::from_ref(&decoy));
+        let many = refine_gates(&inputs, &vec![decoy.clone(); 10]);
+        assert_eq!(
+            once.gates[0].gate.as_slice().unwrap(),
+            many.gates[0].gate.as_slice().unwrap(),
+            "ten copies of one decoy must refine bit-for-bit like one"
+        );
     }
 
     #[test]

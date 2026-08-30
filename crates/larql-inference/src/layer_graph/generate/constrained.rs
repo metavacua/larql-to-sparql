@@ -184,7 +184,7 @@ where
 
     let arch = &*weights.arch;
     let norm_offset = arch.norm_weight_offset();
-    let setup = match build_gpu_decode_setup(weights, index, backend, layer_range, true) {
+    let setup = match build_gpu_decode_setup(weights, index, backend, layer_range, true, None) {
         Ok(setup) => setup,
         Err(err) => {
             let _ = cached_layers;

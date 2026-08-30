@@ -4,47 +4,63 @@ The inference engine in `larql-inference` runs transformer forward passes with h
 
 ## Architecture
 
+Since [ADR-0022](adr/0022-compute-trait-extraction.md) the compute substrate no longer lives inside `larql-inference`. The backend traits, CPU kernels, and forward-pass primitives moved down to `larql-compute`; the Metal backend is a first-class sibling crate, `larql-compute-metal`. `larql-inference` keeps the engines, orchestration, and FFN routing, and re-exports the moved modules at their original paths (`crate::residual::*`, `crate::forward::*`, `crate::attention::*`, `crate::kv_dispatch::*`, ...) so existing imports still compile. The newer VINDEX3 runtime stack is documented separately in [vindex3-runtime.md](vindex3-runtime.md).
+
 ```
-larql-inference/src/
-  backend/
-    mod.rs          MatMulBackend trait, factory, auto-calibration
-    cpu.rs          CPU backend (ndarray + Accelerate BLAS / AMX)
-    metal.rs        Metal GPU backend (tiled compute shaders, buffer cache)
-  attention.rs      BLAS-fused GQA attention (online softmax, no [seq,seq] alloc)
-  forward.rs        Forward pass: embed → layers → logits
-  ffn/              FFN backends: dense, sparse, highway, experimental
-  residual.rs       RMS norm, layer norm
-  trace/            Residual stream decomposition and storage
-  vindex/           WalkFfn (sparse FFN via vindex gate KNN)
-  walker/           Weight-level graph walkers (no forward pass)
+larql-compute/src/                 substrate: traits + CPU kernels
+  backend/                         ComputeBackend umbrella trait + MatMul / QuantMatVec /
+                                   DecodeBackend sub-traits + Capability probe
+  cpu/                             CPU backend (BLAS f32, quant matvec kernels, spin pool)
+  attention/                       rope, gqa (BLAS-fused GQA), block/decode attention spine
+  forward/                         forward-pass primitives: embed, ops, layer, predict
+  ffn.rs                           FfnBackend trait + activations
+  residual.rs                      RMS norm, layer norm
+  kv_dispatch/                     KvDispatch trait + CPU impl
+  async_compute_backend/           AsyncComputeBackend trait + CPU impl
+
+larql-compute-metal/src/           Metal GPU backend (first-class peer, macOS-only)
+  backend/                         MetalBackend struct, construction, calibration
+  kernels/ shaders/ ops/ stages/   MSL sources, pipeline registries, per-op dispatch
+  decode/                          autoregressive decode-loop assembly
+  trait_impl/                      ComputeBackend sub-trait impls for MetalBackend
+  kv_dispatch_impl.rs              KvDispatch for MetalBackend
+  async_compute_backend_impl.rs    AsyncComputeBackend for MetalBackend
+
+larql-inference/src/               engines + orchestration
+  forward/                         forward orchestrators (predict, trace, patching, memit)
+  attention/, residual.rs          re-export shims over larql-compute
+  ffn/                             FFN backend impls: dense, sparse, MoE, remote
+  trace/                           residual stream decomposition and storage
+  vindex/                          WalkFfn + kquant forward glue
+  layer_graph/, layer_executor/    generation orchestration (CPU/GPU hybrid dispatch)
 ```
 
-## Matmul Backend
+## Compute Backend
 
-All large matrix multiplications dispatch through the `MatMulBackend` trait, which routes to the optimal hardware path.
+All large matrix multiplications dispatch through the `ComputeBackend` trait (`crates/larql-compute/src/backend/mod.rs`), the umbrella over the `MatMul`, `QuantMatVec`, and `DecodeBackend` sub-traits. It routes to the optimal hardware path.
 
 ### CPU Backend (default)
 
-Uses ndarray `.dot()` which dispatches through `cblas_sgemm` via Apple Accelerate on macOS. The AMX coprocessor on M-series handles the actual computation at ~2-4 TFLOPS f32. Zero dispatch overhead.
+Lives in `crates/larql-compute/src/cpu/`. Uses ndarray `.dot()` which dispatches through `cblas_sgemm` via Apple Accelerate on macOS. The AMX coprocessor on M-series handles the actual computation at ~2-4 TFLOPS f32. Zero dispatch overhead.
 
 ```toml
-# Already configured in Cargo.toml
+# Already configured in Cargo.toml (macOS)
 ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["accelerate"] }
 ```
 
 ### Metal GPU Backend (optional)
 
-Feature-gated behind `--features metal`. Uses 32x32 tiled compute shaders with threadgroup memory on Apple GPU.
+The Metal backend is the sibling crate `crates/larql-compute-metal`, pulled in behind the `gpu` feature of `larql-inference` (`gpu = ["dep:larql-compute-metal", ...]`). It compiles to an empty crate on non-macOS hosts.
 
 ```bash
-cargo build --release -p larql-inference --features metal
+cargo build --release -p larql-inference --features gpu
 ```
 
 Key optimisations:
 
-- **Buffer cache**: Weight matrices from mmap'd safetensors have stable addresses. Their GPU buffers are created once on first use and reused for all subsequent calls. Only the small input residual and output buffers are allocated per call.
-- **Auto-calibration**: On startup, benchmarks CPU vs Metal at representative matrix sizes (attention projections, FFN layers). Finds the lowest FLOP count where Metal with warm cache beats CPU. No magic constants.
+- **Buffer cache**: Weight matrices from mmap'd safetensors have stable addresses. Their GPU buffers are created once on first use and reused for all subsequent calls (`crates/larql-compute-metal/src/buffers/`). Only the small input residual and output buffers are allocated per call.
+- **Auto-calibration**: On startup, benchmarks CPU vs Metal at representative matrix sizes (attention projections, FFN layers). Finds the lowest FLOP count where Metal with warm cache beats CPU (`crates/larql-compute-metal/src/calibration.rs`). No magic constants.
 - **FLOP-based routing**: Small operations (QK^T at 18K FLOPs) route to CPU with zero overhead. Large operations (FFN gate at 315M FLOPs) route to Metal with cached buffers.
 - **Batch dispatch**: `matmul_batch()` encodes multiple matmuls into a single Metal command buffer for parallel GPU execution.
 
@@ -70,14 +86,18 @@ The threshold adapts to hardware via auto-calibration:
 ### Usage
 
 ```rust
-use larql_inference::backend::{default_backend, MatMulBackend};
+// Re-exported from larql-compute at the larql-inference crate root.
+use larql_inference::{default_backend, ComputeBackend};
 
-// Auto-selects best backend (Metal if available, calibrates, falls back to CPU)
+// `default_backend()` always returns the CPU backend. For GPU, use
+// `larql_inference::default_compute_backend()` (Metal when built with
+// `--features gpu` on a Metal host, CPU fallback otherwise) or construct
+// `larql_compute_metal::MetalBackend` directly.
 let backend = default_backend();
 println!("Using: {}", backend.name());
 
 // Single matmul
-let c = backend.matmul_transb(&input, &weights);
+let c = backend.matmul_transb(input.view(), weights.view());
 
 // Batched (all attention heads in one GPU dispatch)
 let results = backend.matmul_batch(&ops);
@@ -85,7 +105,7 @@ let results = backend.matmul_batch(&ops);
 
 ## BLAS-Fused Attention
 
-The attention kernel uses BLAS-accelerated gemv calls inside a fused online-softmax loop. It never allocates the full `[seq, seq]` attention matrix.
+The attention kernel (`crates/larql-compute/src/attention/gqa/`) uses BLAS-accelerated gemv calls inside a fused online-softmax loop. It never allocates the full `[seq, seq]` attention matrix.
 
 ### How it works
 
@@ -144,15 +164,17 @@ Two changes that speed up every forward pass:
 
 ## Examples
 
+The demos moved to the `larql-demos` crate (`crates/larql-demos/examples/inference/`); the `bench_*` examples stayed in `crates/larql-inference/examples/`.
+
 ```bash
 # Backend demo (shows routing, cache, calibration)
-cargo run --release -p larql-inference --example backend_demo --features metal
+cargo run --release -p larql-demos --example backend_demo --features gpu
 
 # Backend benchmark (CPU vs Metal at transformer scale)
-cargo run --release -p larql-inference --example bench_backend --features metal
+cargo run --release -p larql-inference --example bench_backend --features gpu
 
 # Fused attention demo (correctness, GQA, softcap, capture)
-cargo run --release -p larql-inference --example attention_demo
+cargo run --release -p larql-demos --example attention_demo
 
 # Fused attention benchmark (fused vs materialized, scaling)
 cargo run --release -p larql-inference --example bench_attention
@@ -161,38 +183,26 @@ cargo run --release -p larql-inference --example bench_attention
 cargo run --release -p larql-inference --example bench_inference
 
 # End-to-end inference demo (needs model weights)
-cargo run --release -p larql-inference --example inference_demo
+cargo run --release -p larql-demos --example inference_demo
 ```
 
 ## Tests
 
 ```bash
-# All tests (109 total)
+# All tests
 cargo test -p larql-inference
 
-# With Metal GPU tests (+6 Metal-specific tests)
-cargo test -p larql-inference --features metal
+# With Metal GPU tests
+cargo test -p larql-inference --features gpu
 
 # Specific test suites
-cargo test -p larql-inference --test test_fused_attention   # 18 fused attention tests
-cargo test -p larql-inference --test test_backend           # 13 backend integration tests
-cargo test -p larql-inference --test test_modules           # 15 module unit tests
-cargo test -p larql-inference --test test_trace             # 14 trace store tests
-cargo test -p larql-inference --test test_walkers           # 12 walker integration tests
+cargo test -p larql-inference --test test_fused_attention   # fused attention tests
+cargo test -p larql-inference --test test_backend           # backend integration tests
+cargo test -p larql-inference --test test_modules           # module unit tests
+cargo test -p larql-inference --test test_trace             # trace store tests
 ```
 
-### Test coverage
-
-| Area | Tests | What's covered |
-|------|-------|----------------|
-| Backend (unit) | 21 | Shape, correctness vs f64 reference, identity, zeros, batch, tall/skinny/wide, trait |
-| Backend (integration) | 13+6 | Transformer-scale dims, QKV/FFN/logits shapes, factory, Metal vs CPU, batch, fallback |
-| Fused attention | 18 | Single token, causal mask, GQA (2x, 5x), softcap, capture, reference agreement, edge cases |
-| FFN | 9 | SiLU, GELU, dense shape, activation, highway, multi-position |
-| Attention/residual | 10 | RoPE, GQA, RMS norm, layer norm, per-head norm |
-| Trace stores | 14 | Write/read, bounds, tiers, additive property |
-| Walkers | 12 | Weight/attention walkers, vector extractor, forward pass |
-| Utils | 10 | Top-k, rounding, entity sorting, thresholds |
+The substrate kernels moved down with their unit tests: attention, backend, residual, and forward-primitive tests now run under `cargo test -p larql-compute`; Metal kernel and parity tests under `cargo test -p larql-compute-metal` (needs on-device Apple Silicon). The suites in `crates/larql-inference/tests/` exercise the engine-level composition.
 
 ## Codepath coverage
 
@@ -211,7 +221,7 @@ The fused attention and backend changes are exercised by every inference codepat
 | Python `WalkModel.trace()` | `trace_residuals()` | fused GQA (capture) | WalkFfn |
 | CLI commands | `predict*()` variants | fused GQA | depends on command |
 
-Sparse FFN, WalkFfn, streaming extraction, and vindex operations do not call attention directly — they only implement FfnBackend. Attention always runs through the same `gqa_attention_with_weights()` path.
+Sparse FFN, WalkFfn, streaming extraction, and vindex operations do not call attention directly — they only implement FfnBackend. CPU-path attention always runs through the same `gqa_attention_with_weights()` path (`crates/larql-compute/src/attention/gqa/`); the Metal decode loop in `larql-compute-metal` dispatches its own fused attention kernels.
 
 ## Walk Boundary Sweep
 

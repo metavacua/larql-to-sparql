@@ -16,6 +16,7 @@ pub mod sgemm_transb;
 // it by *path*, not by hand-typed string.
 pub mod activation;
 pub mod attn_fused;
+pub mod bias_add;
 pub mod causal_attention;
 pub mod f16_gemv;
 pub mod f32_gemv;
@@ -26,7 +27,15 @@ pub mod graph_walk_knn;
 pub mod kv_append_attend_fused;
 pub mod kv_attention;
 pub mod layer_norm;
+pub mod moe_descriptor;
+pub mod moe_router;
+pub mod moe_router_select;
+pub mod moe_weighted_combine;
+pub mod mxfp4_grouped_experts;
+pub mod mxfp4_matvec;
+pub mod nvfp4_matvec;
 pub mod per_layer_embed;
+pub mod plan_glue;
 pub mod post_attn_residual_norm_store;
 pub mod post_ffn_norm_residual_add;
 pub mod q4_f32_matvec;
@@ -38,6 +47,7 @@ pub mod q4k_ffn_gate_up_8sg;
 pub mod q4k_ffn_gate_up_coop;
 pub mod q4k_ffn_gate_up_f16acc;
 pub mod q4k_geglu_down;
+pub mod q4k_grouped_experts;
 pub mod q4k_matmul;
 pub mod q4k_matvec;
 pub mod q4k_matvec_8sg;
@@ -48,6 +58,7 @@ pub mod q4kf_ffn_gate_up;
 pub mod q4kf_qkv_proj;
 pub mod q6k_geglu_down;
 pub mod q6k_geglu_gelu_tanh_down_cached;
+pub mod q6k_grouped_experts;
 pub mod q6k_matvec;
 pub mod q6k_matvec_8sg;
 pub mod q8_attn_proj;
@@ -76,6 +87,10 @@ pub fn all_shaders() -> String {
     src.push_str(&f32_gemv::argmax_shader_source());
     src.push_str(&f32_gemv::topk_shader_source());
     src.push_str(f16_gemv::SHADER);
+    // MoE GPU router (rungs A+B+C of the GPU-dataflow routing ladder)
+    src.push_str(moe_router::SHADER);
+    src.push_str(moe_router_select::SHADER);
+    src.push_str(moe_descriptor::SHADER);
     // Q4 dense matvec
     src.push_str(q4_matvec_v4::SHADER);
     // Q4 other
@@ -86,6 +101,8 @@ pub fn all_shaders() -> String {
     src.push_str(q8_matvec::SHADER);
     // Element-wise
     src.push_str(geglu::SHADER);
+    src.push_str(bias_add::SHADER);
+    src.push_str(moe_weighted_combine::SHADER);
     src.push_str(quantize_q8::SHADER);
     src.push_str(residual_inject::SHADER);
     // Attention
@@ -97,6 +114,13 @@ pub fn all_shaders() -> String {
     src.push_str(fused_attention::SHADER);
     src.push_str(fused_ops::SHADER);
     src.push_str(q8_attn_proj::SHADER);
+    src.push_str(mxfp4_matvec::SHADER);
+    src.push_str(nvfp4_matvec::SHADER);
+    src.push_str(nvfp4_matvec::SWEEP_SHADER);
+    src.push_str(plan_glue::SHADER);
+    src.push_str(&mxfp4_grouped_experts::shader());
+    src.push_str(q6k_grouped_experts::SHADER);
+    src.push_str(q4k_grouped_experts::SHADER);
     src.push_str(q4k_matvec::SHADER);
     src.push_str(q4k_matvec_8sg::SHADER);
     src.push_str(q4k_matvec_stride32::SHADER);

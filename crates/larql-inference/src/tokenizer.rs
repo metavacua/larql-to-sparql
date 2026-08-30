@@ -106,7 +106,7 @@ pub fn encode_prompt(
 /// that already have token ids (e.g. from a cached encoding) can reuse
 /// the logic, and so the prepend contract can be unit-tested without
 /// standing up a real tokenizer.
-pub(crate) fn maybe_prepend_bos(mut ids: Vec<u32>, bos: Option<u32>) -> Vec<u32> {
+pub fn maybe_prepend_bos(mut ids: Vec<u32>, bos: Option<u32>) -> Vec<u32> {
     if let Some(bos) = bos {
         if ids.first().copied() != Some(bos) {
             ids.insert(0, bos);

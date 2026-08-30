@@ -1,0 +1,17 @@
+{
+ "note": "Fixed calibration subset for SENSITIVITY-1B. Chosen by category coverage before any score was computed; two per category, first-listed, so the choice carries no tuning.",
+ "prompts": [
+  "code-000",
+  "code-001",
+  "prose-000",
+  "prose-001",
+  "arithmetic-000",
+  "arithmetic-001",
+  "structured-000",
+  "structured-001",
+  "factual-000",
+  "factual-001",
+  "longform-000",
+  "longform-001"
+ ]
+}

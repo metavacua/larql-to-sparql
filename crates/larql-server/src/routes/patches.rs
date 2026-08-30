@@ -62,6 +62,16 @@ fn resolve_patch(
     ))
 }
 
+/// Feature-slot space used to hash an entity into a deterministic slot when
+/// an INSERT op arrives with `feature == 0`.
+///
+/// WARNING: this pins Gemma's 10,240-wide FFN (`intermediate_size`) and is
+/// wrong for other architectures. The per-layer feature count is not safely
+/// reachable here (it lives behind the async `model.patched` lock and this
+/// enrichment runs synchronously inside the request handler), so the historic
+/// literal is kept — existing Gemma behavior must not change.
+const LEGACY_FEATURE_SLOT_SPACE: usize = 10240;
+
 /// Synthesise a gate vector from entity embedding when the client didn't provide one.
 fn enrich_patch_ops(model: &crate::state::LoadedModel, patch: &mut larql_vindex::VindexPatch) {
     let hidden = model.embeddings.shape()[1];
@@ -112,7 +122,7 @@ fn enrich_patch_ops(model: &crate::state::LoadedModel, patch: &mut larql_vindex:
                     let hash = entity
                         .bytes()
                         .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-                    *feature = (hash as usize % 10240) + 1;
+                    *feature = (hash as usize % LEGACY_FEATURE_SLOT_SPACE) + 1;
                 }
             }
 
@@ -138,13 +148,13 @@ async fn apply_patch_to_model(
     let (mut patch, name) = resolve_patch(&req)?;
 
     // Enrich INSERT ops with gate vectors if missing
-    enrich_patch_ops(model, &mut patch);
+    enrich_patch_ops(&model, &mut patch);
 
     let op_count = patch.operations.len();
 
     // Session-scoped or global?
     if let Some(sid) = extract_session_id(headers) {
-        let (ops, active) = state.sessions.apply_patch(&sid, model, patch).await;
+        let (ops, active) = state.sessions.apply_patch(&sid, &model, patch).await;
         Ok(Json(serde_json::json!({
             "applied": name,
             "operations": ops,

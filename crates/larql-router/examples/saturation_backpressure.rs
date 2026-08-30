@@ -35,6 +35,7 @@ fn server(server_id: &str, listen_url: &str, layer_start: u32, layer_end: u32) -
         rtt_ms: None,
         expert_start: 0,
         expert_end: 0,
+        serves_openai: false,
     }
 }
 

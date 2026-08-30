@@ -1,0 +1,48 @@
+# buf configuration for the workspace's gRPC schemas.
+#
+# Linted in CI by `.github/workflows/quality.yml`. Two modules, one per crate
+# that owns .proto files:
+#   crates/larql-router-protocol/proto — larql.grid.v1, larql.shard.v1,
+#                                        larql.expert.v1
+#   crates/larql-server/proto          — vindex
+version: v2
+
+modules:
+  - path: crates/larql-router-protocol/proto
+  - path: crates/larql-server/proto
+
+lint:
+  use:
+    - BASIC
+  except:
+    # Both remaining BASIC rules are about *where files sit on disk*, not
+    # about whether a schema is well-formed, and both would require moving
+    # the .proto files:
+    #
+    #   PACKAGE_DIRECTORY_MATCH — wants larql/grid/v1/grid.proto rather than
+    #     proto/grid.proto, for all four schemas.
+    #   DIRECTORY_SAME_PACKAGE  — wants the three larql.*.v1 packages split
+    #     into one directory each, instead of sharing proto/.
+    #
+    # Moving them means rewriting the `tonic_build` include paths in both
+    # crates' build.rs, and the layout buf wants is only load-bearing if
+    # these schemas are ever published to a buf registry. Nothing here
+    # depends on it today.
+    #
+    # Everything BASIC actually checks about schema content — field, message,
+    # enum and service naming, enum zero-values, reserved-field hygiene —
+    # stays enforced, which is the point: it catches mistakes in *new*
+    # schemas without demanding a layout migration first.
+    - PACKAGE_DIRECTORY_MATCH
+    - DIRECTORY_SAME_PACKAGE
+
+  # Deliberately NOT enabling the STANDARD category. It requires every RPC to
+  # take a dedicated `<Method>Request`/`<Method>Response` pair, which would
+  # rename GridService.Join's ServerMessage/RouterMessage, ExpertService's
+  # ExpertLayerInput/Output, and the shared AdminAck — changing the generated
+  # Rust types and every call site. Worth doing as its own change, not as a
+  # side effect of a lint config.
+
+breaking:
+  use:
+    - FILE

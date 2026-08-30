@@ -28,6 +28,10 @@ use larql_models::ModelWeights;
 /// Zero-sized type; const-construction is free.
 const CPU: CpuBackend = CpuBackend;
 
+/// K and V — the two cached tensors every attention layer stores per
+/// position. Named so the K/V sizing arithmetic doesn't read as a bare 2.
+const KV_TENSORS_PER_LAYER: usize = 2;
+
 impl KvDispatch for MetalBackend {
     fn alloc_kv_buffer(&self, layer: usize, max_tokens: usize, kv_dim: usize) -> KvHandle {
         // Handles are CPU-resident at Step 4. When real Metal kernels land
@@ -394,6 +398,100 @@ impl KvDispatch for MetalBackend {
         Some(hidden)
     }
 
+    /// Coarse prefill under an engine window.
+    ///
+    /// Accepts only a prompt that fits inside the window, matching the
+    /// CPU rule: the fused prefill has no per-query-position masking, so
+    /// a longer prompt would attend in full while the engine advertises
+    /// a bound. Declining sends the engine to the per-layer path, which
+    /// is correct — just slower.
+    fn coarse_prefill_windowed(
+        &self,
+        weights: &ModelWeights,
+        token_ids: &[u32],
+        index: Option<&dyn larql_compute::KvIndex>,
+        window: Option<usize>,
+    ) -> Option<(Array2<f32>, KvHandle)> {
+        if let Some(w) = window {
+            if w == 0 || token_ids.len() > w {
+                return None;
+            }
+        }
+        self.set_engine_window(window);
+        self.coarse_prefill(weights, token_ids, index)
+    }
+
+    /// Coarse decode under an engine window.
+    ///
+    /// Two mechanisms, because one cannot do both jobs:
+    ///
+    /// - **Attention** is bounded by `window` every step, via the layer
+    ///   spec's window (see `effective_window_for`). The kernel attends
+    ///   `[T - window, T)`, so extra resident rows are simply not read.
+    /// - **Memory** is bounded by compaction, run only when occupancy
+    ///   reaches `COMPACTION_SLACK x window`. Compacting every step would
+    ///   memmove the whole window per token; amortised it is O(1) per
+    ///   token, at the cost of holding up to that multiple of the window.
+    ///
+    /// Doing only the compaction would let attention read up to the slack
+    /// multiple of the window between compactions; doing only the span
+    /// clamp would never reclaim memory. Both, or neither contract holds.
+    fn coarse_decode_step_windowed(
+        &self,
+        weights: &ModelWeights,
+        token_id: u32,
+        index: Option<&dyn larql_compute::KvIndex>,
+        handle: &mut KvHandle,
+        abs_position: usize,
+        window: Option<usize>,
+    ) -> Option<Array2<f32>> {
+        let Some(w) = window else {
+            self.set_engine_window(None);
+            return self.coarse_decode_step(weights, token_id, index, handle, abs_position);
+        };
+        if w == 0 {
+            return None;
+        }
+        self.set_engine_window(Some(w));
+        self.compact_kv_to_window(w);
+        self.coarse_decode_step(weights, token_id, index, handle, abs_position)
+    }
+
+    fn per_layer_is_host_delegated(&self) -> bool {
+        // Every per-layer method above forwards to `CPU`. Only the
+        // `coarse_*` family runs Metal kernels. Until the per-layer
+        // surface has native implementations this must stay `true`, or
+        // diagnostics will keep reporting CPU work as GPU work.
+        true
+    }
+
+    fn backend_resident_kv_bytes(&self) -> usize {
+        // The coarse pipeline's K/V lives here, not in the handle
+        // (`MetalCoarseHandle` is a sentinel), so an engine that only
+        // measures its handles reports zero on this path. Count the
+        // populated prefix of each layer — `current_len`, not `max_seq`:
+        // the buffers are preallocated to the context ceiling and
+        // charging an engine for capacity it has not filled would
+        // overstate every short-context run.
+        let Ok(guard) = self.kv_cache.lock() else {
+            return 0;
+        };
+        let Some(cache) = guard.as_ref() else {
+            return 0;
+        };
+        cache
+            .layers
+            .iter()
+            .map(|l| {
+                l.current_len
+                    * l.num_kv_heads
+                    * l.head_dim
+                    * KV_TENSORS_PER_LAYER
+                    * std::mem::size_of::<f32>()
+            })
+            .sum()
+    }
+
     fn read_kv_row_at(
         &self,
         _handle: &KvHandle,
@@ -402,7 +500,7 @@ impl KvDispatch for MetalBackend {
     ) -> Option<(Vec<f32>, Vec<f32>)> {
         // W10 Phase B: read a single position's K/V back from the Metal
         // kv cache. Used by engines running under HOnly that need to
-        // snapshot a specific position on demand (e.g. unlimited_context's
+        // snapshot a specific position on demand (e.g. windowed_checkpoint's
         // close_window). Small (~kv_dim * 4 B per K and V) so cheap vs
         // an end-of-window snapshot of the whole window.
         let cache_guard = self.kv_cache.lock().ok()?;
@@ -459,341 +557,41 @@ impl KvHandleInner for MetalCoarseHandle {
 // (wrapping `MTLBuffer`) once real per-layer Metal compute lands.
 
 #[cfg(test)]
-mod tests {
-    //! Coverage tests for the CPU-delegation `KvDispatch` scaffold.
-    //!
-    //! Each method on `MetalBackend` forwards to `CpuBackend` at Step 4;
-    //! the assertions here drive the delegation paths and (where the
-    //! result is observable) confirm shape parity with the direct CPU
-    //! call. The coarse Q4_K fused methods (`coarse_prefill*`,
-    //! `coarse_decode_step*`) need a real Q4_K vindex fixture and are
-    //! covered end-to-end in `tests/test_metal_decode_synthetic.rs`.
-    use super::*;
-    use larql_models::test_fixtures::make_test_weights;
+mod tests;
 
-    fn backend() -> MetalBackend {
-        MetalBackend::new().expect("Metal device available on test host")
-    }
+/// Occupancy multiple of the window at which compaction runs.
+///
+/// Re-exported from `larql-compute` so the compaction trigger and the
+/// capacity rule that must accommodate it (`kv_capacity_for_window`)
+/// cannot drift apart — a capacity below the trigger is a buffer overrun,
+/// not a smaller allocation.
+pub(crate) use larql_compute::pipeline_layer::KV_COMPACTION_SLACK as COMPACTION_SLACK;
 
-    #[test]
-    fn alloc_kv_buffer_delegates_to_cpu() {
-        let m = backend();
-        let h = m.alloc_kv_buffer(
-            /*layer=*/ 0, /*max_tokens=*/ 8, /*kv_dim=*/ 32,
-        );
-        assert_eq!(h.cached_len(), 0);
-        assert_eq!(h.kv_dim(), 32);
-    }
-
-    #[test]
-    fn append_and_read_kv_round_trips_through_cpu() {
-        let m = backend();
-        let mut h = m.alloc_kv_buffer(0, 4, 4);
-        m.append_kv(&mut h, &[1.0, 2.0, 3.0, 4.0], &[5.0, 6.0, 7.0, 8.0], 0);
-        m.append_kv(
-            &mut h,
-            &[9.0, 10.0, 11.0, 12.0],
-            &[13.0, 14.0, 15.0, 16.0],
-            1,
-        );
-        let (k, v) = m.read_kv_to_host(&h).expect("read after append");
-        assert_eq!(k.shape(), &[2, 4]);
-        assert_eq!(v.shape(), &[2, 4]);
-        assert_eq!(k[[0, 0]], 1.0);
-        assert_eq!(v[[1, 3]], 16.0);
-    }
-
-    #[test]
-    fn clip_kv_truncates_to_window() {
-        let m = backend();
-        let mut h = m.alloc_kv_buffer(0, 8, 2);
-        for i in 0..4u32 {
-            let f = i as f32;
-            m.append_kv(&mut h, &[f, f], &[f, f], i as usize);
+impl MetalBackend {
+    /// Reclaim K/V above `COMPACTION_SLACK x window` rows, per layer.
+    ///
+    /// Safe to call every step: it is a no-op until occupancy actually
+    /// reaches the slack bound. Eviction lowers occupancy only —
+    /// `abs_position` keeps climbing, so RoPE does not rewind (see
+    /// `LayerKVCache::evict_to_window`).
+    pub(crate) fn compact_kv_to_window(&self, window: usize) {
+        if window == 0 {
+            return;
         }
-        m.clip_kv(&mut h, 2);
-        let (k, _) = m.read_kv_to_host(&h).expect("read after clip");
-        assert_eq!(k.shape(), &[2, 2], "clip to window=2 keeps newest 2 rows");
-    }
-
-    #[test]
-    fn attention_step_delegates_through_cpu() {
-        let weights = make_test_weights();
-        let m = backend();
-        let tokens = vec![0u32, 1, 2];
-        let h_in = larql_compute::forward::embed_tokens_pub(&weights, &tokens);
-        let (_, mut kv) = m
-            .attention_prefill(
-                larql_models::WeightsView::dense(&weights),
-                &h_in,
-                0,
-                None,
-                None,
-            )
-            .expect("prefill");
-        let h_new = larql_compute::forward::embed_tokens_pub(&weights, &[3u32]);
-        let h = m
-            .attention_step(
-                larql_models::WeightsView::dense(&weights),
-                &h_new,
-                &mut kv,
-                0,
-                tokens.len(),
-                None,
-            )
-            .expect("attention_step");
-        assert_eq!(h.shape(), &[1, weights.hidden_size]);
-    }
-
-    #[test]
-    fn attention_step_windowed_delegates_through_cpu() {
-        let weights = make_test_weights();
-        let m = backend();
-        let tokens = vec![0u32, 1, 2];
-        let h_in = larql_compute::forward::embed_tokens_pub(&weights, &tokens);
-        let (_, mut kv) = m
-            .attention_prefill(
-                larql_models::WeightsView::dense(&weights),
-                &h_in,
-                0,
-                None,
-                None,
-            )
-            .expect("prefill");
-        let h_new = larql_compute::forward::embed_tokens_pub(&weights, &[3u32]);
-        let h = m
-            .attention_step_windowed(
-                larql_models::WeightsView::dense(&weights),
-                &h_new,
-                &mut kv,
-                0,
-                tokens.len(),
-                64,
-                None,
-            )
-            .expect("windowed attention_step");
-        assert_eq!(h.shape(), &[1, weights.hidden_size]);
-    }
-
-    #[test]
-    fn attention_prefill_delegates_through_cpu() {
-        let weights = make_test_weights();
-        let m = backend();
-        let tokens = vec![0u32, 1, 2];
-        let h_in = larql_compute::forward::embed_tokens_pub(&weights, &tokens);
-        let (h, kv) = m
-            .attention_prefill(
-                larql_models::WeightsView::dense(&weights),
-                &h_in,
-                0,
-                None,
-                None,
-            )
-            .expect("prefill");
-        assert_eq!(h.shape(), &[tokens.len(), weights.hidden_size]);
-        assert_eq!(kv.cached_len(), tokens.len());
-    }
-
-    #[test]
-    fn recompute_kv_from_residuals_delegates_through_cpu() {
-        // `CpuBackend` doesn't override the trait default (it's a Metal-
-        // shaped intent, MarkovResidual-only), so delegation returns the
-        // default `None`. The point of the test is to drive the Metal
-        // dispatch into CpuBackend and confirm it surfaces the same
-        // `None` — exercising the delegation pathway.
-        let weights = make_test_weights();
-        let m = backend();
-        let cpu = larql_compute::CpuBackend;
-        let residuals =
-            Array2::from_shape_vec((3, weights.hidden_size), vec![0.0; 3 * weights.hidden_size])
-                .unwrap();
-        let m_result = m.recompute_kv_from_residuals(
-            larql_models::WeightsView::dense(&weights),
-            &residuals,
-            0,
-        );
-        let cpu_result = cpu.recompute_kv_from_residuals(
-            larql_models::WeightsView::dense(&weights),
-            &residuals,
-            0,
-        );
-        assert_eq!(
-            m_result.is_some(),
-            cpu_result.is_some(),
-            "Metal delegation must match CpuBackend"
-        );
-    }
-
-    #[test]
-    fn upload_boundary_residual_delegates_through_cpu() {
-        let weights = make_test_weights();
-        let m = backend();
-        let residual =
-            Array2::from_shape_vec((1, weights.hidden_size), vec![0.0; weights.hidden_size])
-                .unwrap();
-        let handle = m.upload_boundary_residual(&residual).expect("upload");
-        let _ = handle;
-    }
-
-    #[test]
-    fn forward_from_layer_delegates_through_cpu() {
-        let weights = make_test_weights();
-        let m = backend();
-        let residual =
-            Array2::from_shape_vec((1, weights.hidden_size), vec![0.0; weights.hidden_size])
-                .unwrap();
-        let handle = m.upload_boundary_residual(&residual).expect("upload");
-        let h = m
-            .forward_from_layer(
-                larql_models::WeightsView::dense(&weights),
-                1,
-                &handle,
-                &[0u32, 1, 2],
-            )
-            .expect("forward_from_layer");
-        assert_eq!(h.ncols(), weights.hidden_size);
-    }
-
-    #[test]
-    fn residual_norm_store_delegates_through_cpu() {
-        let m = backend();
-        let cpu = larql_compute::CpuBackend;
-        let x = Array2::from_shape_vec((2, 4), (0..8).map(|i| i as f32).collect()).unwrap();
-        let res = Array2::from_shape_vec((2, 4), (0..8).map(|i| -(i as f32)).collect()).unwrap();
-        let norm = vec![1.0; 4];
-        let h_m = m.residual_norm_store(&x, &res, &norm);
-        let h_c = cpu.residual_norm_store(&x, &res, &norm);
-        assert_eq!(h_m, h_c, "Metal delegation must bit-match CpuBackend");
-    }
-
-    #[test]
-    fn read_kv_row_at_returns_none_when_cache_empty() {
-        let m = backend();
-        let sentinel = KvHandle::new(MetalCoarseHandle);
-        assert!(m.read_kv_row_at(&sentinel, 0, 0).is_none());
-    }
-
-    // ── MetalCoarseHandle inner impl ──────────────────────────────────
-
-    #[test]
-    fn metal_coarse_handle_reports_sentinel_values() {
-        let mut h = MetalCoarseHandle;
-        assert_eq!(KvHandleInner::cached_len(&h), 0);
-        assert_eq!(KvHandleInner::kv_dim(&h), 0);
-        assert_eq!(KvHandleInner::backend_name(&h), "metal-coarse");
-        let any: &dyn std::any::Any = KvHandleInner::as_any(&h);
-        assert!(any.downcast_ref::<MetalCoarseHandle>().is_some());
-        let any_mut: &mut dyn std::any::Any = KvHandleInner::as_any_mut(&mut h);
-        assert!(any_mut.downcast_mut::<MetalCoarseHandle>().is_some());
-    }
-
-    #[test]
-    fn coarse_decode_step_without_index_returns_none() {
-        let weights = make_test_weights();
-        let m = backend();
-        let mut handle = KvHandle::new(MetalCoarseHandle);
-        let result = m.coarse_decode_step(&weights, 0u32, None, &mut handle, 0);
-        assert!(result.is_none());
-    }
-
-    /// Drives `MetalBackend::coarse_prefill` end-to-end against the Q4_K
-    /// fixture — runs through `fused_prefill` and exits via
-    /// `prefill_kquant` on the real Metal kernel. This is the test that
-    /// makes the file's coverage jump from 60% → 90%+.
-    #[test]
-    fn coarse_prefill_with_q4k_fixture_returns_hidden_and_handle() {
-        use larql_compute::test_fixtures::make_q4k_fixture_index;
-        use larql_models::test_fixtures::make_test_q4k_weights;
-        let m = backend();
-        let weights = make_test_q4k_weights();
-        let idx = make_q4k_fixture_index(&weights);
-        let result = m.coarse_prefill(&weights, &[0u32, 1, 2], Some(&idx));
-        let (h, _handle) = result.expect("Metal Q4K prefill succeeds");
-        assert_eq!(h.shape(), &[1, weights.hidden_size]);
-    }
-
-    /// `coarse_prefill_with_state` happy path on Metal with Q4_K.
-    #[test]
-    fn coarse_prefill_with_state_drives_metal_decode_loop() {
-        use larql_compute::test_fixtures::make_q4k_fixture_index;
-        use larql_models::test_fixtures::make_test_q4k_weights;
-        let m = backend();
-        let weights = make_test_q4k_weights();
-        let idx = make_q4k_fixture_index(&weights);
-        let mut state = larql_compute::PerLayerDecodeState::with_capacity(weights.num_layers);
-        let result =
-            m.coarse_prefill_with_state(&weights, &[0u32, 1, 2], Some(&idx), Some(&mut state));
-        let (h, _handle) = result.expect("Metal Q4K prefill-with-state succeeds");
-        assert_eq!(h.shape(), &[1, weights.hidden_size]);
-        assert!(state.is_complete_for(weights.num_layers));
-    }
-
-    /// `coarse_decode_step` end-to-end on Metal with the Q4_K fixture.
-    #[test]
-    fn coarse_decode_step_with_q4k_fixture_returns_hidden() {
-        use larql_compute::test_fixtures::make_q4k_fixture_index;
-        use larql_models::test_fixtures::make_test_q4k_weights;
-        let m = backend();
-        let weights = make_test_q4k_weights();
-        let idx = make_q4k_fixture_index(&weights);
-        // Seed the KV cache via prefill.
-        let (_h, mut handle) = m
-            .coarse_prefill(&weights, &[0u32, 1, 2], Some(&idx))
-            .expect("prefill seeds the cache");
-        let result = m.coarse_decode_step(&weights, 4u32, Some(&idx), &mut handle, 3);
-        let h = result.expect("Metal Q4K decode step returns Some");
-        assert_eq!(h.shape(), &[1, weights.hidden_size]);
-    }
-
-    /// `coarse_decode_step_with_state_masked` over all 3 mask variants
-    /// against Metal + the Q4_K fixture. Drives the masked-state-dump
-    /// bridging logic in `kv_dispatch_impl`.
-    #[test]
-    fn coarse_decode_step_with_state_masked_over_all_mask_variants() {
-        use larql_compute::test_fixtures::make_q4k_fixture_index;
-        use larql_models::test_fixtures::make_test_q4k_weights;
-        let m = backend();
-        let weights = make_test_q4k_weights();
-        let idx = make_q4k_fixture_index(&weights);
-        let (_h, mut handle) = m
-            .coarse_prefill(&weights, &[0u32, 1, 2], Some(&idx))
-            .expect("prefill seeds the cache");
-        for mask in [
-            larql_compute::StateDumpMask::Full,
-            larql_compute::StateDumpMask::HOnly,
-            larql_compute::StateDumpMask::None,
-        ] {
-            let mut state = larql_compute::PerLayerDecodeState::with_capacity(weights.num_layers);
-            let result = m.coarse_decode_step_with_state_masked(
-                &weights,
-                5u32,
-                Some(&idx),
-                &mut handle,
-                4,
-                Some(&mut state),
-                mask,
-            );
-            assert!(
-                result.is_some(),
-                "Metal decode-step-with-state-masked should return Some under {mask:?}"
-            );
+        let trigger = window.saturating_mul(COMPACTION_SLACK);
+        let Ok(mut guard) = self.kv_cache.lock() else {
+            return;
+        };
+        let Some(cache) = guard.as_mut() else {
+            return;
+        };
+        for layer in cache.layers.iter_mut() {
+            if layer.current_len >= trigger {
+                layer.evict_to_window(window);
+            }
         }
-    }
-
-    #[test]
-    fn coarse_decode_step_with_state_masked_without_index_returns_none() {
-        let weights = make_test_weights();
-        let m = backend();
-        let mut handle = KvHandle::new(MetalCoarseHandle);
-        let result = m.coarse_decode_step_with_state_masked(
-            &weights,
-            0u32,
-            None,
-            &mut handle,
-            0,
-            None,
-            larql_compute::StateDumpMask::Full,
-        );
-        assert!(result.is_none());
     }
 }
+
+#[cfg(test)]
+mod windowed_coarse_tests;

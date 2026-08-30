@@ -45,7 +45,8 @@ pub fn dispatch(
     enc.dispatch_threads(threads, tg);
     enc.end_encoding();
     cmd.commit();
-    cmd.wait_until_completed();
+    let _ =
+        crate::cb_status::wait_checked(cmd, "crates/larql-compute-metal/src/ops/q4_vecmat.rs:48");
 
     crate::buffers::read_buffer_f32(&buf_out, hidden)
 }

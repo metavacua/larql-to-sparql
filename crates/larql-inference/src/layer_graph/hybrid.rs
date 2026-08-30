@@ -93,11 +93,11 @@ fn predict_hybrid_gpu(
     let norm_offset = weights.arch.norm_weight_offset();
     let hidden = weights.hidden_size;
     // Build attention-only layer descriptors (FFN weights are dummies)
-    let dummy = larql_compute::QuantWeight {
-        data: &[],
-        scales: None,
-        format: larql_compute::QuantFormat::Q4_0,
-    };
+    let dummy = larql_compute::QuantWeight::new(
+        larql_compute::QuantFormat::Q4_0,
+        &[],
+        larql_compute::QuantAux::None,
+    );
     let attn_layers: Vec<larql_compute::FullPipelineLayer> = layer_range
         .clone()
         .map(|layer| {

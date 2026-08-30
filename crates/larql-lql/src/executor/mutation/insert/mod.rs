@@ -20,7 +20,11 @@
 mod balance;
 mod capture;
 mod compose;
+mod compose_v3;
 mod knn;
+
+pub(crate) use compose_v3::probe_target_prob;
+mod knn_v3;
 mod plan;
 
 use crate::ast::InsertMode;
@@ -54,6 +58,19 @@ impl Session {
                 return self.exec_insert_knn(entity, relation, target, layer_hint, confidence);
             }
             InsertMode::Compose => { /* fallthrough */ }
+        }
+
+        // The V3 compose install: vectors land in the knowledge
+        // overlay and reach execution through the operand-source seam.
+        if matches!(self.backend, crate::executor::Backend::Vindex3 { .. }) {
+            return self.exec_insert_compose_v3(
+                entity,
+                relation,
+                target,
+                layer_hint,
+                confidence,
+                alpha_override,
+            );
         }
 
         // ALPHA is the dimensionless multiplier on the layer's median

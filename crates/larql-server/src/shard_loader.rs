@@ -12,6 +12,58 @@ use tracing::{info, warn};
 
 const SHARD_ENDPOINT: &str = "/v1/shard";
 
+/// Whole-request timeout for downloading one shard tar (connect + full body):
+/// 10 minutes, sized for multi-GB layer tars over LAN links.
+const SHARD_DOWNLOAD_TIMEOUT_SECS: u64 = 600;
+
+/// Reject a `model_id` that cannot safely become one path segment.
+///
+/// `model_id` arrives in the router's `AssignMsg` — it is remote input,
+/// not a local configuration value — and every use below joins it into a
+/// path that is then `create_dir_all`'d and unpacked into. Without this,
+/// a router (or anyone who can reach this node's announce socket) can
+/// set `model_id` to `../../../../etc/cron.d` and choose where a tar
+/// lands on this filesystem.
+///
+/// A single path component of the conservative character set is all any
+/// real model id needs; anything else is refused rather than sanitised,
+/// because silently rewriting an id would make the shard land somewhere
+/// the router did not ask for and the mismatch would surface later as a
+/// confusing cache miss.
+fn validated_model_id(model_id: &str) -> Result<&str, String> {
+    if model_id.is_empty() {
+        return Err("model_id is empty".into());
+    }
+    if model_id.len() > MAX_MODEL_ID_LEN {
+        return Err(format!(
+            "model_id is {} bytes, over the {MAX_MODEL_ID_LEN}-byte limit",
+            model_id.len()
+        ));
+    }
+    // `..` and separators are the traversal primitives; `.` alone would
+    // resolve to the store root. Windows accepts `\\` as a separator, so
+    // reject it too even though this path is unix-first.
+    if model_id == "." || model_id == ".." {
+        return Err(format!("model_id `{model_id}` is a directory reference"));
+    }
+    if model_id.contains("..") {
+        return Err(format!("model_id `{model_id}` contains `..`"));
+    }
+    if !model_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(format!(
+            "model_id `{model_id}` has characters outside [A-Za-z0-9._-]"
+        ));
+    }
+    Ok(model_id)
+}
+
+/// Upper bound on a `model_id`, so a hostile peer cannot push a path near
+/// the filesystem's own limit.
+const MAX_MODEL_ID_LEN: usize = 128;
+
 /// Download a shard tar from `origin_url`, verify the hash, atomically unpack
 /// to `store_path/{model_id}/layers-{layer_start}-{layer_end}/`.
 pub async fn download_and_load_shard(
@@ -27,6 +79,10 @@ pub async fn download_and_load_shard(
         origin_url.trim_end_matches('/')
     );
 
+    let model_id = validated_model_id(model_id).map_err(|e| {
+        warn!(%e, "Mode B: refusing shard download — unsafe model_id");
+        e
+    })?;
     let model_dir = PathBuf::from(store_path).join(model_id);
     let shard_dir = model_dir.join(format!("layers-{layer_start}-{layer_end}"));
     let tmp_dir = model_dir.join(format!(".tmp-layers-{layer_start}-{layer_end}"));
@@ -46,7 +102,7 @@ pub async fn download_and_load_shard(
     info!(url = %url, dest = %shard_dir.display(), "Mode B: downloading shard tar…");
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
+        .timeout(std::time::Duration::from_secs(SHARD_DOWNLOAD_TIMEOUT_SECS))
         .build()?;
     let resp = client.get(&url).send().await?;
     if !resp.status().is_success() {
@@ -106,16 +162,76 @@ pub async fn download_and_load_shard(
     Ok(())
 }
 
+/// Where a shard lands. `None` for a `model_id` that is not a safe single
+/// path segment — callers must refuse rather than fall back, since every
+/// fallback here is a write outside the store.
 #[allow(dead_code)] // exposed for tests + future external callers
-pub fn shard_dest_path(store_path: &str, model_id: &str, start: u32, end: u32) -> PathBuf {
-    Path::new(store_path)
-        .join(model_id)
-        .join(format!("layers-{start}-{end}"))
+pub fn shard_dest_path(store_path: &str, model_id: &str, start: u32, end: u32) -> Option<PathBuf> {
+    let model_id = validated_model_id(model_id).ok()?;
+    Some(
+        Path::new(store_path)
+            .join(model_id)
+            .join(format!("layers-{start}-{end}")),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `model_id` is remote input from the router's AssignMsg. These are
+    /// the shapes that let a peer choose where bytes land on this disk.
+    #[test]
+    fn traversing_model_ids_are_refused() {
+        for hostile in [
+            "../../../../etc/cron.d",
+            "..",
+            ".",
+            "a/../../b",
+            "foo/bar",
+            "/absolute",
+            "back\\slash",
+            "trailing/",
+            "nul\0byte",
+            "",
+        ] {
+            assert!(
+                validated_model_id(hostile).is_err(),
+                "accepted hostile model_id {hostile:?}"
+            );
+            assert!(
+                shard_dest_path("/store", hostile, 0, 1).is_none(),
+                "built a destination path for hostile model_id {hostile:?}"
+            );
+        }
+        // Over-long ids too — a peer should not get to push the path near
+        // the filesystem's own limit.
+        assert!(validated_model_id(&"a".repeat(MAX_MODEL_ID_LEN + 1)).is_err());
+    }
+
+    /// The negative control: without this, a validator that refused
+    /// EVERYTHING would pass the test above and silently break Mode B.
+    #[test]
+    fn real_model_ids_are_accepted_and_stay_inside_the_store() {
+        for good in [
+            "gemma3-4b-q4k",
+            "gpt-oss-20b.vindex3",
+            "Muse_Glimmer-30B",
+            "a",
+            &"m".repeat(MAX_MODEL_ID_LEN),
+        ] {
+            assert!(
+                validated_model_id(good).is_ok(),
+                "rejected real id {good:?}"
+            );
+            let path = shard_dest_path("/store", good, 0, 1).expect("path for a real id");
+            assert!(
+                path.starts_with("/store"),
+                "{good:?} escaped the store: {}",
+                path.display()
+            );
+        }
+    }
     use tempfile::TempDir;
 
     fn build_tar_in_memory(files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -136,7 +252,7 @@ mod tests {
 
     #[test]
     fn shard_dest_path_combines_segments() {
-        let p = shard_dest_path("/mnt/shards", "gemma4-26b", 0, 14);
+        let p = shard_dest_path("/mnt/shards", "gemma4-26b", 0, 14).expect("safe id");
         assert!(p.ends_with("gemma4-26b/layers-0-14") || p.ends_with("gemma4-26b\\layers-0-14"));
     }
 
@@ -178,7 +294,7 @@ mod tests {
             .await
             .expect("download must succeed");
 
-        let dest = shard_dest_path(store, "gemma-test", 0, 5);
+        let dest = shard_dest_path(store, "gemma-test", 0, 5).expect("safe id");
         assert!(dest.is_dir(), "shard directory not created at {dest:?}");
         let manifest = std::fs::read(dest.join("index.json")).unwrap();
         assert_eq!(manifest, b"{\"hello\":\"world\"}");

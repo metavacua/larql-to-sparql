@@ -287,6 +287,8 @@ fn q4k_end_to_end_from_synthetic_safetensors() {
         larql_vindex::WriteWeightsOptions::default(),
         larql_vindex::KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .unwrap();
@@ -362,6 +364,23 @@ fn q4k_end_to_end_from_synthetic_safetensors() {
     let dst_cfg = larql_vindex::load_vindex_config(&dst_dir).unwrap();
     assert_eq!(dst_cfg.quant, QuantFormat::Q4K);
     assert!(dst_cfg.has_model_weights);
+
+    // ── The converter's output must be loadable by the loader that has
+    // to consume it. Asserting the manifest says `q4k` only checks what
+    // the writer claimed; `load_model_weights_kquant` is the reader that
+    // resolves every per-layer file, byte range and packed entry, so it is
+    // the one that can tell a well-labelled directory from a servable one.
+    {
+        let mut load_cb = larql_vindex::SilentLoadCallbacks;
+        let weights = larql_vindex::load_model_weights_kquant(&dst_dir, &mut load_cb)
+            .expect("a freshly converted q4k vindex must load");
+        assert_eq!(weights.num_layers, dst_cfg.num_layers);
+        assert!(
+            !weights.vectors.is_empty() || !weights.packed_byte_ranges.is_empty(),
+            "loading produced neither vectors nor packed byte ranges — the \
+             directory is labelled q4k but carries nothing to serve"
+        );
+    }
     assert!(
         dst_cfg.checksums.is_none(),
         "checksums must be cleared (source's no longer apply)"
@@ -441,6 +460,8 @@ fn q4k_feature_major_down_round_trip() {
         larql_vindex::WriteWeightsOptions::default(),
         larql_vindex::KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .unwrap();
@@ -545,6 +566,8 @@ fn legacy_q4k_filenames_load_via_dual_read() {
         larql_vindex::WriteWeightsOptions::default(),
         larql_vindex::KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .unwrap();

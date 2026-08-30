@@ -20,6 +20,17 @@ pub enum ServerError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
+    /// The request is well-formed but the server's current state
+    /// refuses it — a lifecycle mutation (`POST`/`DELETE
+    /// /v1/runtime/model`) that conflicts with what's already
+    /// happening (a load/unload in progress, a different model
+    /// already bound) or with a static topology invariant
+    /// (`docs/runtime-lifecycle-design.md` §7). Distinct from
+    /// `BadRequest`: retrying the identical request later, once the
+    /// conflicting state has changed, can succeed.
+    #[error("conflict: {0}")]
+    Conflict(String),
+
     #[error("inference not available: {0}")]
     #[allow(dead_code)]
     InferenceUnavailable(String),
@@ -43,6 +54,7 @@ impl IntoResponse for ServerError {
         let (status, message) = match &self {
             ServerError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             ServerError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            ServerError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
             ServerError::InferenceUnavailable(msg) => {
                 (StatusCode::SERVICE_UNAVAILABLE, msg.clone())
             }

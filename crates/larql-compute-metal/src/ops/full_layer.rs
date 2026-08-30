@@ -140,7 +140,8 @@ pub fn dispatch(
     // For now, return attention output only (FFN benchmarked separately)
 
     cmd.commit();
-    cmd.wait_until_completed();
+    let _ =
+        crate::cb_status::wait_checked(cmd, "crates/larql-compute-metal/src/ops/full_layer.rs:143");
 
     crate::buffers::read_buffer_f32(&buf_o_out, seq_len * hidden)
 }

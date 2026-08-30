@@ -8,6 +8,7 @@ use crate::error::LqlError;
 use crate::executor::{Backend, Session};
 
 impl Session {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn exec_diff(
         &self,
         a: &VindexRef,
@@ -16,7 +17,48 @@ impl Session {
         _relation: Option<&str>,
         limit: Option<u32>,
         into_patch: Option<&str>,
+        physical: bool,
     ) -> Result<Vec<String>, LqlError> {
+        // The one V2/V3 decision for DIFF: a side is V3 when its path
+        // carries the V3 generation marker, or when CURRENT is bound
+        // to a V3 container. Mixed-generation diffs are a later rung.
+        let is_v3 = |r: &VindexRef| -> bool {
+            match r {
+                VindexRef::Current => matches!(self.backend, Backend::Vindex3 { .. }),
+                VindexRef::Path(p) => matches!(
+                    larql_vindex::format::generation::detect_generation(std::path::Path::new(p)),
+                    Ok(larql_vindex::format::generation::ContainerGeneration::V3)
+                ),
+            }
+        };
+        match (is_v3(a), is_v3(b)) {
+            (true, true) => {
+                return self.exec_diff_v3(
+                    a,
+                    b,
+                    layer_filter,
+                    _relation,
+                    limit,
+                    into_patch,
+                    physical,
+                )
+            }
+            (false, false) => {}
+            _ => {
+                return Err(LqlError::Execution(
+                    "DIFF across generations (one VINDEX2 side, one VINDEX3 side) is a \
+                     later rung — realise both models in one generation first"
+                        .into(),
+                ))
+            }
+        }
+        if physical {
+            return Err(LqlError::Execution(
+                "DIFF … PHYSICAL is a VINDEX3 report (segment-level); VINDEX2 sides use \
+                 the default logical diff"
+                    .into(),
+            ));
+        }
         let path_a = self.resolve_vindex_ref(a)?;
         let path_b = self.resolve_vindex_ref(b)?;
 

@@ -7,6 +7,7 @@ use crate::executor::{Backend, Session};
 impl Session {
     pub(crate) fn exec_stats(&self, _vindex_path: Option<&str>) -> Result<Vec<String>, LqlError> {
         match &self.backend {
+            Backend::Vindex3 { .. } => self.exec_v3_stats(),
             Backend::Vindex {
                 path,
                 config,

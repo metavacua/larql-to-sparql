@@ -13,7 +13,7 @@ impl Session {
         conditions: &[Condition],
         limit: Option<u32>,
     ) -> Result<Vec<String>, LqlError> {
-        let (_path, config, patched) = self.require_vindex()?;
+        let ctx = self.browse()?;
         let classifier = self.relation_classifier();
 
         let layer_filter = conditions
@@ -43,9 +43,9 @@ impl Session {
         //   - layer_filter set    → show every feature at that layer
         //   - neither             → page-size default (FEATURES_DEFAULT_LIMIT)
         let default_limit = if feature_filter.is_some() {
-            config.num_layers
+            ctx.num_layers
         } else if layer_filter.is_some() {
-            config.intermediate_size
+            ctx.intermediate_size
         } else {
             FEATURES_DEFAULT_LIMIT
         };
@@ -54,7 +54,7 @@ impl Session {
         let scan_layers: Vec<usize> = if let Some(l) = layer_filter {
             vec![l]
         } else {
-            (0..config.num_layers).collect()
+            (0..ctx.num_layers).collect()
         };
 
         let mut out = Vec::new();
@@ -66,7 +66,7 @@ impl Session {
 
         let mut count = 0;
         'outer: for layer in &scan_layers {
-            let nf = patched.num_features(*layer);
+            let nf = ctx.source.num_features(*layer);
             for feat in 0..nf {
                 if count >= limit {
                     break 'outer;
@@ -76,7 +76,7 @@ impl Session {
                         continue;
                     }
                 }
-                if let Some(meta) = patched.feature_meta(*layer, feat) {
+                if let Some(meta) = ctx.source.feature_meta(*layer, feat) {
                     if let Some(tf) = token_filter {
                         if meta.top_token.to_lowercase() != tf.to_lowercase() {
                             continue;

@@ -16,11 +16,10 @@ use crate::executor::tuning::{
 /// — the caller emits the "(not found)" line.
 pub(super) fn describe_build_query(
     entity: &str,
-    path: &std::path::Path,
+    ctx: &crate::executor::knowledge::BrowseCtx<'_>,
 ) -> Result<Option<larql_vindex::ndarray::Array1<f32>>, LqlError> {
-    let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-        .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
-    let tokenizer = larql_vindex::load_vindex_tokenizer(path)
+    let (embed, embed_scale) = ctx.embeddings()?;
+    let tokenizer = larql_vindex::load_vindex_tokenizer(ctx.path)
         .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
     crate::executor::helpers::entity_query_vec(&tokenizer, &embed, embed_scale, entity)
 }

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Metal GPU backend for LARQL. Implements `larql_compute::ComputeBackend` on Apple Silicon via `metal-rs` + custom MSL shaders. Decoupled from larql-compute so non-Mac hosts skip the build entirely."
 keywords = ["metal", "gpu", "apple-silicon", "matmul", "quantization"]
 categories = ["science"]
@@ -36,6 +37,8 @@ libc = "0.2"
 
 [dev-dependencies]
 memmap2 = "0.9"
+# Scratch directories for the env-gated decode-diagnostic dump tests.
+tempfile = "3"
 serde_json = { workspace = true }
 criterion = "0.5"
 # Enable `larql-models`' `test-utils` feature so moved-down Metal trait

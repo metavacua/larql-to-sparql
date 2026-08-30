@@ -15,7 +15,11 @@
 //! 2. `sliding_window_pattern` field (every Nth layer is full)
 //! 3. Default pattern of 6 (every 6th layer is full)
 
-use crate::config::{Activation, ExpertFormat, ModelArchitecture, ModelConfig};
+use crate::config::{
+    Activation, ExpertFormat, GateUpLayout, ModelArchitecture, ModelConfig, PositionPolicy,
+    PostNormEps, RotaryFrequencyBasis,
+};
+use crate::tensor_keys::qk_norm;
 
 /// Layer type string used in Gemma 4 `layer_types` config field.
 const LAYER_TYPE_FULL: &str = "full_attention";
@@ -176,17 +180,11 @@ impl ModelArchitecture for Gemma4Arch {
     // ── QK norm (inherited from Gemma 3) ──
 
     fn attn_q_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.q_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.k_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::k(&self.layer_prefix(layer))
     }
 
     // ── Gemma-family behavior ──
@@ -201,8 +199,16 @@ impl ModelArchitecture for Gemma4Arch {
         Activation::GeluTanh
     }
 
-    fn embed_scale(&self) -> f32 {
-        (self.config.hidden_size as f32).sqrt()
+    fn embed_scale(&self) -> Option<f32> {
+        Some((self.config.hidden_size as f32).sqrt())
+    }
+
+    /// Gemma 4's post-norms share `rms_norm_eps` with its pre-norms — see
+    /// [`Gemma2Architecture::post_norm_eps`](super::gemma2::Gemma2Architecture).
+    /// Declared rather than inherited: a four-norm stack that leaves the
+    /// post-norm epsilon unjudged is refused.
+    fn post_norm_eps(&self) -> Option<PostNormEps> {
+        Some(PostNormEps::Shared)
     }
 
     // Gemma 4's shipped `tokenizer.json` omits `<bos>` from its
@@ -220,6 +226,29 @@ impl ModelArchitecture for Gemma4Arch {
 
     fn is_sliding_window_layer(&self, layer: usize) -> bool {
         !self.is_global_layer(layer)
+    }
+
+    /// Global layers rotate only `partial_rotary_factor` of each
+    /// `global_head_dim`-wide head, with the inverse frequencies taken over
+    /// the FULL head width — HF's `proportional` rope class, which
+    /// `Gemma4RotaryEmbedding` selects for `full_attention` and computes
+    /// with `head_dim_key = "global_head_dim"`. Sliding layers are plain
+    /// rotary at the local base. The class is the architecture's judgement
+    /// (no Gemma 4 checkpoint declares plain partial rotary); the VINDEX3
+    /// carriage gate compares it against the declared `rope_type`, so a
+    /// checkpoint saying otherwise blocks rather than being mis-served.
+    fn position_policy_for_layer(&self, layer: usize) -> PositionPolicy {
+        let theta = self.rope_base_for_layer(layer);
+        match self.config.partial_rotary_factor {
+            Some(rotary_fraction) if self.is_global_layer(layer) && rotary_fraction < 1.0 => {
+                PositionPolicy::PartialRope {
+                    theta,
+                    rotary_fraction,
+                    basis: RotaryFrequencyBasis::HeadWidth,
+                }
+            }
+            _ => PositionPolicy::Rope { theta },
+        }
     }
 
     fn rope_base_for_layer(&self, layer: usize) -> f64 {
@@ -246,6 +275,12 @@ impl ModelArchitecture for Gemma4Arch {
         ExpertFormat::PackedBF16
     }
 
+    /// Stacked `[num_experts, 2 * moe_intermediate, hidden]` with the gate
+    /// rows first — the layout the packed f32 expert path already assumes.
+    fn gate_up_layout(&self) -> Option<GateUpLayout> {
+        Some(GateUpLayout::ContiguousHalves)
+    }
+
     fn num_experts(&self) -> usize {
         self.config.num_experts.unwrap_or(0)
     }
@@ -261,11 +296,11 @@ impl ModelArchitecture for Gemma4Arch {
         self.config.moe_intermediate_size.unwrap_or(0)
     }
 
-    fn moe_router_type(&self) -> &str {
+    fn moe_router_kind(&self) -> crate::MoeRouterKind {
         if self.config.enable_moe_block {
-            "gemma4_top_k_softmax"
+            crate::MoeRouterKind::Gemma4Hybrid
         } else {
-            "top_k_softmax"
+            crate::MoeRouterKind::TopKSoftmax
         }
     }
 

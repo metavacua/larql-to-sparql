@@ -143,11 +143,11 @@ mod tests {
     #[test]
     fn full_layer_direct_dispatches_with_synthetic_weights() {
         let m = backend();
-        let hidden = 32usize;
+        let hidden = 256usize;
         let head_dim = 16usize;
         let num_q_heads = 2usize;
         let num_kv_heads = 2usize;
-        let inter = 64usize;
+        let inter = 512usize;
         let seq_len = 1usize;
 
         let q_dim = num_q_heads * head_dim;

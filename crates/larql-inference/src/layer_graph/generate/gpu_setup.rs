@@ -65,6 +65,11 @@ pub(super) fn build_gpu_decode_setup<'a>(
     backend: &dyn ComputeBackend,
     layer_range: Range<usize>,
     constrained: bool,
+    // Expert-bank authority: routed container if supplied, otherwise
+    // spine. The override replaces ONLY the bank facts on each routed
+    // layer; attention, norms, router state and topology stay
+    // spine-owned. Generic — no representation is named on this path.
+    routed: Option<&'a crate::ffn::ContainerRoutedBackend>,
 ) -> Result<GpuDecodeSetup<'a>, GenerateError> {
     let hidden = weights.hidden_size;
     let gate_index: &dyn larql_vindex::GateIndex = index;
@@ -104,7 +109,7 @@ pub(super) fn build_gpu_decode_setup<'a>(
         .ok_or_else(|| {
             GenerateError::missing_weights("Q4 interleaved FFN format has invalid packed geometry")
         })?;
-    let layers = crate::layer_graph::pipeline_layer::build_pipeline_layers(
+    let mut layers = crate::layer_graph::pipeline_layer::build_pipeline_layers(
         weights,
         index,
         0..weights.num_layers,
@@ -112,6 +117,32 @@ pub(super) fn build_gpu_decode_setup<'a>(
         q4_ffn_per_matrix,
         ffn_format,
     );
+    if let Some(routed) = routed {
+        let mut overridden = 0usize;
+        for (l, layer) in layers.iter_mut().enumerate() {
+            let Some(moe) = layer.moe.as_mut() else {
+                continue; // dense layers owe the container nothing
+            };
+            let ovr = routed
+                .expert_bank_override(moe.num_experts, moe.expert_data_format, l)
+                .map_err(|e| {
+                    GenerateError::missing_weights(format!(
+                        "routed container cannot serve layer {l}: {e}"
+                    ))
+                })?;
+            moe.apply_expert_bank_override(ovr);
+            overridden += 1;
+        }
+        // Fired evidence, not silence: the composed run states what it
+        // actually swapped, once per setup.
+        eprintln!(
+            "[routed-metal] expert banks overridden on {overridden} layer(s); \
+             format L0 = {:?}",
+            layers
+                .iter()
+                .find_map(|l| l.moe.as_ref().map(|m| m.expert_data_format)),
+        );
+    }
 
     Ok(GpuDecodeSetup {
         layers,
@@ -133,7 +164,16 @@ pub(super) fn ensure_prompt_fits(seq_len: usize) -> Result<(), GenerateError> {
 pub(super) fn reset_and_preallocate_kv_cache(weights: &ModelWeights, backend: &dyn ComputeBackend) {
     backend.reset_kv_cache();
     let kv_shapes = kv_cache_shapes_for_arch(weights);
-    backend.preallocate_kv_cache_per_layer(&kv_shapes, DEFAULT_GPU_KV_CACHE_MAX_SEQ);
+    // Every layer at the full default, sliding or not. The window-derived
+    // capacity (`kv_capacities_for_arch`) presumes compaction, and the GPU
+    // decode path never compacts — it appends at `current_len` and attends
+    // absolute rows — so a sliding layer sized to its window ran off the
+    // end of its buffer past position `window x slack` (#229). The Metal
+    // backend applies the same rule in `ensure_kv_cache_for_layers`; stating
+    // it here too keeps the preallocation from being grown on the first
+    // step.
+    let kv_capacities = vec![DEFAULT_GPU_KV_CACHE_MAX_SEQ; kv_shapes.len()];
+    backend.preallocate_kv_cache_per_layer_with_capacity(&kv_shapes, &kv_capacities);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -219,9 +259,15 @@ mod tests {
         let weights = make_test_q4k_weights();
         let index = make_test_q4k_vindex(&weights);
         let backend = CpuBackend;
-        let setup =
-            build_gpu_decode_setup(&weights, &index, &backend, 0..weights.num_layers, false)
-                .expect("Q4K fixture + CpuBackend should build setup");
+        let setup = build_gpu_decode_setup(
+            &weights,
+            &index,
+            &backend,
+            0..weights.num_layers,
+            false,
+            None,
+        )
+        .expect("Q4K fixture + CpuBackend should build setup");
         assert_eq!(setup.layers.len(), weights.num_layers);
         assert_eq!(setup.hidden, weights.hidden_size);
         assert!(setup.intermediate > 0);
@@ -234,8 +280,15 @@ mod tests {
         let weights = make_test_q4k_weights();
         let index = make_test_q4k_vindex(&weights);
         let backend = CpuBackend;
-        let setup = build_gpu_decode_setup(&weights, &index, &backend, 0..weights.num_layers, true)
-            .expect("constrained variant should build on Q4K fixture");
+        let setup = build_gpu_decode_setup(
+            &weights,
+            &index,
+            &backend,
+            0..weights.num_layers,
+            true,
+            None,
+        )
+        .expect("constrained variant should build on Q4K fixture");
         assert_eq!(setup.layers.len(), weights.num_layers);
     }
 
@@ -258,6 +311,7 @@ mod tests {
             &backend,
             0..weights.num_layers,
             false,
+            None,
         );
         let err = match result {
             Ok(_) => panic!("empty vindex must be rejected"),

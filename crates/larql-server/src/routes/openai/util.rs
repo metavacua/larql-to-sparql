@@ -9,6 +9,28 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
+use crate::error::ServerError;
+use crate::routes::openai::OpenAIError;
+
+/// SSE termination sentinel — every OpenAI streaming endpoint ends
+/// with `data: [DONE]\n\n`.
+pub const SSE_DONE: &str = "[DONE]";
+
+/// Bounded depth of the token channel between the blocking generation
+/// thread and the SSE stream. Deep enough to absorb scheduler jitter;
+/// shallow enough that a disconnected client back-pressures generation
+/// within a few tokens.
+pub const SSE_CHANNEL_DEPTH: usize = 64;
+
+/// OpenAI `finish_reason` — generation halted on EOS or a stop string.
+pub const FINISH_REASON_STOP: &str = "stop";
+
+/// OpenAI `finish_reason` — generation ran to the `max_tokens` budget.
+pub const FINISH_REASON_LENGTH: &str = "length";
+
+/// OpenAI `finish_reason` — the model emitted tool calls (chat only).
+pub const FINISH_REASON_TOOL_CALLS: &str = "tool_calls";
+
 /// Stop strings — accepted as either a single string or a list.
 /// OpenAI's `stop` field allows both forms.
 #[derive(Deserialize, Debug, Clone)]
@@ -28,13 +50,9 @@ impl StopSpec {
 }
 
 /// Unix epoch seconds — used as the OpenAI `created` field on every
-/// response and stream chunk.
-pub fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+/// response and stream chunk. Re-exported from the session clock so the
+/// server has one implementation of "what time is it".
+pub use crate::session::unix_now;
 
 /// Generate a short hex id suffix for `cmpl-...` / `chatcmpl-...`.
 /// Not cryptographically strong; uniqueness across one server lifetime
@@ -82,6 +100,38 @@ pub fn trim_at_stop(haystack: &str, needles: &[String]) -> String {
 /// failure mid-stream rather than a truncated success response.
 pub fn error_chunk(msg: &str) -> String {
     serde_json::json!({"error": {"message": msg, "type": "server_error"}}).to_string()
+}
+
+/// Await a blocking generation task under the server-side timeout —
+/// the 504-and-detach contract every buffered OpenAI endpoint applies
+/// (BUG-infer-deadlock §5.6): on timeout the JoinHandle is dropped,
+/// the blocking thread finishes in the background, and the client
+/// gets 504 rather than an indefinitely held connection. A zero
+/// timeout disables the race.
+pub async fn join_generation<T>(
+    handle: tokio::task::JoinHandle<Result<T, ServerError>>,
+    timeout: std::time::Duration,
+) -> Result<T, OpenAIError> {
+    if timeout.is_zero() {
+        return Ok(handle
+            .await
+            .map_err(|e| ServerError::Internal(e.to_string()))??);
+    }
+    match tokio::time::timeout(timeout, handle).await {
+        Ok(join_result) => Ok(join_result.map_err(|e| ServerError::Internal(e.to_string()))??),
+        Err(_elapsed) => {
+            tracing::warn!(
+                target: "larql_server::openai",
+                "generation timed out after {}s; responding 504 (background thread \
+                 finishes on its own)",
+                timeout.as_secs(),
+            );
+            Err(OpenAIError::from(ServerError::Timeout(format!(
+                "generation exceeded server-side timeout of {}s",
+                timeout.as_secs(),
+            ))))
+        }
+    }
 }
 
 /// Sampling parameters extracted from an OpenAI completions /
@@ -339,6 +389,47 @@ mod tests {
         assert_eq!(eos.stop_strings.len(), eos_baseline.stop_strings.len() + 2);
         assert!(eos.stop_strings.iter().any(|s| s == "\n\n"));
         assert!(eos.stop_strings.iter().any(|s| s == "STOP"));
+    }
+
+    #[tokio::test]
+    async fn join_generation_awaits_with_timeout_disabled() {
+        let handle = tokio::task::spawn_blocking(|| Ok::<_, ServerError>(7usize));
+        let value = join_generation(handle, std::time::Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(value, 7);
+    }
+
+    #[tokio::test]
+    async fn join_generation_returns_within_the_timeout() {
+        let handle = tokio::task::spawn_blocking(|| Ok::<_, ServerError>("done"));
+        let value = join_generation(handle, std::time::Duration::from_secs(30))
+            .await
+            .unwrap();
+        assert_eq!(value, "done");
+    }
+
+    #[tokio::test]
+    async fn join_generation_responds_504_when_the_task_overruns() {
+        let handle = tokio::task::spawn_blocking(|| {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            Ok::<_, ServerError>(())
+        });
+        let err = join_generation(handle, std::time::Duration::from_millis(5))
+            .await
+            .unwrap_err();
+        let body = format!("{err:?}");
+        assert!(body.contains("timeout"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn join_generation_surfaces_the_task_error() {
+        let handle =
+            tokio::task::spawn_blocking(|| Err::<(), _>(ServerError::Internal("boom".to_string())));
+        let err = join_generation(handle, std::time::Duration::from_secs(30))
+            .await
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("boom"));
     }
 
     #[test]

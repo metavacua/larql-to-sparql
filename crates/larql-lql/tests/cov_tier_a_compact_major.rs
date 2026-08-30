@@ -120,6 +120,8 @@ fn write_large_vindex_dir(dir: &std::path::Path) {
         packed_mmaps: HashMap::new(),
         skipped_tensors: Vec::new(),
         packed_byte_ranges: HashMap::new(),
+        per_layer_ffn_format: Default::default(),
+        per_layer_ffn_arrangement: Default::default(),
         embed: embed.clone(),
         lm_head,
         position_embed: None,
@@ -189,6 +191,7 @@ fn write_large_vindex_dir(dir: &std::path::Path) {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     };
 
     let mut config = VindexConfig {

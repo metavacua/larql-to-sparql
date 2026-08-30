@@ -100,7 +100,7 @@ plan, not a `Range<usize>`.
 
 ## What "cross-architecture" actually means here
 
-We already have `ModelArchitecture` (`crates/larql-models/src/config.rs:158`)
+We already have `ModelArchitecture` (`crates/larql-models/src/config/architecture.rs:49`)
 abstracting per-family LM details (tensor keys, norm type, activation,
 RoPE scaling, per-layer geometry). That trait does its job — adding
 Granite or Qwen didn't require forward-pass changes.
@@ -144,7 +144,7 @@ before editing this section):
 ### `larql-models` — LM architecture abstraction
 
 - `ModelArchitecture` trait at
-  `crates/larql-models/src/config.rs:158`.
+  `crates/larql-models/src/config/architecture.rs:49`.
 - Per-family impls in `crates/larql-models/src/architectures/`:
   `gemma3.rs`, `gemma4.rs`, `granite.rs`, `qwen.rs`, `llama.rs`,
   `mistral.rs`, `mixtral.rs`, `deepseek_v4.rs`, `gpt_oss.rs`, ...

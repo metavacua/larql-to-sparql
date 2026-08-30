@@ -36,49 +36,25 @@ impl<'a> BuildContext<'a> {
             dtype: self.dtype,
             quant: crate::QuantFormat::None,
             layer_bands: crate::LayerBands::for_family(&family, self.num_layers),
-            model_config: {
-                let cfg = self.weights.arch.config();
-                Some(VindexModelConfig {
-                    model_type: cfg.model_type.clone(),
-                    head_dim: self.weights.head_dim,
-                    num_q_heads: self.weights.num_q_heads,
-                    num_kv_heads: self.weights.num_kv_heads,
-                    rope_base: self.weights.rope_base,
-                    sliding_window: cfg.sliding_window,
-                    moe: if self.is_moe {
-                        let a = &*self.weights.arch;
-                        Some(crate::MoeConfig {
-                            num_experts: self.n_experts,
-                            top_k: a.num_experts_per_token(),
-                            shared_expert: a.num_shared_experts() > 0,
-                            router_type: a.moe_router_type().to_string(),
-                            moe_intermediate_size: if a.moe_intermediate_size() > 0 {
-                                Some(a.moe_intermediate_size())
-                            } else {
-                                None
-                            },
-                            hybrid: a.is_hybrid_moe(),
-                        })
-                    } else {
-                        None
-                    },
-                    global_head_dim: cfg.global_head_dim,
-                    num_global_kv_heads: cfg.num_global_kv_heads,
-                    partial_rotary_factor: cfg.partial_rotary_factor,
-                    sliding_window_pattern: cfg.sliding_window_pattern,
-                    layer_types: cfg.layer_types.clone(),
-                    attention_k_eq_v: cfg.attention_k_eq_v,
-                    num_kv_shared_layers: cfg.num_kv_shared_layers,
-                    per_layer_embed_dim: cfg.per_layer_embed_dim,
-                    rope_local_base: cfg.rope_local_base,
-                    query_pre_attn_scalar: cfg.query_pre_attn_scalar,
-                    final_logit_softcapping: cfg.final_logit_softcapping,
-                    attention_multiplier: cfg.attention_multiplier,
-                    residual_multiplier: cfg.residual_multiplier,
-                    logits_scaling: cfg.logits_scaling,
-                    norm_eps: cfg.norm_eps,
-                })
-            },
+            // See the streaming writer: one mapping, not three.
+            model_config: Some({
+                let mut mc = VindexModelConfig::from_arch(&*self.weights.arch);
+                // Geometry the extractor observed in the tensors wins
+                // over the declared config — this writer's original
+                // reason for not calling `from_arch`.
+                mc.head_dim = self.weights.head_dim;
+                mc.num_q_heads = self.weights.num_q_heads;
+                mc.num_kv_heads = self.weights.num_kv_heads;
+                mc.rope_base = self.weights.rope_base;
+                if self.is_moe {
+                    if let Some(moe) = mc.moe.as_mut() {
+                        moe.num_experts = self.n_experts;
+                    }
+                } else {
+                    mc.moe = None;
+                }
+                mc
+            }),
             fp4: None,
             ffn_layout: None,
             bitnet_layout: None,

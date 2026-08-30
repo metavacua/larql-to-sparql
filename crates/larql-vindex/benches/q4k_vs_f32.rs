@@ -176,6 +176,8 @@ fn bench_q4k_vs_f32(c: &mut Criterion) {
         larql_vindex::WriteWeightsOptions::default(),
         larql_vindex::KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .unwrap();
@@ -194,6 +196,8 @@ fn bench_q4k_vs_f32(c: &mut Criterion) {
         larql_vindex::WriteWeightsOptions::default(),
         larql_vindex::KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .unwrap();

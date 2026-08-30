@@ -6,5 +6,6 @@ pub mod dispatch;
 pub mod grid;
 pub mod http;
 pub mod metrics;
+pub mod openai;
 pub mod shards;
 pub mod tasks;

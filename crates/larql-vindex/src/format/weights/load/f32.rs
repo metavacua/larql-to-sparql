@@ -237,20 +237,26 @@ pub fn load_model_weights_with_opts(
     // want FFN weights (saves ~3-14 GB heap for a 4B/31B client).
     if config.quant == crate::config::types::QuantFormat::None && !opts.skip_ffn {
         let gate_file = std::fs::File::open(dir.join(GATE_VECTORS_BIN))?;
-        let gate_mmap = unsafe { memmap2::Mmap::map(&gate_file)? };
-        let gate_floats = crate::config::dtype::decode_floats(&gate_mmap, config.dtype);
-        let bpf = crate::config::dtype::bytes_per_float(config.dtype);
-        for info in &config.layers {
-            let float_offset = info.offset as usize / bpf;
-            let float_count = info.num_features * config.hidden_size;
-            if float_offset + float_count <= gate_floats.len() {
-                let gate_data = &gate_floats[float_offset..float_offset + float_count];
-                let gate_matrix = Array2::from_shape_vec(
-                    (info.num_features, config.hidden_size),
-                    gate_data.to_vec(),
-                )
-                .map_err(|e| VindexError::Parse(e.to_string()))?;
-                tensors.insert(arch.ffn_gate_key(info.layer), gate_matrix.into_shared());
+        // A dense-only vindex writes this file empty rather than omitting
+        // it, and an empty mapping is rejected on Windows with OS error 87
+        // (issue #164). Absent gate vectors are the intended state for that
+        // build, so skip only this block — `if let` rather than an early
+        // return, because the rest of the load must still run.
+        if let Some(gate_mmap) = super::map_if_nonempty(&gate_file)? {
+            let gate_floats = crate::config::dtype::decode_floats(&gate_mmap, config.dtype);
+            let bpf = crate::config::dtype::bytes_per_float(config.dtype);
+            for info in &config.layers {
+                let float_offset = info.offset as usize / bpf;
+                let float_count = info.num_features * config.hidden_size;
+                if float_offset + float_count <= gate_floats.len() {
+                    let gate_data = &gate_floats[float_offset..float_offset + float_count];
+                    let gate_matrix = Array2::from_shape_vec(
+                        (info.num_features, config.hidden_size),
+                        gate_data.to_vec(),
+                    )
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+                    tensors.insert(arch.ffn_gate_key(info.layer), gate_matrix.into_shared());
+                }
             }
         }
     }
@@ -321,6 +327,8 @@ pub fn load_model_weights_with_opts(
         skipped_tensors: Vec::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
+        per_layer_ffn_format: Default::default(),
+        per_layer_ffn_arrangement: Default::default(),
         embed,
         lm_head,
         position_embed: None,

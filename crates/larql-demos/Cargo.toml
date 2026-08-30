@@ -1,0 +1,260 @@
+# Runnable demonstrations of larql's shipped capabilities.
+#
+# Split out of the individual crates' `examples/` so that "how do I use
+# this" has one home, separate from benchmarks/diagnostics (which stay
+# next to the code they exercise) and from research probes (which live
+# in chris-experiments, pinned to the larql revision that produced their
+# verdict).
+[package]
+name = "larql-demos"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Runnable demonstrations of larql's shipped capabilities"
+publish = false
+autoexamples = false        # folders mirror the source crate; all declared below
+
+[dependencies]
+larql-boundary = { path = "../larql-boundary" }
+larql-compute = { path = "../larql-compute" }
+larql-core = { path = "../larql-core" }
+larql-inference = { path = "../larql-inference" }
+larql-kv = { path = "../larql-kv" }
+larql-lql = { path = "../larql-lql" }
+# Scratch dirs for the self-contained VINDEX3 LQL demo.
+tempfile = "3"
+larql-models = { path = "../larql-models" }
+larql-router-protocol = { path = "../larql-router-protocol" }
+larql-server = { path = "../larql-server" }
+larql-vindex = { path = "../larql-vindex" }
+
+safetensors = "0.7"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokenizers = "0.21"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# The larql-server demos are async clients.
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tonic = "0.13"
+tower = { version = "0.5", features = ["limit"] }
+
+# BLAS backend per target, mirroring larql-inference. The compute demos
+# carry `extern crate blas_src;`, so it has to be linked even where the
+# crate is featureless.
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["accelerate"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ndarray = "0.16"
+blas-src = { version = "0.10", default-features = false }
+
+[features]
+default = []
+# Cascade the flags the demos themselves test for, so `#[cfg(feature = ..)]`
+# in a demo resolves against a real feature rather than warning as unexpected.
+gpu = ["larql-inference/gpu", "larql-vindex/gpu"]
+msgpack = ["larql-core/msgpack"]
+
+# --- boundary --------------------------------------------------
+[[example]]
+name = "encode_decode"
+path = "examples/boundary/encode_decode.rs"
+
+[[example]]
+name = "gate_decision"
+path = "examples/boundary/gate_decision.rs"
+
+# --- compute ---------------------------------------------------
+[[example]]
+name = "demo_architecture"
+path = "examples/compute/demo_architecture.rs"
+
+[[example]]
+name = "demo_basic"
+path = "examples/compute/demo_basic.rs"
+
+[[example]]
+name = "demo_ridge_solve"
+path = "examples/compute/demo_ridge_solve.rs"
+
+# --- core ------------------------------------------------------
+[[example]]
+name = "algorithm_demo"
+path = "examples/core/algorithm_demo.rs"
+
+[[example]]
+name = "edge_demo"
+path = "examples/core/edge_demo.rs"
+
+[[example]]
+name = "filter_demo"
+path = "examples/core/filter_demo.rs"
+
+[[example]]
+name = "graph_demo"
+path = "examples/core/graph_demo.rs"
+
+[[example]]
+name = "serialization_demo"
+path = "examples/core/serialization_demo.rs"
+
+# --- inference -------------------------------------------------
+[[example]]
+name = "attention_demo"
+path = "examples/inference/attention_demo.rs"
+
+[[example]]
+name = "ave_demo"
+path = "examples/inference/ave_demo.rs"
+
+[[example]]
+name = "backend_demo"
+path = "examples/inference/backend_demo.rs"
+
+[[example]]
+name = "chat_demo"
+path = "examples/inference/chat_demo.rs"
+
+[[example]]
+name = "clustering_demo"
+path = "examples/inference/clustering_demo.rs"
+
+[[example]]
+name = "detok_demo"
+path = "examples/inference/detok_demo.rs"
+
+[[example]]
+name = "eos_demo"
+path = "examples/inference/eos_demo.rs"
+
+[[example]]
+name = "experts_demo"
+path = "examples/inference/experts_demo.rs"
+
+[[example]]
+name = "ffn_cache_demo"
+path = "examples/inference/ffn_cache_demo.rs"
+
+[[example]]
+name = "inference_demo"
+path = "examples/inference/inference_demo.rs"
+
+[[example]]
+name = "mech_interp_demo"
+path = "examples/inference/mech_interp_demo.rs"
+
+[[example]]
+name = "pair_matching_demo"
+path = "examples/inference/pair_matching_demo.rs"
+
+[[example]]
+name = "sampling_demo"
+path = "examples/inference/sampling_demo.rs"
+
+[[example]]
+name = "streaming_demo"
+path = "examples/inference/streaming_demo.rs"
+
+# --- kv --------------------------------------------------------
+[[example]]
+name = "engine_ladder"
+path = "examples/kv/engine_ladder.rs"
+
+# --- lql -------------------------------------------------------
+[[example]]
+name = "compact_demo"
+path = "examples/lql/compact_demo.rs"
+
+[[example]]
+name = "compile_demo"
+path = "examples/lql/compile_demo.rs"
+
+[[example]]
+name = "lql_demo"
+path = "examples/lql/lql_demo.rs"
+
+[[example]]
+name = "vindex3_demo"
+path = "examples/lql/vindex3_demo.rs"
+
+[[example]]
+name = "parser_demo"
+path = "examples/lql/parser_demo.rs"
+
+[[example]]
+name = "refine_demo"
+path = "examples/lql/refine_demo.rs"
+
+[[example]]
+name = "trace_demo"
+path = "examples/lql/trace_demo.rs"
+
+# --- models ----------------------------------------------------
+[[example]]
+name = "architecture_demo"
+path = "examples/models/architecture_demo.rs"
+
+[[example]]
+name = "demo_loading"
+path = "examples/models/demo_loading.rs"
+
+[[example]]
+name = "demo_tensor_keys"
+path = "examples/models/demo_tensor_keys.rs"
+
+# --- server ----------------------------------------------------
+[[example]]
+name = "embed_demo"
+path = "examples/server/embed_demo.rs"
+
+[[example]]
+name = "openai_demo"
+path = "examples/server/openai_demo.rs"
+
+[[example]]
+name = "vindex3_serve_demo"
+path = "examples/server/vindex3_serve_demo.rs"
+
+[[example]]
+name = "server_demo"
+path = "examples/server/server_demo.rs"
+
+[[example]]
+name = "shard_query_demo"
+path = "examples/server/shard_query_demo.rs"
+
+# --- vindex ----------------------------------------------------
+[[example]]
+name = "demo_features"
+path = "examples/vindex/demo_features.rs"
+
+[[example]]
+name = "demo_memit_solve"
+path = "examples/vindex/demo_memit_solve.rs"
+
+[[example]]
+name = "mmap_demo"
+path = "examples/vindex/mmap_demo.rs"
+
+[[example]]
+name = "q4k_demo"
+path = "examples/vindex/q4k_demo.rs"
+
+[[example]]
+name = "walker_demo"
+path = "examples/vindex/walker_demo.rs"
+
+
+[lints]
+workspace = true

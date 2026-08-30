@@ -790,6 +790,36 @@ fn extract_with_unknown_keyword_is_error() {
 }
 
 #[test]
+fn extract_format_names_a_generation_or_stays_absent() {
+    use larql_lql::ast::ExtractFormat;
+    // Explicit requests parse, case-insensitively (bare identifiers, as
+    // with COMPILE INTO VINDEX).
+    match ok(r#"EXTRACT MODEL "m" INTO "o.vindex" FORMAT VINDEX2;"#) {
+        Statement::Extract { format, .. } => assert_eq!(format, Some(ExtractFormat::Vindex2)),
+        other => panic!("got {other:?}"),
+    }
+    match ok(r#"EXTRACT MODEL "m" INTO "o.vindex" FORMAT vindex3 WITH INFERENCE;"#) {
+        Statement::Extract {
+            format,
+            extract_level,
+            ..
+        } => {
+            assert_eq!(format, Some(ExtractFormat::Vindex3));
+            assert_eq!(extract_level, larql_lql::ast::ExtractLevel::Inference);
+        }
+        other => panic!("got {other:?}"),
+    }
+    // Absence is "no preference" — a distinct value from either request,
+    // resolved by the vindex crate's policy site, not the parser.
+    match ok(r#"EXTRACT MODEL "m" INTO "o.vindex";"#) {
+        Statement::Extract { format, .. } => assert_eq!(format, None),
+        other => panic!("got {other:?}"),
+    }
+    // FORMAT followed by anything else is a parse error.
+    err(r#"EXTRACT MODEL "m" INTO "o.vindex" FORMAT GGUF;"#);
+}
+
+#[test]
 fn diff_with_all_optional_clauses() {
     let stmt = ok(r#"DIFF "a.vindex" "b.vindex" LAYER 5 RELATION "capital-of" LIMIT 10;"#);
     match stmt {

@@ -169,16 +169,8 @@ mod tests {
             Array2::zeros((x.nrows(), x.ncols()))
         }
 
-        fn forward_with_activation(
-            &self,
-            _layer: usize,
-            x: &Array2<f32>,
-        ) -> (Array2<f32>, Array2<f32>) {
-            (
-                Array2::zeros((x.nrows(), x.ncols())),
-                Array2::zeros((x.nrows(), x.ncols())),
-            )
-        }
+        // `forward_observed` keeps the trait default (Absent): this
+        // stub computes nothing, so it observes nothing.
 
         fn name(&self) -> &str {
             "zero"

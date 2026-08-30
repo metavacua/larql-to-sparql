@@ -3,7 +3,7 @@
 Examples in three groups. Run any with:
 
 ```
-cargo run --release --features metal -p larql-compute --example <name>
+cargo run --release -p larql-compute-metal --example <name>
 ```
 
 ## Demos — show the API
@@ -17,7 +17,7 @@ cargo run --release --features metal -p larql-compute --example <name>
 ## Compares — full-pipeline benchmarks
 
 End-to-end decode/generation throughput. Different surface from `benches/quant_matvec.rs`
-(which measures kernel-level throughput). Run with `--release --features metal`.
+(which measures kernel-level throughput). Run with `--release`. (They live in `larql-compute-metal`, which is gated on `target_os = "macos"` — there is no `metal` feature to enable.)
 
 | Example | What it measures |
 |---|---|
@@ -31,14 +31,14 @@ For kernel-level throughput regressions, use the criterion bench suite:
 
 ```
 make bench-compute   # quant_matvec Criterion bench with Metal
-cargo bench -p larql-compute --bench matmul
+cargo bench -p larql-compute-metal --bench matmul
 cargo bench -p larql-compute --bench linalg
 ```
 
 ## Diagnostics (`diag_*`) — investigate production issues
 
 These are operational tools, not tutorials. They answer specific questions
-about where time goes or why output diverges. They require `--features metal`
+about where time goes or why output diverges. They live in `larql-compute-metal` (no feature flag — the crate is `target_os`-gated)
 and a real vindex or production-shape synthetic data.
 
 | Example | Question it answers |
@@ -51,14 +51,14 @@ Usage:
 
 ```bash
 # Per-kernel bandwidth profiler — runs 50 iterations per kernel, batched x34
-cargo run --release --features metal -p larql-compute --example diag_profile_kernels
+cargo run --release -p larql-compute-metal --example diag_profile_kernels
 
 # Shader benchmark inventory / JSON comparison
-cargo run --release --features metal -p larql-compute --example diag_shader_bench -- --profile smoke
+cargo run --release -p larql-compute-metal --example diag_shader_bench -- --profile smoke
 
 # Decode pipeline stage bisect — dumps per-stage f32 files for diffing
 LARQL_METAL_DUMP_LAYERS=/tmp/decode_dump \
-cargo run --release --features metal -p larql-compute --example diag_decode_pipeline
+cargo run --release -p larql-compute-metal --example diag_decode_pipeline
 ```
 
 ### When to use each

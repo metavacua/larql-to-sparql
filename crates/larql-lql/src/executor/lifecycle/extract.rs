@@ -2,13 +2,16 @@
 
 use std::path::PathBuf;
 
-use crate::ast::{Component, ExtractLevel, Range};
+use crate::ast::{Component, ExtractFormat, ExtractLevel, Range};
 use crate::error::LqlError;
 use crate::executor::helpers::format_number;
 use crate::executor::memit_persist::load_memit_store;
 use crate::executor::{Backend, Session};
 use crate::relations::RelationClassifier;
 use larql_vindex::format::filenames::KNN_STORE_BIN;
+use larql_vindex::format::generation::{
+    admit_extraction_generation, ContainerGeneration, GenerationRequest,
+};
 
 impl Session {
     pub(crate) fn exec_extract(
@@ -18,7 +21,22 @@ impl Session {
         _components: Option<&[Component]>,
         _layers: Option<&Range>,
         _extract_level: ExtractLevel,
+        format: Option<ExtractFormat>,
     ) -> Result<Vec<String>, LqlError> {
+        // Resolve the generation FIRST — the request must be admitted or
+        // refused before any model bytes move. `None` is "no preference",
+        // resolved by the vindex crate's single policy site (the
+        // default-flip gate), never by a default here.
+        let request = match format {
+            None => GenerationRequest::Auto,
+            Some(ExtractFormat::Vindex2) => GenerationRequest::Explicit(ContainerGeneration::V2),
+            Some(ExtractFormat::Vindex3) => GenerationRequest::Explicit(ContainerGeneration::V3),
+        };
+        match admit_extraction_generation(request) {
+            ContainerGeneration::V2 => {}
+            ContainerGeneration::V3 => return self.exec_extract_v3(model, output),
+        }
+
         let output_dir = PathBuf::from(output);
 
         let mut out = Vec::new();
@@ -108,6 +126,61 @@ impl Session {
             memit_store,
         };
 
+        Ok(out)
+    }
+
+    /// The VINDEX3 arm: HF checkpoint artifacts → `encode_checkpoint`
+    /// (plan gate with itemised blocking findings, segments, capability
+    /// snapshot) → bind, through the same block `USE` binds with.
+    ///
+    /// The V2 arm above loads a model through `InferenceModel::load`,
+    /// which accepts GGUF as well as safetensors; the V3 encoder takes
+    /// only HF checkpoint artifacts, because a container may not
+    /// transcode on the way in. A source it cannot consume refuses by
+    /// name rather than falling back to a V2 extraction.
+    fn exec_extract_v3(&mut self, model: &str, output: &str) -> Result<Vec<String>, LqlError> {
+        let model_path = larql_models::resolve_model_path(model)
+            .map_err(|e| LqlError::exec("failed to resolve model path", e))?;
+        if model_path.is_file() {
+            return Err(LqlError::Execution(format!(
+                "{} is a GGUF file; the VINDEX3 encoder consumes HF checkpoint artifacts \
+                 (config.json + safetensors) and a container may not transcode on the way \
+                 in. Use FORMAT VINDEX2 for GGUF sources.",
+                model_path.display()
+            )));
+        }
+
+        let output_dir = PathBuf::from(output);
+        let mut out = vec![format!(
+            "Encoding checkpoint {} → {} (VINDEX3)...",
+            model_path.display(),
+            output_dir.display()
+        )];
+        let encoded = larql_vindex::format::vindex3::encode::checkpoint::encode_checkpoint(
+            &model_path,
+            &output_dir,
+        )
+        .map_err(|e| LqlError::exec("VINDEX3 encode failed", e))?;
+        out.push(format!(
+            "Encoded {} ({} representation(s), {} payload bytes).",
+            encoded.artifact,
+            encoded.outcome.representations,
+            format_number(encoded.outcome.total_payload_bytes as usize),
+        ));
+        if encoded.capabilities.is_empty() {
+            out.push(
+                "No tokenizer.json beside the checkpoint — binding with token-id \
+                 capability only."
+                    .into(),
+            );
+        } else {
+            out.push(format!(
+                "Capabilities: {}.",
+                encoded.capabilities.join(", ")
+            ));
+        }
+
+        out.extend(self.bind_v3_session(output_dir)?);
         Ok(out)
     }
 }

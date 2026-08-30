@@ -371,7 +371,7 @@ fn vector_architecture_from_header(
         let family = arch.family().to_string();
         return Ok(VectorArchitecture {
             family: family.clone(),
-            embed_scale: arch.embed_scale(),
+            embed_scale: arch.embed_scale_multiplier(),
             layer_bands: LayerBands::for_family(&family, num_layers),
             model_config: Some(VindexModelConfig::from_arch(&*arch)),
         });

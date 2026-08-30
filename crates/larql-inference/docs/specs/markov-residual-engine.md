@@ -137,7 +137,7 @@ behaviour that was never in scope:
   hidden dim. State is model-specific.
 - **Unbounded context.** The hot window is `W`; the cold tier stores
   token IDs only, and cold-replay cost grows with `N_cold`. This engine
-  bounds *memory*, not *cold-replay compute*. Tier 2 (`UnlimitedContextEngine`)
+  bounds *memory*, not *cold-replay compute*. Tier 2 (`WindowedCheckpointEngine`)
   and Tier 3 (`ApolloEngine`) are the escape hatches for unbounded
   context; they live in sibling engines and are out of scope here.
 - **Training-time use.** The engine is inference-only. Gradient flow
@@ -383,7 +383,7 @@ Not blocking the migration, but worth tracking:
   quantisation tier*. The remaining open work is fixturing — the current
   measured tier is FP16; Q4_K and FP8 same-tier comparison fixtures need
   to land before those tiers can be claimed as supported.
-- **Interaction with Tier 2 / Tier 3 engines.** `UnlimitedContextEngine`
+- **Interaction with Tier 2 / Tier 3 engines.** `WindowedCheckpointEngine`
   and `ApolloEngine` build on the same residual-stream machinery. Worth
   deciding whether they share a common trait / base engine with
   `MarkovResidualEngine` or stay as sibling implementations. Out of
@@ -400,7 +400,7 @@ This engine was **Row 3** of the historical benchmark's correctness ladder
   stated against.
 - Row 2 (TurboQuant): a different engine with a different contract
   (top-1 preserved, not bit-exact).
-- Row 4 (`UnlimitedContextEngine` / Tier 2): a different engine, uses
+- Row 4 (`WindowedCheckpointEngine` / Tier 2): a different engine, uses
   per-window K/V checkpoints; bit-exact within window, not across.
 - Row 5 (`ApolloEngine` / Tier 3): a different engine, uses single-vector
   boundaries + injection; first-token factual, not bit-exact.

@@ -6,5 +6,5 @@ pub mod store;
 
 pub use engine::{ApolloEngine, ApolloError, QueryTrace};
 pub use entry::{InjectionConfig, VecInjectEntry};
-pub use routing::RoutingIndex;
+pub use routing::{RoutingBuildError, RoutingIndex, MAX_ROUTABLE_WINDOWS};
 pub use store::{ApolloStore, StoreLoadError};

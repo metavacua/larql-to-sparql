@@ -11,8 +11,22 @@ impl Session {
         top: Option<u32>,
         compare: bool,
         route: Option<&crate::ast::InferRoute>,
+        generate: Option<u32>,
     ) -> Result<Vec<String>, LqlError> {
         let top_k = top.unwrap_or(5) as usize;
+
+        // VINDEX3 binding: the runtime seam serves INFER (and the
+        // GENERATE continuation); no other backend supports GENERATE.
+        if matches!(self.backend, Backend::Vindex3 { .. }) {
+            return self.exec_v3_infer(prompt, top_k, generate);
+        }
+        if generate.is_some() {
+            return Err(LqlError::Execution(
+                "INFER GENERATE currently requires a VINDEX3 container \
+                 (USE \"path/to/container\")"
+                    .into(),
+            ));
+        }
         // Resolve the KnnStore router: an explicit `ROUTE VERIFY [FALLBACK]
         // [TOPK n]` clause wins; otherwise inherit the `LARQL_KNN_*` env default
         // (so unclaused INFER stays byte-identical to the Python binding —
@@ -47,10 +61,7 @@ impl Session {
             weights, tokenizer, ..
         } = &self.backend
         {
-            let encoding = tokenizer
-                .encode(prompt, true)
-                .map_err(|e| LqlError::exec("tokenize error", e))?;
-            let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+            let token_ids = super::encode_dense_prompt(weights, tokenizer, prompt)?;
 
             let start = std::time::Instant::now();
             let result = larql_inference::predict(weights, tokenizer, &token_ids, top_k);
@@ -87,10 +98,7 @@ impl Session {
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
             .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
-        let encoding = tokenizer
-            .encode(prompt, true)
-            .map_err(|e| LqlError::exec("tokenize error", e))?;
-        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+        let token_ids = super::encode_vindex_prompt(config, &tokenizer, prompt)?;
 
         // Shared INFER pipeline — walk FFN (unlimited features) plus KnnStore
         // side-channel override. Same code path as `PyVindex::infer`; see ADR

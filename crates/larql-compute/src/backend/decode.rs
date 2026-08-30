@@ -77,7 +77,7 @@ impl DecodeStateDump {
 /// canonical residual state (`MarkovResidualEngine::recompute_kv`).
 ///
 /// Engines that treat K/V as **canonical** (e.g. `TurboQuantEngine`'s
-/// compressed K/V, `UnlimitedContextEngine`'s in-window K/V) must
+/// compressed K/V, `WindowedCheckpointEngine`'s in-window K/V) must
 /// use `Full`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum StateDumpMask {
@@ -123,6 +123,26 @@ pub struct ProfileTimings {
     pub gate_up_ms: f64,
     /// Wall time for the FFN down projection + post-FFN residual + scalar.
     pub down_ms: f64,
+    /// Total time the GPU was actually executing, summed from
+    /// `MTLCommandBuffer` start/end windows. Zero on CPU backends.
+    ///
+    /// Reported alongside [`Self::wall_ms`] so a reader can see that "GPU
+    /// fwd" is wall time *around* the dispatch rather than GPU time.
+    ///
+    /// **The split is only valid against itself.** Turning profiling on
+    /// costs 2.5× — qwen3-0.6b runs 94.8 tok/s unprofiled and 38.2 tok/s
+    /// with `LARQL_PROFILE_SPLIT=1`, with `gpu_ms` steady near 2.8ms while
+    /// the wall around it goes 4.3ms → 20ms. Almost all of the CPU-side
+    /// share this reports is the instrument's own per-command-buffer
+    /// synchronisation, not production cost. Use it to compare stages within
+    /// one profiled run; do not quote the CPU/GPU ratio as a property of the
+    /// unprofiled path.
+    pub gpu_ms: f64,
+    /// Wall time around the whole token, CPU encoding and readback included.
+    pub wall_ms: f64,
+    /// Command buffers submitted for this token. A large count is dispatch
+    /// overhead the per-stage numbers do not show.
+    pub cmd_buffers: u32,
 }
 
 impl ProfileTimings {
@@ -153,6 +173,42 @@ impl ProfileTimings {
             total,
         )
     }
+}
+
+/// What a backend needs in order to finish the token itself: final norm,
+/// the lm_head matvec, and the partial top-K.
+///
+/// Handing this to [`DecodeBackend::decode_token_q4k_moe_head`] moves the
+/// head *inside* the decode submission. The token then costs one
+/// commit + wait instead of two, and the only thing crossing the host
+/// boundary is the partial top-K — the hidden state never comes back.
+///
+/// The plan states the store's geometry rather than deriving it: `cols`
+/// is the width the Q4_K rows are actually stored at (`hidden` rounded up
+/// to whole super-blocks), and the query is zero-padded to it. A backend
+/// that cannot honour some part of the plan returns `None` and the caller
+/// stays on the unfused path — never a silently different head.
+pub struct DecodeHeadPlan<'a> {
+    /// Which norm the head applies. Stated rather than assumed: a
+    /// backend that implements only one of them must refuse the other,
+    /// because "applied the wrong normaliser" and "did not run" are the
+    /// same `None` to the caller only if the refusal actually happens.
+    pub norm_type: crate::NormType,
+    /// Final norm weight, `[hidden]`.
+    pub final_norm_weight: &'a [f32],
+    /// Variance epsilon for the final norm.
+    pub norm_eps: f32,
+    /// Added to each norm weight before scaling (Gemma's `+ 1`).
+    pub norm_offset: f32,
+    /// Q4_K lm_head bytes, `[vocab, cols]` row-major.
+    pub lm_head_q4k: &'a [u8],
+    /// Rows in the lm_head store.
+    pub vocab: usize,
+    /// Stored row width in elements. Equals `hidden` when the hidden size
+    /// is already a whole number of Q4_K super-blocks.
+    pub cols: usize,
+    /// How many `(token_id, score)` pairs to return, descending.
+    pub top_k: usize,
 }
 
 /// KV-cached generation primitives.
@@ -260,6 +316,24 @@ pub trait DecodeBackend {
     /// asymmetric attention geometry (Gemma 4 alternates sliding/global).
     fn preallocate_kv_cache_per_layer(&self, _shapes: &[(usize, usize)], _max_seq: usize) {}
 
+    /// Pre-allocate with a per-layer *capacity* as well as a per-layer
+    /// shape, so a sliding layer is not sized for history it can never
+    /// reach.
+    ///
+    /// `capacities[i]` is the row count for layer `i`, from
+    /// [`crate::pipeline_layer::kv_capacities_for_arch`]. The default impl
+    /// ignores them and falls back to the uniform allocation, so a backend
+    /// that has not opted in keeps its previous behaviour — over-allocating
+    /// is wasteful, never wrong.
+    fn preallocate_kv_cache_per_layer_with_capacity(
+        &self,
+        shapes: &[(usize, usize)],
+        capacities: &[usize],
+    ) {
+        let max_seq = capacities.iter().copied().max().unwrap_or(0);
+        self.preallocate_kv_cache_per_layer(shapes, max_seq);
+    }
+
     /// Decode one token through all layers with KV cache.
     fn decode_token(
         &self,
@@ -343,6 +417,28 @@ pub trait DecodeBackend {
         _norm_eps: f32,
         _get_expert: &dyn Fn(usize, usize) -> Option<(&'w [u8], &'w [u8])>,
     ) -> Option<Vec<f32>> {
+        None
+    }
+
+    /// [`Self::decode_token_q4k_moe`] with the LM head encoded into the
+    /// same command buffer: final norm → lm_head matvec → partial top-K,
+    /// one commit + wait, partials-only readback.
+    ///
+    /// Returns the `top_k` `(token_id, score)` pairs descending, or `None`
+    /// when this backend cannot serve the plan as stated — in which case
+    /// the caller runs the unfused path (readback → CPU norm → lm_head),
+    /// which stays the reference the fused result is pinned against.
+    #[allow(clippy::too_many_arguments)]
+    fn decode_token_q4k_moe_head<'w>(
+        &self,
+        _layers: &[crate::FullPipelineLayer<'_>],
+        _x: &[f32],
+        _hidden: usize,
+        _inter: usize,
+        _norm_eps: f32,
+        _get_expert: &dyn Fn(usize, usize) -> Option<(&'w [u8], &'w [u8])>,
+        _head: &DecodeHeadPlan<'_>,
+    ) -> Option<Vec<(u32, f32)>> {
         None
     }
 
@@ -461,6 +557,7 @@ mod tests {
             attn_ms: 1.5,
             gate_up_ms: 2.5,
             down_ms: 1.0,
+            ..Default::default()
         };
         assert!((p.total_ms() - 5.0).abs() < 1e-9);
     }
@@ -480,6 +577,7 @@ mod tests {
             attn_ms: 6.0,
             gate_up_ms: 3.0,
             down_ms: 1.0,
+            ..Default::default()
         };
         let s = p.format_summary(10);
         assert!(s.contains("total=10.00ms"));
@@ -493,6 +591,7 @@ mod tests {
             attn_ms: 1.0,
             gate_up_ms: 1.0,
             down_ms: 1.0,
+            ..Default::default()
         };
         let s = p.format_summary(0);
         assert!(s.contains("0 layers"));
@@ -612,6 +711,21 @@ mod tests {
         b.reset_kv_cache();
         b.truncate_kv_cache(0);
         b.preallocate_kv_cache_per_layer(&[(2, 4)], 16);
+        assert_eq!(b.kv_cache_len(), 0);
+    }
+
+    /// The capacity-aware variant falls back to the uniform allocation
+    /// using the *largest* requested capacity. Taking the max rather than
+    /// the min matters: a backend that ignores per-layer capacity must
+    /// over-allocate, never under-allocate — too small is an overrun,
+    /// too large is only waste.
+    #[test]
+    fn default_capacity_preallocate_falls_back_to_the_largest_capacity() {
+        let b = StubDecode;
+        // Mixed sliding/global capacities, as a real model produces.
+        b.preallocate_kv_cache_per_layer_with_capacity(&[(2, 4), (2, 4)], &[2048, 4096]);
+        // Empty input must not panic on the `max` of an empty iterator.
+        b.preallocate_kv_cache_per_layer_with_capacity(&[], &[]);
         assert_eq!(b.kv_cache_len(), 0);
     }
 

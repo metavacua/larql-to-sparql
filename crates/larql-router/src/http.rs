@@ -24,8 +24,10 @@ use crate::metrics::{encode_metrics_text, RouterMetrics};
 use crate::shards::{find_shard_for_layer, peek_binary, Shard};
 
 /// Content-Type used by the FFN binary protocol. JSON requests use the
-/// standard `application/json`.
-pub const BINARY_CT: &str = "application/x-larql-ffn";
+/// standard `application/json`. Single-sourced in the shared walk-ffn
+/// codec (ROADMAP hardening item 16); re-exported under the historical
+/// `larql_router::http::BINARY_CT` path.
+pub use larql_inference::ffn::remote::BINARY_CT;
 
 /// Shared HTTP service state. Holds the static shard map, an optional
 /// grid handle, and a single reqwest client (whose connection pool is
@@ -52,6 +54,11 @@ pub struct AppState {
     /// responded yet. `None` disables hedging (pre-ADR-0021
     /// behaviour); operators opt in via `--hedge-after-ms M`.
     pub hedge_after: Option<std::time::Duration>,
+    /// N0-router — sticky routes for the Responses API: which grid
+    /// server produced (and stores) each proxied response id, so
+    /// `previous_response_id` chains and by-id retrieval land on the
+    /// same server. Bounded FIFO; see `openai::responses`.
+    pub openai_responses: crate::openai::ResponseRouteStore,
 }
 
 impl AppState {
@@ -99,6 +106,24 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/health", get(handle_health))
         .route("/v1/stats", get(handle_stats))
         .route("/metrics", get(handle_metrics))
+        // N0-router — the OpenAI surface on the grid front door; each
+        // request proxies to a `serves_openai` grid server (openai.rs).
+        .route("/v1/models", get(crate::openai::handle_models))
+        .route(
+            "/v1/chat/completions",
+            post(crate::openai::handle_chat_completions),
+        )
+        .route("/v1/completions", post(crate::openai::handle_completions))
+        .route("/v1/embeddings", post(crate::openai::handle_embeddings))
+        .route(
+            crate::openai::RESPONSES_PATH,
+            post(crate::openai::responses::handle_responses),
+        )
+        .route(
+            "/v1/responses/{response_id}",
+            get(crate::openai::responses::handle_get_response)
+                .delete(crate::openai::responses::handle_delete_response),
+        )
         .with_state(state)
 }
 

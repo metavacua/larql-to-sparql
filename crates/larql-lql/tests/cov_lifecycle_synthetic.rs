@@ -534,3 +534,28 @@ fn compile_path_into_vindex_from_other_vindex() {
         ),
     );
 }
+
+/// `EXTRACT ... FORMAT VINDEX3` routes to the V3 arm, not the V2 one.
+///
+/// The two arms fail differently on an unresolvable model — V3 resolves
+/// the checkpoint path for the encoder, V2 loads a model through
+/// `InferenceModel` — so the error names which arm ran. (The V3 arm's
+/// own behaviour — encode, capability snapshot, auto-bind, refusals — is
+/// gated end to end in `vindex3_extract.rs`.)
+#[test]
+fn extract_format_vindex3_takes_the_v3_arm() {
+    let mut session = Session::new();
+    let v3 = try_run(
+        &mut session,
+        r#"EXTRACT MODEL "no-such-model" INTO "/nonexistent/out" FORMAT VINDEX3;"#,
+    )
+    .expect_err("an unresolvable model must fail");
+    assert!(v3.contains("failed to resolve model path"), "{v3}");
+
+    let v2 = try_run(
+        &mut session,
+        r#"EXTRACT MODEL "no-such-model" INTO "/nonexistent/out" FORMAT VINDEX2;"#,
+    )
+    .expect_err("an unresolvable model must fail");
+    assert!(v2.contains("failed to load model"), "{v2}");
+}

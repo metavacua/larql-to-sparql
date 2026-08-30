@@ -118,13 +118,24 @@ fn bench_remote<F: FnMut() -> Result<(), String>>(
 
 fn make_app_state(model: LoadedModel) -> Arc<AppState> {
     Arc::new(AppState {
-        models: vec![Arc::new(model)],
+        model_set: std::sync::RwLock::new(larql_server::state::ModelSet {
+            models: vec![Arc::new(model)],
+            v3_models: Vec::new(),
+        }),
+        router_topology: larql_server::state::RouterTopology::SingleModel,
+        lifecycle: std::sync::Mutex::new(larql_server::state::LifecycleState::Idle),
         started_at: Instant::now(),
         requests_served: AtomicU64::new(0),
         api_key: None,
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(60),
         infer_timeout: std::time::Duration::from_secs(60),
+        responses: larql_server::response_store::ResponseStore::new(),
+        v3_kv: larql_server::response_kv::ResponseKvCache::new(
+            larql_server::response_kv::DEFAULT_MAX_ENTRIES,
+            larql_server::response_kv::DEFAULT_TTL_SECS,
+        ),
+        runtime: Arc::new(larql_server::runtime_stats::RuntimeRecorder::new()),
     })
 }
 
@@ -608,6 +619,8 @@ fn main() {
     let experts_gate_up_local: Vec<&[u8]> = gu_bytes_owned.iter().map(|v| v.as_slice()).collect();
     let experts_down_local: Vec<&[u8]> = dn_bytes_owned.iter().map(|v| v.as_slice()).collect();
     let layer_w = MoeLayerWeights {
+        expert_scales: larql_compute::MoeExpertScales::Inline,
+        fused_row_layout: larql_compute::MoeFusedRowLayout::ContiguousHalves,
         experts_gate_up: experts_gate_up_local,
         experts_down: experts_down_local,
         routing_policy: larql_compute::MoeRoutingPolicy::gemma4_hybrid(),
@@ -624,7 +637,10 @@ fn main() {
         num_experts,
         top_k,
         intermediate_size: moe_inter,
-        activation,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(activation),
         expert_data_format: bench_format,
     };
     bench_remote(

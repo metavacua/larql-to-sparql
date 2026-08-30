@@ -24,6 +24,20 @@ impl super::Session {
         positions: Option<TracePositionMode>,
         save: Option<&str>,
     ) -> Result<Vec<String>, LqlError> {
+        // VINDEX3 binding: observational trace over the canonical
+        // executor (LQL-2). The richer trace clauses are later detail
+        // levels — refuse them rather than silently ignore.
+        if matches!(self.backend, super::Backend::Vindex3 { .. }) {
+            if answer.is_some()
+                || decompose
+                || layers.is_some()
+                || positions.is_some()
+                || save.is_some()
+            {
+                return Err(super::vindex3::unsupported("TRACE with options"));
+            }
+            return self.exec_v3_trace(prompt);
+        }
         // Weight backend: dense inference (no vindex)
         if let super::Backend::Weight {
             weights, tokenizer, ..

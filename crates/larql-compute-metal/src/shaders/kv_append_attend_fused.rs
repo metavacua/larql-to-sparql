@@ -41,6 +41,9 @@ kernel void kv_append_attend_fused(
     constant uint&      window_size [[buffer(9)]],
     device const float* new_k   [[buffer(10)]],  // [num_kv * head_dim]
     device const float* new_v   [[buffer(11)]],  // [num_kv * head_dim]
+    constant float*     sinks     [[buffer(12)]],  // per-Q-head attention sink logits
+    constant uint&      has_sinks [[buffer(13)]],  // 0 = no sinks (slot is a placeholder)
+    constant float&     softcap [[buffer(14)]],    // 0.0 = disabled
     uint tg_id  [[threadgroup_position_in_grid]],
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]],
@@ -81,6 +84,10 @@ kernel void kv_append_attend_fused(
         }
         for (uint d = (head_dim & ~3u); d < head_dim; d++) dot += q[d] * k[d];
         dot *= scale;
+        // Gemma-2-style logit softcapping (clamped; see attn_fused).
+        if (softcap > 0.0f) {
+            dot = softcap * tanh(clamp(dot / softcap, -15.0f, 15.0f));
+        }
         tg_scores[t - t_start] = dot;
         local_max = max(local_max, dot);
     }
@@ -92,6 +99,10 @@ kernel void kv_append_attend_fused(
     float global_max = tg_sg_vals[0];
     uint n_sg = (tg_sz + 31) / 32;
     for (uint i = 1; i < n_sg; i++) global_max = max(global_max, tg_sg_vals[i]);
+    // The sink competes in the softmax, so it must join the max or
+    // exp(sink - max) overflows when the sink dominates. Every thread
+    // computes the same value here, as with the reduction above.
+    if (has_sinks != 0u) global_max = max(global_max, sinks[head]);
 
     float local_sum = 0.0f;
     for (uint t = t_start + tid; t < T; t += tg_sz) {
@@ -113,6 +124,9 @@ kernel void kv_append_attend_fused(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     float global_sum = tg_sg_vals[0];
     for (uint i = 1; i < n_sg; i++) global_sum += tg_sg_vals[i];
+    // Denominator only: the sink has no output slot, so the emitted
+    // weights deliberately sum to less than one.
+    if (has_sinks != 0u) global_sum += exp(sinks[head] - global_max);
     float inv_sum = 1.0f / global_sum;
 
     for (uint t = t_start + tid; t < T; t += tg_sz) {
@@ -129,9 +143,155 @@ kernel void kv_append_attend_fused(
         out_head[d] = acc;
     }
 }
+
+// ---------------------------------------------------------------------
+// KV-B1: sequence-parallel phase 3, fused variant.
+//
+// `kv_attention_seqpar` fixed the serial weighted-V loop, but only for the
+// UNFUSED attend path — which decode reaches solely when the span exceeds
+// SHORT_ATTENTION_SPAN. Below that threshold this kernel is the default
+// (`LARQL_FUSED_KV_APPEND_ATTEND`, on), and it carried the identical
+// defect: `head_dim` threads walking the whole span serially while the
+// other threads in the threadgroup idle. That covers every sliding-window
+// layer at all depths and every full-attention layer up to 1024, i.e. the
+// common case. Same fix, same contract.
+//
+// Phase 0's cooperative K/V append is unchanged and still runs on the
+// first `head_dim` threads; widening the threadgroup only adds threads
+// that skip it.
+//
+// Caller contract, as for `kv_attention_seqpar`: `tg_sz` is a multiple of
+// `head_dim`, at least `head_dim`, and at most 1024 so `tg_partial` covers
+// `n_slices * head_dim`. `tg_sg_vals` is 32 here rather than 8 because
+// 1024 threads is 32 simdgroups.
+kernel void kv_append_attend_fused_seqpar(
+    device const float* Q       [[buffer(0)]],
+    device float*       K_cache [[buffer(1)]],
+    device float*       V_cache [[buffer(2)]],
+    device float*       out     [[buffer(3)]],
+    constant uint&      T       [[buffer(4)]],
+    constant uint&      head_dim[[buffer(5)]],
+    constant uint&      num_q   [[buffer(6)]],
+    constant uint&      num_kv  [[buffer(7)]],
+    constant float&     scale   [[buffer(8)]],
+    constant uint&      window_size [[buffer(9)]],
+    device const float* new_k   [[buffer(10)]],
+    device const float* new_v   [[buffer(11)]],
+    constant float*     sinks     [[buffer(12)]],
+    constant uint&      has_sinks [[buffer(13)]],
+    constant float&     softcap [[buffer(14)]],
+    uint tg_id  [[threadgroup_position_in_grid]],
+    uint tid    [[thread_index_in_threadgroup]],
+    uint tg_sz  [[threads_per_threadgroup]],
+    uint lane   [[thread_index_in_simdgroup]],
+    uint sg_id  [[simdgroup_index_in_threadgroup]])
+{
+    uint head = tg_id;
+    if (head >= num_q) return;
+    uint kv_head = head / (num_q / num_kv);
+
+    // ── Phase 0: append this token's K/V row (see the unfused kernel's
+    // doc — idempotent across the Q heads sharing this kv_head).
+    uint pos = T - 1u;
+    uint cache_row_off = pos * num_kv * head_dim + kv_head * head_dim;
+    uint new_off       = kv_head * head_dim;
+    for (uint d = tid; d < head_dim; d += tg_sz) {
+        K_cache[cache_row_off + d] = new_k[new_off + d];
+        V_cache[cache_row_off + d] = new_v[new_off + d];
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+
+    device const float* q = Q + head * head_dim;
+    uint t_start = (window_size > 0 && T > window_size) ? T - window_size : 0;
+
+    threadgroup float tg_scores[1024];
+    threadgroup float tg_partial[1024];
+
+    // ---- Phases 1-2: unchanged from kv_append_attend_fused ----
+    float local_max = -1e30f;
+    for (uint t = t_start + tid; t < T; t += tg_sz) {
+        device const float* k = K_cache + t * num_kv * head_dim + kv_head * head_dim;
+        float dot = 0.0f;
+        for (uint d = 0; d + 3 < head_dim; d += 4) {
+            dot += q[d]*k[d] + q[d+1]*k[d+1] + q[d+2]*k[d+2] + q[d+3]*k[d+3];
+        }
+        for (uint d = (head_dim & ~3u); d < head_dim; d++) dot += q[d] * k[d];
+        dot *= scale;
+        if (softcap > 0.0f) {
+            dot = softcap * tanh(clamp(dot / softcap, -15.0f, 15.0f));
+        }
+        tg_scores[t - t_start] = dot;
+        local_max = max(local_max, dot);
+    }
+
+    float sg_max = simd_max(local_max);
+    threadgroup float tg_sg_vals[32];
+    if (lane == 0) tg_sg_vals[sg_id] = sg_max;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float global_max = tg_sg_vals[0];
+    uint n_sg = (tg_sz + 31) / 32;
+    for (uint i = 1; i < n_sg; i++) global_max = max(global_max, tg_sg_vals[i]);
+    if (has_sinks != 0u) global_max = max(global_max, sinks[head]);
+
+    float local_sum = 0.0f;
+    for (uint t = t_start + tid; t < T; t += tg_sz) {
+        float w = exp(tg_scores[t - t_start] - global_max);
+        tg_scores[t - t_start] = w;
+        local_sum += w;
+    }
+
+    float sg_sum = simd_sum(local_sum);
+    // Reuse barrier for tg_sg_vals — see the unfused kernel's note on the
+    // race this closes and why it desyncs the Shannon coder.
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (lane == 0) tg_sg_vals[sg_id] = sg_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float global_sum = tg_sg_vals[0];
+    for (uint i = 1; i < n_sg; i++) global_sum += tg_sg_vals[i];
+    if (has_sinks != 0u) global_sum += exp(sinks[head] - global_max);
+    float inv_sum = 1.0f / global_sum;
+
+    for (uint t = t_start + tid; t < T; t += tg_sz) {
+        tg_scores[t - t_start] *= inv_sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // ---- Phase 3: sequence-parallel ----
+    uint n_slices = tg_sz / head_dim;
+    if (n_slices == 0u) n_slices = 1u;
+    uint active = n_slices * head_dim;
+    uint d = tid % head_dim;
+    uint slice = tid / head_dim;
+
+    if (tid < active) {
+        float acc = 0.0f;
+        for (uint t = t_start + slice; t < T; t += n_slices) {
+            acc += tg_scores[t - t_start]
+                 * V_cache[t * num_kv * head_dim + kv_head * head_dim + d];
+        }
+        tg_partial[slice * head_dim + d] = acc;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (tid < head_dim) {
+        // Fixed slice order — determinism, as above.
+        float sum = tg_partial[tid];
+        for (uint s = 1u; s < n_slices; s++) {
+            sum += tg_partial[s * head_dim + tid];
+        }
+        out[head * head_dim + tid] = sum;
+    }
+}
 "#;
 
 pub struct Kernel;
 impl crate::kernels::ShaderKernel for Kernel {
     const KERNEL_NAME: &'static str = "kv_append_attend_fused";
+}
+
+/// KV-B1 sequence-parallel variant of [`Kernel`]. Same I/O; requires a
+/// threadgroup width of `slices * head_dim`.
+pub struct SeqParKernel;
+impl crate::kernels::ShaderKernel for SeqParKernel {
+    const KERNEL_NAME: &'static str = "kv_append_attend_fused_seqpar";
 }

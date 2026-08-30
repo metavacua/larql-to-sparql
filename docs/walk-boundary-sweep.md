@@ -123,7 +123,9 @@ With attention template cache:
 ## Reproducing
 
 ```bash
-cargo run --release -p larql-inference --example walk_boundary_sweep -- \
+# Moved out of the workspace (commit 95ab64d2): research probes now live in
+# the sibling chris-experiments repo, so this runs from there, not here.
+cargo run --release --example walk_boundary_sweep -- \
   --model google/gemma-3-4b-it \
   --vindex /path/to/gemma3-4b-f16.vindex
 ```

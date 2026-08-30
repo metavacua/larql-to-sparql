@@ -1,0 +1,127 @@
+{
+ "note": "Disjoint calibration for SENSITIVITY-1B'. Written for this test; no prompt appears in quality-bank-1/prompts.json.",
+ "purpose": "SENSITIVITY-1B' calibration. Moments captured from these prompts only.",
+ "frozen": "2026-08-24",
+ "count": 12,
+ "categories": {
+  "arithmetic": 2,
+  "code": 2,
+  "factual": 2,
+  "longform": 2,
+  "prose": 2,
+  "structured": 2
+ },
+ "disjointness": {
+  "verified_against": "quality-bank-1/prompts.json",
+  "method": "exact id match and whitespace/case-normalised text match, plus 40-char prefix near-duplicate scan",
+  "bank_prompts": 69,
+  "id_overlap": 0,
+  "text_overlap": 0,
+  "near_duplicate_pairs": 0,
+  "internal_duplicates": 0
+ },
+ "text_digest": {
+  "algorithm": "sha256",
+  "over": "json([{id, normalised text}], sort_keys, compact) where normalise = collapse whitespace, strip, lowercase",
+  "value": "f628ce4739f81e9e5b8dd42b8d83d907112718e61ce711443846d379fa5fb34f"
+ },
+ "token_digest": {
+  "algorithm": "sha256",
+  "over": "json([{id, ids}], sort_keys, compact) of the emitted token JSONL",
+  "value": "df0e3644aba068c4687baefe178399d1f0a62cb7509377211499927a55da96c3",
+  "tokenizer": {
+   "path": "../../../../../../../../chris-models/granite-4.1-3b.vindex3/tokenizer.json",
+   "sha256": "e2bad66439538cb4d5a7580680932432ed9ece9d3b8577e675512bdf11599253"
+  },
+  "bos_convention": {
+   "adds_special_tokens": false,
+   "prepended_ids": [],
+   "probe": "Hello world",
+   "note": "run_bank.py calls encode(text) with the default add_special_tokens=True"
+  },
+  "token_limit": 128,
+  "min_ids": 3,
+  "convention_source": "run_bank.py:tokenize (the function that produced the Q-BANK verdicts)",
+  "container": {
+   "path": "/Users/christopherhay/chris-models/granite-4.1-3b.vindex3",
+   "model": "c0650403e44e78ec0262dab1c90914c65b196c4e",
+   "representation_digests": {
+    "target.decoder_stack@BF16": "374562b3ff81c81fb72f1fcd4c842912ef75e167f8c0e9568997965a15f2612c",
+    "target.embedding@BF16": "7fd254e1ea6d056ab7670149e30d3cd01257a1b6d8394da6c964a264cbc79f7f",
+    "target.final_norm@BF16": "03fcd3c36620768aedd9d5302138d29d83853cc1cb71a5d8f300d66961c84e6b"
+   },
+   "head_output_multiplier": 0.1
+  },
+  "positions": 458,
+  "entries": 12
+ },
+ "capture": {
+  "model": null,
+  "container_digest": null,
+  "backend": null,
+  "positions": null,
+  "note": "Filled at capture time, once per model."
+ },
+ "prompts": [
+  {
+   "id": "code-d00",
+   "category": "code",
+   "text": "func Reverse[T any](xs []T) []T {\n    out := make([]T, len(xs))\n    for i, v := range xs {"
+  },
+  {
+   "id": "code-d01",
+   "category": "code",
+   "text": "type Cache struct {\n    mu sync.RWMutex\n    entries map[string][]byte\n}\n\nfunc (c *Cache) Get(k string)"
+  },
+  {
+   "id": "prose-d02",
+   "category": "prose",
+   "text": "The harbour emptied slowly that winter, one boat at a time, and nobody"
+  },
+  {
+   "id": "prose-d03",
+   "category": "prose",
+   "text": "What she remembered afterwards was not the argument itself but the way the room"
+  },
+  {
+   "id": "arithmetic-d04",
+   "category": "arithmetic",
+   "text": "A cyclist covers 18 kilometres in 40 minutes; maintaining that pace, the distance in two hours is"
+  },
+  {
+   "id": "arithmetic-d05",
+   "category": "arithmetic",
+   "text": "The prime factorisation of 360 is 2 cubed times 3 squared times 5, which gives"
+  },
+  {
+   "id": "structured-d06",
+   "category": "structured",
+   "text": "openapi: 3.0.0\ninfo:\n  title: Inventory\n  version: 1.2.0\npaths:\n  /items:\n    get:"
+  },
+  {
+   "id": "structured-d07",
+   "category": "structured",
+   "text": "{\"event\": \"deploy\", \"service\": \"gateway\", \"region\": \"eu-west-2\", \"replicas\":"
+  },
+  {
+   "id": "factual-d08",
+   "category": "factual",
+   "text": "Photosynthesis in vascular plants occurs chiefly in the mesophyll, where chloroplasts"
+  },
+  {
+   "id": "factual-d09",
+   "category": "factual",
+   "text": "The Danube rises in the Black Forest and flows east through ten countries before reaching"
+  },
+  {
+   "id": "longform-d10",
+   "category": "longform",
+   "text": "Cartography has always been an argument about what deserves to be shown. A map that recorded everything would be the size of the territory and no use to anyone, so every map is a series of decisions about omission, and those decisions carry the mapmaker's priorities whether or not they are stated. Roads appear because someone intends to travel; contour lines appear because someone intends to climb or to farm or to shell. The convention that a map is a neutral record survives mainly because its omissions are invisible to the reader, who cannot miss what was never drawn."
+  },
+  {
+   "id": "longform-d11",
+   "category": "longform",
+   "text": "Materials fail in two quite different ways and the distinction matters more than the failure. Ductile failure gives warning: the metal stretches, thins, and deforms long before it parts, and an inspector walking past has a chance of noticing. Brittle failure gives none. A crack propagates faster than the eye follows and the structure is in two pieces before anyone has registered a sound. This is why engineers will often accept a weaker material that yields gracefully over a stronger one that shatters, and why temperature matters so much: steel that is ductile in summer can be brittle on a cold morning."
+  }
+ ]
+}

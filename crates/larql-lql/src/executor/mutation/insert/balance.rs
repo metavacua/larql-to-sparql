@@ -44,7 +44,7 @@ impl Session {
         // every magic number has a single home with its measurement-link
         // comment.
 
-        let (path, _config, _patched) = self.require_vindex()?;
+        let (path, config, _patched) = self.require_vindex()?;
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let weights = larql_vindex::load_model_weights(path, &mut cb)
             .map_err(|e| LqlError::exec("balance: load weights", e))?;
@@ -52,10 +52,8 @@ impl Session {
             .map_err(|e| LqlError::exec("balance: load tokenizer", e))?;
 
         let prompt = canonical_prompt(relation, entity);
-        let enc = tokenizer
-            .encode(prompt.as_str(), true)
-            .map_err(|e| LqlError::exec("balance: tokenize", e))?;
-        let prompt_ids: Vec<u32> = enc.get_ids().to_vec();
+        let prompt_ids =
+            crate::executor::query::encode_vindex_prompt(config, &tokenizer, prompt.as_str())?;
 
         // Snapshot/restore applies only to the AMPLIFY path: when
         // UP_SCALE saturates (residual blow-up, softmax collapse in
@@ -179,11 +177,13 @@ impl Session {
             return Ok(());
         }
 
-        let (path, _config, _patched) = self.require_vindex()?;
+        let (path, config, _patched) = self.require_vindex()?;
+        let path = path.to_path_buf();
+        let config = config.clone();
         let mut cb = larql_vindex::SilentLoadCallbacks;
-        let weights = larql_vindex::load_model_weights(path, &mut cb)
+        let weights = larql_vindex::load_model_weights(&path, &mut cb)
             .map_err(|e| LqlError::exec("cross-balance: load weights", e))?;
-        let tokenizer = larql_vindex::load_vindex_tokenizer(path)
+        let tokenizer = larql_vindex::load_vindex_tokenizer(&path)
             .map_err(|e| LqlError::exec("cross-balance: load tokenizer", e))?;
 
         for _iter in 0..CROSS_ITERS {
@@ -196,10 +196,11 @@ impl Session {
                 .cloned()
                 .collect();
             for fact in &priors_to_check {
-                let enc = tokenizer
-                    .encode(fact.canonical_prompt.as_str(), true)
-                    .map_err(|e| LqlError::exec("cross-balance: tokenize", e))?;
-                let fact_ids: Vec<u32> = enc.get_ids().to_vec();
+                let fact_ids = crate::executor::query::encode_vindex_prompt(
+                    &config,
+                    &tokenizer,
+                    fact.canonical_prompt.as_str(),
+                )?;
                 let (_, _, patched) = self.require_vindex()?;
                 let walk =
                     larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);

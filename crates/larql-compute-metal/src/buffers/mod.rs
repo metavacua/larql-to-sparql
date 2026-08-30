@@ -10,6 +10,9 @@ use std::sync::Mutex;
 
 use metal::*;
 
+mod regions;
+pub mod residency;
+
 /// Cache key: (pointer address, byte length) of the source data.
 type CacheKey = (usize, usize);
 
@@ -30,6 +33,12 @@ pub struct BufferCache {
     /// Each entry is a Vec of available (not currently in use) buffers.
     /// Grows on first use; reused on subsequent decode steps.
     scratch_pool: Mutex<HashMap<u64, Vec<Buffer>>>,
+    /// Registered whole-mmap weight regions for zero-copy sub-slice
+    /// resolution — see `regions.rs`.
+    regions: Mutex<Vec<regions::Region>>,
+    /// Explicit residency for the registered regions. `None` under the
+    /// implicit arm or on a runtime without `MTLResidencySet`.
+    residency: Mutex<Option<residency::ResidencySet>>,
 }
 
 impl BufferCache {
@@ -38,6 +47,8 @@ impl BufferCache {
             device: device.clone(),
             cache: Mutex::new(HashMap::new()),
             scratch_pool: Mutex::new(HashMap::new()),
+            regions: Mutex::new(Vec::new()),
+            residency: Mutex::new(None),
         }
     }
 
@@ -92,6 +103,19 @@ impl BufferCache {
     /// Get or create a cached GPU buffer for raw byte data (Q4 packed weights).
     /// Uses zero-copy for page-aligned mmap data.
     /// Empty slices return a minimal 4-byte stub (see `get_f32` for rationale).
+    ///
+    /// # Contract
+    ///
+    /// The cache key is `(data.as_ptr(), data.len())` — **address identity, not
+    /// content**. That is sound only while `data` points into an allocation that
+    /// outlives the cache and never changes, which is what mmap'd weight data
+    /// is. Passing a temporary `Vec` is a **silent correctness bug**: the
+    /// allocator may hand the same address to a later, different temporary of
+    /// equal length, and this returns the earlier buffer.
+    ///
+    /// Debug builds verify contents on every hit and panic on mismatch. Release
+    /// builds cannot afford the compare (it is a full pass over the weights), so
+    /// ephemeral data must use [`Self::uncached_bytes`] instead.
     pub fn get_bytes(&self, data: &[u8]) -> Buffer {
         if data.is_empty() {
             let stub_key: CacheKey = (1, 0);
@@ -109,6 +133,15 @@ impl BufferCache {
         let key: CacheKey = (data.as_ptr() as usize, data.len());
         let mut cache = self.cache.lock().unwrap();
         if let Some(buf) = cache.get(&key) {
+            debug_assert!(
+                Self::contents_match(buf, data),
+                "BufferCache aliasing: a cached buffer at the same (ptr, len) holds \
+                 DIFFERENT bytes. `get_bytes` caches on address identity, so it is \
+                 only valid for allocations that live for the process and never \
+                 change — mmap'd weights. A temporary Vec whose address the \
+                 allocator later reuses will silently return the earlier buffer. \
+                 Use `uncached_bytes` for ephemeral data."
+            );
             return buf.clone();
         }
 
@@ -132,6 +165,47 @@ impl BufferCache {
 
         cache.insert(key, buf.clone());
         buf
+    }
+
+    /// True when `buf`'s bytes equal `data` — debug-only cache validation.
+    fn contents_match(buf: &Buffer, data: &[u8]) -> bool {
+        if buf.length() as usize != data.len() {
+            return false;
+        }
+        // SAFETY: shared-storage buffers expose their bytes for the buffer's
+        // lifetime, and `buf` is borrowed for the duration of the comparison.
+        let got = unsafe { std::slice::from_raw_parts(buf.contents() as *const u8, data.len()) };
+        got == data
+    }
+
+    /// An uncached GPU buffer for byte data whose allocation is ephemeral.
+    ///
+    /// Use this for anything built on the fly — offset tables, per-call index
+    /// lists — where address identity says nothing about content. Always copies,
+    /// so the caller's buffer may be dropped immediately afterwards.
+    ///
+    /// **This is the safe default; [`Self::get_bytes`] is the optimisation.**
+    /// Caching on `(ptr, len)` is what keeps decode from re-uploading
+    /// gigabytes of weights per token, so the serving path must keep using
+    /// it — its operands are mmap'd and satisfy the contract. Everything
+    /// else should come here. `diag/` in particular builds synthetic
+    /// weights in locals and uploads once, outside the timed region, so it
+    /// gains nothing from the cache and carries all of its risk: a freed
+    /// local's address reused by the next arm's same-sized tensor returns
+    /// the *previous* arm's buffer, and since the aliasing guard in
+    /// `get_bytes` is a `debug_assert!`, a release-mode benchmark would
+    /// report a number computed on the wrong weights with no symptom.
+    pub fn uncached_bytes(&self, data: &[u8]) -> Buffer {
+        if data.is_empty() {
+            return self
+                .device
+                .new_buffer(4, MTLResourceOptions::StorageModeShared);
+        }
+        self.device.new_buffer_with_data(
+            data.as_ptr() as *const c_void,
+            data.len() as u64,
+            MTLResourceOptions::StorageModeShared,
+        )
     }
 
     /// Create a transient buffer (NOT cached — contents change each call).
@@ -176,6 +250,21 @@ impl BufferCache {
     pub fn output(&self, bytes: u64) -> Buffer {
         let mut pool = self.scratch_pool.lock().unwrap();
         if let Some(buf) = pool.entry(bytes).or_default().pop() {
+            // A fresh Metal buffer arrives zeroed; a recycled one carries
+            // its previous tenant's bytes. Any caller that writes less
+            // than it reads therefore behaves differently once the pool
+            // has been churned — see `ENV_ZERO_POOLED_BUFFERS`, which
+            // exists to tell that defect apart from a real race.
+            if larql_compute::options::env_flag(larql_compute::options::ENV_ZERO_POOLED_BUFFERS) {
+                let ptr = buf.contents();
+                if !ptr.is_null() {
+                    // SAFETY: shared-storage buffer of exactly `bytes`
+                    // bytes, and the pool is keyed by that length. No GPU
+                    // work can be in flight against it: `recycle` is only
+                    // legal after `wait_until_completed`.
+                    unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, bytes as usize) };
+                }
+            }
             return buf;
         }
         self.device
@@ -537,5 +626,88 @@ mod tests {
             first_addr,
             "ScratchGuard drop must recycle into the scratch pool"
         );
+    }
+
+    /// Regression: two same-length ephemeral tables must not share a buffer.
+    ///
+    /// This is the K2 tournament bug. Two 64-byte offset tables were built as
+    /// temporaries; the allocator reused one address, `get_bytes` keyed on it,
+    /// and the second call returned the first table's buffer. Slot 0's offset is
+    /// 0 in both tables, so every check that looked only at slot 0 passed.
+    #[test]
+    fn uncached_bytes_never_aliases_two_ephemeral_tables() {
+        let Some(device) = metal::Device::system_default() else {
+            return;
+        };
+        let cache = BufferCache::new(&device);
+        let mk =
+            |base: u32| -> Vec<u8> { (0..16u32).flat_map(|i| (base + i).to_ne_bytes()).collect() };
+        // Built and dropped in sequence, so the allocator is free to reuse the
+        // address — exactly the shape that broke.
+        let a = cache.uncached_bytes(&mk(0));
+        let b = cache.uncached_bytes(&mk(1000));
+        assert!(
+            BufferCache::contents_match(&a, &mk(0)),
+            "first table corrupted"
+        );
+        assert!(
+            BufferCache::contents_match(&b, &mk(1000)),
+            "second table aliased the first"
+        );
+    }
+
+    /// Regression for the cold-rotate collapse in `diag::kernel_profile`.
+    ///
+    /// Building a temporary inside a `map` and handing it to the address-keyed
+    /// cache produced 8 handles to ONE buffer, so every "cold" measurement
+    /// re-read a partially cache-resident buffer and overstated bandwidth.
+    /// `uncached_bytes` copies, so the temporary may die and each call is fresh.
+    #[test]
+    fn uncached_bytes_keeps_a_rotation_rotating() {
+        let Some(device) = metal::Device::system_default() else {
+            return;
+        };
+        let cache = BufferCache::new(&device);
+        let bufs: Vec<_> = (0..8u8)
+            .map(|i| {
+                let w: Vec<u8> = (0..4096u32).map(|j| (j as u8).wrapping_add(i)).collect();
+                cache.uncached_bytes(&w)
+            })
+            .collect();
+        let addrs: std::collections::BTreeSet<usize> =
+            bufs.iter().map(|b| b.contents() as usize).collect();
+        assert_eq!(
+            addrs.len(),
+            bufs.len(),
+            "rotation collapsed to {} buffers",
+            addrs.len()
+        );
+    }
+
+    #[test]
+    fn contents_match_detects_a_stale_buffer() {
+        let Some(device) = metal::Device::system_default() else {
+            return;
+        };
+        let cache = BufferCache::new(&device);
+        let buf = cache.uncached_bytes(&[1u8, 2, 3, 4]);
+        assert!(BufferCache::contents_match(&buf, &[1, 2, 3, 4]));
+        assert!(
+            !BufferCache::contents_match(&buf, &[1, 2, 3, 5]),
+            "content change must be seen"
+        );
+        assert!(
+            !BufferCache::contents_match(&buf, &[1, 2, 3]),
+            "length change must be seen"
+        );
+    }
+
+    #[test]
+    fn uncached_bytes_tolerates_an_empty_slice() {
+        let Some(device) = metal::Device::system_default() else {
+            return;
+        };
+        let cache = BufferCache::new(&device);
+        assert!(cache.uncached_bytes(&[]).length() >= 4);
     }
 }

@@ -46,9 +46,13 @@ pub fn run_expert(
 
     let arch = &*weights.arch;
 
-    if !arch.is_hybrid_moe() {
+    // Pure MoE (GraniteMoE, OLMoE) serves experts exactly like hybrid MoE —
+    // the packed per-layer expert store is the same shape either way. Only
+    // the presence of a parallel dense slab differs, which the expert
+    // endpoints never touch.
+    if !(arch.is_moe() || arch.is_hybrid_moe()) {
         return Err(ServerError::BadRequest(
-            "model is not a hybrid MoE — no expert endpoints available".into(),
+            "model is not a MoE — no expert endpoints available".into(),
         ));
     }
 
@@ -121,7 +125,7 @@ pub fn run_expert(
             arch.norm_weight_offset(),
             arch.norm_eps(),
             format,
-            activation,
+            larql_compute::ExpertMlp::gated(activation),
         )
     } else {
         larql_inference::run_single_expert(
@@ -130,7 +134,7 @@ pub fn run_expert(
             down_bytes,
             inter,
             format,
-            activation,
+            larql_compute::ExpertMlp::gated(activation),
         )
     };
 
@@ -158,6 +162,7 @@ pub async fn handle_expert(
     Json(req): Json<SingleExpertRequest>,
 ) -> Result<Json<SingleExpertResponse>, ServerError> {
     state.bump_requests();
+    let _rif_guard = crate::routes::walk_ffn::types::track_model_request(&state);
     let start = std::time::Instant::now();
 
     let output =

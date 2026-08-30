@@ -64,6 +64,7 @@ async fn join_and_announce(
             vindex_hash: hash.into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await

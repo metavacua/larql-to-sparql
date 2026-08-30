@@ -75,6 +75,9 @@ enum ObjectPhase {
     ExpectValue,
     /// Inside the value — handled by a nested frame.
     InValue,
+    /// Saw `,` after a value — a key MUST follow (`}` here would be a
+    /// trailing comma, which JSON forbids).
+    ExpectKey,
     /// Saw value's closing structure; expecting `,` or `}`.
     AfterValue,
 }
@@ -451,6 +454,12 @@ impl Fsm {
             ObjectPhase::AfterOpen => match ch {
                 '}' => self.close_object_if_required_satisfied(),
                 '"' => {
+                    // A closed object with no viable key left admits
+                    // only `}` — refuse opening a key that could never
+                    // close.
+                    if self.viable_key_enum().is_some_and(|v| v.is_empty()) {
+                        return StepResult::Reject;
+                    }
                     self.set_object_phase(ObjectPhase::InKey);
                     self.push_string_frame_for_key();
                     StepResult::Ok
@@ -480,25 +489,28 @@ impl Fsm {
             }
             ObjectPhase::AfterValue => match ch {
                 ',' => {
-                    self.set_object_phase(ObjectPhase::AfterOpen);
-                    // After comma we can't accept `}` immediately —
-                    // OpenAI tolerates trailing-comma-then-close on
-                    // some clients but the JSON spec doesn't. Reset to
-                    // a "must see key" sub-phase by reusing AfterOpen
-                    // and rejecting `}` there until a key arrives.
-                    // Adjust: we want post-comma to require a key, not
-                    // allow empty-close. Force phase ExpectKeyOnly.
-                    self.set_object_phase(ObjectPhase::InKey);
-                    self.set_object_phase(ObjectPhase::AfterOpen);
-                    // (Re-using AfterOpen permits `}` on empty obj
-                    // pre-first-key; we accept that minor inaccuracy
-                    // to keep the state space small. The mask path
-                    // never produces `,}` because the model is
-                    // unconstrained character-wise — token-level
-                    // emit usually opens a fresh key.)
+                    // A comma commits the emission to another key, so
+                    // it is only legal while a key remains emittable —
+                    // otherwise the mask would admit a `,` that can
+                    // never be legally followed (found by the
+                    // N0.6-on-V3 gate: greedy emitted `…{},}`).
+                    if self.viable_key_enum().is_some_and(|v| v.is_empty()) {
+                        return StepResult::Reject;
+                    }
+                    self.set_object_phase(ObjectPhase::ExpectKey);
                     StepResult::Ok
                 }
                 '}' => self.close_object_if_required_satisfied(),
+                _ => StepResult::Reject,
+            },
+            ObjectPhase::ExpectKey => match ch {
+                // Post-comma: a key is mandatory — `}` here would be a
+                // trailing comma, which JSON forbids.
+                '"' => {
+                    self.set_object_phase(ObjectPhase::InKey);
+                    self.push_string_frame_for_key();
+                    StepResult::Ok
+                }
                 _ => StepResult::Reject,
             },
             ObjectPhase::InKey | ObjectPhase::InValue => {
@@ -614,16 +626,46 @@ impl Fsm {
     }
 
     fn push_string_frame_for_key(&mut self) {
-        // Key strings are unconstrained content-wise (the schema validates
-        // KEY NAMES, not key string contents). We use a fresh
-        // StringSchema so escape/control validation still runs.
+        // On a CLOSED object (`additionalProperties: false`) the key
+        // string is constrained to the still-viable property names via
+        // the string frame's enum machinery — prefix-filtered while
+        // the key is being emitted, exact-matched at the closing
+        // quote. Without this the mask would admit a doomed key and
+        // dead-end after its colon (found by the N0.6-on-V3 gate: the
+        // constrained emission produced `{"name":"get","get":` and
+        // starved). Open objects keep unconstrained keys.
         self.stack.push(Frame::String(StringFrame {
-            spec: StringSchema::default(),
+            spec: StringSchema {
+                r#enum: self.viable_key_enum(),
+                ..StringSchema::default()
+            },
             is_key: true,
             decoded: String::new(),
             in_escape: false,
             unicode_left: 0,
         }));
+    }
+
+    /// Property names still emittable in the current Object frame, for
+    /// constraining key strings at emission time. `None` means
+    /// unconstrained (the object admits additional properties). Keys
+    /// already seen are excluded — re-emitting one would be valid JSON
+    /// but can never make progress toward closing the object.
+    fn viable_key_enum(&self) -> Option<Vec<String>> {
+        let Some(Frame::Object(obj)) = self.stack.last() else {
+            return None;
+        };
+        if obj.spec.additional.is_some() {
+            return None;
+        }
+        Some(
+            obj.spec
+                .properties
+                .keys()
+                .filter(|k| !obj.seen.iter().any(|seen| &seen == k))
+                .cloned()
+                .collect(),
+        )
     }
 
     fn consume_object_key(&mut self) -> String {
@@ -1235,6 +1277,66 @@ mod tests {
         assert!(!fsm.is_complete());
         assert_eq!(fsm.step_str("}"), StepResult::Ok);
         assert!(fsm.is_complete());
+    }
+
+    // ── N0.6 emission-time key discipline ─────────────────────────
+    //
+    // The mask samples token by token, so a closed object must refuse
+    // a doomed key AT THE KEY'S FIRST CHARACTER (not after its colon)
+    // and must refuse a comma no further key could legally follow —
+    // otherwise constrained generation dead-ends mid-emission. Both
+    // were found live by the N0.6-on-V3 gates.
+
+    #[test]
+    fn strict_object_rejects_a_doomed_key_at_its_first_char() {
+        let s = obj(&[("name", Schema::number())], &[], true);
+        let mut fsm = Fsm::new(s);
+        assert_eq!(fsm.step_str(r#"{"g"#), StepResult::Reject);
+    }
+
+    #[test]
+    fn strict_object_rejects_reopening_a_seen_key() {
+        let s = obj(
+            &[("a", Schema::number()), ("b", Schema::number())],
+            &[],
+            true,
+        );
+        let mut fsm = Fsm::new(s);
+        assert_eq!(fsm.step_str(r#"{"a":1,"a"#), StepResult::Reject);
+    }
+
+    #[test]
+    fn open_object_keys_stay_unconstrained() {
+        let s = obj(&[("a", Schema::number())], &[], false);
+        assert_accepts(s, r#"{"anything":true}"#);
+    }
+
+    #[test]
+    fn trailing_comma_is_rejected() {
+        let s = obj(&[("a", Schema::number())], &[], false);
+        let mut fsm = Fsm::new(s);
+        assert_eq!(fsm.step_str(r#"{"a":1,"#), StepResult::Ok);
+        assert_eq!(fsm.step_str("}"), StepResult::Reject);
+    }
+
+    #[test]
+    fn comma_with_no_viable_key_left_is_rejected() {
+        // Every property emitted on a strict object: `}` is the only
+        // legal continuation — a comma could never be followed.
+        let s = obj(&[("a", Schema::number())], &[], true);
+        let mut fsm = Fsm::new(s);
+        assert_eq!(fsm.step_str(r#"{"a":1"#), StepResult::Ok);
+        assert_eq!(fsm.step_str(","), StepResult::Reject);
+    }
+
+    #[test]
+    fn strict_object_still_walks_its_full_emission() {
+        let s = obj(
+            &[("a", Schema::number()), ("b", Schema::number())],
+            &["a", "b"],
+            true,
+        );
+        assert_accepts(s, r#"{"a":1,"b":2}"#);
     }
 
     #[test]

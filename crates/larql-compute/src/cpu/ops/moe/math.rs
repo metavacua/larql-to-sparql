@@ -1,7 +1,12 @@
 //! Numeric primitives used by the MoE forward pass.
 //!
-//! `pub(super)` keeps these module-private — `cpu_moe_forward` and the
-//! per-expert helpers share them, nothing outside `moe/` should.
+//! Most are `pub(super)`: `cpu_moe_forward` and the per-expert helpers share
+//! them and nothing outside `moe/` should.
+//!
+//! `matmul_vec` and `softmax` are the exceptions. They are the router's
+//! numerical recipe, and a VINDEX3 `BoundRouter` binds *these functions* so
+//! that kernel-binding parity is a statement about the production kernel
+//! rather than about two similar-looking loops agreeing.
 
 /// Dequantize a BF16 byte slice to f32.
 #[inline]
@@ -48,13 +53,13 @@ pub(super) fn rms_norm_no_weight(x: &[f32], eps: f32) -> Vec<f32> {
 
 /// SiLU activation: x * sigmoid(x)
 #[inline]
-pub(super) fn silu(x: f32) -> f32 {
+pub(crate) fn silu(x: f32) -> f32 {
     x / (1.0 + (-x).exp())
 }
 
 /// GELU with tanh approximation (Gemma 4 expert FFN activation).
 #[inline]
-pub(super) fn gelu_tanh(x: f32) -> f32 {
+pub(crate) fn gelu_tanh(x: f32) -> f32 {
     let c = 0.797_884_6_f32;
     0.5 * x * (1.0 + (c * (x + 0.044715 * x * x * x)).tanh())
 }
@@ -67,7 +72,10 @@ pub(super) fn gelu_tanh(x: f32) -> f32 {
 /// `out_rows × in_cols` multiplies, repeated 8 experts × 60 layers per token,
 /// and BLAS sgemv hits the AMX tiles + SIMD fused-multiply-add pipeline that
 /// the scalar path misses entirely.
-pub(super) fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<f32> {
+/// Public so a VINDEX3 `BoundRouter` can bind *this* kernel rather than
+/// reimplement a lookalike. Binding the real function is the difference
+/// between proving kernel binding works and proving two similar loops agree.
+pub fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<f32> {
     debug_assert_eq!(w.len(), out_rows * in_cols);
     debug_assert_eq!(x.len(), in_cols);
     if out_rows == 0 || in_cols == 0 {
@@ -116,7 +124,10 @@ pub(super) fn matmul_vec_into(
 }
 
 /// Softmax in-place.
-pub(super) fn softmax(v: &mut [f32]) {
+/// Public for the same reason as [`matmul_vec`]: the router's numerical
+/// recipe is scoring *and* its softmax, and reproducing one while
+/// reimplementing the other would leave the comparison meaningless.
+pub fn softmax(v: &mut [f32]) {
     let max = v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let mut sum = 0.0f32;
     for x in v.iter_mut() {
@@ -130,11 +141,22 @@ pub(super) fn softmax(v: &mut [f32]) {
     }
 }
 
-/// Top-k indices by value (descending). Returns (indices, values).
+/// Top-k indices by (value descending, index ascending). Returns
+/// (indices, values).
+///
+/// The secondary key is the ROUTING TIE CONTRACT: under exact ties (or
+/// low-precision score collapse) the lower expert id wins, so CPU/GPU
+/// route equality stays well-defined. GPU router implementations
+/// (`larql-compute-metal` `moe_router_select`) implement the same
+/// contract; changing one side alone is a routing semantics change.
 pub(super) fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
     let k = k.min(v.len());
     let mut indexed: Vec<(usize, f32)> = v.iter().copied().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_unstable_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
     indexed.truncate(k);
     let indices: Vec<usize> = indexed.iter().map(|(i, _)| *i).collect();
     let values: Vec<f32> = indexed.iter().map(|(_, v)| *v).collect();
@@ -214,6 +236,26 @@ mod tests {
         // k > len — get all in descending order.
         let (idx, _) = top_k(&[0.1, 0.5, 0.3], 99);
         assert_eq!(idx, vec![1, 2, 0]);
+    }
+
+    /// The routing tie contract: equal values order by ascending index —
+    /// including ties that straddle the selection boundary, where the
+    /// contract decides WHICH expert is selected at all.
+    #[test]
+    fn top_k_ties_break_by_ascending_index() {
+        // Tie inside the selection: both 2.0s taken, lower index first.
+        let (idx, val) = top_k(&[1.0, 2.0, 2.0, 0.5], 3);
+        assert_eq!(idx, vec![1, 2, 0]);
+        assert_eq!(val, vec![2.0, 2.0, 1.0]);
+
+        // Tie ACROSS the boundary: k=1 must pick the lower index of the
+        // tied pair, deterministically.
+        let (idx, _) = top_k(&[0.5, 2.0, 2.0], 1);
+        assert_eq!(idx, vec![1]);
+
+        // All-equal input: selection is the first k indices.
+        let (idx, _) = top_k(&[3.0, 3.0, 3.0, 3.0], 2);
+        assert_eq!(idx, vec![0, 1]);
     }
 
     /// `softmax` produces a probability distribution.

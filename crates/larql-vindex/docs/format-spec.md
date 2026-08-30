@@ -4,7 +4,7 @@
 **Date:** 2026-04-24
 **Status:** Implemented (~98%); FP4/FP8 storage in progress (exp 26)
 **Implementation:** `larql-vindex` crate (Rust)
-**Companion specs:** [Operations](operations-spec.md), [Ecosystem](ecosystem-spec.md), [LQL](../../larql-lql/docs/spec.md)
+**Companion specs:** [Conformance v1](conformance-v1.md) (error-not-panic contract, corruption tests, LE golden vectors), [Operations](operations-spec.md), [Ecosystem](ecosystem-spec.md), [LQL](../../larql-lql/docs/spec.md)
 **FP4 companion specs:** [FP4 format](fp4-format-spec.md), [FP4 precision policy](fp4-precision-policy.md), [Quantize CLI](../../larql-cli/docs/quantize-spec.md)
 
 **Implementation coverage:** File layout, binary formats, extract levels, f16 storage, checksums, mmap loading, streaming extraction, `larql verify`, Q4_K quantisation — all implemented. **FP4/FP8 block storage** — codec layer landed (see §5.10), writer and walk-kernel dispatch in progress.
@@ -106,9 +106,9 @@ model.vindex/
 │  # ═══ Quantised Weights (when quant = Q4k) ═══
 │  # Written instead of attn_weights.bin / up_weights.bin / down_weights.bin.
 │
-├── attn_weights_q4k.bin      # Q/K/O = Q4_K, V = Q6_K per layer
+├── attn_weights_kquant.bin      # Q/K/O = Q4_K, V = Q6_K per layer
 ├── attn_weights_q4k_manifest.json
-├── interleaved_q4k.bin       # FFN gate/up = Q4_K, down = Q6_K (or Q4_K with --down-q4k) per layer
+├── interleaved_kquant.bin       # FFN gate/up = Q4_K, down = Q6_K (or Q4_K with --down-q4k) per layer
 ├── interleaved_q4k_manifest.json
 │
 │  # ═══ FP4/FP8 Storage (when index.json.fp4 is set — exp 26) ═══
@@ -379,7 +379,7 @@ gate, was downgraded after failing it, or was set by policy regardless).
 
 ### 5.12 Per-layer FFN weight storage (`layers/`)
 
-**Status:** Shipped 2026-04-26 for MoE — `experts_packed.bin` (BF16 monolith) is no longer written. Dense layers still use `interleaved_q4k.bin` for now; per-layer dense is a future migration. Activated when `index.json` carries `"ffn_layout": "per_layer"`.
+**Status:** Shipped 2026-04-26 for MoE — `experts_packed.bin` (BF16 monolith) is no longer written. Dense layers still use `interleaved_kquant.bin` for now; per-layer dense is a future migration. Activated when `index.json` carries `"ffn_layout": "per_layer"`.
 
 **Reading code (current):** `format/weights/load/q4k.rs::load_model_weights_q4k_shard` mmaps each `layers/layer_{L}.weights`, parses the LYRW header + offset table, and exposes per-expert byte ranges via `ModelWeights::get_layer_entry_bytes(layer, entry)`. The CPU MoE path (`larql-compute::cpu::ops::moe`) and the remote-expert HTTP handler (`larql-server::routes::expert::run_expert`) both consume per-expert slices directly — no monolith arithmetic.
 
@@ -395,7 +395,7 @@ gate, was downgraded after failing it, or was set by policy regardless).
 
 **Why the old formats fail.**
 
-*`interleaved_q4k.bin` (dense):* One flat file for all 34 layers. Server `--layers` sharding works via byte-offset filtering but the OS faults in the full virtual range. Layer-level replacement or re-quantization requires rewriting the whole file.
+*`interleaved_kquant.bin` (dense):* One flat file for all 34 layers. Server `--layers` sharding works via byte-offset filtering but the OS faults in the full virtual range. Layer-level replacement or re-quantization requires rewriting the whole file.
 
 *`experts_packed.bin` (MoE BF16):* historical 43 GB monolithic BF16 blob. CPU BF16→f32 dequant at ~2.9 GB/token on Gemma 4 26B A4B; near-zero LRU cache hit rate. 30 GPU commit/wait syncs per decode step. No per-expert addressability. **Removed from new MoE vindexes 2026-04-26.**
 
@@ -466,7 +466,7 @@ One GPU command buffer per decode step for both dense and MoE paths.
 | Old format | Size | New format | Size |
 |---|---|---|---|
 | `experts_packed.bin` (BF16) | 43 GB | `layers/*.weights` (Q4_K) | ~24 GB |
-| `interleaved_q4k.bin` (dense) | — | `layers/*.weights` (Q4_K) | same bytes, per-layer |
+| `interleaved_kquant.bin` (dense) | — | `layers/*.weights` (Q4_K) | same bytes, per-layer |
 
 ---
 
@@ -542,7 +542,7 @@ The central configuration file. Version 2 is the current format.
 
   // FFN weight layout. "per_layer" = layers/layer_{L}.weights, one file per layer,
   // format declared in file header (see §5.12). Works for both dense and MoE.
-  // Absent = legacy flat-file layout (interleaved_q4k.bin / experts_packed.bin).
+  // Absent = legacy flat-file layout (interleaved_kquant.bin / experts_packed.bin).
   "ffn_layout": "per_layer",
 
   "fp4": {
@@ -738,7 +738,7 @@ At 31B scale (Gemma 4 31B, hidden=5376, intermediate=21504, 60 layers):
 | Version | Changes |
 |---------|---------|
 | 1 | Original: gate + embed + down_meta JSONL + model_weights.bin |
-| 2 | Added extract_level, layer_bands, model_config, source, checksums, dtype. Binary down_meta. Split weight files (attn, up, down, norms, lm_head). f16 storage. Q4_K/Q6_K quantisation (interleaved_q4k.bin + manifest). |
+| 2 | Added extract_level, layer_bands, model_config, source, checksums, dtype. Binary down_meta. Split weight files (attn, up, down, norms, lm_head). f16 storage. Q4_K/Q6_K quantisation (interleaved_kquant.bin + manifest). |
 
 **FP4/FP8 storage is an additive extension, not a version bump.** Version
 2 vindexes can optionally carry an `fp4` field in `index.json` with

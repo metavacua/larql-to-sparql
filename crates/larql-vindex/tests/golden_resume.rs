@@ -136,6 +136,8 @@ fn run_extract(model_dir: &Path, output_dir: &Path) {
         WriteWeightsOptions::default(),
         KquantWriteOptions::default(),
         false,
+        larql_vindex::ExtractionRequest::Legacy,
+        None,
         &mut cb,
     )
     .unwrap();

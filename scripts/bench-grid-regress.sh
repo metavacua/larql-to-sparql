@@ -54,6 +54,18 @@ echo "[bench-grid-regress] running bench against ${LARQL_BENCH_FFN_URL}..."
     --output-file "${CURRENT}"
 
 if [ ! -f "${BASELINE}" ]; then
+    # A regression gate that invents its own baseline cannot fail. Until
+    # 2026-08-22 this branch silently saved the current run and exited 0,
+    # and since NO grid-*.json baseline has ever existed in the repo,
+    # every invocation took it — the gate reported success without ever
+    # comparing anything. Creating a baseline is now an explicit act.
+    if [ "${LARQL_BENCH_SAVE_BASELINE:-0}" != "1" ]; then
+        echo "[bench-grid-regress] FAIL: no baseline at ${BASELINE}" >&2
+        echo "[bench-grid-regress] Nothing to compare against, so this is not a pass." >&2
+        echo "[bench-grid-regress] To record one deliberately:" >&2
+        echo "[bench-grid-regress]   LARQL_BENCH_SAVE_BASELINE=1 $0 $*" >&2
+        exit 1
+    fi
     echo "[bench-grid-regress] no baseline found at ${BASELINE} — saving current run as baseline"
     mkdir -p "$(dirname "${BASELINE}")"
     cp "${CURRENT}" "${BASELINE}"

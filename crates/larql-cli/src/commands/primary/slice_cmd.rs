@@ -373,6 +373,19 @@ pub fn run(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Resolve source through the cache shorthand.
     let src = cache::resolve_model(&args.source)?;
 
+    // Slicing selects files by VINDEX2 filename patterns. A VINDEX3
+    // container's payload lives in `segments/`, so those patterns match
+    // nothing and the copy would look like a success while producing a
+    // container missing its weights. Refuse, naming the generation.
+    if let Ok(found) = larql_vindex::format::generation::detect_generation(&src) {
+        if found != larql_vindex::format::generation::ContainerGeneration::V2 {
+            return Err(larql_vindex::format::generation::unsupported_generation(
+                "slice", &src, found,
+            )
+            .into());
+        }
+    }
+
     // 2. Build requested part set (parts ∪ preset expansion).
     let mut wanted: BTreeSet<Part> = BTreeSet::new();
     if let Some(ref p) = args.preset {

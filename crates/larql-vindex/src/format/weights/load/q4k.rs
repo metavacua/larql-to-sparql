@@ -71,6 +71,11 @@ pub fn load_model_weights_kquant_shard(
     let mut tensors: HashMap<String, larql_models::WeightArray> = HashMap::new();
     let mut packed_mmaps: HashMap<String, memmap2::Mmap> = HashMap::new();
     let mut packed_byte_ranges: HashMap<String, (String, usize, usize)> = HashMap::new();
+    let mut per_layer_ffn_format: HashMap<usize, String> = HashMap::new();
+    let mut per_layer_ffn_arrangement: HashMap<
+        usize,
+        larql_models::weights::PerLayerFfnArrangement,
+    > = HashMap::new();
     let mut lm_head_loaded: Option<larql_models::WeightArray> = None;
 
     if manifest_path.exists() {
@@ -182,33 +187,50 @@ pub fn load_model_weights_kquant_shard(
             }
             if let Ok(f) = std::fs::File::open(&fpath) {
                 if let Ok(mmap) = unsafe { memmap2::Mmap::map(&f) } {
-                    if let Some((_fmt, _num_entries, _inter, _hidden, offsets)) =
-                        parse_layer_weights_header(&mmap)
-                    {
+                    if let Some(header) = parse_layer_weights_header(&mmap) {
+                        // The header is the format authority for this store.
+                        // Recording it is what lets the MoE forward decode a
+                        // Q6_K (MXFP4-transcoded) store as Q6_K instead of
+                        // assuming Q4_K.
+                        per_layer_ffn_format.insert(l, header.format.registry_tag().to_string());
+                        // The arrangement facts travel with the format, for
+                        // the same reason: a reader that takes the format and
+                        // derives the rest is the reader that serves an
+                        // interleaved bank as contiguous halves.
+                        per_layer_ffn_arrangement.insert(
+                            l,
+                            larql_models::weights::PerLayerFfnArrangement {
+                                split_scales: header.scale_binding.is_split(),
+                                gate_up_layout: header.fused_row_layout,
+                            },
+                        );
                         // Use the shared key builder from larql-models so the
                         // loader and `ModelWeights::get_layer_entry_bytes` stay
                         // in lockstep. Drift here causes silent None returns.
-                        for (e, (gu_off, gu_bytes, dn_off, dn_bytes)) in offsets.iter().enumerate()
-                        {
+                        for (e, entry) in header.entries.iter().enumerate() {
                             if !expert_in_shard(e, expert_filter) {
                                 continue;
                             }
-                            packed_byte_ranges.insert(
-                                larql_models::weights::per_layer_ffn_key(
-                                    l,
-                                    e,
-                                    larql_models::weights::PER_LAYER_FFN_GATE_UP,
-                                ),
-                                (filename.clone(), *gu_off, *gu_bytes),
-                            );
-                            packed_byte_ranges.insert(
-                                larql_models::weights::per_layer_ffn_key(
-                                    l,
-                                    e,
-                                    larql_models::weights::PER_LAYER_FFN_DOWN,
-                                ),
-                                (filename.clone(), *dn_off, *dn_bytes),
-                            );
+                            let mut record =
+                                |slot: &str, r: &super::super::write_layers::StoredRange| {
+                                    packed_byte_ranges.insert(
+                                        larql_models::weights::per_layer_ffn_key(l, e, slot),
+                                        (filename.clone(), r.offset, r.len),
+                                    );
+                                };
+                            record(larql_models::weights::PER_LAYER_FFN_GATE_UP, &entry.gate_up);
+                            record(larql_models::weights::PER_LAYER_FFN_DOWN, &entry.down);
+                            // Exponent streams, present exactly for a
+                            // split-scale store. Registering them under their
+                            // own slots keeps `payload_offset / 16` — a
+                            // physical-placement coincidence, not a format
+                            // property — out of every consumer.
+                            if let Some(r) = &entry.gate_up_scales {
+                                record(larql_models::weights::PER_LAYER_FFN_GATE_UP_SCALES, r);
+                            }
+                            if let Some(r) = &entry.down_scales {
+                                record(larql_models::weights::PER_LAYER_FFN_DOWN_SCALES, r);
+                            }
                         }
                         packed_mmaps.insert(filename, mmap);
                     }
@@ -224,16 +246,47 @@ pub fn load_model_weights_kquant_shard(
     let lm_q4_path = crate::format::filenames::resolve_lm_head_kquant(dir).bin;
     if lm_q4_path.exists() {
         let bytes = std::fs::read(&lm_q4_path)?;
-        let num_floats = config.vocab_size * config.hidden_size;
-        let padded = num_floats.div_ceil(larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS)
-            * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
-        if let Ok(floats) = larql_models::quant::ggml::dequantize_q4_k(&bytes, padded) {
-            if floats.len() >= num_floats {
-                if let Ok(arr) = Array2::from_shape_vec(
-                    (config.vocab_size, config.hidden_size),
-                    floats[..num_floats].to_vec(),
-                ) {
-                    lm_head_loaded = Some(arr.into_shared());
+        let vocab = config.vocab_size;
+        let hidden = config.hidden_size;
+        let num_floats = vocab * hidden;
+        // The writer pads every ROW to a super-block boundary
+        // (`pad_rows_to_block`) — hidden 2880 stores as 3072 columns — so
+        // the store must be dequantised at its own row width and the
+        // padding stripped per row. The old flat dequant at vocab×hidden
+        // read every row after the first at a skewed offset, which made
+        // this `weights.lm_head` — the REFERENCE side of lm-head parity —
+        // the garbled arm while the (fixed) matvec was right. For
+        // block-multiple hidden sizes the two schemes are byte-identical,
+        // which is why every previously-served model hid this.
+        let block = larql_models::quant::ggml::Q4_K_BLOCK_ELEMS;
+        let padded_cols = hidden.div_ceil(block) * block;
+        let per_row_total = vocab * padded_cols;
+        let per_row_bytes = per_row_total / block * larql_models::quant::ggml::Q4_K_BLOCK_BYTES;
+        if padded_cols != hidden && bytes.len() == per_row_bytes {
+            if let Ok(floats) = larql_models::quant::ggml::dequantize_q4_k(&bytes, per_row_total) {
+                if floats.len() >= per_row_total {
+                    let mut rows = Vec::with_capacity(num_floats);
+                    for r in 0..vocab {
+                        let start = r * padded_cols;
+                        rows.extend_from_slice(&floats[start..start + hidden]);
+                    }
+                    if let Ok(arr) = Array2::from_shape_vec((vocab, hidden), rows) {
+                        lm_head_loaded = Some(arr.into_shared());
+                    }
+                }
+            }
+        } else {
+            // Block-multiple hidden (row padding is a no-op) or a legacy
+            // flat-padded store: the original scheme.
+            let padded = num_floats.div_ceil(larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS)
+                * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
+            if let Ok(floats) = larql_models::quant::ggml::dequantize_q4_k(&bytes, padded) {
+                if floats.len() >= num_floats {
+                    if let Ok(arr) =
+                        Array2::from_shape_vec((vocab, hidden), floats[..num_floats].to_vec())
+                    {
+                        lm_head_loaded = Some(arr.into_shared());
+                    }
                 }
             }
         }
@@ -250,6 +303,8 @@ pub fn load_model_weights_kquant_shard(
         skipped_tensors: Vec::new(),
         packed_mmaps,
         packed_byte_ranges,
+        per_layer_ffn_format,
+        per_layer_ffn_arrangement,
         embed,
         lm_head,
         position_embed: None,

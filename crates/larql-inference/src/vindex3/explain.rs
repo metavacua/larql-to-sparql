@@ -1,0 +1,292 @@
+//! Structured explanation of a bound V3 program (LQL-2 `EXPLAIN INFER`).
+//!
+//! Static and deterministic: built from the executable
+//! [`ComponentOpPlan`] alone — the same object the executor runs — so
+//! the explanation IS the authority that will execute, not a
+//! reconstruction of one. No tokens run to produce it.
+//!
+//! **The structured value is primary; renderings are derived.** LQL
+//! prints it, and a JSON/server surface serialises the same value
+//! later — nothing should ever parse pretty text to learn what a
+//! program does. `PartialEq` is deliberate: the explain-stability gate
+//! compares whole values across repeated opens.
+//!
+//! Operand provenance quotes the plan's own [`OperandRef`] bindings —
+//! object, segment-relative tensor, dtype — exactly the coordinates
+//! `OperandStore` resolves at execution time, so the explain chain and
+//! the execution chain cannot name different bytes.
+
+use larql_vindex::format::vindex3::opplan::exec::backend::PlanBackend;
+use larql_vindex::format::vindex3::opplan::{
+    ComponentOpPlan, LayerAttention, LayerFfn, OperandRef,
+};
+use serde::Serialize;
+
+use super::runtime::Vindex3Runtime;
+
+/// The whole program, explained. Field order mirrors execution order.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainPlan {
+    /// The container's self-declared model name.
+    pub model: String,
+    pub component: String,
+    pub generation: u32,
+    /// True by construction: a runtime only opens a closed plan.
+    pub execution_closed: bool,
+    pub embedding: ExplainEmbedding,
+    pub layers: Vec<ExplainLayer>,
+    /// Per-layer continuation geometry, as a provider will be
+    /// `prepare`d with it.
+    pub continuation: Vec<ExplainKvGeometry>,
+    pub final_norm: bool,
+    pub output: Option<ExplainOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainEmbedding {
+    pub vocab_size: usize,
+    pub scaled: bool,
+    pub normed: bool,
+    pub table: ExplainOperand,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainLayer {
+    pub layer: usize,
+    /// The layer's operations in execution order — the step's own
+    /// sequence, including the optional ops only when the plan
+    /// declares them (absence is never an identity op).
+    pub ops: Vec<String>,
+    pub attention: ExplainAttention,
+    pub ffn: ExplainFfn,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainAttention {
+    /// The layer's `layer_types` spelling: `"sliding"`, `"full"`, or
+    /// `"linear_attention"`.
+    pub mode: String,
+    pub window: Option<usize>,
+    /// Softmax head geometry. Absent on a linear-attention layer — which
+    /// is a statement, not a gap: reporting a DeltaNet layer's 48 value
+    /// heads as `kv_heads` would tell a reader it retains 48 heads of KV
+    /// when it retains none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub q_heads: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kv_heads: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_dim: Option<usize>,
+    /// Elements in one linear-attention layer's recurrent state, constant
+    /// in sequence length. Absent on a softmax layer, whose continuation
+    /// state grows per position instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_elements: Option<usize>,
+    pub gated: bool,
+    pub qk_norm: bool,
+    /// Per-head sink logits participate in the softmax.
+    pub sinks: bool,
+    /// Q/K/V/O projection biases are applied.
+    pub biased: bool,
+    /// Q/K/V/O (and gate, when present) bindings.
+    pub operands: Vec<ExplainOperand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainFfn {
+    /// `"dense"`, `"routed"`, or `"hybrid"`.
+    pub kind: String,
+    /// Routed layers: `(experts, top_k)`.
+    pub experts: Option<(usize, usize)>,
+    pub operands: Vec<ExplainOperand>,
+}
+
+/// One executable operand binding: the exact coordinates execution
+/// resolves — `object → tensor → dtype` (the representation encoding).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainOperand {
+    pub role: String,
+    pub object: String,
+    pub tensor: String,
+    pub dtype: String,
+    pub shape: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct ExplainKvGeometry {
+    pub kv_dim: usize,
+    pub window: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExplainOutput {
+    pub vocab: usize,
+    pub multiplied: bool,
+    pub softcapped: bool,
+    pub projection: ExplainOperand,
+}
+
+impl ExplainPlan {
+    /// Explain a bound runtime's program.
+    pub fn from_runtime<B: PlanBackend>(runtime: &Vindex3Runtime<B>) -> Self {
+        Self::from_plan(runtime.plan(), runtime.model_name())
+    }
+
+    /// Explain a plan directly — the negative-control seam: tests
+    /// mutate a plan and prove the explanation changes with it.
+    pub fn from_plan(plan: &ComponentOpPlan, model: &str) -> Self {
+        let embedding = plan
+            .embedding
+            .as_ref()
+            .expect("a decode-servable component carries an embedding op");
+        let continuation = super::plan_kv_geometry(plan)
+            .into_iter()
+            .map(|g| ExplainKvGeometry {
+                kv_dim: g.kv_dim,
+                window: g.window,
+            })
+            .collect();
+        Self {
+            model: model.to_string(),
+            component: plan.component.clone(),
+            generation: 3,
+            execution_closed: true,
+            embedding: ExplainEmbedding {
+                vocab_size: embedding.vocab_size,
+                scaled: embedding.scale.is_some(),
+                normed: embedding.norm.is_some(),
+                table: operand("table", &embedding.table),
+            },
+            layers: plan
+                .layers
+                .iter()
+                .enumerate()
+                .map(|(index, layer)| explain_layer(index, layer))
+                .collect(),
+            continuation,
+            final_norm: plan.final_norm.is_some(),
+            output: plan.output.as_ref().map(|op| ExplainOutput {
+                vocab: op.projection.shape.first().copied().unwrap_or(0),
+                multiplied: op.multiplier.is_some(),
+                softcapped: op.softcapping.is_some(),
+                projection: operand("projection", &op.projection),
+            }),
+        }
+    }
+}
+
+fn explain_layer(
+    index: usize,
+    layer: &larql_vindex::format::vindex3::opplan::LayerPlan,
+) -> ExplainLayer {
+    let mut ops = vec!["pre_attention_norm".to_string(), "attention".to_string()];
+    if layer.post_attention_norm.is_some() {
+        ops.push("post_attention_norm".into());
+    }
+    ops.push("residual_add".into());
+    ops.push("pre_ffn_norm".into());
+    ops.push("ffn".into());
+    if layer.post_ffn_norm.is_some() {
+        ops.push("post_ffn_norm".into());
+    }
+    ops.push("residual_add".into());
+    if layer.layer_scale.is_some() {
+        ops.push("layer_scale".into());
+    }
+
+    let attention = match &layer.attention {
+        LayerAttention::Softmax(op) => {
+            let mut operands = vec![
+                operand("q", &op.q),
+                operand("k", &op.k),
+                operand("v", &op.v),
+                operand("o", &op.o),
+            ];
+            if let Some(gate) = &op.output_gate {
+                operands.push(operand("output_gate", &gate.projection));
+            }
+            ExplainAttention {
+                mode: if op.window.is_some() {
+                    "sliding".into()
+                } else {
+                    "full".into()
+                },
+                window: op.window,
+                q_heads: Some(op.num_q_heads),
+                kv_heads: Some(op.num_kv_heads),
+                head_dim: Some(op.head_dim),
+                state_elements: None,
+                gated: op.output_gate.is_some(),
+                qk_norm: op.qk_norm.is_some(),
+                sinks: op.sinks.is_some(),
+                biased: op.q_bias.is_some(),
+                operands,
+            }
+        }
+        LayerAttention::GatedDelta(op) => ExplainAttention {
+            mode: layer.attention.declared_name().into(),
+            window: None,
+            q_heads: None,
+            kv_heads: None,
+            head_dim: None,
+            state_elements: Some(op.state_elements()),
+            // The z projection gates this operator's output the way an
+            // attention output gate does; the rest are softmax-only
+            // features a recurrence has no analogue for.
+            gated: true,
+            qk_norm: false,
+            sinks: false,
+            biased: false,
+            operands: vec![
+                operand("in_proj_qkv", &op.in_proj_qkv),
+                operand("in_proj_a", &op.in_proj_a),
+                operand("in_proj_b", &op.in_proj_b),
+                operand("in_proj_z", &op.in_proj_z),
+                operand("conv1d", &op.conv1d),
+                operand("a_log", &op.a_log),
+                operand("dt_bias", &op.dt_bias),
+                operand("norm", &op.norm),
+                operand("out_proj", &op.out_proj),
+            ],
+        },
+    };
+
+    let (kind, experts, ffn_operands) = match &layer.ffn {
+        LayerFfn::Dense(op) => {
+            let mut operands = Vec::new();
+            if let Some(gate) = &op.gate {
+                operands.push(operand("gate", gate));
+            }
+            operands.push(operand("up", &op.up));
+            operands.push(operand("down", &op.down));
+            ("dense", None, operands)
+        }
+        LayerFfn::Routed(op) => (
+            "routed",
+            Some((op.experts, op.top_k)),
+            vec![operand("router", &op.router)],
+        ),
+        LayerFfn::Hybrid(_) => ("hybrid", None, Vec::new()),
+    };
+
+    ExplainLayer {
+        layer: index,
+        ops,
+        attention,
+        ffn: ExplainFfn {
+            kind: kind.into(),
+            experts,
+            operands: ffn_operands,
+        },
+    }
+}
+
+fn operand(role: &str, op: &OperandRef) -> ExplainOperand {
+    ExplainOperand {
+        role: role.to_string(),
+        object: op.object.clone(),
+        tensor: op.tensor.clone(),
+        dtype: op.dtype.clone(),
+        shape: op.shape.clone(),
+    }
+}

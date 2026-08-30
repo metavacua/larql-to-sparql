@@ -283,7 +283,7 @@ pub async fn handle_describe(
 ) -> Result<Response, ServerError> {
     state.bump_requests();
     let model = state.model_or_err(None)?;
-    describe_with_cache(&state, model, &headers, params).await
+    describe_with_cache(&state, &model, &headers, params).await
 }
 
 #[utoipa::path(
@@ -310,5 +310,5 @@ pub async fn handle_describe_multi(
 ) -> Result<Response, ServerError> {
     state.bump_requests();
     let model = state.model_or_err(Some(&model_id))?;
-    describe_with_cache(&state, model, &headers, params).await
+    describe_with_cache(&state, &model, &headers, params).await
 }

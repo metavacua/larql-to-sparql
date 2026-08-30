@@ -23,6 +23,7 @@
 //! multi-position prefill the caller loops over positions, passing
 //! `f32_in_off` / `out_off` in bytes.
 
+use larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 use std::ffi::c_void;
 
@@ -109,6 +110,34 @@ pub fn encode(
     num_rows: usize,
     hidden: usize,
 ) {
+    // Every k-quant shader derives its superblock count as `K / 256`,
+    // truncating. A `K` below one superblock therefore dispatches ZERO
+    // work and leaves the output as it found it — so the caller receives a
+    // well-formed vector of zeros rather than an error, and a misaligned
+    // `K` silently drops the tail.
+    //
+    // That is not hypothetical: the synthetic decode suite ran for months
+    // with a completely dead O-projection because its `Q_DIM` was 128
+    // (issue #227). Attention was computed correctly and thrown away, and
+    // every "non-NaN, non-zero, correct length" assertion still passed
+    // because the FFN alone satisfied all three.
+    //
+    // `qkv_proj::encode` already asserts this for its `hidden` (audit
+    // F17). The O-projection reaches the kernels through *this* path,
+    // which had no equivalent guard — hence the hole was on this side.
+    if matches!(
+        format,
+        larql_compute::QuantFormat::Q4_K
+            | larql_compute::QuantFormat::Q4_KF
+            | larql_compute::QuantFormat::Q6_K
+    ) {
+        assert!(
+            hidden >= K_QUANT_BLOCK_ELEMS && hidden.is_multiple_of(K_QUANT_BLOCK_ELEMS),
+            "{format:?} matvec requires K % {K_QUANT_BLOCK_ELEMS} == 0 and at least one \
+             superblock; got K={hidden}. Below one superblock the kernel emits zeros \
+             silently instead of failing (issue #227)."
+        );
+    }
     let n = num_rows as u32;
     let k = hidden as u32;
     match format {
@@ -230,11 +259,45 @@ pub fn encode(
                  backend (`ternary_matvec`), or add a Metal sign-select shader."
             );
         }
+        larql_compute::QuantFormat::Q5_K => {
+            // The cheapest exact container for MXFP4 weights (25 affine
+            // levels needed, Q5_K has 32) and therefore the lossless
+            // fallback if the native MXFP4 path does not pay off — but
+            // no Metal Q5_K kernel exists yet. Fail loudly, mirroring
+            // the Q8_0 and I2S arms.
+            panic!(
+                "metal::stages::quant_matvec::encode: Q5_K has no Metal kernel \
+                 yet. Add a q5k matvec shader and register it in \
+                 `kernels::quant`, or serve these weights as Q6_K."
+            );
+        }
+        larql_compute::QuantFormat::MXFP4 => {
+            // MXFP4 *does* have Metal kernels — but they take the packed
+            // nibbles and the e8m0 exponent stream as two bindings, and
+            // this dispatcher's signature carries only `w_buf`. Binding
+            // the packed stream alone would decode every group at scale
+            // 2^0. Fail loudly, mirroring the Q8_0 and I2S arms.
+            panic!(
+                "metal::stages::quant_matvec::encode: MXFP4 needs its external \
+                 e8m0 scale stream, which this single-weight-buffer dispatcher \
+                 cannot bind. Route MXFP4 through the expert path \
+                 (`mxfp4_grouped_experts`) or `trait_impl::mxfp4`."
+            );
+        }
         larql_compute::QuantFormat::BF16
         | larql_compute::QuantFormat::F16
         | larql_compute::QuantFormat::F32 => {
-            // Not dispatchable via this Q4 shader path — caller should use
-            // a float matvec or dequantize before calling.
+            // Previously a silent no-op: no dispatch was encoded and the
+            // output buffer kept whatever the pooled scratch last held —
+            // stale data presented as a result, the worst failure mode
+            // in the capability audit (F4). Fail loudly, mirroring the
+            // Q8_0 and I2S arms above.
+            panic!(
+                "metal::stages::quant_matvec::encode: {format:?} weights are \
+                 not dispatchable through the quant matvec path. Use a float \
+                 matvec (f32_gemv / f16_gemv) or quantize the weights before \
+                 routing them here."
+            );
         }
     }
 }
@@ -292,7 +355,10 @@ mod tests {
         );
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/stages/quant_matvec.rs:358",
+        );
     }
 
     /// Q4_KF format dispatches the dedicated Q4_KF shader when the
@@ -395,30 +461,31 @@ mod tests {
         }));
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/stages/quant_matvec.rs:461",
+        );
         if let Err(payload) = result {
             std::panic::resume_unwind(payload);
         }
     }
 
-    /// Float formats are no-ops — the dispatcher silently returns
-    /// without setting any pipeline (line 222-227).  We pre-bind a
-    /// dummy dispatch to the encoder before calling `encode`, because
-    /// Metal panics on a release of a "naked" command encoder with
-    /// zero dispatches.  Production callers always feed a hot encoder
-    /// here.
+    /// Float formats refuse loudly (capability audit F4). This test
+    /// previously pinned the opposite: a silent no-op that encoded no
+    /// dispatch and left whatever the pooled scratch last held as the
+    /// "result". Same hand-unwind discipline as the Q8_0 test above —
+    /// the panic fires before `end_encoding`, and Metal aborts the
+    /// process if the encoder drops without one.
     #[test]
-    fn float_formats_are_dispatch_noops() {
+    fn float_formats_refuse_loudly() {
         let m = backend();
         let pipes = pipelines(&m);
         for fmt in [QuantFormat::F32, QuantFormat::F16, QuantFormat::BF16] {
             let (w, f32_in, q8_in, q8s_in, out, n, k) = fixture(&m);
             let cmd = m.queue.new_command_buffer();
             let enc = cmd.new_compute_command_encoder();
-            // Hot-start the encoder with a Q4_K dispatch so its drop
-            // (after end_encoding below) doesn't hit Metal's
-            // "released without endEncoding" assertion when `encode`
-            // is a no-op for the float branch.
+            // Hot-start the encoder with a Q4_K dispatch so end_encoding
+            // below isn't closing a naked encoder.
             encode(
                 enc,
                 QuantFormat::Q4_K,
@@ -435,13 +502,27 @@ mod tests {
                 n,
                 k,
             );
-            // Now exercise the float-format no-op branch on the same encoder.
-            encode(
-                enc, fmt, &w, &f32_in, 0, &q8_in, 0, &q8s_in, 0, &out, 0, &pipes, n, k,
-            );
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                encode(
+                    enc, fmt, &w, &f32_in, 0, &q8_in, 0, &q8s_in, 0, &out, 0, &pipes, n, k,
+                );
+            }));
             enc.end_encoding();
             cmd.commit();
-            cmd.wait_until_completed();
+            let _ = crate::cb_status::wait_checked(
+                cmd,
+                "crates/larql-compute-metal/src/stages/quant_matvec.rs:506",
+            );
+            let payload = result.expect_err("float formats must refuse, not no-op");
+            let msg = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default();
+            assert!(
+                msg.contains("not dispatchable"),
+                "{fmt:?} panic message: {msg}"
+            );
         }
     }
 }

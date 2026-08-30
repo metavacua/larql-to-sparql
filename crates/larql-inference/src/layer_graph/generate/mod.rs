@@ -12,7 +12,7 @@ pub mod detok;
 pub mod eos;
 mod gpu;
 mod gpu_setup;
-mod lm_head;
+pub(crate) mod lm_head;
 pub(crate) mod policy;
 pub mod sampling;
 mod types;
@@ -28,8 +28,9 @@ pub use constrained::{
 pub use detok::Detokenizer;
 pub use eos::{EosConfig, BUILTIN_STOP_STRINGS, GENERATION_CONFIG_FILENAME};
 pub use gpu::{
-    generate, generate_streaming, generate_with_sampling, stream_forced_full_logits, try_generate,
-    try_generate_streaming, try_generate_with_sampling, ForcedLogitsResult,
+    generate, generate_routed, generate_streaming, generate_with_sampling,
+    stream_forced_full_logits, try_generate, try_generate_streaming, try_generate_with_sampling,
+    ForcedLogitsResult,
 };
 pub use lm_head::lm_head_topk;
 pub use sampling::{Sampler, SamplingConfig};
@@ -188,6 +189,7 @@ mod tests {
             SamplingConfig::greedy(),
             &EosConfig::builtin(),
             |id, text, prob| streamed.push((id, text.to_string(), prob)),
+            None,
         );
 
         // The streaming callback must fire exactly once per emitted token.
@@ -320,6 +322,7 @@ mod tests {
             SamplingConfig::greedy(),
             &EosConfig::builtin(),
             |id, text, prob| streamed.push((id, text.to_string(), prob)),
+            None,
         );
         // Callback may or may not fire on the CPU fallback path. Either
         // outcome is acceptable for coverage purposes.

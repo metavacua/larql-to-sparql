@@ -115,13 +115,13 @@ This is **not async-specific** — sync `StandardEngine::new` exhibits the same 
 1. `KvDispatch::attention_prefill(weights, tokens_embedded, layer, window)` takes f32 inputs and reads f32 attention tensors from `weights.tensors`.
 2. `larql_vindex::load_model_weights_q4k` populates `weights` with **graph** tensors (embeddings, norm, lm_head) but leaves attention as Q4K bytes in the sibling `VectorIndex`.
 3. The trait's `attention_prefill` has no `&VectorIndex` parameter, so backends can't route to Q4K kernels even when they support them.
-4. `KvEngine::prefill_q4k` was added as an **engine-side override** (workaround) — but only `MarkovResidual`, `UnlimitedContext`, `TurboQuant` override it. `StandardEngine`, `NoCache`, `Apollo` inherit the default which falls back to f32 `prefill` and fails.
+4. `KvEngine::prefill_quant` was added as an **engine-side override** (workaround) — but only `MarkovResidual`, `WindowedCheckpoint`, `TurboQuant` override it. `StandardEngine`, `NoCache`, `Apollo` inherit the default which falls back to f32 `prefill` and fails.
 
-Engines that DO support Q4K (`MarkovResidual` et al.) **bypass `KvDispatch`** entirely in their `prefill_q4k` body:
+Engines that DO support Q4K (`MarkovResidual` et al.) **bypass `KvDispatch`** entirely in their `prefill_quant` body:
 
 ```rust
 // crates/larql-kv/src/engines/markov_residual/engine.rs:126
-fn prefill_q4k(&mut self, weights, _ffn, index, token_ids, backend) {
+fn prefill_quant(&mut self, weights, _ffn, index, token_ids, backend) {
     if let Some(h) = q4k_prefill_metal(weights, index, token_ids, backend) {
         // Metal fused decode_token path — backend.has_q4() gate.
         ...
@@ -142,7 +142,7 @@ The spec already anticipated this (`compute-backend-redesign.md` §11.5):
 Reality has drifted from the spec. The right shape:
 
 1. **`KvDispatch::attention_prefill` carries `Option<&VectorIndex>`** (or a unified "weight source" handle). Backends inspect it: f32 tensors in `weights.tensors` → f32 path; Q4K data in `index` + `backend.has_q4()` → Q4K matvec via `QuantMatVec::q4k_matvec`. Engines don't need to know.
-2. **Drop `KvEngine::prefill_q4k`** as a separate trait method. Make `prefill` quantization-agnostic. The Q4K-specific engines (Apollo) that need bespoke logic can still do that internally, but the dispatch shape stays uniform.
+2. **Drop `KvEngine::prefill_quant`** as a separate trait method. Make `prefill` quantization-agnostic. The Q4K-specific engines (Apollo) that need bespoke logic can still do that internally, but the dispatch shape stays uniform.
 3. **Move `q4k_prefill_metal` / `q4k_decode_token`** out of `larql-kv` and into `MetalBackend`'s `KvDispatch` impl. The engine just calls `backend.attention_prefill(weights, embed, layer, Some(index))` and the Metal backend chooses Q4K natively.
 4. **`ensure_attn_tensors_dequantised`** becomes an opt-in CPU-fallback helper on the backend trait, not an engine-side concern.
 
@@ -151,10 +151,10 @@ Reality has drifted from the spec. The right shape:
 1. `ensure_attn_tensors_dequantised` moved from `larql-kv/src/engines/markov_residual/q4k.rs` to `larql-inference/src/vindex/dequant.rs` (so the trait impls can call it without a `larql-kv → larql-inference → larql-kv` cycle).
 2. `KvDispatch::attention_prefill` / `attention_step` / `attention_step_windowed` gained `index: Option<&larql_vindex::VectorIndex>` parameter. Default impls accept and ignore. Same widening on `AsyncComputeBackend::attention_*_async` siblings.
 3. Helpers (`kv_prefill_via_dispatch`, `kv_decode_step_via_dispatch`, async variants) thread the index through to the trait calls.
-4. `StandardEngine::prefill_q4k` / `decode_step_q4k` now override the `KvEngine` defaults: call `ensure_attn_tensors_dequantised` once, then delegate to `do_prefill` / `do_decode_step` (the shared bodies that match on `BackendSlot::{Sync, Async}` and route through the helpers with `Some(index)`).
-5. `larql-kv` re-exports `ensure_attn_tensors_dequantised` from its old location so existing call sites in `MarkovResidual` / `UnlimitedContext` / `TurboQuant` keep working.
+4. `StandardEngine::prefill_quant` / `decode_step_quant` now override the `KvEngine` defaults: call `ensure_attn_tensors_dequantised` once, then delegate to `do_prefill` / `do_decode_step` (the shared bodies that match on `BackendSlot::{Sync, Async}` and route through the helpers with `Some(index)`).
+5. `larql-kv` re-exports `ensure_attn_tensors_dequantised` from its old location so existing call sites in `MarkovResidual` / `WindowedCheckpoint` / `TurboQuant` keep working.
 
-**Phase 2 (deferred):** Other engines (`MarkovResidual`, `UnlimitedContext`, `TurboQuant`) still have their bespoke `prefill_q4k` overrides that bypass the dispatch trait (`q4k_prefill_metal`, `rs_prefill_walk`, etc.). They can migrate to the dispatch-trait-only path in a follow-up session.
+**Phase 2 (deferred):** Other engines (`MarkovResidual`, `WindowedCheckpoint`, `TurboQuant`) still have their bespoke `prefill_quant` overrides that bypass the dispatch trait (`q4k_prefill_metal`, `rs_prefill_walk`, etc.). They can migrate to the dispatch-trait-only path in a follow-up session.
 
 **Phase 3 (deferred):** Replace bulk dequant in `ensure_attn_tensors_dequantised` with native Q4K matvec on `CpuBackend` via `larql_compute::QuantMatVec::q4k_matvec`. This drops the memory cost of full-f32 attention tensors. Per-call kernel work.
 

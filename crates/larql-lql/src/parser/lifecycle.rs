@@ -15,6 +15,7 @@ impl Parser {
         let mut components = None;
         let mut layers = None;
         let mut extract_level = ExtractLevel::Browse;
+        let mut format = None;
 
         loop {
             match self.peek() {
@@ -25,6 +26,26 @@ impl Parser {
                 crate::lexer::Token::Keyword(Keyword::Layers) => {
                     self.advance();
                     layers = Some(self.parse_range()?);
+                }
+                crate::lexer::Token::Keyword(Keyword::Format) => {
+                    self.advance();
+                    // VINDEX2 / VINDEX3 are bare identifiers, as with
+                    // COMPILE INTO VINDEX.
+                    format = Some(match self.peek() {
+                        crate::lexer::Token::Ident(ref s) if s.eq_ignore_ascii_case("vindex2") => {
+                            self.advance();
+                            ExtractFormat::Vindex2
+                        }
+                        crate::lexer::Token::Ident(ref s) if s.eq_ignore_ascii_case("vindex3") => {
+                            self.advance();
+                            ExtractFormat::Vindex3
+                        }
+                        other => {
+                            return Err(ParseError(format!(
+                                "EXTRACT FORMAT expects VINDEX2 or VINDEX3, found {other:?}"
+                            )))
+                        }
+                    });
                 }
                 crate::lexer::Token::Keyword(Keyword::With) => {
                     self.advance();
@@ -52,6 +73,7 @@ impl Parser {
             components,
             layers,
             extract_level,
+            format,
         })
     }
 
@@ -142,9 +164,14 @@ impl Parser {
         let mut layer = None;
         let mut relation = None;
         let mut limit = None;
+        let mut physical = false;
 
         loop {
             match self.peek() {
+                crate::lexer::Token::Keyword(Keyword::Physical) => {
+                    self.advance();
+                    physical = true;
+                }
                 crate::lexer::Token::Keyword(Keyword::Layer) => {
                     self.advance();
                     layer = Some(self.expect_u32()?);
@@ -170,6 +197,7 @@ impl Parser {
                         relation,
                         limit,
                         into_patch: Some(path),
+                        physical,
                     });
                 }
                 _ => break,
@@ -184,6 +212,7 @@ impl Parser {
             relation,
             limit,
             into_patch: None,
+            physical,
         })
     }
 
@@ -216,6 +245,23 @@ impl Parser {
     pub(crate) fn parse_compact(&mut self) -> Result<Statement, ParseError> {
         self.expect_keyword(Keyword::Compact)?;
         match self.peek() {
+            crate::lexer::Token::Keyword(Keyword::Into) => {
+                self.advance();
+                // "VINDEX" is an identifier, as in COMPILE INTO VINDEX.
+                match self.peek() {
+                    crate::lexer::Token::Ident(ref s) if s.eq_ignore_ascii_case("vindex") => {
+                        self.advance();
+                    }
+                    other => {
+                        return Err(ParseError(format!(
+                            "COMPACT INTO expects VINDEX, found {other:?}"
+                        )))
+                    }
+                }
+                let output = self.expect_string()?;
+                self.eat_semicolon();
+                Ok(Statement::CompactInto { output })
+            }
             crate::lexer::Token::Ident(ref s) if s.eq_ignore_ascii_case("MINOR") => {
                 self.advance();
                 self.eat_semicolon();

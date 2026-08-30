@@ -582,6 +582,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         #[cfg(feature = "http3")]
         h3_client,
         hedge_after: cli.hedge_after_ms.map(std::time::Duration::from_millis),
+        openai_responses: Default::default(),
     });
 
     let app = build_router(state);

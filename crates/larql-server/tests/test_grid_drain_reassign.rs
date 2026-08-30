@@ -73,6 +73,7 @@ async fn spawn_live_origin(
             vindex_hash: "live-origin-hash".into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await
@@ -102,6 +103,7 @@ async fn drain_then_reassign_via_available_after_drain() {
         ram_bytes: 0,
         grid_key: None,
         vindex_hash: "drained-hash".into(),
+        serves_openai: false,
         latency_tracker: Arc::new(LayerLatencyTracker::new()),
         requests_in_flight: Arc::new(AtomicU32::new(0)),
         requests_total: Arc::new(std::sync::atomic::AtomicU64::new(0)),

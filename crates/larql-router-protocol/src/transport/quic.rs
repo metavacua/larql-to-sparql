@@ -296,6 +296,7 @@ fn tls13_signature_schemes() -> Vec<rustls::SignatureScheme> {
 /// Build a rustls `ClientConfig` that pins the server cert to a
 /// SHA-256 fingerprint. ADR-0019's h3 module reuses this to layer
 /// its h3 ALPN override on top.
+#[cfg(feature = "http3")]
 pub(crate) fn client_rustls_config_with_fingerprint(
     fp_hex: String,
 ) -> Result<ClientConfig, String> {
@@ -305,6 +306,7 @@ pub(crate) fn client_rustls_config_with_fingerprint(
 /// Build a rustls `ClientConfig` that skips cert verification.
 /// LAN / dev only. Exposed for ADR-0019's h3 module to layer its
 /// ALPN override on top.
+#[cfg(feature = "http3")]
 pub(crate) fn client_rustls_config_skip_verify() -> ClientConfig {
     client_config_skip_verify()
 }
@@ -314,6 +316,7 @@ pub(crate) fn client_rustls_config_skip_verify() -> ClientConfig {
 /// layer its h3 ALPN override on top; the plain `quic` server
 /// path uses `quinn::ServerConfig::with_single_cert` directly
 /// without ALPN.
+#[cfg(feature = "http3")]
 pub(crate) fn server_rustls_config(tls: &SelfSignedTls) -> Result<rustls::ServerConfig, String> {
     let mut cert_pem_bytes = tls.cert_pem.as_bytes();
     let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut cert_pem_bytes)

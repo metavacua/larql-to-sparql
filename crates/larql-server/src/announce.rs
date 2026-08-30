@@ -47,6 +47,11 @@ pub struct AnnounceConfig {
     pub grid_key: Option<String>,
     /// Stable identity hash of the vindex (model_id + num_layers).
     pub vindex_hash: String,
+    /// N0-router: true when this server can serve complete OpenAI
+    /// requests by itself (full layer coverage, inference enabled, no
+    /// expert/unit filter). Drives `AnnounceMsg.serves_openai`, which
+    /// the router uses to select OpenAI proxy backends.
+    pub serves_openai: bool,
     /// Per-layer latency tracker — populates HeartbeatMsg.layer_stats.
     pub latency_tracker: Arc<LayerLatencyTracker>,
     /// Active request counter — used for drain (GT6) and heartbeat.requests_in_flight.
@@ -209,6 +214,7 @@ fn announce_message(cfg: &AnnounceConfig) -> ServerMessage {
             // CLI flag will surface these.
             expert_start: 0,
             expert_end: 0,
+            serves_openai: cfg.serves_openai,
         })),
     }
 }
@@ -608,6 +614,7 @@ mod tests {
             ram_bytes: 42,
             grid_key: Some("secret".into()),
             vindex_hash: "abc123".into(),
+            serves_openai: false,
             latency_tracker: Arc::new(LayerLatencyTracker::new()),
             requests_in_flight: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             requests_total: Arc::new(std::sync::atomic::AtomicU64::new(0)),

@@ -1,0 +1,136 @@
+{
+ "bank": "quality-bank-1",
+ "model": "muse-glimmer-30b",
+ "reference": "BF16 canonical, --backend metal",
+ "finding": "Surface is flat. No concentrated sensitive region; R0 is already at the knee.",
+ "candidates": [
+  {
+   "label": "R0-deploy",
+   "positions": 1679,
+   "payload_bytes": 23380397696,
+   "runtime_compiled_total": 0,
+   "kl": {
+    "mean": 0.03118,
+    "p50": 0.01518,
+    "p95": 0.11004,
+    "p99": 0.249,
+    "max": 0.82232
+   },
+   "dnll_mean": 0.02192,
+   "flips": 100,
+   "flips_high_margin": 76
+  },
+  {
+   "label": "late5-ffn",
+   "positions": 1679,
+   "payload_bytes": 26442157616,
+   "runtime_compiled_total": 0,
+   "kl": {
+    "mean": 0.02863,
+    "p50": 0.01364,
+    "p95": 0.10152,
+    "p99": 0.24439,
+    "max": 0.59895
+   },
+   "dnll_mean": 0.02028,
+   "flips": 99,
+   "flips_high_margin": 75
+  },
+  {
+   "label": "late10-ffn",
+   "positions": 1679,
+   "payload_bytes": 29503917536,
+   "runtime_compiled_total": 0,
+   "kl": {
+    "mean": 0.02681,
+    "p50": 0.01238,
+    "p95": 0.09767,
+    "p99": 0.22221,
+    "max": 0.56434
+   },
+   "dnll_mean": 0.01812,
+   "flips": 91,
+   "flips_high_margin": 69
+  },
+  {
+   "label": "ffn-protected",
+   "positions": 1679,
+   "payload_bytes": 55222700864,
+   "runtime_compiled_total": 0,
+   "kl": {
+    "mean": 0.00799,
+    "p50": 0.00345,
+    "p95": 0.03024,
+    "p99": 0.06476,
+    "max": 0.2039
+   },
+   "dnll_mean": 0.00468,
+   "flips": 67,
+   "flips_high_margin": 44
+  },
+  {
+   "label": "attn-protected",
+   "positions": 1679,
+   "payload_bytes": 27710950208,
+   "runtime_compiled_total": 0,
+   "kl": {
+    "mean": 0.02167,
+    "p50": 0.01135,
+    "p95": 0.07223,
+    "p99": 0.17356,
+    "max": 0.49342
+   },
+   "dnll_mean": 0.01698,
+   "flips": 82,
+   "flips_high_margin": 60
+  },
+  {
+   "label": "late10",
+   "positions": 1679,
+   "payload_bytes": 30336716096,
+   "runtime_compiled_total": 0,
+   "kl": {
+    "mean": 0.02632,
+    "p50": 0.01171,
+    "p95": 0.10036,
+    "p99": 0.20988,
+    "max": 1.08695
+   },
+   "dnll_mean": 0.01526,
+   "flips": 94,
+   "flips_high_margin": 74
+  },
+  {
+   "label": "early10",
+   "positions": 1679,
+   "payload_bytes": 30336716096,
+   "runtime_compiled_total": 0,
+   "kl": {
+    "mean": 0.02836,
+    "p50": 0.01443,
+    "p95": 0.09691,
+    "p99": 0.21725,
+    "max": 0.67841
+   },
+   "dnll_mean": 0.02415,
+   "flips": 93,
+   "flips_high_margin": 69
+  },
+  {
+   "label": "v-protected",
+   "positions": 1679,
+   "payload_bytes": 23507766704,
+   "runtime_compiled_total": 0,
+   "kl": {
+    "mean": 0.0274,
+    "p50": 0.0143,
+    "p95": 0.09455,
+    "p99": 0.20668,
+    "max": 0.58547
+   },
+   "dnll_mean": 0.02351,
+   "flips": 97,
+   "flips_high_margin": 73
+  }
+ ]
+}

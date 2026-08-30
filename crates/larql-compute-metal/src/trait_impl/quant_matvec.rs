@@ -56,7 +56,10 @@ impl QuantMatVec for MetalBackend {
             self.encode_argmax_partial(enc, &scores, num_rows);
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/trait_impl/quant_matvec.rs:59",
+        );
         Self::reduce_argmax_partial(&partial_vals, &partial_idxs, n_partials)
     }
 
@@ -100,7 +103,10 @@ impl QuantMatVec for MetalBackend {
             self.encode_topk_partial(enc, &scores, num_rows);
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/trait_impl/quant_matvec.rs:103",
+        );
         Some(MetalBackend::reduce_topk_partial(
             &partial_vals,
             &partial_idxs,
@@ -181,9 +187,69 @@ impl QuantMatVec for MetalBackend {
         );
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/trait_impl/quant_matvec.rs:184",
+        );
 
         Some(crate::buffers::read_buffer_f32(&buf_out, num_rows))
+    }
+
+    /// Q4_K matvec + GPU partial top-K in one command buffer. The scores
+    /// vector never leaves the GPU: only `num_tgs × K_TOPK` (val, idx)
+    /// pairs come back for a small CPU merge — on a 201K-row lm_head that
+    /// replaces an ~800 KB readback and a full-vocab CPU heap scan.
+    fn q4k_matvec_topk(
+        &self,
+        q4k_data: &[u8],
+        x: &[f32],
+        num_rows: usize,
+        hidden: usize,
+        top_k: usize,
+    ) -> Option<Vec<(u32, f32)>> {
+        if top_k == 0 || top_k > crate::shaders::f32_gemv::K_TOPK {
+            return None;
+        }
+        if num_rows == 0 || x.len() != hidden {
+            return None;
+        }
+        let buf_w = self.bufs.get_bytes(q4k_data);
+        let buf_x = self.bufs.transient_from_f32(x);
+        let buf_out = self.bufs.output((num_rows * 4) as u64);
+        let n = num_rows as u32;
+        let k = hidden as u32;
+        // Geometry from the bound pipeline, same as `q4k_matvec` — see the
+        // dispatch-geometry note there.
+        let rows_per_tg = self.quant.q4k_matvec_pipeline.rows_per_tg;
+        let threads_per_tg = self.quant.q4k_matvec_pipeline.threads_per_tg;
+        let num_tgs = (num_rows as u64).div_ceil(rows_per_tg);
+
+        let cmd = self.queue.new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&self.quant.q4k_matvec_pipeline.state);
+        enc.set_buffer(0, Some(&buf_w), 0);
+        enc.set_buffer(1, Some(&buf_x), 0);
+        enc.set_buffer(2, Some(&buf_out), 0);
+        enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
+        enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
+        enc.dispatch_thread_groups(
+            metal::MTLSize::new(num_tgs, 1, 1),
+            metal::MTLSize::new(threads_per_tg, 1, 1),
+        );
+        let (partial_vals, partial_idxs, topk_tgs) =
+            self.encode_topk_partial(enc, &buf_out, num_rows);
+        enc.end_encoding();
+        cmd.commit();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/trait_impl/quant_matvec.rs:234",
+        );
+        Some(MetalBackend::reduce_topk_partial(
+            &partial_vals,
+            &partial_idxs,
+            topk_tgs,
+            top_k,
+        ))
     }
 
     /// Q4_K matrix-matrix multiply: `C[m, n] = sum_k W[n, k] * X[m, k]`.
@@ -234,7 +300,10 @@ impl QuantMatVec for MetalBackend {
         );
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/trait_impl/quant_matvec.rs:291",
+        );
 
         Some(crate::buffers::read_buffer_f32(
             &buf_out,
@@ -249,17 +318,25 @@ impl QuantMatVec for MetalBackend {
         num_rows: usize,
         hidden: usize,
     ) -> Option<Vec<f32>> {
-        use crate::shaders::q6k_matvec as q6k;
+        // Geometry from the bound `KernelHandle`, never from a shader
+        // module's constants: `q6k_matvec_pipeline` resolves to the 8sg
+        // variant (8 rows/TG, 256 threads) under `LARQL_Q6K_8SG=1`, and
+        // dispatching it with the 4sg module constants launches half
+        // the threadgroups — rows `8t+4..8t+7` are never written and
+        // the output buffer serves stale pool data for them. The q4k
+        // twin above documents the same hazard; this site was left
+        // behind when that one was fixed. Capability audit F5.
+        let kh = &self.quant.q6k_matvec_pipeline;
         let buf_w = self.bufs.get_bytes(q6k_data);
         let buf_x = self.bufs.transient_from_f32(x);
         let buf_out = self.bufs.output((num_rows * 4) as u64);
         let n = num_rows as u32;
         let k = hidden as u32;
-        let num_tgs = (num_rows as u64).div_ceil(q6k::ROWS_PER_TG);
+        let num_tgs = (num_rows as u64).div_ceil(kh.rows_per_tg);
 
         let cmd = self.queue.new_command_buffer();
         let enc = cmd.new_compute_command_encoder();
-        enc.set_compute_pipeline_state(&self.quant.q6k_matvec_pipeline.state);
+        enc.set_compute_pipeline_state(&kh.state);
         enc.set_buffer(0, Some(&buf_w), 0);
         enc.set_buffer(1, Some(&buf_x), 0);
         enc.set_buffer(2, Some(&buf_out), 0);
@@ -267,11 +344,14 @@ impl QuantMatVec for MetalBackend {
         enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
         enc.dispatch_thread_groups(
             metal::MTLSize::new(num_tgs, 1, 1),
-            metal::MTLSize::new(q6k::THREADS_PER_TG, 1, 1),
+            metal::MTLSize::new(kh.threads_per_tg, 1, 1),
         );
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/trait_impl/quant_matvec.rs:336",
+        );
 
         Some(crate::buffers::read_buffer_f32(&buf_out, num_rows))
     }
@@ -412,5 +492,88 @@ mod tests {
             .q4k_matmul(&[], &[], 1, 4, 0)
             .expect("zero-dim path returns Some(empty)");
         assert!(out.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod q4k_topk_tests {
+    use crate::MetalBackend;
+    use larql_compute::backend::QuantMatVec;
+    use larql_compute::cpu::ops::q4_common::quantize_q4_k;
+
+    fn backend() -> MetalBackend {
+        MetalBackend::new().expect("Metal device available on test host")
+    }
+
+    /// Rows deliberately not a multiple of the tile so the remainder path
+    /// runs; K a Q4_K super-block multiple.
+    const N: usize = 517;
+    const K: usize = 512;
+
+    fn fixture() -> (Vec<u8>, Vec<f32>) {
+        // Knuth-hash mix, NOT a short-period ramp: a pattern with period p
+        // makes rows p apart byte-identical, and tied duplicate rows turn
+        // rank order into a coin flip the parity assert would then fail on.
+        let w: Vec<f32> = (0..N * K)
+            .map(|i| {
+                let h = (i as u32).wrapping_mul(2654435761) >> 16;
+                ((h % 4001) as f32 - 2000.0) * 1e-3
+            })
+            .collect();
+        let x: Vec<f32> = (0..K).map(|i| ((i % 89) as f32 - 44.0) * 0.02).collect();
+        (quantize_q4_k(&w), x)
+    }
+
+    /// The one contract that lets the lm_head path take the small-K arm:
+    /// the fused matvec+top-K submission returns exactly what the full
+    /// readback + CPU reduce returns.
+    #[test]
+    fn q4k_matvec_topk_matches_full_readback_reduce() {
+        let m = backend();
+        let (q, x) = fixture();
+        let scores = m.q4k_matvec(&q, &x, N, K).expect("full matvec");
+        let mut want: Vec<(u32, f32)> = scores
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| (i as u32, s))
+            .collect();
+        want.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        for top_k in [1usize, 5, 8] {
+            let hits = m
+                .q4k_matvec_topk(&q, &x, N, K, top_k)
+                .expect("topk path fires for top_k <= K_TOPK");
+            assert_eq!(hits.len(), top_k.min(N));
+            for (rank, (id, score)) in hits.iter().enumerate() {
+                // Exact ties order arbitrarily between the two reduces, so
+                // the id contract is "an id whose score is this rank's
+                // score", with score parity exact-tolerance either way.
+                assert!(
+                    (score - want[rank].1).abs() <= 1e-5 * want[rank].1.abs().max(1.0),
+                    "rank {rank} score {score} vs {} (top_k={top_k})",
+                    want[rank].1
+                );
+                assert!(
+                    *id == want[rank].0 || scores[*id as usize] == want[rank].1,
+                    "rank {rank}: id {id} is not the rank-{rank} id {} and its \
+                     score {} is not tied with {} (top_k={top_k})",
+                    want[rank].0,
+                    scores[*id as usize],
+                    want[rank].1
+                );
+            }
+        }
+    }
+
+    /// The refusals that keep the caller's fallback honest.
+    #[test]
+    fn q4k_matvec_topk_refuses_out_of_capacity_and_bad_shapes() {
+        let m = backend();
+        let (q, x) = fixture();
+        assert!(m.q4k_matvec_topk(&q, &x, N, K, 0).is_none());
+        assert!(m
+            .q4k_matvec_topk(&q, &x, N, K, crate::shaders::f32_gemv::K_TOPK + 1)
+            .is_none());
+        assert!(m.q4k_matvec_topk(&q, &x[..K - 1], N, K, 1).is_none());
+        assert!(m.q4k_matvec_topk(&q, &x, 0, K, 1).is_none());
     }
 }

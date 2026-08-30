@@ -68,6 +68,10 @@ pub struct ServerEntry {
     /// than reading these directly.
     pub expert_start: u32, // inclusive (meaningful only when !is_dense)
     pub expert_end: u32, // inclusive (meaningful only when !is_dense)
+    /// N0-router — true when this server announced it can serve
+    /// complete OpenAI requests by itself (full model, inference
+    /// enabled). Only such servers are eligible OpenAI proxy backends.
+    pub serves_openai: bool,
 }
 
 impl ServerEntry {

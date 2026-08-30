@@ -24,7 +24,14 @@ pub(super) struct DecodeLoopOutcome {
     /// Per-step wall time in ms.
     pub decode_ms: Vec<f64>,
     pub t_embed: f64,
+    /// Wall time around the GPU call, CPU encode and readback included.
     pub t_gpu: f64,
+    /// Time the GPU was actually executing. Only populated under
+    /// `profile_split`; the gap against `t_gpu` is CPU-side cost.
+    pub t_gpu_only: f64,
+    /// Command buffers submitted across the run.
+    pub n_cmd_buffers: u64,
+    pub t_attn: f64,
     pub t_gate_up: f64,
     pub t_down: f64,
     pub t_norm: f64,
@@ -72,11 +79,32 @@ where
     let profile_split = runtime.profile_split;
     let mut t_embed = 0.0f64;
     let mut t_gpu = 0.0f64;
+    // Split detail, populated only when `profile_split` is on.
+    let mut t_attn = 0.0f64;
+    let mut t_gpu_only = 0.0f64;
+    let mut n_cmd_buffers = 0u64;
     let mut t_gate_up = 0.0f64;
     let mut t_down = 0.0f64;
     let mut t_norm = 0.0f64;
     let mut t_lmhead = 0.0f64;
     let mut t_detok = 0.0f64;
+
+    // TOKEN-B1 rung 2. Resolved once: every field is constant across the
+    // loop, and a per-step rebuild would put the store's geometry check on
+    // the hot path for no benefit. `None` here means the unfused path runs
+    // for the whole generation — the two produce the same tokens, so this
+    // only decides how many command buffers a token costs.
+    let fused_head = build_fused_head_plan(weights, index, hidden, norm_offset, knn_k);
+    if profile {
+        eprintln!(
+            "[profile] fused decode head: {}",
+            if fused_head.is_some() {
+                "active (norm + lm_head + top-K inside the decode CB)"
+            } else {
+                "unavailable — unfused norm + lm_head per token"
+            }
+        );
+    }
 
     for step in 1..max_tokens {
         let decode_start = std::time::Instant::now();
@@ -111,49 +139,87 @@ where
         if let Some(upload) = upload_ple {
             upload(current_token_id, &x_dec);
         }
-        let result = run_one_decode_step(
-            weights,
-            backend,
-            layers,
-            hidden,
-            intermediate,
-            &x_dec,
-            profile_split,
-            step,
-        );
+        // TOKEN-B1 rung 2: when the backend can carry the head inside the
+        // decode command buffer, the token's top-K comes back with the
+        // decode and the hidden state never crosses the host boundary.
+        // `None` — no plan, or a backend that refused it — falls through to
+        // the unfused path below, which stays the reference.
+        let fused_hits = fused_head.as_ref().and_then(|plan| {
+            run_one_decode_step_head(
+                weights,
+                index,
+                backend,
+                layers,
+                hidden,
+                intermediate,
+                &x_dec,
+                plan,
+            )
+        });
+        let fused_ran = fused_hits.is_some();
+
+        let result = if fused_ran {
+            None
+        } else {
+            run_one_decode_step(
+                weights,
+                backend,
+                layers,
+                hidden,
+                intermediate,
+                &x_dec,
+                profile_split,
+                step,
+            )
+        };
         let gpu_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
-        if profile && step <= 2 {
+        if profile && step <= 2 && !fused_ran {
             log_step_diagnostic(step, result.as_deref());
         }
 
-        let Some(h_out) = result else {
-            // GPU returned None mid-decode. The caller routes
-            // non-fused-Q4 backends (today: CPU) to a full CPU Q4K path at
-            // the top, so this branch can only fire when a GPU backend that
-            // passed `backend_supports_fused_q4_pipeline` subsequently fails
-            // a single decode step. Treat as early-stop rather than re-run
-            // the O(N²) CPU path mid-loop without a kept id list.
-            if profile {
-                eprintln!("[profile] step={step} — GPU decode returned None; stopping generation");
+        let (hits, norm_ms, lmhead_ms) = if let Some(hits) = fused_hits {
+            // Norm and lm_head were encoded into the decode submission, so
+            // there is no separate stage to time: their cost is inside
+            // `gpu_ms`. Reporting 0.0 here rather than folding a guess into
+            // the stage table keeps the split honest about what moved.
+            (hits, 0.0, 0.0)
+        } else {
+            let Some(h_out) = result else {
+                // GPU returned None mid-decode. The caller routes
+                // non-fused-Q4 backends (today: CPU) to a full CPU Q4K path at
+                // the top, so this branch can only fire when a GPU backend that
+                // passed `backend_supports_fused_q4_pipeline` subsequently fails
+                // a single decode step. Treat as early-stop rather than re-run
+                // the O(N²) CPU path mid-loop without a kept id list.
+                if profile {
+                    eprintln!(
+                        "[profile] step={step} — GPU decode returned None; stopping generation"
+                    );
+                }
+                break;
+            };
+
+            let t2 = std::time::Instant::now();
+            let h_arr = ndarray::Array2::from_shape_vec((1, hidden), h_out).unwrap();
+            let h_final = crate::forward::apply_norm(
+                weights,
+                &h_arr,
+                weights.arch.final_norm_key(),
+                norm_offset,
+            );
+            let h_1d = h_final.row(0).to_owned();
+            let norm_ms = t2.elapsed().as_secs_f64() * 1000.0;
+
+            let t3 = std::time::Instant::now();
+            let hits =
+                lm_head_topk_with_policy(index, weights, &h_1d, knn_k, backend, &runtime.lm_head);
+            let lmhead_ms = t3.elapsed().as_secs_f64() * 1000.0;
+            if profile && step <= 2 {
+                log_h_1d_diagnostic(step, &h_1d, hits.len());
             }
-            break;
+            (hits, norm_ms, lmhead_ms)
         };
-
-        let t2 = std::time::Instant::now();
-        let h_arr = ndarray::Array2::from_shape_vec((1, hidden), h_out).unwrap();
-        let h_final =
-            crate::forward::apply_norm(weights, &h_arr, weights.arch.final_norm_key(), norm_offset);
-        let h_1d = h_final.row(0).to_owned();
-        let norm_ms = t2.elapsed().as_secs_f64() * 1000.0;
-
-        let t3 = std::time::Instant::now();
-        let hits =
-            lm_head_topk_with_policy(index, weights, &h_1d, knn_k, backend, &runtime.lm_head);
-        let lmhead_ms = t3.elapsed().as_secs_f64() * 1000.0;
-        if profile && step <= 2 {
-            log_h_1d_diagnostic(step, &h_1d, hits.len());
-        }
 
         let step_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
         decode_ms.push(step_ms);
@@ -169,8 +235,15 @@ where
             generated_ids,
             on_token,
         ) else {
+            // Empty candidates: either the head found nothing, or the fused
+            // step ran and a command buffer inside it failed (a GPU fault —
+            // the backend reports that as an empty top-K so the token is
+            // not re-run on top of its already-appended KV). Terminal
+            // either way; a poisoned step must never reach the sampler.
             if profile {
-                eprintln!("[profile] step={step} — lm_head returned empty; break");
+                eprintln!(
+                    "[profile] step={step} — no candidates (empty head, or GPU step failed); break"
+                );
             }
             break;
         };
@@ -185,8 +258,17 @@ where
         t_gpu += gpu_ms;
         if profile_split {
             if let Some(pt) = backend.take_split_timings() {
+                // `attn_ms` was previously dropped here: the backend measured
+                // it, the loop discarded it, and a third of the GPU split
+                // never reached any report.
+                t_attn += pt.attn_ms;
                 t_gate_up += pt.gate_up_ms;
                 t_down += pt.down_ms;
+                // How much of the token was on the GPU at all. Without this
+                // the caller can only see wall time and will attribute all of
+                // it to the GPU.
+                t_gpu_only += pt.gpu_ms;
+                n_cmd_buffers += u64::from(pt.cmd_buffers);
             }
         }
         t_norm += norm_ms;
@@ -215,6 +297,9 @@ where
         decode_ms,
         t_embed,
         t_gpu,
+        t_gpu_only,
+        n_cmd_buffers,
+        t_attn,
         t_gate_up,
         t_down,
         t_norm,
@@ -257,6 +342,117 @@ fn run_one_decode_step(
         );
     }
     backend.decode_token(layers, x_dec, hidden, intermediate)
+}
+
+/// Everything the fused head needs, resolved once per generation.
+///
+/// Owns the norm weight because `weights.vectors` hands out an `Array1`
+/// whose contiguous slice we cannot borrow across the loop's `&mut
+/// weights` uses; `hidden` floats copied once per generation is not a
+/// cost worth designing around.
+pub(super) struct FusedHeadPlan {
+    norm_type: larql_compute::NormType,
+    final_norm_weight: Vec<f32>,
+    norm_eps: f32,
+    norm_offset: f32,
+    vocab: usize,
+    cols: usize,
+    top_k: usize,
+}
+
+/// Resolve the fused-head plan, or `None` when any input is absent or the
+/// store's geometry cannot be explained.
+///
+/// Deliberately conservative: this decides only whether the *fast* path is
+/// eligible, and every `None` costs a command buffer, never a wrong token.
+fn build_fused_head_plan(
+    weights: &ModelWeights,
+    index: &larql_vindex::VectorIndex,
+    hidden: usize,
+    norm_offset: f32,
+    knn_k: usize,
+) -> Option<FusedHeadPlan> {
+    // `arch` speaks the models crate's NormType; the backend plan speaks
+    // the compute crate's. Convert once, here, rather than teaching the
+    // plan about both.
+    // Default-on, opt-out: `LARQL_FUSED_DECODE_HEAD=0` restores the
+    // unfused path so the two can be measured against each other on the
+    // same binary and the same machine state.
+    if larql_compute::options::env_opt_out(larql_compute::options::ENV_FUSED_DECODE_HEAD) {
+        return None;
+    }
+    let norm_type: larql_compute::NormType = weights.arch.norm_type().into();
+    // The Metal head implements RMS only. Resolved here rather than left
+    // for the backend to discover so the reason is visible at the seam
+    // that owns the model facts.
+    if norm_type != larql_compute::NormType::RmsNorm {
+        return None;
+    }
+    let w = weights.vectors.get(weights.arch.final_norm_key())?;
+    let final_norm_weight = w.to_vec();
+    if final_norm_weight.len() != hidden {
+        return None;
+    }
+    let (_, vocab, cols) = index.lm_head_q4k_geometry(hidden)?;
+    Some(FusedHeadPlan {
+        norm_type,
+        final_norm_weight,
+        norm_eps: weights.arch.norm_eps(),
+        norm_offset,
+        vocab,
+        cols,
+        top_k: knn_k,
+    })
+}
+
+/// One decode step with the head fused into the same command buffer.
+///
+/// `None` when the backend declines the plan — the caller then runs the
+/// ordinary decode + CPU norm + lm_head, which is the path this is pinned
+/// against.
+#[allow(clippy::too_many_arguments)]
+fn run_one_decode_step_head(
+    weights: &ModelWeights,
+    index: &larql_vindex::VectorIndex,
+    backend: &dyn ComputeBackend,
+    layers: &[FullPipelineLayer],
+    hidden: usize,
+    intermediate: usize,
+    x_dec: &[f32],
+    plan: &FusedHeadPlan,
+) -> Option<Vec<(u32, f32)>> {
+    if !(weights.has_per_layer_ffn() && backend.supports(Capability::DecodeQ4KMoe)) {
+        return None;
+    }
+    // Re-read the bytes here rather than storing them in the plan: the
+    // borrow is short-lived, and holding a `&[u8]` across the decode loop
+    // would pin `index` for the whole generation. The geometry is
+    // recomputed with it and pinned against the plan below, so a store
+    // that changed shape mid-generation refuses instead of misreading.
+    let (lm_head_q4k, vocab, cols) = index.lm_head_q4k_geometry(hidden)?;
+    if vocab != plan.vocab || cols != plan.cols {
+        return None;
+    }
+    let get_expert = |layer_idx, expert_idx| weights.get_layer_entry_bytes(layer_idx, expert_idx);
+    let head = larql_compute::DecodeHeadPlan {
+        norm_type: plan.norm_type,
+        final_norm_weight: &plan.final_norm_weight,
+        norm_eps: plan.norm_eps,
+        norm_offset: plan.norm_offset,
+        lm_head_q4k,
+        vocab: plan.vocab,
+        cols: plan.cols,
+        top_k: plan.top_k,
+    };
+    backend.decode_token_q4k_moe_head(
+        layers,
+        x_dec,
+        hidden,
+        intermediate,
+        weights.arch.norm_eps(),
+        &get_expert,
+        &head,
+    )
 }
 
 fn log_step_diagnostic(step: usize, h_out: Option<&[f32]>) {

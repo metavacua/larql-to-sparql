@@ -60,7 +60,7 @@ dominate, and the FFN — sparse or dense — is a masked fraction. The
 
 ## FFN microbench — the missing instrument (built 2026-05-29)
 
-`examples/walk_ffn_microbench.rs` isolates `WalkFfn::forward` at **seq_len = 1**
+`chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_microbench.rs` isolates `WalkFfn::forward` at **seq_len = 1**
 (decode shape), no attention/lm_head, across K. gemma3-4b-q4k, layer 17, 10240
 features, 300 iters:
 
@@ -125,7 +125,7 @@ predictive quality is measured next.
 
 ## Accuracy frontier — speed is cheap, accuracy is not (built 2026-05-29, task #19)
 
-`examples/walk_ffn_accuracy.rs` runs a full forward (attention dequantised to f32
+`chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_accuracy.rs` runs a full forward (attention dequantised to f32
 up front via `insert_q4k_layer_tensors`, so the **FFN router is the only
 variable**) and scores the last-token next-token distribution against dense in
 the Shannon discipline — **KL in bits, top-1 agreement, q@p_argmax** — never
@@ -350,7 +350,7 @@ most-frequent gate-KNN features across its members (capped). At inference, the
 per-position residual picks its nearest cell (O(C·hidden)) and that cell's pool
 is the candidate set — **content-addressed** (cell depends on the residual) but
 cheap (no full O(num_features) gate projection). Built and run in
-`examples/walk_ffn_cell_router.rs` (C=64, calibration 24 prose prompts, 9-layer
+`chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_cell_router.rs` (C=64, calibration 24 prose prompts, 9-layer
 band, K=512). **All KL is measured against *dense* (KL 0 = dense); gate-KNN is
 itself a lossy top-K truncation of the gate projection, not a floor.** Lower =
 closer to dense.
@@ -466,7 +466,7 @@ that the faithful-K regime is **kernel-bound, not FLOP-bound**:
 
 **So the faithful-K speedup exists in the FLOPs and is squandered by the kernel.**
 The optimization (task #24) — **gather the selected K rows contiguous, then run
-the kernel** — was built and measured (`examples/walk_ffn_gather_gemm.rs`), and it
+the kernel** — was built and measured (`chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_gather_gemm.rs`), and it
 **flips faithful-K from slower-than-dense to faster** (isolated FFN, seq_len=1):
 
 | K | scattered (current) | gather Q4K + fused | dense |
@@ -495,7 +495,7 @@ so a feature's down vector is a strided *column*, not a gatherable row. The
 gather microbench read the transposed down with row striding: **the timing is
 representative (work magnitude is right) but the down *values* are wrong.**
 Realising it correctly needs the **feature-major down sidecar**
-(`down_features_q4k.bin`) — *absent* on current vindexes — exposed on
+(`down_features_kquant.bin`) — *absent* on current vindexes — exposed on
 `GateIndex`. So the wiring is reverted (the method `gather_q4k_accumulate` is
 retained, unwired, with the caveat); `walk_ffn_sparse` stays on the correct
 scalar paths. **This does not affect the #22/#23 results** — those loaded native
@@ -545,7 +545,7 @@ survives"), starting with the **4-layer static band**, top-1 agreement alongside
 ### End-to-end decode measurement — the win does not survive the full forward
 
 Pre-committed bar: net forward tok/s **> dense**. Measured three ways
-(`examples/walk_ffn_decode_timing.rs`), each hitting a distinct confound — and
+(`chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_decode_timing.rs`), each hitting a distinct confound — and
 **none clears the bar**:
 
 | measurement | result | confound |
@@ -579,7 +579,7 @@ validated components; the end-to-end payoff does not.
 Sparsity is closed (do-less flips tokens). The remaining doors are *fewer bytes
 per feature* or *more work per byte*. Tested the most graph-native:
 **graded precision** — keep all features, spend bits by ‖down_row‖ importance
-(`examples/walk_ffn_graded_precision.rs`, block-wise quantiser validated: uniform
+(`chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_graded_precision.rs`, block-wise quantiser validated: uniform
 4-bit = KL 0.011 vs f32, matching real Q4K). KL vs f32 reference, 4 prompts
 (in-dist + code + non-English):
 
@@ -604,7 +604,7 @@ n=4) at 0.75× FFN bandwidth (~16% total → ~1.19× decode if it holds). **But 
 single-step number oversold it.**
 
 **⚠️ Generation drift overturns the single-step story.** Greedy-decoding 10
-prompts to 32 tokens, sim-Q4 vs Q3 (`examples/walk_ffn_drift.rs`): **per-step
+prompts to 32 tokens, sim-Q4 vs Q3 (`chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_drift.rs`): **per-step
 argmax flip rate 19.1%, mean first-divergence token 4/32, 0/10 exact match.** The
 "100% top-1" was an n=4 artifact; KL 0.05 bits *sounds* tiny but LM distributions
 are full of near-ties, so a 0.05-bit perturbation flips ~19% of argmaxes →
@@ -614,7 +614,7 @@ lesson on the sequence axis: single-step KL/top-1 can't see drift.
 
 **The three-way per-token NLL adjudicator decides it — and the mean would have
 lied.** f32 / Q4 / Q3 teacher-forced on entropic prose
-(`examples/walk_ffn_nll.rs`, 74 positions):
+(`chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_nll.rs`, 74 positions):
 
 | arm | mean | **median** | p90 | p99 | max | mean Δ vs f32 | p90 Δ | p99 Δ | worst-token Δ |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -771,7 +771,7 @@ TEMPORAL axis dense BLAS structurally can't see (no cursor, no delta between
 tokens). Guardrail honored: token-to-token at FIXED layer, last-position residual
 over real history (`predict_with_ffn_trace` on teacher-forced prefixes =
 KV-cached decode step), never within-prefill cross-position (that would be the
-spatial cosine wearing a temporal label). `examples/walk_ffn_temporal_reuse.rs`,
+spatial cosine wearing a temporal label). `chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_temporal_reuse.rs`,
 6 entropic passages, per-zone distribution (median / p10 / worst), not mean:
 
 | zone | residual cosine (med/p10/worst) | pool Jaccard (med/p10/worst) | delta TwoNN |
@@ -814,7 +814,7 @@ is a *full-amplitude* move, not a thin perturbation. Low-rank ≠ small. So befo
 any kernel, the cheap falsification: amplitude `‖δ‖/‖base‖` + full-Jacobian
 linearization error `‖f(base+δ)−(f(base)+Jδ)‖/‖f(base+δ)‖` (finite-diff JVP),
 **targeting the FFN-INPUT residual (post-attn-norm) — what the FFN actually
-sees — not #27's layer-input residual.** `examples/walk_ffn_delta_walk.rs`:
+sees — not #27's layer-input residual.** `chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_delta_walk.rs`:
 
 | zone | ‖δ‖/‖base‖ med/p90/worst | lin-error med/p90/worst |
 |---|---|---|

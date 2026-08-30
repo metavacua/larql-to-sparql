@@ -3,7 +3,9 @@
 use std::io::Write;
 
 use larql_compute::{ComputeBackend, DecodeBackend, MatMul, QuantMatVec};
+use larql_models::config::experts::GateUpLayout;
 use larql_vindex::format::filenames::{layer_weights_filename, ROUTER_WEIGHTS_BIN};
+use larql_vindex::format::weights::layer_store_layout::LayerScaleBinding;
 use larql_vindex::format::weights::write_layers::{
     bf16_bytes_to_f32, pad_cols_to_256, parse_layer_weights_header, quantize_dense_entry,
     quantize_moe_entries, write_layer_weights, LayerEntry, LayerWeightFormat,
@@ -192,6 +194,7 @@ fn moe_model_config() -> VindexModelConfig {
         attention_k_eq_v: false,
         num_kv_shared_layers: None,
         per_layer_embed_dim: None,
+        layer_rope_theta: None,
         rope_local_base: None,
         query_pre_attn_scalar: None,
         final_logit_softcapping: None,
@@ -199,6 +202,7 @@ fn moe_model_config() -> VindexModelConfig {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     }
 }
 
@@ -413,10 +417,12 @@ fn layer_weight_writer_round_trips_header_offsets_and_data() {
         LayerEntry {
             gate_up: vec![1, 2, 3],
             down: vec![4, 5],
+            scales: None,
         },
         LayerEntry {
             gate_up: vec![6],
             down: vec![7, 8, 9, 10],
+            scales: None,
         },
     ];
 
@@ -431,28 +437,27 @@ fn layer_weight_writer_round_trips_header_offsets_and_data() {
     .unwrap();
 
     let bytes = std::fs::read(dir.path().join(layer_weights_filename(LAYER_INDEX))).unwrap();
-    let (format, num_entries, inter, hidden, offsets) = parse_layer_weights_header(&bytes).unwrap();
+    let h = parse_layer_weights_header(&bytes).unwrap();
 
-    assert_eq!(format, LayerWeightFormat::F32);
-    assert_eq!(num_entries, entries.len());
-    assert_eq!(inter, LAYER_INTERMEDIATE);
-    assert_eq!(hidden, LAYER_HIDDEN);
+    assert_eq!(h.format, LayerWeightFormat::F32);
+    assert_eq!(h.num_entries, entries.len());
+    assert_eq!(h.inter, LAYER_INTERMEDIATE);
+    assert_eq!(h.hidden, LAYER_HIDDEN);
+    // A format without a layout block reports the arrangement its writer
+    // actually produced, not an "unknown".
+    assert_eq!(h.scale_binding, LayerScaleBinding::Inline);
+    assert_eq!(h.fused_row_layout, GateUpLayout::ContiguousHalves);
     let expected_first_gate_offset = LAYER_HEADER_BYTES + entries.len() * LAYER_OFFSET_BYTES;
     let expected_first_down_offset = expected_first_gate_offset + entries[0].gate_up.len();
-    assert_eq!(
-        offsets[0],
-        (
-            expected_first_gate_offset,
-            entries[0].gate_up.len(),
-            expected_first_down_offset,
-            entries[0].down.len()
-        )
-    );
-    assert_eq!(&bytes[offsets[1].0..offsets[1].0 + offsets[1].1], &[6]);
-    assert_eq!(
-        &bytes[offsets[1].2..offsets[1].2 + offsets[1].3],
-        &[7, 8, 9, 10]
-    );
+    assert_eq!(h.entries[0].gate_up.offset, expected_first_gate_offset);
+    assert_eq!(h.entries[0].gate_up.len, entries[0].gate_up.len());
+    assert_eq!(h.entries[0].down.offset, expected_first_down_offset);
+    assert_eq!(h.entries[0].down.len, entries[0].down.len());
+    assert!(h.entries[0].gate_up_scales.is_none());
+    let gu = h.entries[1].gate_up;
+    let dn = h.entries[1].down;
+    assert_eq!(&bytes[gu.offset..gu.offset + gu.len], &[6]);
+    assert_eq!(&bytes[dn.offset..dn.offset + dn.len], &[7, 8, 9, 10]);
 }
 
 #[test]
@@ -497,7 +502,14 @@ fn layer_weight_quant_helpers_cover_dense_and_moe_shapes() {
         LayerWeightFormat::F32,
     )
     .unwrap();
-    assert_eq!(dense.gate_up.len(), 8 * F32_BYTES);
+    // Gate/up ROWS are padded to the super-block boundary exactly as down
+    // columns are (2026-08-09) — hidden 2 stores as 256 columns per row, so
+    // per-row integer kernels can index non-block-multiple models
+    // (GPT-OSS's 2880→3072). 2 gate rows + 2 up rows at 256 cols each.
+    assert_eq!(
+        dense.gate_up.len(),
+        4 * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS * F32_BYTES
+    );
     assert_eq!(
         dense.down.len(),
         2 * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS * F32_BYTES
@@ -515,7 +527,12 @@ fn layer_weight_quant_helpers_cover_dense_and_moe_shapes() {
     )
     .unwrap();
     assert_eq!(moe.len(), NUM_EXPERTS);
-    assert_eq!(moe[0].gate_up.len(), 2 * LAYER_HIDDEN * F32_BYTES);
+    // Same row-padding rule on the packed-BF16 writer: 2 fused rows
+    // (inter = 1) padded from LAYER_HIDDEN to one super-block each.
+    assert_eq!(
+        moe[0].gate_up.len(),
+        2 * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS * F32_BYTES
+    );
 }
 
 #[test]

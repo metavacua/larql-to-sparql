@@ -12,12 +12,18 @@
 //! routes/openai/
 //! ├── mod.rs           — re-exports + module declarations
 //! ├── util.rs          — shared helpers (StopSpec, id-suffix, unix_now,
-//! │                      stop-string trimming, SSE error chunk)
+//! │                      stop-string trimming, SSE consts, timeout join)
+//! ├── prompt.rs        — chat-template pick + message rendering shared
+//! │                      by chat + responses
 //! ├── embeddings.rs    — POST /v1/embeddings (mean-pooled lookup)
 //! ├── completions.rs   — POST /v1/completions (legacy text completions
-//! │                      + slice 3 SSE streaming)
-//! └── chat.rs          — POST /v1/chat/completions (chat-template
-//!                        rendering + slice 3 SSE streaming)
+//! │                      + slice 3 SSE streaming; V3 arm in
+//! │                      v3_completions.rs)
+//! ├── chat/            — POST /v1/chat/completions (chat-template
+//! │                      rendering, tools, SSE streaming, V3 arm)
+//! └── responses/       — POST /v1/responses + GET/DELETE by id
+//!                        (Responses API: input items, stored
+//!                        conversations, typed-event SSE, V2+V3)
 //! ```
 //!
 //! Roadmap entries: ROADMAP.md → N0.1, N0.2, N0.4, N0.5 (live);
@@ -27,8 +33,12 @@ pub mod chat;
 pub mod completions;
 pub mod embeddings;
 pub mod error;
+pub mod prompt;
+pub mod responses;
 pub mod schema;
+mod token_tap;
 pub mod util;
+mod v3_completions;
 
 pub use error::OpenAIError;
 
@@ -40,3 +50,4 @@ pub use error::OpenAIError;
 pub use chat::handle_chat_completions;
 pub use completions::handle_completions;
 pub use embeddings::handle_embeddings;
+pub use responses::{handle_delete_response, handle_get_response, handle_responses};

@@ -14,9 +14,78 @@
 //! Validated at 25K edges, 87 edges/s, 100% same-prompt retrieval.
 
 use crate::error::LqlError;
-use crate::executor::Session;
+use crate::executor::{Backend, Session};
+
+/// Default `c_score` for a KNN insert without an explicit CONFIDENCE
+/// clause — retrieval entries are exact, so full confidence.
+pub(crate) const DEFAULT_KNN_CONFIDENCE: f32 = 1.0;
+
+/// The canonical prompt whose residual becomes the retrieval key —
+/// shared verbatim by every backend so the same INSERT stores the same
+/// logical fact everywhere.
+pub(crate) fn knn_canonical_prompt(entity: &str, relation: &str) -> String {
+    let rel_words = relation.replace(['-', '_'], " ");
+    format!("The {rel_words} of {entity} is")
+}
 
 impl Session {
+    /// Phase 3 of the KNN insert — the shared logical operation:
+    /// store the captured key in the bound backend's KnnStore, record
+    /// the patch op, and report. Both the V2 and V3 arms end here.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn knn_finalize(
+        &mut self,
+        install_layer: usize,
+        key: Vec<f32>,
+        target_id: u32,
+        entity: &str,
+        relation: &str,
+        target: &str,
+        c_score: f32,
+        mode_note: &str,
+    ) -> Result<Vec<String>, LqlError> {
+        let key_b64 = larql_vindex::patch::core::encode_gate_vector(&key);
+        let total = {
+            let store = match &mut self.backend {
+                Backend::Vindex { patched, .. } => &mut patched.knn_store,
+                Backend::Vindex3 { overlay, .. } => &mut overlay.knn_store,
+                _ => return Err(LqlError::NoBackend),
+            };
+            store.add(
+                install_layer,
+                key,
+                target_id,
+                target.to_string(),
+                entity.to_string(),
+                relation.to_string(),
+                c_score,
+            );
+            store.len()
+        };
+
+        let patch_op = larql_vindex::PatchOp::InsertKnn {
+            layer: install_layer,
+            entity: entity.to_string(),
+            relation: relation.to_string(),
+            target: target.to_string(),
+            target_id,
+            confidence: Some(c_score),
+            key_vector_b64: key_b64,
+        };
+        if let Some(ref mut recording) = self.patch_recording {
+            recording.operations.push(patch_op);
+        }
+
+        Ok(vec![
+            format!(
+                "Inserted: {} —[{}]→ {} at L{} (KNN store)",
+                entity, relation, target, install_layer,
+            ),
+            format!("  mode: {mode_note}"),
+            format!("  KNN store: {total} entries total"),
+        ])
+    }
+
     pub(crate) fn exec_insert_knn(
         &mut self,
         entity: &str,
@@ -25,6 +94,9 @@ impl Session {
         layer_hint: Option<u32>,
         confidence: Option<f32>,
     ) -> Result<Vec<String>, LqlError> {
+        if matches!(self.backend, Backend::Vindex3 { .. }) {
+            return self.exec_insert_knn_v3(entity, relation, target, layer_hint, confidence);
+        }
         // ── Phase 1: Read config, determine install layer ──
         let (install_layer, has_weights);
         {
@@ -65,12 +137,9 @@ impl Session {
                 .map_err(|e| LqlError::exec("tokenize error", e))?;
             target_id = target_encoding.get_ids().first().copied().unwrap_or(0);
 
-            let rel_words = relation.replace(['-', '_'], " ");
-            let prompt = format!("The {rel_words} of {entity} is");
-            let encoding = tokenizer
-                .encode(prompt.as_str(), true)
-                .map_err(|e| LqlError::exec("tokenize error", e))?;
-            let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+            let prompt = knn_canonical_prompt(entity, relation);
+            let token_ids =
+                crate::executor::query::encode_vindex_prompt(config, &tokenizer, prompt.as_str())?;
 
             // `InferenceWeights::load` branches on `config.quant` — callers
             // do not need to know the on-disk format.
@@ -119,50 +188,22 @@ impl Session {
             .unwrap_or_else(|| vec![0.0f32; hidden]);
         }
 
-        // ── Phase 3: Store in KnnStore ──
-        let c_score = confidence.unwrap_or(1.0);
-        let key_b64 = larql_vindex::patch::core::encode_gate_vector(&residual_key);
-
-        {
-            let (_path, _config, patched) = self.require_patched_mut()?;
-            patched.knn_store.add(
-                install_layer,
-                residual_key,
-                target_id,
-                target.to_string(),
-                entity.to_string(),
-                relation.to_string(),
-                c_score,
-            );
-        }
-
-        let patch_op = larql_vindex::PatchOp::InsertKnn {
-            layer: install_layer,
-            entity: entity.to_string(),
-            relation: relation.to_string(),
-            target: target.to_string(),
-            target_id,
-            confidence: Some(c_score),
-            key_vector_b64: key_b64,
-        };
-        if let Some(ref mut recording) = self.patch_recording {
-            recording.operations.push(patch_op);
-        }
-
-        let mut out = Vec::new();
-        out.push(format!(
-            "Inserted: {} —[{}]→ {} at L{} (KNN store)",
-            entity, relation, target, install_layer,
-        ));
-        if has_weights {
-            out.push("  mode: KNN — residual capture (Architecture B, retrieval-override)".into());
+        // ── Phase 3: the shared logical store-and-record ──
+        let c_score = confidence.unwrap_or(DEFAULT_KNN_CONFIDENCE);
+        let mode_note = if has_weights {
+            "KNN — residual capture (Architecture B, retrieval-override)"
         } else {
-            out.push("  mode: KNN — embedding key (no model weights)".into());
-        }
-        out.push(format!("  KNN store: {} entries total", {
-            let (_, _, patched) = self.require_vindex()?;
-            patched.knn_store.len()
-        }));
-        Ok(out)
+            "KNN — embedding key (no model weights)"
+        };
+        self.knn_finalize(
+            install_layer,
+            residual_key,
+            target_id,
+            entity,
+            relation,
+            target,
+            c_score,
+            mode_note,
+        )
     }
 }

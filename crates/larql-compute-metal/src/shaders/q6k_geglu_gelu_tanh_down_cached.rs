@@ -88,17 +88,28 @@ kernel void q6k_geglu_gelu_tanh_down_cached(
             for (uint pass = 0u; pass < 8u; pass++) {
                 uint i = pass * 32u + lane;
 
-                uchar lo_byte = ql[i >> 1u];
-                uint lo4 = (i & 1u) ? ((lo_byte >> 4u) & 0x0Fu) : (lo_byte & 0x0Fu);
+                // Planar Q6_K addressing (see `q6k_matvec` for the layout): a
+                // super-block is two 128-element halves, and within a half the
+                // four nibble planes sit at element stride 32, not adjacent.
+                uint half_ = i >> 7u;         // 0 or 1
+                uint l     = i & 31u;         // nibble column within the half
+                uint plane = (i >> 5u) & 3u;  // 0..3
 
-                uchar hi_byte = qh[i >> 2u];
-                uint hi2 = (hi_byte >> ((i & 3u) << 1u)) & 0x03u;
+                uchar lo_byte = ql[half_ * 64u + l + (plane & 1u) * 32u];
+                uint lo4 = (lo_byte >> ((plane >> 1u) * 4u)) & 0x0Fu;
+
+                uchar hi_byte = qh[half_ * 32u + l];
+                uint hi2 = (hi_byte >> (plane << 1u)) & 0x03u;
 
                 int raw = int(lo4 | (hi2 << 4u)) - 32;
                 float w = d * float(sc[i >> 4u]) * float(raw);
 
+                // Clamp like `geglu_gelu_tanh`: Apple's tanh NaNs for
+                // |y| >~ 44, which real gate values (~±10) reach.
                 float gi = tg_gate[i];
-                float t = tanh(c * (gi + 0.044715f * gi * gi * gi));
+                float y = clamp(c * (gi + 0.044715f * gi * gi * gi),
+                                -15.0f, 15.0f);
+                float t = tanh(y);
                 float gelu_g = 0.5f * gi * (1.0f + t);
                 float ai = gelu_g * tg_up[i];
 

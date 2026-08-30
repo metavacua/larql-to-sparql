@@ -223,7 +223,7 @@ fix is in three small parts:
 1. **`crates/larql-models/src/detect/parser.rs`**: read
    `text_config["rms_norm_eps"]` and store it on `ModelConfig`. Default
    to 1e-6 only when absent.
-2. **`crates/larql-models/src/config.rs`**: override `norm_eps()` to
+2. **`crates/larql-models/src/config/`**: override `norm_eps()` to
    return the parsed config value via the default trait impl.
 3. **`crates/larql-models/src/architectures/gemma3.rs`**: parse the
    structured `rope_scaling` field, expose `rope_position_divisor_for_layer`,

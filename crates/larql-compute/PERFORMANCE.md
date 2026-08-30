@@ -25,6 +25,42 @@ Vindex: `gemma3-4b-q4k-v2` (Q4_K attn/gate/up, Q6_K V/down — Ollama convention
 > remaining ~1.17× decode gap to ollama is distributed across the
 > pipeline, not concentrated in any single kernel.
 
+> **Corrected 2026-08-22 — "at saturation" and "not concentrated in any
+> single kernel" are both isolated-bench conclusions, and the in-situ
+> measurement disagrees.** Every GB/s figure in this file (and in
+> `CHANGELOG.md`'s per-kernel table) is measured with the kernel batched
+> against itself. Running the *same* kernels inside a real decode, via the
+> VINDEX3 stage profiler, they do not reach those rates:
+>
+> | stage | in situ | isolated | ratio |
+> |---|---:|---:|---:|
+> | attention projections | ~205–209 GB/s | ~283 | **73%** |
+> | routed FFN (experts) | ~250–251 | ~322 | **78%** |
+> | lm_head | ~363–368 | ~377 | **97%** |
+>
+> Replicated across sessions to 0.4–1.9%, against ~±6% wobble on tok/s —
+> the per-stage ratio is the stable instrument here, not wall-clock. The
+> head is the control that makes it real: it runs **once** per token as one
+> long sequential stream and reaches its isolated rate; every stage
+> repeated 24× is 22–27% short. So the deficit **is** concentrated and
+> **is** kernel-specific, which is the direct negation of the sentence
+> above — anyone reading "nothing left here" would de-prioritise the two
+> kernels with the largest remaining headroom.
+>
+> What that deficit is NOT, as of 2026-08-22: plain repetition (a repeat
+> curve is a ~4% step by n=4, then flat), command-buffer structure
+> (splitting 24 dispatches across 24 command buffers does not recover it),
+> or operand co-location (packing attention operands into one allocation
+> measured a null). Same-matrix versus distinct-matrix is ~10%, the largest
+> single effect found, so the address stream stays in the frame. The
+> mechanism is open.
+>
+> This crate already held the lesson empirically and never generalised it:
+> see `CHANGELOG.md` on NR2 (wins isolated by 1.47×, **loses batched by
+> 4%**), on kernel-isolated 1.79–3.8× that did not translate end-to-end,
+> and on a thermal A/B where an apparent +23% became **parity on a quiet
+> GPU**.
+
 ---
 
 ## CPU kernels (2026-05-15)
@@ -118,7 +154,7 @@ pipeline. `LARQL_QKV_FUSED=1` opts back in.
 
 The dispatch-geometry fix (2026-05-02) cuts lm_head from 2.95 → 1.85 ms
 (−1.14 ms/tok, +7.7 tok/s end-to-end) by making `MetalBackend::q4k_matvec`
-and the three sibling sites in `moe_dispatch.rs` + `decode/encode_ffn.rs`
+and the three sibling sites in `moe_dispatch/` + `decode/encode_ffn.rs`
 use `pipeline.rows_per_tg` / `pipeline.threads_per_tg` instead of hardcoding
 `shaders::q4k_matvec::ROWS_PER_TG`. Production has bound the 8sg pipeline
 since 2026-04-28; the hardcoded 4sg constants left simdgroups 4..7 of
@@ -155,7 +191,7 @@ backend on a Q4_K vindex with tied embeddings (`gemma3-4b-q4k-v2`)?
 Earlier write-up (preserved in git history) attributed the argmax drift
 to `q4k_matvec`'s 32-lane simdgroup reduction tree. **Wrong root cause.**
 The actual bug: `MetalBackend::q4k_matvec` (and three sibling sites in
-`moe_dispatch.rs` + the non-gated FFN path) hardcoded the 4sg shader's
+`moe_dispatch/` + the non-gated FFN path) hardcoded the 4sg shader's
 `THREADS_PER_TG=128` while dispatching the 8sg `q4k_matvec_pipeline`
 (production default since 2026-04-28). With only 128 threads dispatched,
 simdgroups 4..7 of each 8sg TG never executed — half the rows in each
@@ -218,7 +254,7 @@ shader-module constants while the bound pipeline has different geometry.
   "kernel-level drift" to "dispatch-geometry mismatch."
 - `crates/larql-compute/src/metal/trait_impl/quant_matvec.rs::q4k_matvec`
   — fixed dispatch site.
-- `crates/larql-compute/src/metal/moe_dispatch.rs` — three sibling sites
+- `crates/larql-compute-metal/src/moe_dispatch/` — three sibling sites
   fixed in the same pass.
 
 ---
@@ -305,7 +341,7 @@ shader to default — it implements the three-step diagnostic pinned in
 **Step 1 — capture a baseline** (commit `main` or whatever `HEAD` you trust):
 
 ```bash
-cargo run --release --features gpu -p larql-compute --example diag_shader_bench -- \
+cargo run --release --features gpu -p larql-compute-metal --example diag_shader_bench -- \
   --profile gemma3 \
   --json /tmp/larql-shaders-baseline.json
 ```
@@ -313,7 +349,7 @@ cargo run --release --features gpu -p larql-compute --example diag_shader_bench 
 **Step 2 — change the shader, then compare:**
 
 ```bash
-cargo run --release --features gpu -p larql-compute --example diag_shader_bench -- \
+cargo run --release --features gpu -p larql-compute-metal --example diag_shader_bench -- \
   --profile gemma3 \
   --compare /tmp/larql-shaders-baseline.json \
   --json /tmp/larql-shaders-current.json \
@@ -359,7 +395,7 @@ Vindex: `gemma-4-26B-A4B-it.vindex` (30 layers, 128 experts/layer, top-K=8, inte
 ### What the 2026-05-02 moe_dispatch fix changed
 
 Same root cause as the Gemma 3 4B lm_head fix: three sites in
-`metal/moe_dispatch.rs` (per-expert down projection) hardcoded the legacy
+`metal/moe_dispatch/` (per-expert down projection) hardcoded the legacy
 4sg `q4k_matvec` shader's `THREADS_PER_TG=128` while dispatching the
 `q4k_matvec_pipeline` (bound to the 8sg variant since 2026-04-28).
 Per token, that meant:
@@ -392,7 +428,7 @@ per-expert down × top_k, activation, output) once per model shape and
 caches by `(top_k, hidden, intermediate_size)` on the backend. Per-layer
 `gpu_moe_dispatch_with_scratch` calls only memcpy expert bytes into the
 existing buffer contents — no `bufs.output(...)` calls in the hot path.
-Confirmed by audit: every `bufs.output(...)` in `moe_dispatch.rs` is in
+Confirmed by audit: every `bufs.output(...)` in `moe_dispatch/` is in
 `MoeScratch::new` (one-shot), never per-layer.
 
 The 19.4 tok/s baseline measured 2026-05-02 includes both Phase 2 AND
@@ -432,7 +468,7 @@ class of fix.
 
 ## Per-kernel profiling (2026-04-26, M3 Max, Gemma 3 4B shapes)
 
-Run: `cargo run --release --features gpu -p larql-compute --example diag_profile_kernels`
+Run: `cargo run --release --features gpu -p larql-compute-metal --example diag_profile_kernels`
 
 Two measurement modes:
 - **Isolated**: one commit+wait per call (includes ~20µs GPU spin-up overhead)

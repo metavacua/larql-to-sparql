@@ -3,6 +3,46 @@
 use crate::config::types::QuantFormat;
 use crate::error::VindexError;
 use crate::extract::streaming::context::StreamingContext;
+use std::path::Path;
+
+impl<'a> StreamingContext<'a> {
+    /// Expert-bank extraction — the orchestrator decides the route
+    /// (`extract::orchestrate`), this stage only supplies the streaming
+    /// source and the destination. Runs independently of the weight
+    /// writers so an experts-only run (`--level browse`) never pays for
+    /// a spine re-extraction it does not want.
+    pub(in crate::extract::streaming) fn extract_expert_banks(
+        &mut self,
+        request: crate::extract::target::ExtractionRequest,
+        dest: &Path,
+    ) -> Result<crate::extract::orchestrate::ExpertBankOutcome, VindexError> {
+        let (shard_mmaps, tensor_index) = match (
+            self.tensor_source.safetensors_mmap_refs(),
+            self.tensor_source.safetensors_index(),
+        ) {
+            (Some(m), Some(i)) => (m, i),
+            _ => {
+                return Err(VindexError::Parse(
+                    "expert-bank extraction requires safetensors input (GGUF \
+                     carries no native MXFP4 streams to extract)"
+                        .to_string(),
+                ));
+            }
+        };
+        let streaming_source = crate::format::weights::StreamingWeights {
+            shard_mmaps: &shard_mmaps,
+            tensor_index,
+            arch: &*self.arch,
+            num_layers: self.num_layers,
+        };
+        crate::extract::orchestrate::extract_expert_banks(
+            &streaming_source,
+            dest,
+            request,
+            self.model_name,
+        )
+    }
+}
 
 impl<'a> StreamingContext<'a> {
     /// Stage 6 — model weights (if extract level requires them).

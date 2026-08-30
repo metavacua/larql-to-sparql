@@ -63,9 +63,9 @@ From `crates/larql-inference/src/vindex/walk_ffn/mod.rs:252-394`. Order is prior
 
 WalkFfn has two paths for Q4K vindexes:
 
-1. **Branch 7 (`walk_ffn_q4k_dequant`):** Used only if `num_features(layer) > 0`. **Still dequantises to f32 internally** per `interleaved_q4k.rs:13` — the name says "q4k_dequant" because it reads the Q4K bytes but lifts them to f32 before matmul. Some win on memory (Q4K on disk, dequant on demand) but the hot path is still f32 sgemv.
+1. **Branch 7 (`walk_ffn_q4k_dequant`):** Used only if `num_features(layer) > 0`. **Still dequantises to f32 internally** per `interleaved_kquant_native.rs:13` — the name says "q4k_dequant" because it reads the Q4K bytes but lifts them to f32 before matmul. Some win on memory (Q4K on disk, dequant on demand) but the hot path is still f32 sgemv.
 
-2. **`larql_inference::vindex::ffn_decode_step_native`** (the one we just exposed): The production hot path. Direct Q4K matvec via `q4k_matvec_into` (rayon-parallel) using interleaved Q4K bytes. **No dequant, no f32 staging.** This is what `predict_q4k_decode_step_direct` uses internally — the 24 tok/s path.
+2. **`larql_inference::vindex::ffn_decode_step_native`** (the one we just exposed): The production hot path. Direct Q4K matvec via `q4k_matvec_into` (rayon-parallel) using interleaved Q4K bytes. **No dequant, no f32 staging.** This is what `predict_kquant_decode_step_direct` uses internally — the 24 tok/s path.
 
 WalkFfn doesn't currently route to `ffn_decode_step_native`. The engines now route around WalkFfn for Q4K vindexes as a workaround.
 
@@ -114,7 +114,7 @@ Cons: substantial refactor; every test against WalkFfn pre-strategy-rewrite need
 1. **Why is the `zero_features_dense` early exit gated *before* the ladder?** Historical reason? Performance optimization for sparse-only vindexes? Documented or implicit?
 2. **What other vindex shapes hit `zero_features_dense`?** Llama 2 7B Q4K? Mistral 7B? TinyStories f32? Worth knowing how broad the trap is.
 3. **Is `walk_ffn_q4k_dequant` ever the right path?** It exists, requires `num_features > 0` AND `has_interleaved_q4k()` — i.e. vindex has BOTH sparse features AND Q4K bytes. Is that combo ever built?
-4. **`ffn_decode_step_native` lives in `q4k_forward/cached.rs` — should it move to `walk_ffn/`?** Architectural question about where the "native quantised FFN forward" primitive belongs. It's used by both `predict_q4k_decode_step_direct` (production path) and now by the engines. Putting it in `walk_ffn/` (as Option B's reorder) makes WalkFfn the canonical entry point. Putting it where it is (in `q4k_forward`) keeps it next to its current sibling helpers.
+4. **`ffn_decode_step_native` lives in `q4k_forward/cached.rs` — should it move to `walk_ffn/`?** Architectural question about where the "native quantised FFN forward" primitive belongs. It's used by both `predict_kquant_decode_step_direct` (production path) and now by the engines. Putting it in `walk_ffn/` (as Option B's reorder) makes WalkFfn the canonical entry point. Putting it where it is (in `q4k_forward`) keeps it next to its current sibling helpers.
 5. **Does `walk_ffn_q4k_dequant` (branch 7) actually dequant per call?** If so, it's the same trap as `zero_features_dense` just by a different route. Worth measuring.
 6. **L1 cache effectiveness.** The cache fires for `seq_len == 1` and an exact-match residual hash. How often does it hit in real generation? Telemetry would tell.
 
@@ -127,7 +127,7 @@ The `LARQL_INSTRUMENT_MARKOV=1` env var, set during `cargo run` of `larql bench`
                    (attn_helper hits/miss=34/0)
 ```
 
-The instrumentation lives in `crates/larql-kv/src/engines/markov_residual/q4k.rs::rs_decode_step_walk`. Same pattern can be added to `walk_ffn/mod.rs` to log which branch fires per layer per call — useful for the routing analysis.
+The instrumentation lives in `crates/larql-kv/src/engines/markov_residual/walk.rs::rs_decode_step_walk`. Same pattern can be added to `walk_ffn/mod.rs` to log which branch fires per layer per call — useful for the routing analysis.
 
 `WalkFfn` already has `trace_path(layer, label)` (line 255 et al.) which records the path taken. Setting `record_trace = true` on the WalkFfn would let you dump the per-layer branch names without writing new code. See `crate::vindex::walk_ffn::WalkTrace`.
 
@@ -135,11 +135,11 @@ The instrumentation lives in `crates/larql-kv/src/engines/markov_residual/q4k.rs
 
 - Routing ladder: `crates/larql-inference/src/vindex/walk_ffn/mod.rs:252-394`
 - The trap (zero_features_dense): `crates/larql-inference/src/vindex/walk_ffn/mod.rs:253-260`
-- Q4K dequant branch: `crates/larql-inference/src/vindex/walk_ffn/interleaved_q4k.rs`
-- Production fast-path FFN: `crates/larql-inference/src/vindex/q4k_forward/cached.rs::run_ffn_decode_step_q4k_direct` (publicly exposed as `vindex::ffn_decode_step_native`)
+- Q4K dequant branch: `crates/larql-inference/src/vindex/walk_ffn/interleaved_kquant_native.rs`
+- Production fast-path FFN: `crates/larql-inference/src/vindex/kquant_forward/cached/::run_ffn_decode_step_q4k_direct` (publicly exposed as `vindex::ffn_decode_step_native`)
 - Engine workaround examples:
-  - `crates/larql-kv/src/engines/markov_residual/q4k.rs:189-210` (decode_step)
-  - `crates/larql-kv/src/engines/unlimited_context/extend.rs:175-195` (extend)
+  - `crates/larql-kv/src/engines/markov_residual/walk.rs:189-210` (decode_step)
+  - `crates/larql-kv/src/engines/windowed_checkpoint/extend.rs:175-195` (extend)
   - `crates/larql-kv/src/engines/turbo_quant/engine.rs:380-400` (prefill + decode)
 - `WeightFfn::forward_with_activation`: `crates/larql-inference/src/ffn/weight.rs`
-- `q4k_matvec_into` (the actual kernel): `crates/larql-compute/src/cpu/ops/q4_common.rs:535`
+- `q4k_matvec_into` (the actual kernel): `crates/larql-compute/src/cpu/ops/q4_common/`

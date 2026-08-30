@@ -75,8 +75,8 @@ CPU fwd is the dominant cost; lm_head is no longer a bottleneck.
 ## What changed — ten independent fixes
 
 1. **KV-cached decode path**
-   (`crates/larql-inference/src/vindex/q4k_forward/cached.rs`):
-   `predict_q4k_prefill` + `predict_q4k_decode_step` split. Prefill
+   (`crates/larql-inference/src/vindex/kquant_forward/cached.rs`):
+   `predict_kquant_prefill` + `predict_kquant_decode_step` split. Prefill
    captures per-layer K/V into a `CpuKvCache`; decode runs single-row
    attention against the growing cache. O(N²) → O(N) decode work on
    attention/FFN. Dense architectures only — hybrid-MoE and KV-shared
@@ -84,7 +84,7 @@ CPU fwd is the dominant cost; lm_head is no longer a bottleneck.
    legacy loop.
 
 2. **Direct Q4_K / Q6_K matvec, skipping per-step dequant**
-   (`predict_q4k_decode_step_direct`):
+   (`predict_kquant_decode_step_direct`):
    Every Q/K/V/O and gate/up/down projection routes through
    `backend.quant_matvec` against the vindex's raw Q4_K/Q6_K bytes.
    No more `insert_q4k_layer_tensors` dequant staging per step. The
@@ -208,7 +208,7 @@ Closing the 1.73× per-core gap is hand-tuned kernel work:
 3. **Lower-precision quant** (Q3_K_M, Q2_K): smaller bytes-per-weight,
    less memory traffic. Needs new vindex extraction.
 
-The **55× prefill gap** is a separate target — `predict_q4k_prefill`
+The **55× prefill gap** is a separate target — `predict_kquant_prefill`
 still uses the legacy dequantise-then-sgemv path (~75 ms × 33 layers
 of dequant). Routing through a batched CPU `q4k_matmul` (multi-row
 matvec sharing weight reads across seq positions) would close most of
@@ -242,7 +242,7 @@ encodes which fixes were in place:
   ```
   Two tests: `cached_decode_matches_uncached_tokens` (bit-match
   required — cached prefill+decode against the legacy
-  `predict_q4k_hidden` per-step path) and
+  `predict_kquant_hidden` per-step path) and
   `direct_matvec_decode_matches_dequant_path` (first-token agreement
   + ≤ 1 disagreement in first 3 tokens; later drift expected from
   different summation orders, both paths are mathematically correct).

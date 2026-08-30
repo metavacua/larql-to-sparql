@@ -17,12 +17,14 @@ fn parse_extract_minimal() {
             components,
             layers,
             extract_level,
+            format,
         } => {
             assert_eq!(model, "google/gemma-3-4b-it");
             assert_eq!(output, "gemma3-4b.vindex");
             assert!(components.is_none());
             assert!(layers.is_none());
             assert_eq!(extract_level, ExtractLevel::Browse);
+            assert_eq!(format, None, "no FORMAT clause = no preference");
         }
         _ => panic!("expected Extract"),
     }
@@ -1591,11 +1593,13 @@ fn parse_infer_minimal() {
             top,
             compare,
             route,
+            generate,
         } => {
             assert_eq!(prompt, "The capital of France is");
             assert_eq!(top, Some(5));
             assert!(!compare);
             assert!(route.is_none());
+            assert!(generate.is_none());
         }
         _ => panic!("expected Infer"),
     }
@@ -1610,7 +1614,9 @@ fn parse_infer_with_compare() {
             top,
             compare,
             route,
+            generate,
         } => {
+            let _ = generate;
             assert_eq!(prompt, "test prompt");
             assert_eq!(top, Some(3));
             assert!(compare);

@@ -318,6 +318,7 @@ fn compact_model_config() -> larql_vindex::VindexModelConfig {
         attention_k_eq_v: false,
         num_kv_shared_layers: None,
         per_layer_embed_dim: None,
+        layer_rope_theta: None,
         rope_local_base: None,
         query_pre_attn_scalar: None,
         final_logit_softcapping: None,
@@ -325,6 +326,7 @@ fn compact_model_config() -> larql_vindex::VindexModelConfig {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     }
 }
 

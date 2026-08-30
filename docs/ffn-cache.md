@@ -43,10 +43,10 @@ if let Some((hits, misses)) = walk.l1_cache_stats() {
 }
 ```
 
-**When it fires:** Only on the `walk_ffn_sparse` path, which requires `top_k * 2 < intermediate_size`. For Gemma 3 4B (intermediate=16384), this means `top_k < 8192`. The default bench top-k of 8092 meets this threshold.
+**When it fires:** Only on the `walk_ffn_sparse` path, which requires `top_k` below the 80% full-K density rewrite (`FULL_K_DENSITY` 4/5 in `walk_ffn/thresholds.rs`). For Gemma 3 4B (intermediate=10240), this means `top_k < 8192`. The default bench top-k of 8092 meets this threshold.
 
 **When it does NOT fire:**
-- `top_k >= intermediate_size / 2` → interleaved or full-mmap path (no sparse KNN)
+- `top_k >= intermediate_size * 4/5` → full-K gemv / whole-layer path (no sparse KNN)
 - `seq_len > 1` → prefill phase (multi-position, not cached)
 - `index.has_overrides_at(layer)` → INSERT session active (see Patch Safety below)
 
@@ -71,7 +71,7 @@ This means:
 - An INSERT session → cache bypassed for layers that have overrides; active for layers without
 - The override check is per-layer, not per-session, so a session that only patches L10 still gets cache hits at L0–L9 and L11–L33
 
-This is validated in `examples/ffn_cache_demo.rs` (Scenario 3) and is the correct behaviour: correctness over hit rate for live-patched layers.
+This is validated in `crates/larql-demos/examples/inference/ffn_cache_demo.rs` (Scenario 3) and is the correct behaviour: correctness over hit rate for live-patched layers.
 
 ---
 

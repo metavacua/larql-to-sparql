@@ -466,38 +466,104 @@ pub fn model_with_q4k_weights(
 // ══════════════════════════════════════════════════════════════
 
 pub fn state(models: Vec<Arc<LoadedModel>>) -> Arc<AppState> {
+    let router_topology = larql_server::state::RouterTopology::for_boot_count(models.len());
     Arc::new(AppState {
-        models,
+        model_set: std::sync::RwLock::new(larql_server::state::ModelSet {
+            models,
+            v3_models: Vec::new(),
+        }),
+        router_topology,
+        lifecycle: std::sync::Mutex::new(larql_server::state::LifecycleState::Idle),
         started_at: std::time::Instant::now(),
         requests_served: AtomicU64::new(0),
         api_key: None,
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(0),
         infer_timeout: std::time::Duration::from_secs(60),
+        responses: larql_server::response_store::ResponseStore::new(),
+        v3_kv: larql_server::response_kv::ResponseKvCache::new(
+            larql_server::response_kv::DEFAULT_MAX_ENTRIES,
+            larql_server::response_kv::DEFAULT_TTL_SECS,
+        ),
+        runtime: Arc::new(larql_server::runtime_stats::RuntimeRecorder::new()),
+    })
+}
+
+/// State whose inference timeout is `timeout` — for driving the
+/// server-side timeout arms without a slow model.
+#[allow(dead_code)]
+pub fn state_with_timeout(
+    models: Vec<Arc<LoadedModel>>,
+    timeout: std::time::Duration,
+) -> Arc<AppState> {
+    let router_topology = larql_server::state::RouterTopology::for_boot_count(models.len());
+    Arc::new(AppState {
+        model_set: std::sync::RwLock::new(larql_server::state::ModelSet {
+            models,
+            v3_models: Vec::new(),
+        }),
+        router_topology,
+        lifecycle: std::sync::Mutex::new(larql_server::state::LifecycleState::Idle),
+        started_at: std::time::Instant::now(),
+        requests_served: AtomicU64::new(0),
+        api_key: None,
+        sessions: SessionManager::new(3600),
+        describe_cache: DescribeCache::new(0),
+        infer_timeout: timeout,
+        responses: larql_server::response_store::ResponseStore::new(),
+        v3_kv: larql_server::response_kv::ResponseKvCache::new(
+            larql_server::response_kv::DEFAULT_MAX_ENTRIES,
+            larql_server::response_kv::DEFAULT_TTL_SECS,
+        ),
+        runtime: Arc::new(larql_server::runtime_stats::RuntimeRecorder::new()),
     })
 }
 
 pub fn state_with_key(models: Vec<Arc<LoadedModel>>, key: &str) -> Arc<AppState> {
+    let router_topology = larql_server::state::RouterTopology::for_boot_count(models.len());
     Arc::new(AppState {
-        models,
+        model_set: std::sync::RwLock::new(larql_server::state::ModelSet {
+            models,
+            v3_models: Vec::new(),
+        }),
+        router_topology,
+        lifecycle: std::sync::Mutex::new(larql_server::state::LifecycleState::Idle),
         started_at: std::time::Instant::now(),
         requests_served: AtomicU64::new(0),
         api_key: Some(key.to_string()),
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(0),
         infer_timeout: std::time::Duration::from_secs(60),
+        responses: larql_server::response_store::ResponseStore::new(),
+        v3_kv: larql_server::response_kv::ResponseKvCache::new(
+            larql_server::response_kv::DEFAULT_MAX_ENTRIES,
+            larql_server::response_kv::DEFAULT_TTL_SECS,
+        ),
+        runtime: Arc::new(larql_server::runtime_stats::RuntimeRecorder::new()),
     })
 }
 
 pub fn state_with_cache(models: Vec<Arc<LoadedModel>>, cache_size: u64) -> Arc<AppState> {
+    let router_topology = larql_server::state::RouterTopology::for_boot_count(models.len());
     Arc::new(AppState {
-        models,
+        model_set: std::sync::RwLock::new(larql_server::state::ModelSet {
+            models,
+            v3_models: Vec::new(),
+        }),
+        router_topology,
+        lifecycle: std::sync::Mutex::new(larql_server::state::LifecycleState::Idle),
         started_at: std::time::Instant::now(),
         requests_served: AtomicU64::new(0),
         api_key: None,
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(cache_size),
         infer_timeout: std::time::Duration::from_secs(60),
+        responses: larql_server::response_store::ResponseStore::new(),
+        v3_kv: larql_server::response_kv::ResponseKvCache::new(
+            larql_server::response_kv::DEFAULT_MAX_ENTRIES,
+            larql_server::response_kv::DEFAULT_TTL_SECS,
+        ),
+        runtime: Arc::new(larql_server::runtime_stats::RuntimeRecorder::new()),
     })
 }
 

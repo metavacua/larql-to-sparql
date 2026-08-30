@@ -83,7 +83,8 @@ pub fn pair_batch(
     }
 
     cmd.commit();
-    cmd.wait_until_completed();
+    let _ =
+        crate::cb_status::wait_checked(cmd, "crates/larql-compute-metal/src/ops/q4_batched.rs:86");
 
     let mut gate_results = Vec::with_capacity(seq_len);
     let mut up_results = Vec::with_capacity(seq_len);
@@ -224,7 +225,8 @@ pub fn multi_layer_ffn(
     }
 
     cmd.commit();
-    cmd.wait_until_completed();
+    let _ =
+        crate::cb_status::wait_checked(cmd, "crates/larql-compute-metal/src/ops/q4_batched.rs:227");
 
     let last = num_layers - 1;
     crate::buffers::read_buffer_f32(&down_outs[last], hidden)

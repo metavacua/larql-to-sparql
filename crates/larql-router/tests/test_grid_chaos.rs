@@ -68,6 +68,7 @@ fn make_entry(c: &Candidate, in_flight: u32) -> ServerEntry {
         rtt_ms: None,
         expert_start: 0,
         expert_end: 0,
+        serves_openai: false,
     }
 }
 

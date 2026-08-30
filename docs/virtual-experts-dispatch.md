@@ -71,7 +71,7 @@ analogous, even though the expert implementation is not: neural experts
 are weight shards selected by a learned router, while WASM experts are
 host-executed programs selected by op name. Both are forms of routing
 decisions to specialised callable units. The fact that
-`crates/larql-inference/src/ffn/moe_remote.rs` (MoE weight sharding) and
+`crates/larql-inference/src/ffn/moe_remote/` (MoE weight sharding) and
 `crates/larql-inference/src/experts/` (WASM compute experts) now coexist
 cleanly under disambiguated names — Phase 3 of this work — makes that
 parallel structurally explicit.
@@ -173,7 +173,7 @@ with parallel tests). 5 unit tests cover all four precedence outcomes.
 `RemoteExpertBackend` → `RemoteMoeBackend`, `RemoteExpertError` →
 `RemoteMoeError`, `generate_with_remote_experts` →
 `generate_with_remote_moe`, `examples/expert_grid_generate.rs` →
-`examples/moe_grid_generate.rs`. Module doc explicitly disambiguates from
+`chris-experiments/larql_probes/examples/misc/moe_grid_generate.rs`. Module doc explicitly disambiguates from
 `crate::experts`.
 
 Side-effect of running the rename: caught two pre-existing build breakages
@@ -202,7 +202,7 @@ Wired through `larql-cli/src/commands/primary/run_cmd.rs` as
 | vindex quant | `--metal` | strategy                       | why                                   |
 |--------------|-----------|--------------------------------|---------------------------------------|
 | Q4_K         | yes       | `layer_graph::generate`        | Metal prefill + KV-cached decode      |
-| Q4_K         | no        | `vindex::generate_q4k_cpu`     | per-step `predict_q4k` loop, no KV cache → O(N²) |
+| Q4_K         | no        | `vindex::generate_kquant_cpu`     | per-step `predict_q4k` loop, no KV cache → O(N²) |
 | f32          | any       | `forward::generate_cached`     | CPU F32, KV-cached                    |
 
 Plus chat mode (REPL on stdin) when no prompt is given. Loads the model
@@ -249,7 +249,7 @@ Two end-to-end tests added, both `#[ignore]`d by default with skip-on-
 missing-prerequisites for clean CI behaviour:
 
 - **`test_generate_q4k_cpu`** (`larql-inference`) — loads a real Q4K
-  vindex, runs `generate_q4k_cpu` for 4 tokens, asserts non-empty output.
+  vindex, runs `generate_kquant_cpu` for 4 tokens, asserts non-empty output.
   Validated against Gemma 3 4B Q4K: 4 tokens in 393s on CPU (98s/tok,
   expected for the O(N²) per-step path).
 
@@ -466,7 +466,7 @@ path, just returning the full vocab-length score vector instead of
 truncating. On Metal this is still ~3–5 ms per token for the Gemma 3
 262K × 2560 tied LM head; the mask + argmax adds microseconds.
 
-The CPU Q4K path needed `predict_q4k_hidden` as a small refactor —
+The CPU Q4K path needed `predict_kquant_hidden` as a small refactor —
 extracting the per-layer dequantise-and-forward loop out of `predict_q4k`
 so the constrained path can reuse it without duplicating ~120 lines of
 attention-block-with-PLE-and-KV-sharing code.
@@ -580,7 +580,7 @@ impl ChatTemplate {
 }
 
 // larql_inference::vindex:
-pub fn generate_q4k_cpu(weights, tokenizer, prompt_ids, max_tokens, index)
+pub fn generate_kquant_cpu(weights, tokenizer, prompt_ids, max_tokens, index)
     -> Vec<(String, u32)>
 pub fn generate_q4k_cpu_constrained<M>(weights, tokenizer, prompt_ids,
     max_tokens, index, mask_fn: M) -> Vec<(String, u32)>
@@ -649,13 +649,13 @@ crates/larql-experts/expert-interface/src/lib.rs       # ABI: OpSpec
 crates/larql-experts/experts/*/src/lib.rs              # 19 files: ops = [(name, args)]
 crates/larql-inference/src/experts/{caller,registry,parser,session,mask,mod}.rs
 crates/larql-inference/src/prompt.rs                   # ChatTemplate
-crates/larql-inference/src/trie/mod.rs                 # find_with_env
-crates/larql-inference/src/vindex/{q4k_forward,mod}.rs # generate_q4k_cpu + _constrained
-crates/larql-inference/src/ffn/{moe_remote,mod}.rs     # rename + new fields
-crates/larql-inference/src/layer_graph/{generate,grid,mod}.rs # generate_constrained
+crates/larql-vindex/src/trie/mod.rs                    # find_with_env (moved from larql-inference)
+crates/larql-inference/src/vindex/{kquant_forward/generation.rs,mod.rs} # generate_kquant_cpu + _constrained (was q4k_forward.rs / generate_kquant_cpu)
+crates/larql-inference/src/ffn/{moe_remote/,mod.rs}    # rename + new fields (moe_remote.rs is now a module dir)
+crates/larql-inference/src/layer_graph/{generate/,grid.rs,mod.rs} # generate_constrained
 crates/larql-inference/src/lib.rs                      # re-exports
 crates/larql-inference/tests/{data/,test_generate_q4k_cpu,test_*_dispatch}.rs
-crates/larql-inference/examples/moe_grid_generate.rs   # renamed
+chris-experiments/larql_probes/examples/misc/moe_grid_generate.rs   # renamed
 crates/larql-cli/src/commands/primary/run_cmd.rs       # --experts + --constrained
 crates/larql-cli/src/main.rs                           # ChatArgs ↔ RunArgs
 crates/larql-cli/tests/test_run_experts.rs             # CLI integration tests

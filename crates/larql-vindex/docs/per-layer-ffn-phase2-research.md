@@ -16,14 +16,14 @@ win and a ROADMAP correction.
 
 ### In-process: `MetalBackend::moe_scratch`
 
-`crates/larql-compute/src/metal/mod.rs:250` declares
+`crates/larql-compute-metal/src/lib.rs` declares
 
 ```rust
 moe_scratch: std::sync::Mutex<Option<moe_dispatch::MoeScratch>>,
 ```
 
 `MetalBackend::decode_token_q4k_moe` at
-`crates/larql-compute/src/metal/moe_dispatch.rs:138-187` holds the lock
+`crates/larql-compute-metal/src/moe_dispatch/` holds the lock
 across the entire decode and only calls `MoeScratch::new` on a shape
 mismatch:
 
@@ -54,7 +54,7 @@ Verification grep confirms the cache is never invalidated:
 
 ```
 $ grep -rnE 'moe_scratch\.(take|reset|clear)|\*\s*scratch_guard\s*=' crates/larql-compute/src/
-crates/larql-compute/src/metal/moe_dispatch.rs:185:  *scratch_guard = Some(MoeScratch::new(&self.bufs, shape.0, shape.1, shape.2));
+crates/larql-compute-metal/src/moe_dispatch/:  *scratch_guard = Some(MoeScratch::new(&self.bufs, shape.0, shape.1, shape.2));
 ```
 
 The only assignment is the shape-mismatch reallocation; no `.take()` or
@@ -62,7 +62,7 @@ The only assignment is the shape-mismatch reallocation; no `.take()` or
 
 ### Server: `AppState::moe_scratches`
 
-`crates/larql-server/src/state.rs:106-108` declares
+`crates/larql-server/src/state/loaded_model.rs:120-122` declares
 
 ```rust
 pub moe_scratches: std::sync::Mutex<
@@ -81,14 +81,14 @@ let scratch = scratch_cache
     .or_insert_with(|| Arc::new(MoeScratch::new_public(backend, top_k, hidden, inter)));
 ```
 
-`MoeScratch::new_public` at `moe_dispatch.rs:78-80` is the public-API
+`MoeScratch::new_public` at `moe_dispatch/` is the public-API
 wrapper around the same constructor. The server cache survives across
 RPC calls; only the first call for a given shape pays the allocation
 cost.
 
 ## 2. What `MoeScratch` actually pre-allocates
 
-Per `moe_dispatch.rs:82-128`, `MoeScratch::new` allocates **10 buffers
+Per `moe_dispatch/`, `MoeScratch::new` allocates **10 buffers
 once** at the per-decode shape:
 
 | Buffer | Size formula | Gemma 4 26B A4B (top_k=8, hidden=2560, inter=2112) |
@@ -113,7 +113,7 @@ allocations per token**.
 ## 3. What the per-token decode actually costs
 
 After the first token of a model load, `gpu_moe_dispatch_with_scratch`
-(`moe_dispatch.rs:701-...`) does:
+(`moe_dispatch/-...`) does:
 
 1. **CPU pre-experts norm + router pass** (one pass per MoE layer,
    `~hidden²` FLOPs).

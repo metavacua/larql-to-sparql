@@ -53,7 +53,7 @@ The Nix development environment provides the following (from nixpkgs unstable):
 
 | Package | Purpose |
 |---------|---------|
-| Rust (~1.92) | Compiler and cargo (well above `rust-version = "1.75"` minimum) |
+| Rust (~1.92) | Compiler and cargo (above the `rust-version = "1.88"` minimum) |
 | OpenBLAS | BLAS backend for `ndarray` (Linux) |
 | Accelerate | BLAS backend (macOS, via Apple framework) |
 | protobuf | gRPC code generation for `larql-server` |

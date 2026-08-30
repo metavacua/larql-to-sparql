@@ -181,6 +181,8 @@ pub fn build() -> SyntheticQ4kVindex {
         larql_vindex::WriteWeightsOptions::default(),
         larql_vindex::KquantWriteOptions::default(),
         false, // drop_gate_vectors — keep them so Vector KNN works too
+        larql_vindex::ExtractionRequest::Legacy, // expert_banks — dense fixture, no banks
+        None,  // expert_banks_out
         &mut cb,
     )
     .expect("build Q4K synthetic vindex");

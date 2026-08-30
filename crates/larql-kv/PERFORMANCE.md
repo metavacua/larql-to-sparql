@@ -1,5 +1,33 @@
 # Performance — larql-kv
 
+> **Retracted 2026-08-22 — every per-engine tok/s figure below is inflated.**
+> The harness that produced them was not measuring a token: it stopped its
+> timer before `pick_next`, while the reference rows included lm_head, and
+> both landed in the same tok/s column. `CHANGELOG.md` (2026-08-04, §"the
+> bench was not measuring a token") puts the inflation at **2–3× for every
+> engine**. An earlier `total/n` conflation in this same table was already
+> flagged by `docs/diagnoses/remote-moe-bottlenecks.md:49`, so these rows
+> have now survived two independent instrument corrections.
+>
+> **Do not choose an engine on these numbers.** The *ordering* between
+> engines may survive — both arms shared the defect — but no absolute here,
+> and no comparison against a non-larql baseline, is usable until the table
+> is re-run through a harness that times a whole token.
+>
+> Three further hazards, established 2026-08-21/22 against the VINDEX3
+> lowered path and applicable to any re-run:
+> - **AC only.** On battery the same probe roughly halves; one runbook
+>   recorded llama.cpp itself falling 34 → 1.05 tok/s at 31% battery.
+> - **~±6% cross-session floor.** Identical code read 8.14 ms and 8.62 ms
+>   in two sessions, so no sub-6% claim survives a single block however
+>   clean its internal brackets. A textbook interleaved A/B/A/B with a
+>   0.48% control bracket still produced a false +2.4%.
+> - **Warm the GPU.** Short or unwarmed sampling reads a fake speedup —
+>   an unwarmed micro-probe read 3.8× slow, and this repo already caught
+>   the same class once (`larql-compute/CHANGELOG.md:89`: 58.5 GiB/s under
+>   default criterion sampling against a consistent 33 at
+>   `--measurement-time 20`).
+
 Machine: M3 Max, macOS. Numbers carried from the engine-level audits that
 preceded the crate extraction (2026-04-23 onward), with the source bench
 identified for each row. The extraction itself was a code move — no
@@ -22,11 +50,11 @@ Per-engine impact, 50-token decode on Gemma 3 4B Q4K, M3 Max:
 | `markov-rs` | 87.1 | **98.0** | +12.5% |
 | `markov-rs-codec` | 86.6 | **98.1** | +13.3% |
 | `boundary-per-layer` (windowless) | 86.9 | **98.7** | +13.6% |
-| `unlimited-context:window=256` | 86.1 | 94.2 | +9.4% (HOnly only) |
+| `windowed-checkpoint:window=256` | 86.1 | 94.2 | +9.4% (HOnly only) |
 | `turbo-quant:bits=4` | 82.7 | 85.0 | unchanged (canonical K/V) |
 
 The three derivative-K/V engines now sit at standard's
-fused-kernel ceiling (within 1%). `unlimited-context` is at HOnly
+fused-kernel ceiling (within 1%). `windowed-checkpoint` is at HOnly
 ceiling — its `close_window` flow still needs `KvDispatch::read_kv_row_at`
 to pull the last K/V row back from the cache, leaving a ~3 ms/step
 residual. `turbo-quant` doesn't take the cascade — its codec is
@@ -68,7 +96,7 @@ sibling files can access them.
 | Metal GPU | `standard` (control) | **99.8** |
 | Metal GPU | `markov-rs` | 87.1 |
 | Metal GPU | `markov-rs-codec:window=512` | 86.6 |
-| Metal GPU | `unlimited-context:window=256` | 86.1 |
+| Metal GPU | `windowed-checkpoint:window=256` | 86.1 |
 | Metal GPU | `boundary-per-layer:window=512,layers=34` | **87.2** |
 | Metal GPU | `turbo-quant:bits=4` | 82.7 |
 | CPU | `standard` | 28.7 |
@@ -89,7 +117,7 @@ hot-path timings.
 | `boundary_kv/gate.rs` | 100% | ✅ |
 | `apollo/executor.rs` | 97.1% | ✅ |
 | `markov_residual_codec/executor.rs` | 94.6% | ✅ |
-| `unlimited_context/dispatch.rs` | 84.9% | gated on Q4K vindex |
+| `windowed_checkpoint/dispatch.rs` | 84.9% | gated on Q4K vindex |
 | `markov_residual_codec/dispatch.rs` | 82.3% | gated on Q4K vindex |
 | `markov_residual/dispatch.rs` | 84.3% | gated on Q4K vindex |
 | `boundary_per_layer/dispatch.rs` | 0% | gated on Q4K vindex |
@@ -134,7 +162,7 @@ after the final commit. +30-48% across the cached-state engines.
 | `boundary_kv` (= standard + chunk frames) | 28 | ~99 | 0 MB | larql-boundary frames | composes with standard for cross-session resume |
 | `markov_residual` (W2 + W1-GPU + W7 blit) | 27.4 | **75.3** | 10.8 MB | residuals @ 4 B/tok | residual-stream, no f16 KV |
 | `markov_residual_codec` (W2 + W1-GPU + W7 blit) | 26.6 | **79.0** | 10.8 MB | bf16 residuals (2× cold saving) | long-context-friendly cold codec |
-| `unlimited_context` (W1-GPU step 4 + W7 blit) | 28.1 | **82.7** | 15.7 MB (window=256) | per-window K/V checkpoints | W7 blit fusion +48% on top of W1-GPU |
+| `windowed_checkpoint` (W1-GPU step 4 + W7 blit) | 28.1 | **82.7** | 15.7 MB (window=256) | per-window K/V checkpoints | W7 blit fusion +48% on top of W1-GPU |
 | `turbo_quant` (4-bit, W1-GPU + W7 blit, 10-tok bench) | 19.4 | **37.7** | 0.7 MB | — | WHT + Lloyd-Max K/V compression; codec cost grows with N |
 | `apollo` (boundaries) | — | requires store | scales w/ store | constellation map | retrieval+injection; not on the same scale as the others |
 | `no_cache` | — | — (O(N²) by design) | token list only | — | correctness baseline |
@@ -160,7 +188,7 @@ after the final commit. +30-48% across the cached-state engines.
   fraction of per-token time. Codec cost also grows with sequence
   length (each step re-compresses the full layer K/V), so longer
   benches show lower mean tok/s.
-- `unlimited_context` got the biggest W7 win (+48%) because its
+- `windowed_checkpoint` got the biggest W7 win (+48%) because its
   per-step CPU-side work after the kernel returns is the lightest
   of the four cached-state engines, so the saved commit overhead
   is a larger fraction of total per-token time. The extra hot
@@ -177,7 +205,9 @@ profiler data after W7:
 | ~~Per-layer commit overhead~~ | ~~~1.7 ms~~ | **Closed by W7** (single commit per token) |
 | CPU glue (state Vec→Array2, append, etc.) | ~3 ms | In-place state updates / pre-allocated buffers |
 
-## W10 — engine state on GPU (opt-in via `LARQL_W10_HONLY=1`)
+## W10 — engine state on GPU (**default ON**; opt out with `LARQL_W10_DISABLE=1`)
+
+> **Corrected 2026-08-23.** This heading said "opt-in via `LARQL_W10_HONLY=1`". W10 has been **default-on** since 2026-05-21 (`w10_enabled()` reads only `LARQL_W10_DISABLE`), and `LARQL_W10_HONLY` is accepted but **inert** — setting it does nothing. Anything below that reads as "turn this on to get X" is describing behaviour you already have.
 
 W10 lets engines that treat K/V (and optionally h_in) as derivative
 state declare so at the API boundary; the Metal kernel then skips
@@ -199,7 +229,7 @@ Engines that opted in:
 |---|---|---|---|
 | `markov_residual` | ✅ | ✅ (window=None) | K/V derivative (Metal cache is truth); h_in dead weight without cold-tier eviction |
 | `markov_residual_codec` | ✅ | ✅ (window=None) | Same — codec residuals are canonical, hot K/V is derivative |
-| `unlimited_context` | ✅ | ❌ | `close_window` reads last K/V back via `KvDispatch::read_kv_row_at`; h_in needed for replay-from-checkpoint |
+| `windowed_checkpoint` | ✅ | ❌ | `close_window` reads last K/V back via `KvDispatch::read_kv_row_at`; h_in needed for replay-from-checkpoint |
 | `turbo_quant` | ❌ | ❌ | K/V is canonical (destructive codec); cannot be derived |
 
 ### Measurement protocol
@@ -265,8 +295,8 @@ active on every engine.
 | `markov-rs` None (windowless) | **99.1** | 10.10 ms | ~9.5 / ~1.2 ms | 0 MB | **+17%** |
 | `markov-rs-codec` Full | 88.3 | 11.33 ms | ~10.0 / ~1.2 ms | 26.3 MB | — |
 | `markov-rs-codec` None (windowless) | **98.5** | 10.15 ms | ~9.0 / ~1.2 ms | 0 MB | **+12%** |
-| `unlimited-context:window=256` Full | 88.2 | 11.34 ms | ~10.1 / ~1.3 ms | 9.6 MB | — |
-| `unlimited-context:window=256` HOnly | **92.8** | 10.78 ms | ~9.5 / ~1.2 ms | 0 MB | **+5%** |
+| `windowed-checkpoint:window=256` Full | 88.2 | 11.34 ms | ~10.1 / ~1.3 ms | 9.6 MB | — |
+| `windowed-checkpoint:window=256` HOnly | **92.8** | 10.78 ms | ~9.5 / ~1.2 ms | 0 MB | **+5%** |
 
 **What the numbers say:**
 
@@ -282,7 +312,7 @@ active on every engine.
   `codec` (windowless), 30.2 MB → 0 MB on `markov-rs:window=512`,
   9.6 MB → 0 MB on `unlimited:window=256`. The Metal kv cache is
   now the sole source of truth on the dispatch hot path.
-- **`unlimited-context` win is small** (+5%) because most of its
+- **`windowed-checkpoint` win is small** (+5%) because most of its
   per-step CPU work is the window-buffer slot-assign that survived
   even after the shadow is dropped (the window slots are
   pre-allocated regardless of mask). Memory savings still hold.
@@ -356,7 +386,7 @@ regressions in PR review; not a proxy for real-model decode speed.
 | `standard:window=4` | 15.2 µs | 7.1 µs (smaller K/V to attend over) |
 | `no-cache` | 14.9 µs | 34.8 µs (re-runs full forward each step) |
 | `markov-rs` | 15.0 µs | 27.1 µs (recomputes K/V from residuals) |
-| `unlimited-context` | 56.9 µs | 8.3 µs (window-checkpoint amortises decode) |
+| `windowed-checkpoint` | 56.9 µs | 8.3 µs (window-checkpoint amortises decode) |
 | `turbo-quant` (4-bit) | 21.8 µs | 81.9 µs (codec dominates on tiny model) |
 | `apollo` | 45 ns (no boundary store loaded → early bail) | 2 ns (early bail) |
 
@@ -381,7 +411,7 @@ the table above.
 - **Profiler.** Per-stage breakdown lands in `EngineProfiler`:
   embed, recompute_cold, recompute_hot, attention, ffn, total.
 
-### unlimited_context
+### windowed_checkpoint
 
 - **Mechanism.** Sliding window over the active K/V cache plus a
   checkpoint of the pre-window residual. Decode beyond the window
@@ -409,7 +439,7 @@ the table above.
 - **O(N²) by design.** Apollo's decode_step pushes the new token onto
   `self.context_tokens` and calls `forward_from_layer(weights,
   &self.context_tokens, ...)` — which builds a fresh HashMap KV cache
-  per call (`compute/src/forward/predict/raw.rs:190`) and re-runs
+  per call (`crates/larql-compute/src/forward/predict/raw.rs:190`) and re-runs
   `from_layer..num_layers` over the **entire growing context** every
   step. There is no cross-step KV persistence: each decode is O(N)
   attention work, total O(N²). This is inherent to the "retrieval-style,
@@ -442,7 +472,7 @@ contract (see `apollo` notes above).
 | `standard` | Backend KV cache; clean | — |
 | `markov_residual` | Cold-tier O(N²) merge — fixed 2026-05-19 via doubling-capacity `append_cold_overflow` | landed |
 | `markov_residual_codec` | Shares `markov_residual` cold tier; same fix | landed |
-| `unlimited_context` | Clean | — |
+| `windowed_checkpoint` | Clean | — |
 | `turbo_quant` | O(N) decompress+recompress per step — fixed 2026-05-19 via append-only codec path (30.1 → 82.8 tok/s, +175%) | landed |
 | `apollo` | O(N²) by design — `forward_from_layer` rebuilds KV each step over growing context | not a bug |
 | `boundary_kv` | Clean | — |
@@ -532,7 +562,7 @@ checkpoint, use:
 
 ```sh
 cargo run -p larql-cli --release -- bench gemma3:4b --engine markov-rs
-cargo run -p larql-cli --release -- bench gemma3:4b --engine unlimited-context:window=256
+cargo run -p larql-cli --release -- bench gemma3:4b --engine windowed-checkpoint:window=256
 cargo run -p larql-cli --release -- bench gemma3:4b --engine turbo-quant:bits=4
 cargo run -p larql-cli --release -- bench gemma3:4b --engine apollo:layer=30
 cargo run -p larql-cli --release -- bench gemma3:4b --engine boundary-per-layer:window=512

@@ -160,7 +160,12 @@ pub fn dispatch_full_pipeline(
     _residual_norm_q8_pipeline: &ComputePipelineState,
     q4k_qkv_proj_pipeline: Option<&ComputePipelineState>,
     q4kf_qkv_proj_pipeline: Option<&ComputePipelineState>,
+    q4k_q6k_qkv_proj_pipeline: Option<&crate::kernels::KernelHandle>,
     q4kf_proj_pipeline: Option<&ComputePipelineState>,
+    // Element-wise `out += bias` for attention projection biases. `None`
+    // only on legacy callers; a layer that carries a bias refuses loudly
+    // rather than silently dropping it.
+    bias_add_pipeline: Option<&ComputePipelineState>,
     rope_at_pos_pipeline: Option<&ComputePipelineState>,
     qk_norm_pipeline: Option<&ComputePipelineState>,
     scale_vector_pipeline: Option<&ComputePipelineState>,
@@ -209,10 +214,9 @@ pub fn dispatch_full_pipeline(
     // shared references means the body's existing `wq_bufs[l]` etc.
     // resolve through `Vec<Buffer>` indexing unchanged.
     // Q/K/V weight & scale buffers are consumed inside the
-    // input-norm + QKV stage helper (`stages::encode_input_norm_and_qkv`)
-    // — the helper reads them off `lb` directly. The rest of the body
-    // only needs `wo` (for o_proj).
-    let wo_bufs = &lb.wo;
+    // input-norm + QKV stage helper (`stages::encode_input_norm_and_qkv`),
+    // and `wo` + the Q8 staging pair inside `stages::encode_o_proj_stage`
+    // — those helpers read them off `lb` directly.
     let gate_bufs = &lb.gate;
     let up_bufs = &lb.up;
     let down_bufs = &lb.down;
@@ -231,8 +235,6 @@ pub fn dispatch_full_pipeline(
     let up_outs = &lb.up_out;
     let act_bufs_vec = &lb.act_buf;
     let down_outs = &lb.down_out;
-    let q8_bufs = &lb.q8;
-    let q8s_bufs = &lb.q8s;
     let ffn_q8_bufs = &lb.ffn_q8;
     let ffn_q8s_bufs = &lb.ffn_q8s;
     let q8_row_max = lb.q8_row_max;
@@ -250,8 +252,9 @@ pub fn dispatch_full_pipeline(
     super::dump::dump_h_embed(dump_path.as_deref(), &lb, seq_len, hidden);
 
     for l in 0..num_layers {
+        let _route_scope = larql_compute::moe_route_observe::LayerScope::new(l);
         let eps = layers[l].eps;
-        let layer_rope_base = layers[l].rope_base;
+        let layer_rope_plan = &layers[l].rope_freq;
         let layer_head_dim = layers[l].head_dim;
         let layer_num_q_heads = layers[l].num_q_heads;
         let layer_num_kv_heads = layers[l].num_kv_heads;
@@ -263,16 +266,12 @@ pub fn dispatch_full_pipeline(
 
         // ── 1+3. Input norm + Q/K/V projections (format-aware) ──
         //
-        // Per-position offsets (bytes). `layer_q_dim` / `layer_kv_dim`
-        // are the **this layer's** actual dimensions — Gemma 4
-        // alternates sliding (head_dim=256) and global (head_dim=512)
-        // layers so these differ per layer. Offsets into the per-layer
-        // allocated buffers use the per-layer dims; `q_dim` / `kv_dim`
-        // are only used as fallback stride for the Q8 staging bucket.
-        let h_off = |p: usize| (p * hidden * 4) as u64;
-        let q_off = |p: usize| (p * layer_q_dim * 4) as u64;
-        let q8_off = |p: usize| (p * q8_row_max) as u64;
-        let q8s_off = |p: usize| (p * q8s_row_bytes) as u64;
+        // Per-position offsets live inside the stage helpers now
+        // (`encode_input_norm_and_qkv`, `encode_o_proj_stage`), derived
+        // from **this layer's** actual dimensions — Gemma 4 alternates
+        // sliding (head_dim=256) and global (head_dim=512) layers so
+        // they differ per layer; `q_dim` / `kv_dim` are only fallback
+        // stride for the Q8 staging bucket.
         let qm_pipes = crate::stages::quant_matvec::Pipelines {
             q4kf_proj: q4kf_proj_pipeline,
             q4k_matvec_fallback: q4k_matvec_pipeline,
@@ -300,6 +299,8 @@ pub fn dispatch_full_pipeline(
                 q8_qkv_proj: q8_qkv_proj_pipeline,
                 q4kf_qkv_proj: q4kf_qkv_proj_pipeline,
                 q4k_qkv_proj: q4k_qkv_proj_pipeline,
+                q4k_q6k_qkv_proj: q4k_q6k_qkv_proj_pipeline,
+                bias_add: bias_add_pipeline,
                 qm_pipes,
             },
             &lb,
@@ -411,7 +412,7 @@ pub fn dispatch_full_pipeline(
                 layer_num_kv_heads,
                 layer_head_dim,
                 layers[l].rotary_dim,
-                layer_rope_base,
+                layer_rope_plan,
             );
             enc.end_encoding();
         }
@@ -431,7 +432,7 @@ pub fn dispatch_full_pipeline(
                 layer_num_kv_heads,
                 layer_head_dim,
                 layer_attn_scale,
-                layer_rope_base,
+                layer_rope_plan,
                 crate::stages::attention::Flags {
                     // Caller pre-applied QK-norm: tell shader to skip its internal
                     // normalisation so we don't double-normalise.
@@ -439,7 +440,15 @@ pub fn dispatch_full_pipeline(
                     skip_rope: use_separate_rope,
                     softcap,
                     rotary_dim: layers[l].rotary_dim as u32,
+                    // ROADMAP M4. `sliding_window` is already per-layer and
+                    // already resolved through
+                    // `effective_attention_window_for_layer` in
+                    // `build_pipeline_layers`, with 0 as the "attend
+                    // everything" sentinel — so global layers arrive as 0 and
+                    // stay unwindowed.
+                    window: (layers[l].sliding_window != 0).then_some(layers[l].sliding_window),
                 },
+                layers[l].attn_sinks,
             );
             enc.end_encoding();
         }
@@ -453,7 +462,10 @@ pub fn dispatch_full_pipeline(
         if let Some(iv) = intervention {
             if l == iv.target_layer {
                 cmd.commit();
-                cmd.wait_until_completed();
+                let _ = crate::cb_status::wait_checked(
+                    &cmd,
+                    "crates/larql-compute-metal/src/ops/full_pipeline/dispatch.rs:465",
+                );
                 let q_dim = iv.num_q_heads * iv.head_dim;
 
                 // A.1: Capture pre-W_O for oracle code computation.
@@ -493,40 +505,21 @@ pub fn dispatch_full_pipeline(
             }
         }
 
-        // ── 5. O projection. Per position, coalesced into a single
-        // encoder so we pay one encoder-create + end_encoding for the
-        // whole stage. (Tried wiring `q4k_matmul` here for seq_len>1
-        // prefill — kernel-isolated 3.8× speedup did NOT translate
-        // end-to-end. Within-noise on short prompts, ~10% regression
-        // on long prompts. Same root cause as the f16 acc and FFN
-        // gate+up tries: the kernel was already bandwidth-near-peak
-        // and the matmul's [seq_len × q_dim] X working set thrashes
-        // L1 on long prompts. Reverted 2026-04-28; matmul kernel
-        // remains shipped with parity tests but isn't worth wiring
-        // into production decode/prefill.)
-        {
-            let enc = cmd.new_compute_command_encoder();
-            for pos in 0..seq_len {
-                crate::stages::o_proj::encode(
-                    enc,
-                    &qm_pipes,
-                    q8_quant_pipeline,
-                    layers[l].wo.format,
-                    &wo_bufs[l],
-                    &attn_outs[l],
-                    q_off(pos),
-                    &q8_bufs[l],
-                    q8_off(pos),
-                    &q8s_bufs[l],
-                    q8s_off(pos),
-                    &o_outs[l],
-                    h_off(pos),
-                    layer_q_dim,
-                    hidden,
-                );
-            }
-            enc.end_encoding();
-        }
+        // ── 5. O projection (+ optional O bias). See
+        // `stages::encode_o_proj_stage` for the per-position encoding and
+        // the q4k_matmul ship-log on why prefill stays per-position matvec.
+        super::stages::encode_o_proj_stage(
+            cmd.as_ref(),
+            &layers[l],
+            l,
+            seq_len,
+            hidden,
+            layer_q_dim,
+            &qm_pipes,
+            q8_quant_pipeline,
+            bias_add_pipeline,
+            &lb,
+        );
 
         // ── Intervention hook B: add replacement_delta to o_outs[l] ──
         //
@@ -539,7 +532,10 @@ pub fn dispatch_full_pipeline(
         if let Some(iv) = intervention {
             if l == iv.target_layer {
                 cmd.commit();
-                cmd.wait_until_completed();
+                let _ = crate::cb_status::wait_checked(
+                    &cmd,
+                    "crates/larql-compute-metal/src/ops/full_pipeline/dispatch.rs:532",
+                );
                 debug_assert_eq!(
                     iv.replacement_delta.len(),
                     seq_len * hidden,
@@ -567,7 +563,7 @@ pub fn dispatch_full_pipeline(
         //       consumed only by Q4_0 / Q8_0 FFN.
         // `h_post_attns[l]` holds the post-residual f32 hidden state for the
         // final residual add at the end of this layer (step 10).
-        let ffn_format = layers[l].gate.format;
+        let ffn_format = layers[l].gate.format();
         let ffn_needs_q8 = matches!(
             ffn_format,
             larql_compute::QuantFormat::Q4_0 | larql_compute::QuantFormat::Q8_0
@@ -630,8 +626,8 @@ pub fn dispatch_full_pipeline(
                     &qm_pipes,
                     silu_pipeline,
                     gelu_tanh_pipeline,
-                    layers[l].up.format,
-                    layers[l].down.format,
+                    layers[l].up.format(),
+                    layers[l].down.format(),
                     act,
                     &up_bufs[l],
                     &down_bufs[l],
@@ -661,9 +657,9 @@ pub fn dispatch_full_pipeline(
                         q6k_silu: fused_q6k_geglu_silu_down,
                         q6k_gelu_tanh: fused_q6k_geglu_gelu_tanh_down,
                     },
-                    layers[l].gate.format,
-                    layers[l].up.format,
-                    layers[l].down.format,
+                    layers[l].gate.format(),
+                    layers[l].up.format(),
+                    layers[l].down.format(),
                     act,
                     &gate_bufs[l],
                     &up_bufs[l],
@@ -752,7 +748,10 @@ pub fn dispatch_full_pipeline(
         // restart the command buffer for the next layer.
         if needs_per_layer_commit {
             cmd.commit();
-            cmd.wait_until_completed();
+            let _ = crate::cb_status::wait_checked(
+                &cmd,
+                "crates/larql-compute-metal/src/ops/full_pipeline/dispatch.rs:745",
+            );
 
             // KV cache: copy this layer's K/V before the caller reads
             // `h_post_attn` or touches `new_h`.
@@ -780,7 +779,10 @@ pub fn dispatch_full_pipeline(
 
     if !needs_per_layer_commit {
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            &cmd,
+            "crates/larql-compute-metal/src/ops/full_pipeline/dispatch.rs:773",
+        );
 
         // Post-commit: populate persistent KV cache from GPU-computed
         // RoPE'd K/V (buffers are readable now that the command buffer is

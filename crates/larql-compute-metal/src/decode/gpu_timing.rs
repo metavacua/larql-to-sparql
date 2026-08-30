@@ -45,6 +45,50 @@ pub fn gpu_elapsed_ms(cmd: &CommandBufferRef) -> f64 {
     (end - start) * 1000.0
 }
 
+/// Host-side segment accumulators for the merged-CB MoE path, in ms.
+///
+/// `LARQL_GPU_TIMING=1` already separates GPU-busy from wall; the residual is
+/// host time that does not overlap GPU execution. These name where it goes.
+/// Thread-local because the decode loop is single-threaded per token and
+/// threading a `&mut` through `handle_moe_interleave` would touch every
+/// caller for a diagnostic.
+#[derive(Default, Clone, Copy)]
+pub struct HostSegments {
+    /// Blocked in `wait_until_completed` — CONTAINS GPU execution, so this is
+    /// not pure host cost. Reported to show how much of the wall is the
+    /// host standing still.
+    pub wait_ms: f64,
+    /// `end_encoding()` + `commit()` — host-side driver work translating and
+    /// submitting the encoded commands. Distinct from `wait_ms`: an empty
+    /// command buffer round trip measures ~15 us (see LARQL_EXTRA_BARRIERS),
+    /// so anything large here is submission cost, not scheduling latency.
+    pub commit_ms: f64,
+    /// CPU routing: expert input norm, router input, top-k selection.
+    pub route_ms: f64,
+    /// Expert byte-range → Metal buffer resolution.
+    pub resolve_ms: f64,
+    /// Encoding the expert + combine dispatches.
+    pub encode_ms: f64,
+}
+
+thread_local! {
+    static HOST_SEGMENTS: std::cell::Cell<HostSegments> =
+        const { std::cell::Cell::new(HostSegments { wait_ms: 0.0, commit_ms: 0.0, route_ms: 0.0, resolve_ms: 0.0, encode_ms: 0.0 }) };
+}
+
+/// Add `ms` to one segment. `pick` selects the field.
+pub fn add_host_segment(pick: fn(&mut HostSegments) -> &mut f64, ms: f64) {
+    HOST_SEGMENTS.with(|c| {
+        let mut v = c.get();
+        *pick(&mut v) += ms;
+        c.set(v);
+    });
+}
+
+fn take_host_segments() -> HostSegments {
+    HOST_SEGMENTS.with(|c| c.replace(HostSegments::default()))
+}
+
 /// Stage labels for fine-grained per-token GPU profiling.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum DecodeStage {
@@ -88,6 +132,19 @@ pub struct TokenGpuTime {
     pub dense_ffn_ms: f64,
     pub final_ms: f64,
     pub other_ms: f64,
+    /// GPU idle BETWEEN consecutive command buffers, from this token's own
+    /// timestamps: `GPUStartTime[i+1] - GPUEndTime[i]`. This is the bubble —
+    /// wall time in which no GPU work is executing and the host has not yet
+    /// handed over the next buffer. Separates "the GPU is waiting for us"
+    /// from "our kernels are slow".
+    pub gpu_idle_between_ms: f64,
+    /// Each individual `GPUStartTime[i+1] - GPUEndTime[i]` gap, in ms, in
+    /// command-buffer order. Printed per token under `LARQL_GPU_TIMING=1` so a
+    /// gap can be correlated with the layer and the resources it referenced —
+    /// a sum cannot distinguish "every layer costs the same" from "layer 0
+    /// costs everything".
+    pub gaps_ms: Vec<f64>,
+    last_gpu_end: Option<f64>,
 }
 
 impl TokenGpuTime {
@@ -100,6 +157,19 @@ impl TokenGpuTime {
     /// Like [`Self::record`] but also accumulates the elapsed time into
     /// the per-stage bucket for fine-grained profiling.
     pub fn record_stage(&mut self, cmd: &CommandBufferRef, stage: DecodeStage) {
+        let (gstart, gend) = gpu_window_seconds(cmd);
+        if let Some(prev_end) = self.last_gpu_end {
+            let gap = (gstart - prev_end) * 1000.0;
+            // Negative would mean overlapping buffers — possible in principle,
+            // and not a bubble, so it is not accumulated as one.
+            if gap.is_finite() && gap > 0.0 {
+                self.gpu_idle_between_ms += gap;
+                self.gaps_ms.push(gap);
+            }
+        }
+        if gend.is_finite() {
+            self.last_gpu_end = Some(gend);
+        }
         let elapsed = gpu_elapsed_ms(cmd);
         if elapsed.is_finite() && elapsed > 0.0 {
             self.total_gpu_ms += elapsed;
@@ -127,6 +197,32 @@ impl TokenGpuTime {
             return;
         }
         let cpu_ms = wall_ms - self.total_gpu_ms;
+        let seg = take_host_segments();
+        if seg.wait_ms > 0.0 || seg.route_ms > 0.0 {
+            eprintln!(
+                "[gpu-timing/host] commit={:.3}ms wait={:.3}ms (incl. GPU {:.3}ms) \
+                 route={:.3}ms resolve={:.3}ms encode={:.3}ms  unaccounted={:.3}ms",
+                seg.commit_ms,
+                seg.wait_ms,
+                self.total_gpu_ms,
+                seg.route_ms,
+                seg.resolve_ms,
+                seg.encode_ms,
+                cpu_ms - seg.route_ms - seg.resolve_ms - seg.encode_ms - seg.commit_ms,
+            );
+            eprintln!(
+                "[gpu-timing/bubble] gpu_idle_between_cbs={:.3}ms  ({:.0} us x {} gaps)",
+                self.gpu_idle_between_ms,
+                self.gpu_idle_between_ms * 1000.0 / (self.n_cmd_buffers.max(2) - 1) as f64,
+                self.n_cmd_buffers.saturating_sub(1),
+            );
+            let per_gap: Vec<String> = self
+                .gaps_ms
+                .iter()
+                .map(|g| format!("{:.0}", g * 1000.0))
+                .collect();
+            eprintln!("[gpu-timing/gaps-us] {}", per_gap.join(" "));
+        }
         let cpu_pct = if wall_ms > 0.0 {
             cpu_ms / wall_ms * 100.0
         } else {
@@ -219,6 +315,9 @@ mod tests {
             other_ms: other,
             total_gpu_ms: attn + gate_up + down + dense_ffn + final_ + other,
             n_cmd_buffers: 1,
+            gpu_idle_between_ms: 0.0,
+            gaps_ms: Vec::new(),
+            last_gpu_end: None,
         }
     }
 
@@ -295,7 +394,10 @@ mod tests {
         };
         let cmd = m.queue.new_command_buffer();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/decode/gpu_timing.rs:397",
+        );
 
         let mut t = TokenGpuTime::default();
         // gpu_elapsed_ms returns 0.0 for an empty cmd buffer (no GPU

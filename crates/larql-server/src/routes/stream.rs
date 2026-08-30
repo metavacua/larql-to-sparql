@@ -33,6 +33,9 @@ const WS_CMD_GENERATE: &str = "generate";
 const WS_CMD_CANCEL: &str = "cancel";
 const WS_TYPE_TOKEN: &str = "token";
 
+/// Default `max_tokens` for a WebSocket `generate` command that omits it.
+const DEFAULT_STREAM_MAX_TOKENS: u64 = 256;
+
 fn ws_error(message: impl Into<String>) -> serde_json::Value {
     serde_json::json!({"type": WS_TYPE_ERROR, "message": message.into()})
 }
@@ -194,7 +197,7 @@ async fn stream_describe_messages(
     };
 
     let model = match state.model(None) {
-        Some(m) => Arc::clone(m),
+        Some(m) => m,
         None => return vec![ws_error("no model loaded")],
     };
 
@@ -298,7 +301,7 @@ async fn handle_stream_infer(
     };
 
     let model = match state.model(None) {
-        Some(m) => Arc::clone(m),
+        Some(m) => m,
         None => {
             send_error(socket, "no model loaded").await;
             return;
@@ -400,10 +403,12 @@ async fn handle_stream_generate(
             return;
         }
     };
-    let max_tokens = request["max_tokens"].as_u64().unwrap_or(256) as usize;
+    let max_tokens = request["max_tokens"]
+        .as_u64()
+        .unwrap_or(DEFAULT_STREAM_MAX_TOKENS) as usize;
 
     let model = match state.model(None) {
-        Some(m) => Arc::clone(m),
+        Some(m) => m,
         None => {
             send_error(socket, "no model loaded").await;
             return;
@@ -474,6 +479,7 @@ async fn handle_stream_generate(
             sampling,
             &eos,
             on_token,
+            None,
         );
     });
 
@@ -717,14 +723,26 @@ mod tests {
     }
 
     fn test_state(models: Vec<Arc<LoadedModel>>) -> Arc<AppState> {
+        let router_topology = crate::state::RouterTopology::for_boot_count(models.len());
         Arc::new(AppState {
-            models,
+            model_set: std::sync::RwLock::new(crate::state::ModelSet {
+                models,
+                v3_models: Vec::new(),
+            }),
+            router_topology,
+            lifecycle: std::sync::Mutex::new(crate::state::LifecycleState::Idle),
             started_at: std::time::Instant::now(),
             requests_served: AtomicU64::new(0),
             api_key: None,
             sessions: SessionManager::new(3600),
             describe_cache: DescribeCache::new(0),
             infer_timeout: std::time::Duration::from_secs(60),
+            responses: crate::response_store::ResponseStore::new(),
+            v3_kv: crate::response_kv::ResponseKvCache::new(
+                crate::response_kv::DEFAULT_MAX_ENTRIES,
+                crate::response_kv::DEFAULT_TTL_SECS,
+            ),
+            runtime: std::sync::Arc::new(crate::runtime_stats::RuntimeRecorder::new()),
         })
     }
 

@@ -60,7 +60,7 @@ impl Session {
         conditions: &[Condition],
         limit: Option<u32>,
     ) -> Result<Vec<String>, LqlError> {
-        let (_path, config, patched) = self.require_vindex()?;
+        let ctx = self.browse()?;
 
         let layer_filter = conditions
             .iter()
@@ -81,7 +81,7 @@ impl Session {
         let scan_layers: Vec<usize> = if let Some(l) = layer_filter {
             vec![l]
         } else {
-            (0..config.num_layers).collect()
+            (0..ctx.num_layers).collect()
         };
 
         // Aggregate: token → (occurrence count, max c_score across layers).
@@ -89,9 +89,9 @@ impl Session {
             std::collections::HashMap::new();
 
         for layer in &scan_layers {
-            let nf = patched.num_features(*layer);
+            let nf = ctx.source.num_features(*layer);
             for feat in 0..nf {
-                if let Some(meta) = patched.feature_meta(*layer, feat) {
+                if let Some(meta) = ctx.source.feature_meta(*layer, feat) {
                     let tok = meta.top_token.trim().to_string();
                     if !looks_like_entity(&tok) {
                         continue;

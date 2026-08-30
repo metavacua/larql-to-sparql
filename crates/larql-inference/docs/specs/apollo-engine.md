@@ -116,7 +116,7 @@ that consumes them.
 |---|---|
 | Engine struct + `RetrievalEngine` impl (NOT `KvEngine` — see the 2026-05-24 note above) | `crates/larql-kv/src/engines/apollo/engine.rs` |
 | Store schema | `crates/larql-apollo/` |
-| `forward_from_layer` (run-tail) | `crates/larql-inference/src/forward/from_layer.rs` |
+| `forward_from_layer` (run-tail) | **does not exist as written** — the shipped surface is `AsyncComputeBackend::forward_from_layer_async` (`crates/larql-compute/src/async_compute_backend/cpu.rs`) |
 | Residual capture (offline) | `crates/larql-apollo::capture` |
 
 Apollo composes with `StandardEngine`'s `KvHandle` underneath when

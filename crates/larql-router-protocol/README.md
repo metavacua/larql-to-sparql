@@ -138,7 +138,7 @@ End-to-end demo + microbench:
 
 ```bash
 # Wire walkthrough — empty / patched / orthogonal / cache paths
-cargo run --release -p larql-server --example shard_query_demo
+cargo run --release -p larql-demos --example shard_query_demo
 
 # In-process ShardSource::lookup hot-path bench
 make bench-shard-query

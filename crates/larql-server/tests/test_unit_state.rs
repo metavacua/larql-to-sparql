@@ -115,13 +115,24 @@ fn make_tiny_model(id: &str) -> Arc<LoadedModel> {
 
 fn make_tiny_state(models: Vec<Arc<LoadedModel>>) -> Arc<AppState> {
     Arc::new(AppState {
-        models,
+        model_set: std::sync::RwLock::new(larql_server::state::ModelSet {
+            models,
+            v3_models: Vec::new(),
+        }),
+        router_topology: larql_server::state::RouterTopology::SingleModel,
+        lifecycle: std::sync::Mutex::new(larql_server::state::LifecycleState::Idle),
         started_at: std::time::Instant::now(),
         requests_served: AtomicU64::new(0),
         api_key: None,
         sessions: SessionManager::new(3600),
         describe_cache: DescribeCache::new(0),
         infer_timeout: std::time::Duration::from_secs(60),
+        responses: larql_server::response_store::ResponseStore::new(),
+        v3_kv: larql_server::response_kv::ResponseKvCache::new(
+            larql_server::response_kv::DEFAULT_MAX_ENTRIES,
+            larql_server::response_kv::DEFAULT_TTL_SECS,
+        ),
+        runtime: Arc::new(larql_server::runtime_stats::RuntimeRecorder::new()),
     })
 }
 
@@ -1129,6 +1140,12 @@ fn test_server_error_bad_request_maps_to_400() {
 fn test_server_error_internal_maps_to_500() {
     let resp = ServerError::Internal("oops".into()).into_response();
     assert_eq!(resp.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[test]
+fn test_server_error_conflict_maps_to_409() {
+    let resp = ServerError::Conflict("already loading".into()).into_response();
+    assert_eq!(resp.status(), axum::http::StatusCode::CONFLICT);
 }
 
 #[test]

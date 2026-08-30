@@ -10,6 +10,11 @@ semantic version. Tooling pins via Cargo; the integer
 `vindex_spec_version` in the manifest is the compatibility tag, not
 the evolution channel.
 
+Loader-side behaviour on corrupt artifacts — the error-not-panic
+guarantee, the safe-decline cases, the little-endian byte-order
+golden vectors, and the pinning test suite — is specified in the
+[v1 conformance contract](../larql-vindex/docs/conformance-v1.md).
+
 ## 1. Scope
 
 A *vindex* is a directory of mmap-friendly binary files (`*.bin`) plus
@@ -123,8 +128,8 @@ Filename convention (set by the Rust constants in
   `attn_weights_kquant.bin`, `lm_head_kquant.bin`,
   `down_features_kquant.bin` (each paired with a
   `*_manifest.json` sidecar where applicable). Writers emit these.
-- Legacy: `interleaved_q4k.bin`, `attn_weights_q4k.bin`,
-  `lm_head_q4.bin`, `down_features_q4k.bin`. Readers MUST accept
+- Legacy: `interleaved_kquant.bin`, `attn_weights_kquant.bin`,
+  `lm_head_q4.bin`, `down_features_kquant.bin`. Readers MUST accept
   these as the read-only fallback; writers no longer emit them.
 
 The dual-naming is the on-disk counterpart of the `q4k` / `kquant`

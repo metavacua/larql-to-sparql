@@ -13,9 +13,12 @@ use std::ffi::c_void;
 
 /// Compute the threadgroup width for a `head_dim`-long cooperative reduction.
 /// Rounds up to a power of two, capped at 512 (shader limit).
+/// The widest threadgroup the qk-norm kernels dispatch with.
+pub(crate) const MAX_TG_WIDTH: u64 = 512;
+
 fn tg_width(head_dim: usize) -> u64 {
     let mut tg: u64 = 1;
-    while (tg as usize) < head_dim && tg < 512 {
+    while (tg as usize) < head_dim && tg < MAX_TG_WIDTH {
         tg <<= 1;
     }
     tg
@@ -191,7 +194,10 @@ mod tests {
         );
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/stages/qk_norm.rs:194",
+        );
 
         let q_out = crate::buffers::read_buffer_f32(&q_buf, num_q_heads * head_dim);
         let k_out = crate::buffers::read_buffer_f32(&k_buf, num_kv_heads * head_dim);
@@ -240,7 +246,10 @@ mod tests {
         );
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/stages/qk_norm.rs:243",
+        );
 
         let v_out = crate::buffers::read_buffer_f32(&v_buf, num_kv_heads * head_dim);
         assert!(

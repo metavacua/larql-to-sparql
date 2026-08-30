@@ -276,7 +276,7 @@ Pattern matching for `drop_ffn_weights`:
 
 Loader string constants are centralized in code:
 - `weights.rs` owns shared FFN/attention classifiers and packed expert key fragments.
-- `loading/safetensors.rs` owns safetensors/GGUF extension names, HF cache path fragments, and GPT-OSS MXFP4 suffix/key helpers.
+- `loading/loading/safetensors/` owns safetensors/GGUF extension names, HF cache path fragments, and GPT-OSS MXFP4 suffix/key helpers.
 - `loading/gguf.rs` owns GGUF metadata suffixes and the GGUF-to-HF key replacement table.
 
 ### skipped_tensors

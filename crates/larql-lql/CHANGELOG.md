@@ -6,6 +6,33 @@ The format follows the conventions of [Keep a Changelog](https://keepachangelog.
 with dated entries (`YYYY-MM-DD`) instead of semantic versions during the
 pre-1.0 phase. Forward-looking work lives in [`ROADMAP.md`](ROADMAP.md).
 
+## [2026-06-05/06] — Coverage session 2: 89.21% → 93.91% total
+
+~230 targeted tests added across
+`tests/cov_{mutation,query,lifecycle,executor_core,parser_lexer}_synthetic.rs`,
+`cov_tier_a*.rs`, `cov_remote_mockito.rs`, and
+`cov_patch_lifecycle_synthetic.rs`. Twenty files cleared 90% and were removed
+from the debt list in `coverage-policy.json`, leaving seven.
+
+Recorded here because the reasoning is reusable: the seven remaining debt files
+are hard for a structural reason, not for lack of effort. Each needs either a
+real HuggingFace model directory (a `Backend::Weight` session — `extract.rs`,
+`lifecycle/compile/into_model.rs`, `lifecycle/use_cmd.rs`'s `USE MODEL` success
+path, `query/infer.rs`'s dense-inference arm, `executor/backend.rs`'s `Weight`
+arms, parts of `introspection.rs`) or is an interactive REPL (`repl.rs`).
+Confirmed this session: in-crate `#[cfg(test)]` unit tests do **not** move the
+integration-link coverage summary, so the only route is a hand-built
+safetensors fixture in `larql-inference` test_utils.
+
+## [2026-05-28] — Hardening findings from the whole-codebase review
+
+From the whole-codebase review ([`docs/audits/codebase-review-2026-05-28.md`](../../docs/audits/codebase-review-2026-05-28.md)):
+
+- **P1 — four `embed.row()` sites bypass the crate's own safe helper** (`walk:38`, `explain:31`, `insert/plan:122`, `compact:242`); they skip `average_embed_rows`, so an OOV/unbounded token id panics. Route through `average_embed_rows` / a bounds-checked helper.
+
+Recorded, not fixed. Still open — see [`ROADMAP.md`](ROADMAP.md) §"Open
+defects".
+
 ## [2026-05-10] — Coverage push: 38% → 87.7% lines, 96 new tests
 
 Multi-round coverage push on the executor. 584 → 679 tests (+96), full lib

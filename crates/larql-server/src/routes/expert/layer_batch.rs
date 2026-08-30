@@ -30,7 +30,7 @@ use crate::env_flags;
 use crate::error::ServerError;
 use crate::state::AppState;
 
-use super::cpu::run_experts_cpu_batch;
+use super::cpu::{count_nonzero_weights, run_experts_cpu_batch};
 
 // Limits concurrent `run_experts_cpu_batch` calls to the number of logical
 // CPUs on the machine.  Without this, 30 simultaneous predispatch requests
@@ -45,14 +45,11 @@ use super::cpu::run_experts_cpu_batch;
 fn compute_semaphore() -> &'static Semaphore {
     static SEM: OnceLock<Semaphore> = OnceLock::new();
     SEM.get_or_init(|| {
-        let n = std::env::var("LARQL_COMPUTE_CONCURRENCY")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or_else(|| {
-                std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(8)
-            });
+        let n = env_flags::compute_concurrency().unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(8)
+        });
         Semaphore::new(n)
     })
 }
@@ -77,6 +74,9 @@ pub async fn handle_experts_layer_batch(
     body: Bytes,
 ) -> Result<Response, ServerError> {
     state.bump_requests();
+    // Track drain/heartbeat visibility: in-flight guard + per-model
+    // cumulative counter, same pattern as `walk_ffn::handler`.
+    let _rif_guard = crate::routes::walk_ffn::types::track_model_request(&state);
     // Per-stage timing for HTTP-overhead diagnosis. Enable with
     // `LARQL_HTTP_TIMING=1`. Cached process-wide in `env_flags`.
     let timing = env_flags::http_timing_enabled();
@@ -91,6 +91,7 @@ pub async fn handle_experts_layer_batch(
     };
 
     let expert_ids: Vec<usize> = expert_ids_u32.iter().map(|&e| e as usize).collect();
+    let n_requested = count_nonzero_weights(&expert_weights);
 
     let t_spawn_in = std::time::Instant::now();
     // Acquire a compute slot before spawning.  Limits concurrent
@@ -104,11 +105,24 @@ pub async fn handle_experts_layer_batch(
         let t_in = std::time::Instant::now();
         let r = run_experts_cpu_batch(&state, layer, &residual, &expert_ids, &expert_weights);
         let t_internal = t_in.elapsed();
+        if let Some(m) = state.model(None) {
+            m.layer_latency_tracker
+                .record(layer as u32, t_internal.as_secs_f32() * 1000.0);
+        }
         (r, t_internal)
     })
     .await
     .map_err(|e| ServerError::Internal(e.to_string()))?;
-    let weighted_sum = weighted_sum?;
+    let (weighted_sum, n_run) = weighted_sum?;
+    if n_run != n_requested {
+        // Production clients partition tasks per shard ownership, so an
+        // unresolvable expert here is a genuine error — never a partial sum.
+        return Err(ServerError::BadRequest(format!(
+            "layer {layer}: {} of {n_requested} requested experts could not be \
+             resolved on this shard",
+            n_requested - n_run
+        )));
+    }
     let t_total_compute = t_spawn_in.elapsed();
     let t_spawn_overhead = t_total_compute.saturating_sub(t_spawn_internal);
 
@@ -157,6 +171,7 @@ pub async fn handle_experts_layer_batch_f16(
     body: Bytes,
 ) -> Result<Response, ServerError> {
     state.bump_requests();
+    let _rif_guard = crate::routes::walk_ffn::types::track_model_request(&state);
     let timing = env_flags::http_timing_enabled();
     let t_start = std::time::Instant::now();
 
@@ -170,6 +185,7 @@ pub async fn handle_experts_layer_batch_f16(
     };
 
     let expert_ids: Vec<usize> = expert_ids_u32.iter().map(|&e| e as usize).collect();
+    let n_requested = count_nonzero_weights(&expert_weights);
 
     let t_spawn_in = std::time::Instant::now();
     let _permit = compute_semaphore()
@@ -180,11 +196,22 @@ pub async fn handle_experts_layer_batch_f16(
         let t_in = std::time::Instant::now();
         let r = run_experts_cpu_batch(&state, layer, &residual, &expert_ids, &expert_weights);
         let t_internal = t_in.elapsed();
+        if let Some(m) = state.model(None) {
+            m.layer_latency_tracker
+                .record(layer as u32, t_internal.as_secs_f32() * 1000.0);
+        }
         (r, t_internal)
     })
     .await
     .map_err(|e| ServerError::Internal(e.to_string()))?;
-    let weighted_sum = weighted_sum?;
+    let (weighted_sum, n_run) = weighted_sum?;
+    if n_run != n_requested {
+        return Err(ServerError::BadRequest(format!(
+            "layer {layer}: {} of {n_requested} requested experts could not be \
+             resolved on this shard",
+            n_requested - n_run
+        )));
+    }
     let t_total_compute = t_spawn_in.elapsed();
     let t_spawn_overhead = t_total_compute.saturating_sub(t_spawn_internal);
 

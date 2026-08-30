@@ -79,7 +79,7 @@ does not expose it. The total of ~24 ms is 1000 / 41.37 tok/s.
 
 llama.cpp uses batched gemm: weights read once and applied to all 5
 prompt positions in a single Accelerate sgemm call. larql currently
-takes the legacy `predict_q4k_prefill` path: dequantise each layer's
+takes the legacy `predict_kquant_prefill` path: dequantise each layer's
 Q/K/V/O/gate/up/down to f32 once per layer, then do per-position attention
 + FFN over the prompt. The dequant cost (≈ 75 ms × 33 layers ≈ 2.5 s) is
 the dominant prefill cost; the actual matmul work is small at seq_len=5.

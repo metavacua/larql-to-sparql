@@ -110,27 +110,15 @@ impl TurboQuantEngine {
                 layer_slot.num_vecs * heads_per_row * bytes_per_head,
                 "compressed_k length out of sync with num_vecs on layer {layer}"
             );
-            let k_row_slice = k_new_row.as_slice().expect("non-contiguous K row");
-            for chunk in k_row_slice.chunks(head_dim) {
-                self.tq.encode_vector_into(
-                    chunk,
-                    &mut layer_slot.compressed_k,
-                    &mut scratch_f32,
-                    &mut scratch_u8,
-                );
-            }
-            let v_row_slice = v_new_row.as_slice().expect("non-contiguous V row");
-            for chunk in v_row_slice.chunks(head_dim) {
-                self.tq.encode_vector_into(
-                    chunk,
-                    &mut layer_slot.compressed_v,
-                    &mut scratch_f32,
-                    &mut scratch_u8,
-                );
-            }
-            layer_slot.num_vecs += 1;
-            layer_slot.kv_dim = kv_dim;
-            layer_slot.head_dim = head_dim;
+            debug_assert_eq!(layer_slot.kv_dim, kv_dim);
+            debug_assert_eq!(layer_slot.head_dim, head_dim);
+            layer_slot.append_row(
+                k_new_row.as_slice().expect("non-contiguous K row"),
+                v_new_row.as_slice().expect("non-contiguous V row"),
+                &self.tq,
+                &mut scratch_f32,
+                &mut scratch_u8,
+            );
         }
         if self.profiling {
             self.profile.recompute_hot.record(t_codec);

@@ -3,6 +3,9 @@
 //! - `registry`: Single dispatch table for the GGML quant family
 //!              (Q4_K, Q6_K, …). Adding a new format is one entry
 //!              here; callers do `registry::lookup(tag)?.row_dot(…)`.
+//! - `inventory`: What precision is actually on disk — manifest walk,
+//!              per-projection precision map, single-block decode.
+//!              Backs `larql show` and `larql diag`.
 //! - `scan`:    Q1 compliance measurement — read-only, no output
 //!              side effects.
 //! - `convert`: `vindex_to_fp4` — reads an existing vindex, writes a
@@ -16,10 +19,16 @@
 
 pub mod convert;
 pub mod convert_q4k;
+pub mod inventory;
 pub mod registry;
 pub mod scan;
 
 pub use registry::{lookup, QuantFormatInfo, QUANT_FORMATS};
+
+pub use inventory::{
+    find_tensor, precision_map, read_float_window, read_quant_inventory, PrecisionMap,
+    PrecisionRow, QuantTensor,
+};
 
 pub use convert::{
     vindex_to_fp4, Fp4ConvertConfig, Fp4ConvertReport, Policy, ProjectionAction, ProjectionOutcome,

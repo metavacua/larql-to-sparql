@@ -51,18 +51,19 @@ impl<'a> WhereFilters<'a> {
         }
     }
 
-    /// Resolve the (layer, feature) candidate set against the base vindex.
+    /// Resolve the (layer, feature) candidate set against the bound
+    /// knowledge source (the base scan on either backend).
     ///
     /// Honours all three filters (entity, layer, feature). When both layer
     /// and feature are pinned the lookup short-circuits without scanning.
     pub(super) fn resolve_candidates(
         &self,
-        base: &larql_vindex::VectorIndex,
+        source: &crate::executor::knowledge::KnowledgeSource<'_>,
     ) -> Vec<(usize, usize)> {
         if let (Some(layer), Some(feature)) = (self.layer, self.feature) {
             return vec![(layer, feature)];
         }
-        let mut candidates = base.find_features(self.entity, None, self.layer);
+        let mut candidates = source.find_features(self.entity, self.layer);
         if let Some(wanted) = self.feature {
             candidates.retain(|&(_layer, feature)| feature == wanted);
         }

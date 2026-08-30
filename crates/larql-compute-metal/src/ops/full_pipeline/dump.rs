@@ -67,7 +67,10 @@ pub(super) fn dump_layer0_q_after_stage(
         return cmd;
     }
     cmd.commit();
-    cmd.wait_until_completed();
+    let _ = crate::cb_status::wait_checked(
+        &cmd,
+        "crates/larql-compute-metal/src/ops/full_pipeline/dump.rs:70",
+    );
     let name = format!("metal_L0_q_out_{stage_name}.f32");
     write_f32_buffer(dir, &name, &lb.q_out[layer_idx], seq_len * layer_q_dim);
     queue.new_command_buffer().to_owned()
@@ -93,7 +96,10 @@ pub(super) fn dump_layer_snapshots(
         return cmd;
     };
     cmd.commit();
-    cmd.wait_until_completed();
+    let _ = crate::cb_status::wait_checked(
+        &cmd,
+        "crates/larql-compute-metal/src/ops/full_pipeline/dump.rs:96",
+    );
     let layer_q_dim = layers[l].num_q_heads * layers[l].head_dim;
     let layer_kv_dim = layers[l].num_kv_heads * layers[l].head_dim;
     let layer_dump = |name: &str, buf: &Buffer, n: usize| {

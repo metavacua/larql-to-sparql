@@ -480,11 +480,108 @@ OpenAI clients ignore them.
 }
 ```
 
-### 4.5 OpenAI-Compatible Endpoints (N0 slice 1, shipped 2026-05-02)
+### 4.5 Session Endpoints (N1, shipped 2026-08-22)
 
-Three endpoints conforming to the [OpenAI API](https://platform.openai.com/docs/api-reference)
-shape. Existing `openai` Python/JS SDKs work unmodified — point
-`base_url` at the larql server and the SDK calls just work.
+The operational view and eviction control plane for runtime session
+state. **Observability and termination only** — this surface never
+becomes a second authority for modifying model state, so there is no
+create, no rename, and no patch editing here. Sessions come into
+existence by being *used*: an `X-Session-Id` on `/v1/patches/apply`,
+`/v1/insert`, or `/v1/responses` binds one.
+
+The representation is metadata: patch identities, continuation
+availability, and token counts. Never overlay contents, KV bytes,
+tokenizer state, or cache keys.
+
+#### GET /v1/sessions
+
+Live sessions, most recently used first.
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "session",
+      "id": "sess-medical-team",
+      "model": "gemma-3-4b-it",
+      "created_at": 1755861234,
+      "last_used_at": 1755861299,
+      "expires_at": 1755864899,
+      "state": "active",
+      "patches": {"active": 2, "ids": ["oncology-v3", "dosing-fix"]},
+      "continuation": {
+        "available": true,
+        "input_tokens": 412,
+        "resumptions": 3,
+        "reused_tokens_total": 276
+      }
+    }
+  ]
+}
+```
+
+`state` is `active` — expiry is applied at *read* time, so an expired
+session is absent rather than listed as expired. (Reads take a read
+guard and filter; they never evict, because a writer here would queue
+behind an in-flight sessioned forward pass and stall both inference and
+every other observer.)
+
+`continuation.available` / `input_tokens` describe the KV state
+currently resident for this session; `resumptions` /
+`reused_tokens_total` are cumulative and survive an emptied cache.
+
+#### GET /v1/sessions/{session_id}
+
+The same object for one session; `404` if it is absent or expired.
+
+#### DELETE /v1/sessions/{session_id}
+
+Idempotent and strong. Frees the patch overlay, frees every KV
+continuation the session owns, and retires the session so an in-flight
+generation cannot re-insert one afterwards. Unrelated sessions are
+untouched.
+
+```json
+{
+  "object": "session.deleted",
+  "id": "sess-medical-team",
+  "deleted": true,
+  "patches_freed": 2,
+  "continuations_freed": 1
+}
+```
+
+Repeat deletes are not an error — `deleted: false`, nothing freed. (This
+differs from `DELETE /v1/responses/{id}`, which 404s: a cleanup endpoint
+an operator or a script drives should not fail for having already
+succeeded.)
+
+**Frozen concurrency contract.** A delete that lands while a sessioned
+request is mid-forward-pass waits for that request's read guard: the
+in-flight request completes safely on the state it already acquired,
+and the deletion then prevents any subsequent acquisition. For the
+continuation path — which retains KV *after* generation ends, outside
+any session lock — deletion retires the session's lease, and the KV
+cache checks that lease while holding its own lock. So the two
+possible orderings both end correctly: an insert that gets in first is
+removed by the purge that follows, and an insert that arrives after the
+retirement is refused. A deleted session can never be resurrected by a
+late write.
+
+**TTL interaction.** Expiry uses the same machinery: the maintenance
+sweeper (or any manager write path) evicts idle sessions and retires
+their leases, at which point the session vanishes from `GET`, from the
+listing, and from `/v1/stats.server.sessions.active` together, and its
+continuations become orphans that the KV cache's own sweep collects.
+
+### 4.6 OpenAI-Compatible Endpoints (N0 slice 1, shipped 2026-05-02)
+
+Endpoints conforming to the [OpenAI API](https://platform.openai.com/docs/api-reference)
+shape: `/v1/models`, `/v1/embeddings`, `/v1/completions`,
+`/v1/chat/completions`, and `/v1/responses` (+ `GET`/`DELETE
+/v1/responses/{id}`). Existing `openai` Python/JS SDKs work unmodified
+— point `base_url` at the larql server and the SDK calls just work.
 
 #### GET /v1/models — covered in §4.4 above (now OpenAI-shape).
 
@@ -591,10 +688,126 @@ with `{token, logprob, bytes, top_logprobs}` per emitted token.
 `top_logprobs` currently returns the picked token only; the full
 top-K alternatives are gated on inference work.
 
+#### POST /v1/responses (N0.3, shipped 2026-08-22)
+
+The [Responses API](https://platform.openai.com/docs/api-reference/responses).
+Served by both V2 and V3 runtimes.
+
+```
+Request:  {model?, input: string | [item...], instructions?,
+           previous_response_id?, store?, stream?, tools?, tool_choice?,
+           text?: {format: {...}}, max_output_tokens?, temperature?,
+           top_p?, metadata?, user?}
+Response: {id: "resp_...", object: "response", created_at, model,
+           status: "completed" | "incomplete",
+           incomplete_details?, output: [item...],
+           usage: {input_tokens, output_tokens, total_tokens,
+                   input_tokens_details: {cached_tokens}}}
+```
+
+- **Conversation chaining.** `previous_response_id` replays the stored
+  conversation ahead of this request's input, and the stored model id
+  becomes the default `model` so a follow-up lands on the same runtime.
+  An unknown id is a 404.
+- **Server-side storage.** `store` (default true) retains the envelope
+  and conversation in a bounded FIFO for chaining and for `GET
+  /v1/responses/{id}`; `store: false` retains nothing and the response
+  is not chainable.
+- **Streaming.** `stream: true` emits the typed event sequence
+  (`response.created` → `response.output_item.added` →
+  `response.content_part.added` → `response.output_text.delta`… →
+  `response.output_text.done` → `response.content_part.done` →
+  `response.output_item.done` → `response.completed`), terminated by
+  `data: [DONE]`. A generation failure emits `response.failed`.
+- **Structured output and tools.** `text.format` and `tools` route
+  through the same constrained-decoding FSM as `/v1/chat/completions`
+  (below), on both the V2 and V3 arms.
+- **KV continuation.** On a V3 runtime a chain can resume from the
+  producing turn's resident KV state instead of re-prefilling — see
+  §4.5 and the N1 notes below.
+- `background: true` → 400 (larql serves responses synchronously).
+
+#### GET /v1/responses/{response_id}
+
+Returns the stored envelope. A response created with `store: false`, or
+evicted by the FIFO cap, is a 404 — the same contract clients already
+handle for expired server-side state.
+
+#### DELETE /v1/responses/{response_id}
+
+`{id, object: "response.deleted", deleted: true}`. Unlike
+`DELETE /v1/sessions/{id}` this is **not** idempotent: an unknown id is
+a 404.
+
+#### N1 — KV continuation for chained responses (V3, shipped 2026-08-22)
+
+`previous_response_id` chains on a V3 runtime resume from a resident KV
+state rather than re-prefilling the whole conversation. The producing
+turn's `V3KvHandoff { kv, absorbed_ids }` stays in a bounded, TTL-swept
+cache keyed by response id (`--v3-kv-cache-entries`, default 4;
+`--v3-kv-ttl-secs`, default 600; swept by the maintenance sweeper).
+
+The load-bearing property is that **resumption is purely an
+optimisation**. The generation path reuses a handoff only when its
+absorbed ids are a strict prefix of the new prompt's ids, and otherwise
+falls back to a full prefill — so the produced tokens are identical
+either way, and losing an entry (eviction, TTL, restart, branching)
+can never change an answer. This is gated bit-for-bit.
+
+Three further contracts:
+
+- **Take-once.** A chained request *takes* the entry. Branching two
+  continuations off one response gives the second a full prefill —
+  correct, just not accelerated.
+- **Model-keyed.** A take naming a different runtime binding is a miss
+  and does **not** consume the entry: a KV state under other weights
+  would be garbage even when a shared tokenizer makes the id prefix
+  coincide, and the rightful chain must still be able to claim it.
+- **Session-owned when the client asks.** A request carrying
+  `X-Session-Id` binds a session that owns the retained state, so
+  `DELETE /v1/sessions/{id}` frees it (§4.5).
+
+Observability: a hit surfaces as `usage.input_tokens_details.
+cached_tokens`; `/v1/stats.server.v3_kv` carries `hits`, `misses`,
+`resumptions`, `reused_tokens_total`. `hits - resumptions` is the live
+**prefix-stability gap** — resident state found but unusable under
+exact token-id identity.
+
+What it is worth, measured on a four-turn chain: **2.0–2.4x** on total
+wall time (gpt-oss-20b 45.02 s → 18.77 s; Granite 4.1 3B 15.94 s →
+7.69 s). The shape is the point — without the cache, turn time grows
+linearly as the conversation is re-prefilled from scratch (4.3 → 8.8 →
+13.5 → 18.4 s); with it, turn time is flat (4.3 → 5.0 → 4.6 → 4.9 s),
+because only the new turn is prefilled.
+
+Whether resumption engages on a given turn depends on the **last token
+the model emitted**: if the conversation is re-rendered and that token
+re-tokenises differently once the next turn follows, the exact-ids
+prefix breaks at the seam and the turn falls back to a full prefill. A
+chat template that terminates the assistant turn with an atomic special
+token makes the seam stable; the `Plain` fallback, which ends a turn
+with a bare newline, does not guarantee it either way.
+
 #### Constrained decoding (slice 4 / N0.6, shipped 2026-05-02)
 
 `response_format` and `tools` route the request through a
-schema-typed JSON FSM that masks the LM head per token.
+schema-typed JSON FSM that masks the LM head per token. Since
+2026-08-22 the same masking serves the **V3** runtimes too, on
+`/v1/completions`, `/v1/chat/completions`, and `/v1/responses` — one
+`drive_session` loop behind both drivers, with mask exhaustion before
+the first emission surfacing as an error and after it as a natural
+stop (mirroring the V2 `MaskRejectedAllCandidates` contract). Masking
+and KV resumption are orthogonal: a chained request can resume *and*
+be constrained.
+
+Driving the FSM through an executable JSON path on V3 exposed two
+latent bugs shared with the V2 arm, which the V2 fixtures could never
+spell and so had never caught: property keys were unconstrained during
+emission (the mask admitted a doomed key and then dead-ended), and a
+trailing comma was accepted with no viable key left. Both are fixed —
+a closed object now offers an enum of still-viable, not-yet-seen
+property names, refuses to open a key when none remain, and requires a
+key after a comma.
 
 | Request                                         | Schema enforced                                    |
 |-------------------------------------------------|----------------------------------------------------|
@@ -642,18 +855,103 @@ table once per request, plus FSM clone+replay per candidate
 Other constraints:
 - `n>1` → 400 (single completion per prompt).
 
-#### Coming next
+#### VINDEX3 runtimes (VI3-SERVE-1)
 
-- **N0.3** `/v1/responses` — Responses API + stateful sessions.
+**What a V3 binding refuses.** `load_artifact`'s V3 branch takes a path
+and nothing else — slicing and service modes have no V3 implementation
+— so `--no-infer`, `--ffn-only`, `--embed-only`, `--layers`,
+`--experts`, `--units` and `--moe-remote` are **refused at load** rather
+than accepted and ignored. They used to be silently dropped, which is
+the dangerous shape: a `--layers 0-9` "shard" loaded the whole model
+and answered complete requests, and `--no-infer` did not disable
+inference. V2 cache knobs (`--hnsw`, gate/q4k cache sizes,
+`--release-mmap-after-request`) are accepted and simply have nothing to
+tune.
 
-#### N0-router
+**Operand residency.** A container's operands are lowered into the
+backend's execution form **once, at bind time**
+(`Vindex3Runtime::prepare` → `PreparedVindex3`), and every request reads
+that one image; a request contributes only continuation state. Batch
+prefill and the decode session read the *same* prepared operands — they
+used to materialise the model separately, so a warm request paid for
+the model twice (measured 31.9 s → 0.75 s on a 20 B container once that
+stopped). Preparation takes an `ExecutionSlice`, so a future shard
+prepares only the operands its slice executes; a slice the plan cannot
+satisfy is refused rather than truncated.
 
-Mirror of these endpoints on `larql-router` so the grid is a single
-OpenAI endpoint. `/v1/models` aggregates from registered shards;
-`/v1/embeddings` and `/v1/completions` proxy to a shard owning the
-relevant compute.
+**Chat template.** A V3 container has no architecture-registry entry, so
+the template is resolved from the **container's own declared family**
+(read from the inspection the runtime already performs), falling back
+to the model-id heuristic and then to `Plain`. Landing on `Plain` is warned about at bind time, because it is
+not cosmetic: `Plain` ends an assistant turn with a bare newline, so the
+turn's last token re-tokenises differently once the next turn follows —
+which breaks N1's exact-ids-prefix rule at the seam and costs every
+chained request its resumption.
 
-### 4.6 Remote MoE Expert Endpoints
+
+`larql serve` binds each artifact through `bootstrap::load_artifact`
+(`src/bootstrap/load.rs`), which dispatches on the container's generation
+marker: a VINDEX3 container binds as `LoadedArtifact::V3` carrying a
+`V3Model` (`src/vindex3.rs`) — a `Vindex3Runtime` opened with the
+`ProductionBackend` on the container's `target` component, plus the
+container's `tokenizer.json` — while VINDEX2 takes the existing
+`load_single_vindex` path. `AppState::served` (`src/state.rs`)
+resolves a request's model across both registries; routes match the
+returned binding once, at the top, and nothing below it re-detects
+the container generation.
+
+Served surface for a V3 model:
+
+- `GET /v1/models` — listed with a larql-specific `generation: 3`
+  extra; no `features` count (a V3 container is an executable
+  program, not a feature index).
+- `POST /v1/completions` — buffered and SSE streaming, served by the
+  V3 runtime (`src/routes/openai/v3_completions.rs`). Request
+  validation, chunk shape, stop-string trimming, and `finish_reason`
+  semantics are shared with the V2 path; only the token source
+  differs.
+- `POST /v1/chat/completions` — same shape, V3 arm in
+  `src/routes/openai/chat/v3.rs`. The V2/V3 decision is made once when
+  the model is resolved; everything wire-shaped below it is shared.
+- `POST /v1/responses` — buffered and streaming, including tools /
+  structured output and `previous_response_id` chaining with KV
+  continuation (see N1 above).
+
+`/v1/stats` answers on a V3 binding with the program's own shape read
+from the opened plan (component, layer count, hidden and vocab size,
+whether it carries an output head) plus the server-level block — which
+is the only surface carrying the N1 continuation counters, so it has to
+work where V3 runs. It does not fake the V2 vocabulary (features,
+bands, extract level, q4k caches) onto a V3 binding.
+
+`/v1/embeddings` and the browse endpoints resolve V2 models only — a
+V3 container is an executable program, not a feature index, and has no
+static embedding table to pool over.
+
+Generation opens a fresh session per request (`generate_v3` in
+`src/vindex3.rs`): caller-owned `CanonicalKvState` →
+`prefill_into` → `session_with_kv` → `continue_session`, emitting
+each token through the incremental detokenizer.
+`generate_v3_resumable` is the same stack with an optional inbound
+handoff, and returns the state for the next chain link. Plan operands
+stay resident per session, not per server — a shared resident
+session/operand pool is follow-up perf work.
+
+#### N0-router (shipped 2026-08-22)
+
+These endpoints are mirrored on `larql-router` so the grid is a single
+OpenAI endpoint. A server announces `AnnounceMsg.serves_openai` only
+when it can answer a complete request alone (full layer coverage,
+inference enabled, no shard filter); the router aggregates
+`/v1/models` across capable servers and proxies chat/completions/
+embeddings to the least-loaded one matching `model`, streaming SSE
+back unbuffered. `/v1/responses` is proxied with sticky id → backend
+routing so a `previous_response_id` chain returns to the server
+holding the conversation and its resident KV state. Grid-only: a
+static `--shards` map carries no capability signal and answers 503.
+Contract in `crates/larql-router/CHANGELOG.md`.
+
+### 4.7 Remote MoE Expert Endpoints
 
 For hybrid-MoE models (e.g. Gemma 4 26B-A4B), the inference client runs
 attention + dense FFN + the per-layer router locally and dispatches
@@ -920,7 +1218,12 @@ larql serve gemma3-4b.vindex --cache-ttl 300  # 5 minute TTL
 
 ### 8.5 Per-Session Isolation (implemented)
 
-Patches can be scoped to a session via the `X-Session-Id` header. Each session gets its own PatchedVindex overlay. Sessions expire after 1 hour of inactivity.
+Patches can be scoped to a session via the `X-Session-Id` header. Each
+session gets its own PatchedVindex overlay, materialised lazily — a
+session that never patches carries none and reads exactly like the
+global state. Sessions expire after 1 hour of inactivity by default
+(`--session-ttl-secs`); §4.5 is the surface for observing and evicting
+them.
 
 ```
 POST /v1/patches/apply
@@ -1060,7 +1363,7 @@ Source layout reflects the 2026-05-01 Q1 cleanup pass — see
 tree. Highlights for spec readers:
 
 - `main.rs` is a thin entry point (~26 LOC). All boot orchestration
-  lives in `bootstrap.rs::serve(cli)` so the same code path can be
+  lives in `bootstrap/::serve(cli)` so the same code path can be
   driven from integration tests without going through clap.
 - `env_flags.rs` is the single source of truth for `LARQL_*` knobs;
   every read goes through a cached accessor (`OnceLock`) and the
@@ -1230,7 +1533,7 @@ Out-of-range layers are never loaded into physical RAM:
 
 - For Q4K vindexes (`synthesize_gate_from_q4k`): the anonymous mmap is sized only
   for owned layers. Unowned layers are skipped entirely during dequantisation.
-- For demand-paged files (`gate_vectors.bin`, `interleaved_q4k.bin`): the OS-level
+- For demand-paged files (`gate_vectors.bin`, `interleaved_kquant.bin`): the OS-level
   mmap covers the full file (cheap — virtual address space only). `is_layer_owned()`
   guards every accessor before any byte is read, so out-of-range pages never fault in.
 

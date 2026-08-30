@@ -9,7 +9,6 @@ use crate::executor::tuning::{
 };
 use crate::executor::Session;
 
-use super::super::resolve_bands;
 use super::collect::{
     describe_build_query, describe_collect_edges, describe_scan_layers, DescribeEdge,
 };
@@ -43,21 +42,21 @@ impl Session {
         }
 
         // ── Phase 1: load embeddings + tokenizer, build query vector ──
-        let (path, config, patched) = self.require_vindex()?;
-        let Some(query) = describe_build_query(entity, path)? else {
+        let ctx = self.browse()?;
+        let Some(query) = describe_build_query(entity, &ctx)? else {
             return Ok(vec![format!("{entity}\n  (not found)")]);
         };
 
         // ── Phase 2: pick scan layers from band/layer filter ──
-        let bands = resolve_bands(config);
-        let scan_layers = describe_scan_layers(&bands, &patched.loaded_layers(), band, layer);
+        let bands = ctx.bands;
+        let scan_layers = describe_scan_layers(&bands, &ctx.source.loaded_layers(), band, layer);
 
         // ── Phase 3: walk + collect edges ──
-        let trace = patched.walk(&query, &scan_layers, DESCRIBE_WALK_TOP_K);
+        let trace = ctx.source.walk(&query, &scan_layers, DESCRIBE_WALK_TOP_K);
         let mut edges = describe_collect_edges(&trace, entity);
 
         // ── Phase 3b: append KNN store entries for this entity ──
-        let knn_hits = patched.knn_store.entries_for_entity(entity);
+        let knn_hits = ctx.source.knn_entries_for_entity(entity);
         for (knn_layer, entry) in knn_hits {
             edges.push(DescribeEdge {
                 gate: entry.confidence * DESCRIBE_KNN_GATE_SCALE,

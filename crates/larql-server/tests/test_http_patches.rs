@@ -100,7 +100,7 @@ async fn http_patches_session_apply_returns_session_field() {
     // (uses read().await, safe) so the entry already exists when the HTTP handler
     // calls apply_patch, skipping the blocking_read path entirely.
     let st = state(vec![model("test")]);
-    let m = st.models[0].clone();
+    let m = st.first_model().unwrap();
     st.sessions.get_or_create("sid-abc", &m).await;
 
     let app = single_model_router(st);
@@ -120,7 +120,7 @@ async fn http_patches_session_apply_returns_session_field() {
 #[tokio::test]
 async fn http_patches_session_list_after_session_apply() {
     let st = state(vec![model("test")]);
-    let m = st.models[0].clone();
+    let m = st.first_model().unwrap();
     st.sessions.get_or_create("sid-list", &m).await;
 
     let app1 = single_model_router(st.clone());

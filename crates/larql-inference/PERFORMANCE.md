@@ -29,8 +29,8 @@ Per-step CPU decode breakdown (post-branch):
 | Change | Decode (tok/s) | Δ vs prior | Δ vs baseline |
 |---|---:|---:|---:|
 | Baseline (legacy O(N²) per-step path)  | 0.36  | —      | 1.0× |
-| + KV-cached decode (`predict_q4k_prefill` + `predict_q4k_decode_step`) | ~1.5 | 4.2× | 4.2× |
-| + Direct Q4_K matvec, no per-step dequant (`predict_q4k_decode_step_direct`) | 2.6 | 1.7× | 7.2× |
+| + KV-cached decode (`predict_kquant_prefill` + `predict_kquant_decode_step`) | ~1.5 | 4.2× | 4.2× |
+| + Direct Q4_K matvec, no per-step dequant (`predict_kquant_decode_step_direct`) | 2.6 | 1.7× | 7.2× |
 | + Row-parallel f32 lm_head sgemv (`parallel_lm_head_logits`) | 5.4 | 2.1× | 15× |
 | + NEON Q4_K / Q6_K / f32_dot kernels | 9.9 | 1.8× | 28× |
 | + Q4_K lm_head (synth from f16 embed, `logits_to_predictions_q4_lm_head`) | 12.6 | 1.27× | 35× |
@@ -73,7 +73,7 @@ Previously-tried-and-killed micro-opts:
 
 ### Where the 55× prefill gap lives
 
-Prefill is still on the legacy `predict_q4k_prefill` path:
+Prefill is still on the legacy `predict_kquant_prefill` path:
 dequantise each layer's Q/K/V/O/gate/up/down to f32 once per layer
 (~75 ms × 33 layers ≈ 2.5 s), then run per-position attention + FFN
 over the prompt. llama.cpp does batched gemm: weights read once,

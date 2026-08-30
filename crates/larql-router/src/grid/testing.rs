@@ -40,6 +40,9 @@ pub(crate) fn entry(
         // shards mutate these fields after construction.
         expert_start: 0,
         expert_end: 0,
+        // N0-router: compute shard by default. OpenAI-proxy tests
+        // mutate this after construction.
+        serves_openai: false,
     }
 }
 

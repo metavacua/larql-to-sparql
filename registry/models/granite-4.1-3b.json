@@ -1,0 +1,20 @@
+{
+  "default_variant": "bf16",
+  "variants": {
+    "bf16": {
+      "artifact": {
+        "repo": "larql/granite-4.1-3b",
+        "revision": "1048a8eb2fec5812a698e76d7e603527d0475c17"
+      },
+      "abi": 1,
+      "source": {
+        "repo": "ibm-granite/granite-4.1-3b",
+        "revision": "c0650403e44e78ec0262dab1c90914c65b196c4e",
+        "attestation": {
+          "kind": "hand_attested",
+          "by": "chrishayuk"
+        }
+      }
+    }
+  }
+}

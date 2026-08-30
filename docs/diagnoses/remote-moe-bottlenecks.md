@@ -88,8 +88,26 @@ Reading it:
   (attention → dense → lm_head, ranked by win) to reclaim the ~53% f32 tax, and
   (b) reduce the server expert cost (more shards / FP4 / hash-routing) for the ~41%.
 
+> ⚠️ **Retracted 2026-08-22 — do not implement step 1 as written.** Both of
+> its named pieces were falsified by `q4k-direct-attention.md`, which is the
+> follow-up study to this one:
+> - **`q4_attention_proj` must NOT be wired.** It feeds Q4_K bytes through
+>   the Q4_0 kernel — wrong byte stride, so the output is garbage rather
+>   than merely slow. It is still live and exported
+>   (`larql-compute/src/attention/gpu.rs`, re-exported from
+>   `attention/mod.rs`), so nothing stops someone following this line.
+> - **`run_attention_with_kv_backend` is the wrong function for the 28%.**
+>   That is the prefill / KV-populate path, not decode; replacing it
+>   optimises a stage this diagnosis did not measure.
+>
+> `crates/larql-kv/ROADMAP.md` still repeats the same recommendation and
+> needs the same annotation. What survived from the Q4-direct programme is
+> narrow: it wins only in bandwidth-bound decode-matvec, and the follow-up
+> explicitly declines to headline a tok/s number for it.
+
 **Implementation sequence for item 5b (ranked by client win):**
-1. **Attention (28%)** — Q4K-direct path reading attn bytes from the index via
+1. **Attention (28%)** — ⚠️ **superseded, see the retraction above.** As
+   originally written: a Q4K-direct path reading attn bytes from the index via
    `q4_attention_proj`, replacing the f32 `run_attention_with_kv_backend`. Biggest
    win + (with the others) kills the dequant-all load tax. Parity-critical rework
    of the attention path → verify byte-parity on the 26B before flipping.

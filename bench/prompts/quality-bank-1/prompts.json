@@ -1,0 +1,352 @@
+{
+ "bank": "quality-bank-1",
+ "frozen": "2026-08-23",
+ "note": "Editing this file invalidates comparison against banked runs; add quality-bank-2 instead.",
+ "prompts": [
+  {
+   "id": "factual-000",
+   "category": "factual",
+   "text": "The capital of France is Paris, and the capital of Japan is Tokyo."
+  },
+  {
+   "id": "factual-001",
+   "category": "factual",
+   "text": "Water boils at 100 degrees Celsius at sea level atmospheric pressure."
+  },
+  {
+   "id": "factual-002",
+   "category": "factual",
+   "text": "The chemical symbol for gold is Au and for silver it is Ag."
+  },
+  {
+   "id": "factual-003",
+   "category": "factual",
+   "text": "The first person to walk on the Moon was Neil Armstrong in 1969."
+  },
+  {
+   "id": "factual-004",
+   "category": "factual",
+   "text": "There are seven continents on Earth and five major oceans."
+  },
+  {
+   "id": "factual-005",
+   "category": "factual",
+   "text": "The speed of light in a vacuum is approximately 300,000 kilometres per second."
+  },
+  {
+   "id": "factual-006",
+   "category": "factual",
+   "text": "William Shakespeare wrote Hamlet, Macbeth, and King Lear."
+  },
+  {
+   "id": "factual-007",
+   "category": "factual",
+   "text": "The largest planet in the solar system is Jupiter."
+  },
+  {
+   "id": "factual-008",
+   "category": "factual",
+   "text": "DNA is composed of four bases: adenine, thymine, guanine, and cytosine."
+  },
+  {
+   "id": "factual-009",
+   "category": "factual",
+   "text": "The Great Wall of China was built over many centuries by successive dynasties."
+  },
+  {
+   "id": "factual-010",
+   "category": "factual",
+   "text": "A right angle measures ninety degrees."
+  },
+  {
+   "id": "factual-011",
+   "category": "factual",
+   "text": "The human heart has four chambers: two atria and two ventricles."
+  },
+  {
+   "id": "factual-012",
+   "category": "factual",
+   "text": "Mount Everest is the highest mountain above sea level."
+  },
+  {
+   "id": "factual-013",
+   "category": "factual",
+   "text": "The Pacific Ocean is the largest and deepest of Earth's oceans."
+  },
+  {
+   "id": "factual-014",
+   "category": "factual",
+   "text": "Photosynthesis converts light energy into chemical energy in plants."
+  },
+  {
+   "id": "prose-000",
+   "category": "prose",
+   "text": "The morning fog had not yet lifted from the valley, and the road ahead"
+  },
+  {
+   "id": "prose-001",
+   "category": "prose",
+   "text": "She put down the letter and stared out of the window for a long while,"
+  },
+  {
+   "id": "prose-002",
+   "category": "prose",
+   "text": "It was the kind of silence that settles over a house when everyone has"
+  },
+  {
+   "id": "prose-003",
+   "category": "prose",
+   "text": "By the time the train reached the coast, the weather had turned and the"
+  },
+  {
+   "id": "prose-004",
+   "category": "prose",
+   "text": "He had always believed that the difference between a good decision and"
+  },
+  {
+   "id": "prose-005",
+   "category": "prose",
+   "text": "The bookshop on the corner had been there for forty years, and its owner"
+  },
+  {
+   "id": "prose-006",
+   "category": "prose",
+   "text": "Nobody in the village could remember when the bridge had been built, only"
+  },
+  {
+   "id": "prose-007",
+   "category": "prose",
+   "text": "The experiment had failed three times, and on the fourth attempt she"
+  },
+  {
+   "id": "prose-008",
+   "category": "prose",
+   "text": "Rain moved across the field in slow grey sheets, and the sheep gathered"
+  },
+  {
+   "id": "prose-009",
+   "category": "prose",
+   "text": "There is a particular quality to the light in late autumn that makes"
+  },
+  {
+   "id": "code-000",
+   "category": "code",
+   "text": "def binary_search(arr, target):\n    lo, hi = 0, len(arr) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2"
+  },
+  {
+   "id": "code-001",
+   "category": "code",
+   "text": "class LinkedList:\n    def __init__(self):\n        self.head = None\n\n    def append(self, value):"
+  },
+  {
+   "id": "code-002",
+   "category": "code",
+   "text": "fn main() {\n    let mut total = 0;\n    for i in 1..=100 {\n        total += i;\n    }"
+  },
+  {
+   "id": "code-003",
+   "category": "code",
+   "text": "SELECT customer_id, COUNT(*) AS order_count\nFROM orders\nWHERE created_at >= '2024-01-01'\nGROUP BY"
+  },
+  {
+   "id": "code-004",
+   "category": "code",
+   "text": "import numpy as np\n\ndef softmax(x):\n    x = x - x.max(axis=-1, keepdims=True)\n    e = np.exp(x)"
+  },
+  {
+   "id": "code-005",
+   "category": "code",
+   "text": "const debounce = (fn, ms) => {\n  let timer;\n  return (...args) => {\n    clearTimeout(timer);"
+  },
+  {
+   "id": "code-006",
+   "category": "code",
+   "text": "impl Iterator for Counter {\n    type Item = u32;\n\n    fn next(&mut self) -> Option<Self::Item> {"
+  },
+  {
+   "id": "code-007",
+   "category": "code",
+   "text": "async function fetchJson(url) {\n  const res = await fetch(url);\n  if (!res.ok) {"
+  },
+  {
+   "id": "code-008",
+   "category": "code",
+   "text": "public static int gcd(int a, int b) {\n    while (b != 0) {\n        int t = b;"
+  },
+  {
+   "id": "code-009",
+   "category": "code",
+   "text": "#include <stdio.h>\n\nint main(void) {\n    int n;\n    scanf(\"%d\", &n);"
+  },
+  {
+   "id": "arithmetic-000",
+   "category": "arithmetic",
+   "text": "If a train travels 60 kilometres in 45 minutes, its average speed is"
+  },
+  {
+   "id": "arithmetic-001",
+   "category": "arithmetic",
+   "text": "Twelve multiplied by twelve equals one hundred and forty-four."
+  },
+  {
+   "id": "arithmetic-002",
+   "category": "arithmetic",
+   "text": "The sum of the first ten positive integers is fifty-five."
+  },
+  {
+   "id": "arithmetic-003",
+   "category": "arithmetic",
+   "text": "A rectangle with sides 7 and 9 has an area of 63 and a perimeter of 32."
+  },
+  {
+   "id": "arithmetic-004",
+   "category": "arithmetic",
+   "text": "Seventeen is a prime number because it has no divisors other than 1 and 17."
+  },
+  {
+   "id": "arithmetic-005",
+   "category": "arithmetic",
+   "text": "If x + 5 = 12 then x equals 7."
+  },
+  {
+   "id": "arithmetic-006",
+   "category": "arithmetic",
+   "text": "The square root of one hundred and forty-four is twelve."
+  },
+  {
+   "id": "arithmetic-007",
+   "category": "arithmetic",
+   "text": "Three quarters expressed as a decimal is 0.75 and as a percentage is 75%."
+  },
+  {
+   "id": "arithmetic-008",
+   "category": "arithmetic",
+   "text": "Compound interest on 1000 at 5% for two years gives 1102.50."
+  },
+  {
+   "id": "arithmetic-009",
+   "category": "arithmetic",
+   "text": "The factorial of five is one hundred and twenty."
+  },
+  {
+   "id": "structured-000",
+   "category": "structured",
+   "text": "{\"name\": \"Ada Lovelace\", \"born\": 1815, \"field\": \"mathematics\", \"known_for\":"
+  },
+  {
+   "id": "structured-001",
+   "category": "structured",
+   "text": "<html>\n  <head>\n    <title>Example</title>\n  </head>\n  <body>\n    <h1>"
+  },
+  {
+   "id": "structured-002",
+   "category": "structured",
+   "text": "name: build\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    runs-on:"
+  },
+  {
+   "id": "structured-003",
+   "category": "structured",
+   "text": "| Column | Type | Nullable |\n|--------|------|----------|\n| id | integer | no |\n|"
+  },
+  {
+   "id": "structured-004",
+   "category": "structured",
+   "text": "[{\"id\": 1, \"status\": \"active\"}, {\"id\": 2, \"status\": \"inactive\"}, {\"id\": 3,"
+  },
+  {
+   "id": "structured-005",
+   "category": "structured",
+   "text": "[package]\nname = \"example\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]"
+  },
+  {
+   "id": "structured-006",
+   "category": "structured",
+   "text": "# Heading\n\n- first item\n- second item\n- third item\n\n## Subheading\n\n1."
+  },
+  {
+   "id": "structured-007",
+   "category": "structured",
+   "text": "CREATE TABLE users (\n    id SERIAL PRIMARY KEY,\n    email TEXT NOT NULL UNIQUE,"
+  },
+  {
+   "id": "uncertain-000",
+   "category": "uncertain",
+   "text": "The best thing about a rainy afternoon is"
+  },
+  {
+   "id": "uncertain-001",
+   "category": "uncertain",
+   "text": "If I could change one thing about the way people"
+  },
+  {
+   "id": "uncertain-002",
+   "category": "uncertain",
+   "text": "My favourite colour is"
+  },
+  {
+   "id": "uncertain-003",
+   "category": "uncertain",
+   "text": "The strangest dream I ever had involved"
+  },
+  {
+   "id": "uncertain-004",
+   "category": "uncertain",
+   "text": "Some people believe that the most important quality in a friend is"
+  },
+  {
+   "id": "uncertain-005",
+   "category": "uncertain",
+   "text": "On balance, the argument comes down to whether"
+  },
+  {
+   "id": "uncertain-006",
+   "category": "uncertain",
+   "text": "What surprised me most was"
+  },
+  {
+   "id": "uncertain-007",
+   "category": "uncertain",
+   "text": "The next word in this sentence is entirely"
+  },
+  {
+   "id": "uncertain-008",
+   "category": "uncertain",
+   "text": "Given the choice between the two, most would probably pick"
+  },
+  {
+   "id": "uncertain-009",
+   "category": "uncertain",
+   "text": "It could go either way, but my instinct says"
+  },
+  {
+   "id": "longform-000",
+   "category": "longform",
+   "text": "The history of computing is often told as a story of hardware, of ever smaller and faster switches, but the more interesting thread runs through the ideas. Before there were transistors there were procedures, and before there were procedures there was the recognition that a mechanical process could stand in for a mental one. That recognition arrived slowly and from several directions at once. Mathematicians wanted to know which problems could be settled by rote, engineers wanted machines that would not tire, and logicians wanted to know what followed from what. The answers they found turned out to be the same answer."
+  },
+  {
+   "id": "longform-001",
+   "category": "longform",
+   "text": "Rivers do not simply run downhill; they negotiate. A river meeting soft ground will widen and slow, dropping the sediment it has carried from higher land, and over centuries that deposition builds the very floodplain through which the river then wanders. Meeting hard rock, the same river narrows and quickens, cutting downward rather than sideways. The shape of a valley is therefore a record of an argument between water and stone, conducted over a timescale that makes the outcome look inevitable when it was nothing of the kind."
+  },
+  {
+   "id": "longform-002",
+   "category": "longform",
+   "text": "Good documentation is not a description of what the code does. Anyone can read the code for that, and the code will always be more accurate than the prose beside it. Documentation earns its place by recording what the code does not say: why this approach was chosen over the obvious one, which constraint made the simple version unworkable, what was tried and abandoned. A comment that restates the line below it is worse than no comment, because it must be maintained and it will not be, and eventually it will lie."
+  },
+  {
+   "id": "longform-003",
+   "category": "longform",
+   "text": "The domestication of grasses is the least appreciated revolution in human history. Wheat, rice, maize and barley are all grasses, and all were reshaped by selection into forms that cannot reproduce without human help. The seed head of wild wheat shatters when ripe, scattering grain across the ground; the domesticated variety holds its seed until it is cut. That single change, useless to the plant and essential to the farmer, is what made harvest possible and therefore what made storage, surplus, and cities possible."
+  },
+  {
+   "id": "longform-004",
+   "category": "longform",
+   "text": "Measurement changes what it measures, and not only in physics. A metric that is merely observed will drift with the thing it tracks; a metric that is rewarded will be optimised directly, and the quantity it was chosen to represent will quietly detach from it. This is why the most useful indicators are often the ones nobody is accountable for. The moment a proxy becomes a target, it begins to decay as a proxy, and the decay is fastest where the incentive is strongest."
+  },
+  {
+   "id": "longform-005",
+   "category": "longform",
+   "text": "Sleep is not a single state but a cycle of several, and the ordering matters. Slow-wave sleep dominates the early part of the night and appears to be when declarative memory is consolidated; REM sleep grows longer towards morning and is associated with procedural and emotional processing. Waking someone repeatedly does not merely shorten sleep, it changes its composition, and a full night of fragmented sleep can leave a person more impaired than a shorter night left undisturbed."
+  }
+ ]
+}

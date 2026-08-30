@@ -30,7 +30,7 @@ pub use ffn_row::{FfnRowAccess, GateIndex};
 pub use fp4_ffn::Fp4FfnAccess;
 pub use gate_lookup::GateLookup;
 pub use native_ffn::NativeFfnAccess;
-pub use patch_overrides::PatchOverrides;
+pub use patch_overrides::{OverrideSlot, PatchOverrides};
 pub use quantized_ffn::QuantizedFfnAccess;
 
 /// Default `c_score` for a `FeatureMeta` synthesised without an explicit
@@ -51,11 +51,52 @@ pub struct FeatureMeta {
 }
 
 /// A single step in the walk trace — one feature that fired at one layer.
+///
+/// Two producers build these (2026-07-30 review, item 17):
+///
+/// - **Post-hoc KNN views** (`VectorIndex::walk`, `PatchedVindex::walk`,
+///   `walk_trace_from_residuals`) re-query the gate KNN for a residual;
+///   they know only `gate_score` + `meta` and construct via
+///   [`WalkHit::from_gate`], leaving the execution fields `None`.
+/// - **Runtime trace** (`WalkFfn::take_trace` in larql-inference)
+///   reports the features the walk actually EXECUTED, populating the
+///   execution fields from the kernels' own values.
 pub struct WalkHit {
     pub layer: usize,
     pub feature: usize,
+    /// Gate-position score. From the executed kernel on runtime traces
+    /// (0.0 when the executed path did not score the feature — see the
+    /// `Option` twin in the runtime record), from the KNN re-query on
+    /// post-hoc views.
     pub gate_score: f32,
     pub meta: FeatureMeta,
+    /// Up projection score `u·x` the executed kernel computed.
+    pub up_score: Option<f32>,
+    /// Scalar pre-down activation the executed kernel computed.
+    pub activation: Option<f32>,
+    /// `‖down_row‖` from the selector's lazy norm cache, when that
+    /// cache was already built — never computed just for tracing.
+    pub down_row_norm: Option<f32>,
+    /// Executed visit rank at this (position, layer): 0 = first
+    /// feature the kernel visited.
+    pub rank: Option<usize>,
+}
+
+impl WalkHit {
+    /// A hit known only by gate score + metadata — the post-hoc KNN
+    /// view shape. Execution fields stay honestly `None`.
+    pub fn from_gate(layer: usize, feature: usize, gate_score: f32, meta: FeatureMeta) -> Self {
+        Self {
+            layer,
+            feature,
+            gate_score,
+            meta,
+            up_score: None,
+            activation: None,
+            down_row_norm: None,
+            rank: None,
+        }
+    }
 }
 
 /// Result of a walk — per-layer feature activations with full metadata.

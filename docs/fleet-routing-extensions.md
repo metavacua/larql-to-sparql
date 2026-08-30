@@ -232,7 +232,7 @@ class is geometric/optimization/temporal — **none of those ran**; parity is a
 **stand-in**, and E17 explicitly demotes "E4 is derived" to **a conjecture**
 (`E17_VERDICT.md` ledger #2). So FR4 is research-first by necessity.
 
-**Current LARQL state.** `crates/larql-router/dispatch.rs` is **grid/expert**
+**Current LARQL state.** `crates/larql-router/src/dispatch.rs` is **grid/expert**
 dispatch (routing experts across machines), *not* operation-class dispatch. No
 LQL planner classifies aggregate operations by readability today.
 

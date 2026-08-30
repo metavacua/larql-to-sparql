@@ -27,6 +27,11 @@ use crate::http::{
 };
 use crate::state::{AppState, LoadedModel};
 
+/// Cache-Control for single-token embedding responses: a token's embedding
+/// row never changes for a given model, so cache for a year and mark
+/// immutable (same precedent as `DESCRIBE_CACHE_CONTROL` in `describe.rs`).
+const EMBED_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
+
 // ── Request / response types ──────────────────────────────────────────────────
 
 #[derive(Deserialize, ToSchema)]
@@ -101,8 +106,10 @@ fn parse_binary_logits_request(bytes: &[u8]) -> Result<Vec<f32>, ServerError> {
         ));
     }
     Ok(bytes
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
         .collect())
 }
 
@@ -281,7 +288,7 @@ async fn handle_embed_inner(
         ));
     }
 
-    let h = match embed_tokens(model, &token_ids) {
+    let h = match embed_tokens(&model, &token_ids) {
         Ok(h) => h,
         Err(e) => return e.into_response(),
     };
@@ -674,7 +681,7 @@ fn handle_embed_single_inner(
     };
 
     let cache_headers = [
-        (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+        (header::CACHE_CONTROL, EMBED_CACHE_CONTROL),
         (header::VARY, "Accept"),
     ];
 
@@ -701,7 +708,7 @@ fn handle_embed_single_inner(
     (
         [
             (header::CONTENT_TYPE, BINARY_FFN_CONTENT_TYPE),
-            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+            (header::CACHE_CONTROL, EMBED_CACHE_CONTROL),
             (header::VARY, "Accept"),
         ],
         out,
@@ -790,8 +797,8 @@ mod tests {
             out.extend_from_slice(&v.to_le_bytes());
         }
         let payload = &out[8..];
-        for (i, chunk) in payload.chunks_exact(4).enumerate() {
-            let got = f32::from_le_bytes(chunk.try_into().unwrap());
+        for (i, chunk) in payload.as_chunks::<4>().0.iter().enumerate() {
+            let got = f32::from_le_bytes(*chunk);
             assert!(
                 (got - values[i]).abs() < 1e-6,
                 "float[{i}]: {got} != {}",
@@ -815,8 +822,8 @@ mod tests {
         let residual = [1.5f32, -2.0, 0.0, 99.9];
         let body = make_binary_logits_request(&residual);
         assert_eq!(parse_binary_logits_request(&body).unwrap(), residual);
-        for (i, chunk) in body.chunks_exact(4).enumerate() {
-            let got = f32::from_le_bytes(chunk.try_into().unwrap());
+        for (i, chunk) in body.as_chunks::<4>().0.iter().enumerate() {
+            let got = f32::from_le_bytes(*chunk);
             assert!((got - residual[i]).abs() < 1e-6);
         }
     }

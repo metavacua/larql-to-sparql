@@ -58,12 +58,17 @@ impl Parser {
         let mut top = None;
         let mut compare = false;
         let mut route = None;
+        let mut generate = None;
 
         loop {
             match self.peek() {
                 Token::Keyword(Keyword::Top) => {
                     self.advance();
                     top = Some(self.expect_u32()?);
+                }
+                Token::Keyword(Keyword::Generate) => {
+                    self.advance();
+                    generate = Some(self.expect_u32()?);
                 }
                 Token::Keyword(Keyword::Compare) => {
                     self.advance();
@@ -103,6 +108,7 @@ impl Parser {
             top,
             compare,
             route,
+            generate,
         })
     }
 

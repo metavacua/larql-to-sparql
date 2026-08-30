@@ -59,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: None,
+        openai_responses: Default::default(),
     });
 
     let app = build_router(state);

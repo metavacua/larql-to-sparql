@@ -422,7 +422,7 @@ silently downgrading at decode time).
 | `Standard:window=N` | (none) | `WindowedAttentionStep` |
 | `NoCache` | (none) | — |
 | `MarkovResidual` | (none) | `FusedAttentionStep` |
-| `UnlimitedContext` | (none) | `FusedAttentionStep` |
+| `WindowedCheckpoint` | (none) | `FusedAttentionStep` |
 | `TurboQuant` | (none) | `NativeKvCodec` |
 | `Apollo` | (none) | `PipelinedBoundaryUpload` |
 
@@ -505,13 +505,13 @@ output matches the legacy function output bit-for-bit.
 
 ### 10.3 Step 3 — Migrate engines to dispatch through the trait
 
-`Standard`, `NoCache`, `MarkovResidual`, `UnlimitedContext`,
+`Standard`, `NoCache`, `MarkovResidual`, `WindowedCheckpoint`,
 `TurboQuant`, `Apollo` each migrate to call the new trait methods
 instead of the legacy functions. CPU backend underneath; no GPU work
 yet.
 
 Migration order: smallest first (`NoCache`, `Standard`), then larger
-(`MarkovResidual`, `UnlimitedContext`), then most complex (`Apollo`).
+(`MarkovResidual`, `WindowedCheckpoint`), then most complex (`Apollo`).
 
 **Parity:** Existing engine tests + bit-parity tests from
 `kv-engine-unification.md` §8.4 must still pass byte-for-byte.
@@ -642,8 +642,8 @@ impl. The new trait's intent vocabulary is uniform (`attention_step`,
 `matmul`); backends route to f32 or Q4_K paths internally based on
 tensor type from `weights.tensors` / `VectorIndex`.
 
-**Implication for `KvEngine`:** the current `prefill_q4k` /
-`decode_step_q4k` engine-trait split collapses once engines migrate to
+**Implication for `KvEngine`:** the current `prefill_quant` /
+`decode_step_quant` engine-trait split collapses once engines migrate to
 dispatch through `ComputeBackend`. The Q4K-vs-f32 choice is no longer
 visible at the engine API; it's a backend-internal routing decision.
 This simplifies the `KvEngine` trait further — `prefill` /
@@ -721,9 +721,9 @@ For reviewers, the existing code this spec touches:
 - Today's Metal backend:
   `crates/larql-compute/src/metal/`
 - The KvEngine trait (post-unification):
-  `crates/larql-inference/src/kv_engine.rs`
+  `crates/larql-inference/src/kv_engine/`
 - The engine dispatch entry point:
-  `crates/larql-inference/src/forward/kv_generate.rs` (`generate_with_engine`)
+  `crates/larql-kv/src/generation.rs` (`generate_with_engine`)
 - The forward-pass helpers engines currently call directly (and will
   call via the trait post-migration):
   `crates/larql-inference/src/{attention,ffn,forward,residual}/`

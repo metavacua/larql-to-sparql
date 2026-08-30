@@ -69,9 +69,9 @@ impl Session {
         with_examples: bool,
         mode: DescribeMode,
     ) -> Result<Vec<String>, LqlError> {
-        let (_path, _config, patched) = self.require_vindex()?;
+        let ctx = self.browse()?;
 
-        let all_layers = patched.loaded_layers();
+        let all_layers = ctx.source.loaded_layers();
         let scan_layers: Vec<usize> = if let Some(l) = layer_filter {
             vec![l as usize]
         } else {
@@ -88,7 +88,7 @@ impl Session {
         if mode != DescribeMode::Raw {
             if let Some(rc) = classifier {
                 for &layer in &scan_layers {
-                    let num_features = patched.num_features(layer);
+                    let num_features = ctx.source.num_features(layer);
                     for feat in 0..num_features {
                         if let Some(label) = rc.label_for_feature(layer, feat) {
                             *probe_relations.entry(label.to_string()).or_insert(0) += 1;
@@ -115,7 +115,7 @@ impl Session {
         let mut tokens: HashMap<String, TokenInfo> = HashMap::new();
         if show_raw {
             for &layer in &scan_layers {
-                if let Some(metas) = patched.down_meta_at(layer) {
+                if let Some(metas) = ctx.source.feature_metas(layer) {
                     for meta in metas.iter().flatten() {
                         let tok = meta.top_token.trim();
                         if !is_content_token(tok) {
@@ -232,6 +232,12 @@ impl Session {
     }
 
     pub(crate) fn exec_show_layers(&self, range: Option<&Range>) -> Result<Vec<String>, LqlError> {
+        if matches!(self.backend, super::Backend::Vindex3 { .. }) {
+            // Ranges are cheap to add later; the V3 fixture stacks are
+            // small and the whole table is the point.
+            let _ = range;
+            return self.exec_v3_show_layers();
+        }
         let (_path, _config, patched) = self.require_vindex()?;
 
         let all_layers = patched.loaded_layers();
@@ -289,10 +295,10 @@ impl Session {
         conditions: &[Condition],
         limit: Option<u32>,
     ) -> Result<Vec<String>, LqlError> {
-        let (_path, config, patched) = self.require_vindex()?;
+        let ctx = self.browse()?;
         // Default to num_layers — a manageable screenful that matches
         // the model's depth. Use LIMIT for more or fewer.
-        let limit = limit.unwrap_or(config.num_layers as u32) as usize;
+        let limit = limit.unwrap_or(ctx.num_layers as u32) as usize;
 
         // Extract filters from WHERE conditions
         let token_filter = conditions
@@ -314,7 +320,7 @@ impl Session {
                 _ => None,
             });
 
-        let nf = patched.num_features(layer as usize);
+        let nf = ctx.source.num_features(layer as usize);
         if nf == 0 {
             return Err(LqlError::Execution(format!("no features at layer {layer}")));
         }
@@ -331,7 +337,7 @@ impl Session {
             if count >= limit {
                 break;
             }
-            if let Some(meta) = patched.feature_meta(layer as usize, feat_idx) {
+            if let Some(meta) = ctx.source.feature_meta(layer as usize, feat_idx) {
                 // Apply WHERE filters
                 if let Some(tf) = token_filter {
                     if !meta.top_token.to_lowercase().contains(&tf.to_lowercase()) {
@@ -368,13 +374,13 @@ impl Session {
         layer_filter: Option<u32>,
         limit: Option<u32>,
     ) -> Result<Vec<String>, LqlError> {
-        let (_path, config, patched) = self.require_vindex()?;
+        let ctx = self.browse()?;
         let limit = limit.unwrap_or(50) as usize;
 
         let scan_layers: Vec<usize> = if let Some(l) = layer_filter {
             vec![l as usize]
         } else {
-            (0..config.num_layers).collect()
+            (0..ctx.num_layers).collect()
         };
 
         // Collect distinct top_tokens across all scanned features.
@@ -382,9 +388,9 @@ impl Session {
             std::collections::HashMap::new();
 
         for layer in &scan_layers {
-            let nf = patched.num_features(*layer);
+            let nf = ctx.source.num_features(*layer);
             for feat in 0..nf {
-                if let Some(meta) = patched.feature_meta(*layer, feat) {
+                if let Some(meta) = ctx.source.feature_meta(*layer, feat) {
                     let tok = meta.top_token.trim().to_string();
                     // Filter to named entities: starts with uppercase
                     // ASCII, 3+ chars, all alphabetic. This skips
@@ -445,34 +451,66 @@ impl Session {
         Ok(out)
     }
 
+    /// `SHOW MODELS` — every container in the working directory, of
+    /// **either** generation.
+    ///
+    /// This listed only containers whose `index.json` parsed as a V2
+    /// config, so a VINDEX3 container in the directory silently
+    /// vanished: the user saw an empty listing beside a model they had
+    /// just extracted. Consumer readiness
+    /// (`docs/vindex-generation-policy.md`) forbids that — a container
+    /// is either understood or explicitly accounted for, never hidden —
+    /// so the listing reads the generation-neutral summary and names
+    /// the generation in its own column. A directory holding an
+    /// `index.json` this binary cannot identify is listed too, with the
+    /// reason in place of its facts.
     pub(crate) fn exec_show_models(&self) -> Result<Vec<String>, LqlError> {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        Self::show_models_in(&cwd)
+    }
+
+    /// The listing itself, over an explicit directory — `SHOW MODELS`
+    /// passes the working directory. Split out so the
+    /// both-generations claim is testable without changing a
+    /// process-global cwd.
+    pub fn show_models_in(dir: &std::path::Path) -> Result<Vec<String>, LqlError> {
         let mut out = Vec::new();
         out.push(format!(
-            "{:<35} {:>10} {:>8} {:>12}",
-            "Model", "Size", "Layers", "Status"
+            "{:<35} {:>10} {:>5} {:>8} {:>12}",
+            "Model", "Size", "Gen", "Layers", "Status"
         ));
-        out.push("-".repeat(70));
+        out.push("-".repeat(75));
 
-        let cwd = std::env::current_dir().unwrap_or_default();
-        if let Ok(entries) = std::fs::read_dir(&cwd) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut rows: Vec<String> = Vec::new();
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_dir() {
-                    let index_json = path.join(INDEX_JSON);
-                    if index_json.exists() {
-                        if let Ok(config) = larql_vindex::load_vindex_config(&path) {
-                            let size = dir_size(&path);
-                            out.push(format!(
-                                "{:<35} {:>10} {:>8} {:>12}",
-                                path.file_name().unwrap_or_default().to_string_lossy(),
-                                format_bytes(size),
-                                config.num_layers,
-                                "ready",
-                            ));
-                        }
-                    }
+                if !path.is_dir() || !path.join(INDEX_JSON).exists() {
+                    continue;
                 }
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                let size = format_bytes(dir_size(&path));
+                rows.push(
+                    match larql_vindex::format::generation::summarize_container(&path) {
+                        Ok(summary) => format!(
+                            "{:<35} {:>10} {:>5} {:>8} {:>12}",
+                            name,
+                            size,
+                            summary.generation.schema_label(),
+                            summary.num_layers,
+                            "ready",
+                        ),
+                        // Unidentifiable, but present: say so rather than
+                        // drop the row.
+                        Err(_) => format!(
+                            "{:<35} {:>10} {:>5} {:>8} {:>12}",
+                            name, size, "?", "-", "unreadable",
+                        ),
+                    },
+                );
             }
+            rows.sort();
+            out.extend(rows);
         }
 
         if out.len() == 2 {

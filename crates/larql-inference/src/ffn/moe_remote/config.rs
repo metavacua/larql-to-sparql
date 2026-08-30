@@ -2,6 +2,10 @@ use std::time::Duration;
 
 use super::error::RemoteMoeError;
 
+/// Default per-request HTTP timeout for remote-MoE shard calls: 30 s,
+/// overridable via [`ShardConfig::with_timeout`].
+const DEFAULT_SHARD_TIMEOUT: Duration = Duration::from_secs(30);
+
 // ── Shard configuration ───────────────────────────────────────────────────────
 
 /// One entry in the shard map: an expert-ID range + its URL.
@@ -44,7 +48,7 @@ impl ShardConfig {
             start,
             end,
             url,
-            timeout: Duration::from_secs(30),
+            timeout: DEFAULT_SHARD_TIMEOUT,
             unit_set: None,
         }
     }
@@ -68,7 +72,7 @@ impl ShardConfig {
             start,
             end,
             url,
-            timeout: Duration::from_secs(30),
+            timeout: DEFAULT_SHARD_TIMEOUT,
             unit_set: Some(std::sync::Arc::new(units)),
         }
     }

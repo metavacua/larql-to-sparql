@@ -159,6 +159,8 @@ fn bench_extract_throughput(c: &mut Criterion) {
                     larql_vindex::WriteWeightsOptions::default(),
                     larql_vindex::KquantWriteOptions::default(),
                     false,
+                    larql_vindex::ExtractionRequest::Legacy,
+                    None,
                     &mut cb,
                 )
                 .expect("extract");
@@ -187,6 +189,8 @@ fn bench_extract_throughput(c: &mut Criterion) {
             larql_vindex::WriteWeightsOptions::default(),
             larql_vindex::KquantWriteOptions::default(),
             false,
+            larql_vindex::ExtractionRequest::Legacy,
+            None,
             &mut cb,
         )
         .expect("reference extract for resume bench");
@@ -234,6 +238,8 @@ fn bench_extract_throughput(c: &mut Criterion) {
                 larql_vindex::WriteWeightsOptions::default(),
                 larql_vindex::KquantWriteOptions::default(),
                 false,
+                larql_vindex::ExtractionRequest::Legacy,
+                None,
                 &mut cb,
             )
             .expect("resumed extract");

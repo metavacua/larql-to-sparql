@@ -46,6 +46,18 @@ pub struct ExtractIndexArgs {
     #[arg(long, default_value = "inference", value_parser = parse_extract_level)]
     level: larql_vindex::ExtractLevel,
 
+    /// Expert-bank route: `legacy` (inline k-quant, today's behaviour),
+    /// `native` (VINDEX3 container in the checkpoint's own representation
+    /// — refuses rather than downgrades if the source cannot supply it),
+    /// or `auto` (admission policy decides). Native/auto require
+    /// `--expert-banks-out`.
+    #[arg(long, default_value = "legacy", value_parser = parse_expert_banks)]
+    expert_banks: larql_vindex::ExtractionRequest,
+
+    /// Destination directory for the native expert-bank container.
+    #[arg(long)]
+    expert_banks_out: Option<std::path::PathBuf>,
+
     /// Include full model weights. Alias for --level all (deprecated, use --level instead).
     #[arg(long)]
     include_weights: bool,
@@ -109,6 +121,25 @@ pub struct ExtractIndexArgs {
     /// Skip stages that already have output files (resume interrupted builds).
     #[arg(long)]
     resume: bool,
+
+    /// Container generation to write: `v2` or `v3`, explicitly. Omitted =
+    /// no preference — the vindex crate's extraction-generation policy
+    /// decides (the default-flip gate), never a CLI default. `v3` refuses
+    /// on this surface rather than downgrading: VINDEX3 containers are
+    /// produced by `larql vindex3 encode` from HF checkpoint artifacts.
+    #[arg(long, value_parser = parse_generation)]
+    generation: Option<larql_vindex::format::generation::ContainerGeneration>,
+}
+
+fn parse_generation(
+    s: &str,
+) -> Result<larql_vindex::format::generation::ContainerGeneration, String> {
+    use larql_vindex::format::generation::ContainerGeneration;
+    match s.to_lowercase().as_str() {
+        "v2" | "vindex2" => Ok(ContainerGeneration::V2),
+        "v3" | "vindex3" => Ok(ContainerGeneration::V3),
+        other => Err(format!("unknown container generation '{other}' (v2 | v3)")),
+    }
 }
 
 fn parse_quant(s: &str) -> Result<larql_vindex::QuantFormat, String> {
@@ -121,6 +152,43 @@ fn parse_quant(s: &str) -> Result<larql_vindex::QuantFormat, String> {
         "q4k" | "q4_k" | "kquant" => Ok(larql_vindex::QuantFormat::Q4K),
         _ => Err(format!(
             "unknown quant format: {s} (expected: none, q4k, kquant)"
+        )),
+    }
+}
+
+/// Resolve the effective extract level from the flags that can raise it.
+///
+/// Two things upgrade to `All`:
+///   * `--include-weights` — the pre-`--level` spelling, kept for compat.
+///   * `--quant q4k` — its help has always said it implies `--level all`,
+///     but until 2026-08-07 nothing acted on that, so the level fell through
+///     to the `inference` default and got written into `index.json`. The
+///     claim was right about the *bytes*: `write_kquant` runs the
+///     norms → ple → lm_head trio unconditionally, so a q4k vindex already
+///     contains everything an `all` vindex would. Only the recorded metadata
+///     was wrong — and it under-reported the vindex's contents to every
+///     consumer that reads `extract_level`.
+///
+/// Never *lowers* an explicitly requested level.
+fn resolve_extract_level(
+    include_weights: bool,
+    quant: larql_vindex::QuantFormat,
+    requested: larql_vindex::ExtractLevel,
+) -> larql_vindex::ExtractLevel {
+    if include_weights || quant == larql_vindex::QuantFormat::Q4K {
+        larql_vindex::ExtractLevel::All
+    } else {
+        requested
+    }
+}
+
+fn parse_expert_banks(s: &str) -> Result<larql_vindex::ExtractionRequest, String> {
+    match s {
+        "legacy" => Ok(larql_vindex::ExtractionRequest::Legacy),
+        "native" => Ok(larql_vindex::ExtractionRequest::Native),
+        "auto" => Ok(larql_vindex::ExtractionRequest::Auto),
+        other => Err(format!(
+            "unknown expert-bank route '{other}' (legacy | native | auto)"
         )),
     }
 }
@@ -198,16 +266,98 @@ impl IndexBuildCallbacks for CliBuildCallbacks {
     }
 }
 
+/// The V3 arm: HF checkpoint artifacts → `encode_checkpoint` (plan gate
+/// with itemised blocking findings, segments, capability snapshot).
+///
+/// The V2 route's knobs shape a *transcoding* extraction; none of them
+/// applies to a verbatim encode, so any that was explicitly set refuses
+/// by name rather than being silently ignored.
+fn run_v3(args: &ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let refused: &[(&str, bool)] = &[
+        ("--from-vectors", args.from_vectors.is_some()),
+        ("--quant", args.quant != larql_vindex::QuantFormat::None),
+        (
+            "--expert-banks",
+            args.expert_banks != larql_vindex::ExtractionRequest::Legacy,
+        ),
+        ("--include-weights", args.include_weights),
+        ("--compact", args.compact),
+        ("--drop-gate-vectors", args.drop_gate_vectors),
+        ("--down-q4k", args.down_q4k),
+        ("--feature-major-down", args.feature_major_down),
+        (
+            "--summary-features-per-expert",
+            args.summary_features_per_expert != 0,
+        ),
+    ];
+    if let Some((flag, _)) = refused.iter().find(|(_, set)| *set) {
+        return Err(format!(
+            "{flag} shapes the V2 transcoding route and does not apply to a VINDEX3 \
+             encode; drop it or use --generation v2"
+        )
+        .into());
+    }
+
+    let model = args
+        .model
+        .as_deref()
+        .ok_or("a model path or HF id is required for --generation v3")?;
+    let model_path = larql_models::resolve_model_path(model)?;
+    if model_path.is_file() {
+        return Err(format!(
+            "{} is a GGUF file; the VINDEX3 encoder consumes HF checkpoint artifacts \
+             (config.json + safetensors) and a container may not transcode on the way \
+             in. Use --generation v2 for GGUF sources.",
+            model_path.display()
+        )
+        .into());
+    }
+
+    let encoded = larql_vindex::format::vindex3::encode::checkpoint::encode_checkpoint(
+        &model_path,
+        &args.output,
+    )?;
+    if encoded.capabilities.is_empty() {
+        eprintln!(
+            "note: no tokenizer.json beside the checkpoint — the container will bind \
+             with token-id capability only"
+        );
+    } else {
+        eprintln!("capabilities: {}", encoded.capabilities.join(", "));
+    }
+    eprintln!(
+        "encoded {} ({} representation(s), {:.2} GB payload) → {}",
+        encoded.artifact,
+        encoded.outcome.representations,
+        encoded.outcome.total_payload_bytes as f64 / 1e9,
+        encoded.outcome.container.display(),
+    );
+    Ok(())
+}
+
 pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
+    // Resolve the container generation before any bytes move. Omitted =
+    // Auto, decided by the one policy site in larql-vindex (the
+    // default-flip gate). An admitted V3 takes the encode pipeline; a V3
+    // request this surface cannot honour refuses by name — it is never
+    // downgraded to a V2 extraction.
+    {
+        use larql_vindex::format::generation::{
+            admit_extraction_generation, ContainerGeneration, GenerationRequest,
+        };
+        let request = match args.generation {
+            None => GenerationRequest::Auto,
+            Some(generation) => GenerationRequest::Explicit(generation),
+        };
+        if admit_extraction_generation(request) == ContainerGeneration::V3 {
+            return run_v3(&args);
+        }
+    }
+
     let mut callbacks = CliBuildCallbacks::new();
     let build_start = Instant::now();
 
-    // Resolve extract level: --include-weights upgrades to All (backwards compat)
-    let level = if args.include_weights {
-        larql_vindex::ExtractLevel::All
-    } else {
-        args.level
-    };
+    let level = resolve_extract_level(args.include_weights, args.quant, args.level);
 
     // Dtype resolution:
     //   --f16                → F16
@@ -460,6 +610,8 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
                 weight_opts,
                 q4k_opts,
                 args.drop_gate_vectors,
+                args.expert_banks,
+                args.expert_banks_out.as_deref(),
                 &mut callbacks,
             )?;
         }
@@ -541,4 +693,50 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod level_resolution_tests {
+    use super::resolve_extract_level;
+    use larql_vindex::{ExtractLevel, QuantFormat};
+
+    #[test]
+    fn quant_q4k_implies_all_as_its_help_has_always_claimed() {
+        // The regression this pins: `--quant q4k` with the default level
+        // recorded `inference` while the writer had emitted an `all` vindex.
+        assert_eq!(
+            resolve_extract_level(false, QuantFormat::Q4K, ExtractLevel::Inference),
+            ExtractLevel::All
+        );
+        // Also from the lowest level — the writer's output does not depend
+        // on what was asked for, so neither should the recorded level.
+        assert_eq!(
+            resolve_extract_level(false, QuantFormat::Q4K, ExtractLevel::Browse),
+            ExtractLevel::All
+        );
+    }
+
+    #[test]
+    fn include_weights_still_upgrades() {
+        assert_eq!(
+            resolve_extract_level(true, QuantFormat::None, ExtractLevel::Browse),
+            ExtractLevel::All
+        );
+    }
+
+    #[test]
+    fn without_either_flag_the_requested_level_is_untouched() {
+        for lvl in [
+            ExtractLevel::Browse,
+            ExtractLevel::Attention,
+            ExtractLevel::Inference,
+            ExtractLevel::All,
+        ] {
+            assert_eq!(
+                resolve_extract_level(false, QuantFormat::None, lvl),
+                lvl,
+                "unquantised extract must record exactly the level asked for"
+            );
+        }
+    }
 }

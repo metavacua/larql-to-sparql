@@ -81,7 +81,9 @@ impl DecodeBackend for MetalBackend {
             &self.norms.residual_norm_q8_pipeline,
             Some(&self.attention.q4k_qkv_proj_pipeline.state),
             Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+            Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
             Some(&self.attention.q4kf_proj_pipeline.state),
+            Some(&self.attention.bias_add_pipeline),
             None,
             Some(&self.norms.qk_norm_pipeline),
             Some(&self.norms.scale_vector_pipeline),
@@ -168,7 +170,9 @@ impl DecodeBackend for MetalBackend {
             &self.norms.residual_norm_q8_pipeline,
             Some(&self.attention.q4k_qkv_proj_pipeline.state),
             Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+            Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
             Some(&self.attention.q4kf_proj_pipeline.state),
+            Some(&self.attention.bias_add_pipeline),
             Some(&self.attention.rope_at_pos_pipeline), // per-position RoPE — required for seq_len > 1
             Some(&self.norms.qk_norm_pipeline),
             Some(&self.norms.scale_vector_pipeline),
@@ -262,7 +266,9 @@ impl DecodeBackend for MetalBackend {
                     &self.norms.residual_norm_q8_pipeline,
                     Some(&self.attention.q4k_qkv_proj_pipeline.state),
                     Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+                    Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
                     Some(&self.attention.q4kf_proj_pipeline.state),
+                    Some(&self.attention.bias_add_pipeline),
                     Some(&self.attention.rope_at_pos_pipeline),
                     Some(&self.norms.qk_norm_pipeline),
                     Some(&self.norms.scale_vector_pipeline),
@@ -415,7 +421,9 @@ impl DecodeBackend for MetalBackend {
             &self.norms.residual_norm_q8_pipeline,
             Some(&self.attention.q4k_qkv_proj_pipeline.state),
             Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+            Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
             Some(&self.attention.q4kf_proj_pipeline.state),
+            Some(&self.attention.bias_add_pipeline),
             Some(&self.attention.rope_at_pos_pipeline),
             Some(&self.norms.qk_norm_pipeline),
             Some(&self.norms.scale_vector_pipeline),
@@ -518,7 +526,9 @@ impl DecodeBackend for MetalBackend {
             &self.norms.residual_norm_q8_pipeline,
             Some(&self.attention.q4k_qkv_proj_pipeline.state),
             Some(&self.attention.q4kf_qkv_proj_pipeline.state),
+            Some(&self.attention.q4k_q6k_qkv_proj_pipeline),
             Some(&self.attention.q4kf_proj_pipeline.state),
+            Some(&self.attention.bias_add_pipeline),
             Some(&self.attention.rope_at_pos_pipeline),
             Some(&self.norms.qk_norm_pipeline),
             Some(&self.norms.scale_vector_pipeline),
@@ -595,7 +605,17 @@ impl DecodeBackend for MetalBackend {
         let mut cache_guard = self.kv_cache.lock().unwrap();
         if let Some(ref mut kv) = *cache_guard {
             for layer in &mut kv.layers {
-                layer.current_len = 0;
+                // `clear()`, not `current_len = 0`. The cache splits
+                // occupancy from stream position on purpose — a slid
+                // window drops rows while the stream keeps advancing — and
+                // `abs_position` is what RoPE is computed at. Zeroing only
+                // the occupancy left `abs_position` climbing across every
+                // reset, so the first token of the NEXT sequence was
+                // rotated at the previous sequence's position and the
+                // whole decode drifted. Found via issue #227: once the
+                // O-projection stopped emitting zeros, two decodes over an
+                // identical seeded history stopped matching.
+                layer.clear();
             }
         }
     }
@@ -624,6 +644,25 @@ impl DecodeBackend for MetalBackend {
         // decode would read off the end of a global-layer buffer.
         let mut cache_guard = self.kv_cache.lock().unwrap();
         *cache_guard = Some(self.create_kv_cache_per_layer(shapes, max_seq));
+    }
+
+    fn preallocate_kv_cache_per_layer_with_capacity(
+        &self,
+        shapes: &[(usize, usize)],
+        capacities: &[usize],
+    ) {
+        // Same replace-outright contract as the uniform variant above;
+        // only the per-layer row count differs.
+        let default_capacity = capacities.iter().copied().max().unwrap_or(0);
+        let mut cache_guard = self.kv_cache.lock().unwrap();
+        *cache_guard = Some(
+            crate::ops::kv_cache::KVCache::new_per_layer_with_capacities(
+                &self.bufs,
+                shapes,
+                capacities,
+                default_capacity,
+            ),
+        );
     }
 
     fn decode_token(
@@ -772,7 +811,56 @@ impl DecodeBackend for MetalBackend {
             rope_base,
             norm_eps,
             get_expert,
+            None, // head — this entry point returns the hidden state
         )
+    }
+
+    fn decode_token_q4k_moe_head<'w>(
+        &self,
+        layers: &[larql_compute::FullPipelineLayer<'_>],
+        x: &[f32],
+        hidden: usize,
+        inter: usize,
+        norm_eps: f32,
+        get_expert: &dyn Fn(usize, usize) -> Option<(&'w [u8], &'w [u8])>,
+        head: &larql_compute::DecodeHeadPlan<'_>,
+    ) -> Option<Vec<(u32, f32)>> {
+        let (q_dim, kv_dim, num_q_heads, num_kv_heads, head_dim, rope_base) =
+            legacy_l0_geometry(layers);
+        // The slot the encoded head writes into. It stays `None` when any
+        // precondition refused, and the caller then runs the unfused head
+        // — so a refusal costs a normal token, never a wrong one.
+        let mut hits = None;
+        let hidden_out = MetalBackend::decode_token_q4k_moe(
+            self,
+            layers,
+            x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            num_q_heads,
+            num_kv_heads,
+            head_dim,
+            rope_base,
+            norm_eps,
+            get_expert,
+            Some(crate::decode::HeadRequest {
+                plan: head,
+                out: &mut hits,
+            }),
+        );
+        // `None` from the step means a command buffer inside it failed
+        // (`cb_status`): the step *ran* — KV was appended — but its bytes
+        // are poison. That must not read as a refusal, or the caller would
+        // fall through to the unfused path and run the same token again on
+        // top of the appended KV. Report it as an empty top-K instead:
+        // "the step ran and has no usable candidates", which the caller
+        // treats as terminal.
+        if hidden_out.is_none() {
+            return Some(Vec::new());
+        }
+        hits
     }
 
     fn decode_token_with_moe_split(
@@ -815,6 +903,8 @@ impl DecodeBackend for MetalBackend {
             Some(moe_collect_fn),
             None, // no state capture on split fire/collect MoE path
             larql_compute::StateDumpMask::Full,
+            None,
+            None, // head — split fire/collect returns the hidden state
         ))
     }
 
@@ -843,6 +933,13 @@ impl DecodeBackend for MetalBackend {
                 attn_ms: wall_ms,
                 gate_up_ms: 0.0,
                 down_ms: 0.0,
+                // No split was recorded, so nothing is known about how much
+                // of this wall was GPU. Report zero rather than guessing —
+                // a fabricated `gpu_ms` here would be the same mistake the
+                // "GPU fwd" counter made.
+                gpu_ms: 0.0,
+                wall_ms,
+                cmd_buffers: 0,
             }
         });
         (result, timings.attn_ms, timings.gate_up_ms, timings.down_ms)

@@ -56,6 +56,10 @@ pub fn build_vindex_streaming(
     // time. Refused otherwise because without a Q4K interleaved file
     // the gate would be unrecoverable.
     drop_gate_vectors: bool,
+    // Expert-bank route (`extract::orchestrate` decides; `Legacy` = today's
+    // inline behaviour, no container). `Native` REQUIRES `expert_banks_out`.
+    expert_banks: crate::extract::target::ExtractionRequest,
+    expert_banks_out: Option<&Path>,
     callbacks: &mut dyn IndexBuildCallbacks,
 ) -> Result<(), VindexError> {
     if drop_gate_vectors && quant != QuantFormat::Q4K {
@@ -101,6 +105,25 @@ pub fn build_vindex_streaming(
         callbacks,
     )?;
 
+    // Runs first: a checkpoint carrying tensors nothing can address should
+    // fail in seconds, not after a multi-minute extraction that quietly
+    // produced a hollow vindex.
+    ctx.audit_tensor_coverage()?;
+
+    // Expert banks next: the orchestrator either declines (LegacyInline —
+    // the k-quant writer will emit them later as always) or streams the
+    // native container now, so an experts-only run finishes here-ish
+    // rather than after the spine stages.
+    if expert_banks != crate::extract::target::ExtractionRequest::Legacy {
+        let Some(dest) = expert_banks_out else {
+            return Err(VindexError::Parse(
+                "--expert-banks native/auto requires --expert-banks-out DIR".into(),
+            ));
+        };
+        let outcome = ctx.extract_expert_banks(expert_banks, dest)?;
+        ctx.callbacks
+            .on_stage(&format!("expert banks: {outcome:?} -> {}", dest.display()));
+    }
     ctx.write_gate_vectors()?;
     ctx.write_router_weights()?;
     ctx.write_embeddings()?;

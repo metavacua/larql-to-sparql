@@ -46,6 +46,36 @@ pub(crate) enum Backend {
         weights: larql_inference::ModelWeights,
         tokenizer: larql_inference::tokenizers::Tokenizer,
     },
+    /// A bound VINDEX3 container: the opened executable program plus
+    /// serving glue (LQL-1). Holds NO `ModelWeights`, `VectorIndex`, or
+    /// `ModelArchitecture` — statements consume the runtime's declared
+    /// facts and capabilities; nothing below the binding re-detects the
+    /// format. Supports INFER [GENERATE], STATS, SHOW LAYERS.
+    Vindex3 {
+        #[allow(dead_code)]
+        path: PathBuf,
+        runtime: larql_inference::Vindex3Runtime<
+            larql_vindex::format::vindex3::opplan::exec::production::ProductionBackend,
+        >,
+        /// The container's tokenizer, when it carries one — the text
+        /// capability. INFER requires it; USE/STATS/SHOW do not.
+        tokenizer: Option<larql_inference::tokenizers::Tokenizer>,
+        /// The browse view (V3-LQL-3A): semantic roles bound to the
+        /// plan's operands. `Some` iff the tokenizer capability is
+        /// present (annotations decode token ids); built at USE.
+        knowledge: Option<larql_vindex::format::vindex3::knowledge::KnowledgeView>,
+        /// The logical mutation overlay (V3-LQL-3B): entity-keyed KNN
+        /// entries and applied patches over the read-only container.
+        /// Always present — mutation capability is not gated on the
+        /// tokenizer.
+        overlay: larql_vindex::format::vindex3::knowledge::KnowledgeOverlay,
+        /// The BOS token id the container **declares**, resolved once at
+        /// bind. Every prompt this session encodes prepends it when the
+        /// tokenizer's own post-processor did not — the V2 surface gets
+        /// the same fact from its architecture, and the two must agree
+        /// (`v2_and_v3_prompt_encoders_agree_on_a_bos_requiring_model`).
+        bos_token: Option<u32>,
+    },
     /// Remote server backend — queries forwarded via HTTP.
     /// Local patches can be applied for client-side overlay.
     Remote {
@@ -82,6 +112,7 @@ impl Session {
     pub(crate) fn require_patched(&self) -> Result<&larql_vindex::PatchedVindex, LqlError> {
         match &self.backend {
             Backend::Vindex { patched, .. } => Ok(patched),
+            Backend::Vindex3 { .. } => Err(super::vindex3::unsupported("this statement")),
             Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
                 "this operation requires a vindex. Extract first:\n  \
                  EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",
@@ -110,6 +141,7 @@ impl Session {
                 patched,
                 ..
             } => Ok((path, config, patched)),
+            Backend::Vindex3 { .. } => Err(super::vindex3::unsupported("mutation")),
             Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
                 "mutation requires a vindex. Extract first:\n  \
                  EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",
@@ -138,6 +170,7 @@ impl Session {
                 patched,
                 ..
             } => Ok((path, config, patched)),
+            Backend::Vindex3 { .. } => Err(super::vindex3::unsupported("this statement")),
             Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
                 "this operation requires a vindex. Extract first:\n  \
                  EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",

@@ -31,7 +31,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let layer = &layers[0];
     println!(
         "Layer 0 formats: wq={:?}, wk={:?}, wv={:?}, wo={:?}",
-        layer.wq.format, layer.wk.format, layer.wv.format, layer.wo.format
+        layer.wq.format(),
+        layer.wk.format(),
+        layer.wv.format(),
+        layer.wo.format()
     );
     println!(
         "Layer 0 dims: hd={}, nq={}, nkv={}",

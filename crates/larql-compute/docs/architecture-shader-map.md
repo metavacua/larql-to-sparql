@@ -41,7 +41,7 @@ Hidden=2560 (4B), 34 layers, 8 Q heads × head_dim=256, 4 KV heads, vocab=262K.
 | Post-attn norm + residual | `post_attn_residual_norm_store` | Triple-fused: post-attn RMS + residual + ffn-norm + store (one dispatch). |
 | FFN gate+up | `q4k_ffn_gate_up_8sg` (default, 8sg) — with `LARQL_GATE_UP_8SG=0` opt-out to `q4k_ffn_gate_up`, `LARQL_F16_ACC=1` to `q4k_ffn_gate_up_f16acc`, `LARQL_GATE_UP_COOP=1` to `q4k_ffn_gate_up_coop` | All production fired per-position; matmul wiring twice-falsified (D-PREFILL-MM closed). |
 | GEGLU activation | `geglu` (GELU-tanh variant) | Element-wise gate × up activation. |
-| FFN down | `q6k_matvec` (Q6_K weights via `q6k_matvec_pipeline` aliased to `q6k_matvec_8sg` since 2026-04-28) | Q6_K convention from ollama extracts. |
+| FFN down | `q6k_matvec` (Q6_K weights, **4sg — the default**; `LARQL_Q6K_8SG=1` opts into the 8sg arm, which did not translate end-to-end) | Q6_K convention from ollama extracts. |
 | Post-FFN norm + residual | `post_ffn_norm_residual_add` | Fused norm + residual into next-layer input. |
 | Final norm | `residual_inject::rms_norm` | Standalone one-TG dispatch. |
 | lm_head | `q4k_matvec` (production since 2026-05-02 dispatch fix) | Falls back to `q4k_matvec_stride32` if `LARQL_LM_HEAD_SKIP_Q4K=1`, then `f16_gemv` (tied embed), then `f32_gemv`. |
@@ -60,7 +60,7 @@ Largely the same shaders as Gemma 3, with these differences:
 | QKV input norm offset | `0.0` (Gemma 4 vs Gemma 3's `1.0` for HF-saved weights) | Same `q4k_q6k_qkv_proj` kernel, different config |
 | FFN intermediate size | E2B: 6144, 31B: 21504 | Same `q4k_ffn_gate_up_8sg` + `q6k_matvec` |
 
-**Diagnosed anomaly (2026-05-09)**: gemma4-e2b decode runs at **~1670 ms/tok on CPU**, not Metal. Root cause: **Per-Layer Embeddings (PLE, `hidden_size_per_layer_input: 256`) are not implemented in the Metal pipeline.** `larql-inference/src/layer_graph/generate/gpu.rs:372-374` explicitly checks `weights.arch.has_per_layer_embeddings()` and routes the entire generate path to `generate_via_cpu_q4k`. The Metal `decode_token_with_moe_split_fn` is never called — `[gpu-timing]` lines never fire for E2B, while they do for Gemma 3 4B and Gemma 4 31B (which don't have PLE). The CPU fallback is documented in the source comment as deliberate: "Without this routing the model produces multilingual gibberish."
+**Diagnosed anomaly (2026-05-09)**: gemma4-e2b decode runs at **~1670 ms/tok on CPU**, not Metal. Root cause: **Per-Layer Embeddings (PLE, `hidden_size_per_layer_input: 256`) are not implemented in the Metal pipeline.** `larql-inference/src/layer_graph/generate/gpu/` explicitly checks `weights.arch.has_per_layer_embeddings()` and routes the entire generate path to `generate_via_cpu_q4k`. The Metal `decode_token_with_moe_split_fn` is never called — `[gpu-timing]` lines never fire for E2B, while they do for Gemma 3 4B and Gemma 4 31B (which don't have PLE). The CPU fallback is documented in the source comment as deliberate: "Without this routing the model produces multilingual gibberish."
 
 **To restore E2B to Metal**: implement Per-Layer Embeddings in the Metal pipeline (ROADMAP **D-METAL-PLE**). The PLE math is in `larql-inference/src/forward/ple.rs`:
 - Precompute (once at prefill): `projected = main_embeds @ per_layer_model_projection.T * 1/sqrt(hidden)`, then per-layer RMSNorm + add `embed_tokens_per_layer[token_ids] * sqrt(ple_dim)`, scaled by `1/sqrt(2)`.
@@ -75,7 +75,7 @@ Most kernels needed already exist (matvec, geglu element-wise, rms_norm, residua
 | Stage | Shader(s) | Notes |
 |---|---|---|
 | MoE gate scoring | `f32_gemv` (production, Metal gate scoring landed 2026-04-19) | Picks top-K experts per token. |
-| Expert FFN | `q4k_ffn_gate_up` + `q4k_geglu_down` (per expert, dispatched via `moe_dispatch.rs`) | Geometry fix landed 2026-05-02; pre-fix was 5.1 tok/s (broken dispatch), post-fix 19.4 tok/s. |
+| Expert FFN | `q4k_ffn_gate_up` + `q4k_geglu_down` (per expert, dispatched via `moe_dispatch/`) | Geometry fix landed 2026-05-02; pre-fix was 5.1 tok/s (broken dispatch), post-fix 19.4 tok/s. |
 | Expert combine | Custom Metal/CPU outer-combine helper (`outer_combine.rs`) | Resolved 4 silent CPU/Metal divergences 2026-04-26. |
 
 ### Llama 1/2/3 — `larql-models/architectures/llama.rs`
@@ -105,7 +105,7 @@ Otherwise identical shader path to Llama.
 
 ### DeepSeek (V2 / V3) — `larql-models/architectures/deepseek.rs`
 
-**Architecture supported, compute path partially exercised.** DeepSeek uses MLA (Multi-Latent-Attention) and a different MoE expert pattern than Gemma 4 26B-A4B. The current MoE dispatch (`moe_dispatch.rs`) handles Gemma 4 a4b's pattern but DeepSeek-V3's 256-expert + 8-shared-expert pattern needs verification.
+**Architecture supported, compute path partially exercised.** DeepSeek uses MLA (Multi-Latent-Attention) and a different MoE expert pattern than Gemma 4 26B-A4B. The current MoE dispatch (`moe_dispatch/`) handles Gemma 4 a4b's pattern but DeepSeek-V3's 256-expert + 8-shared-expert pattern needs verification.
 
 ⚠️ **gap**: no DeepSeek vindex tested in this audit. Architecture trait exists (137 LOC in `deepseek.rs`); compute path not validated.
 
@@ -192,10 +192,10 @@ done
 ## How to add a new architecture
 
 1. Add the architecture trait impl: `crates/larql-models/src/architectures/{family}.rs` overriding `ModelArchitecture` methods that differ from defaults.
-2. Add detection logic in `crates/larql-models/src/detect.rs`.
+2. Add detection logic in `crates/larql-models/src/detect/`.
 3. Add at least one entry in `crates/larql-inference/tests/test_logits_goldens.rs` with the model's golden tokens.
 4. Bench with `./target/release/larql bench <vindex>` to verify dispatch works end-to-end.
-5. **If a new shader is needed**: add it under `crates/larql-compute/src/metal/shaders/`, document its applicability in `shader-inventory.md`, register in `metal/mod.rs::all_shaders`, and add a row to this doc's per-architecture table.
+5. **If a new shader is needed**: add it under `crates/larql-compute-metal/src/shaders/`, document its applicability in `shader-inventory.md`, register in `metal/mod.rs::all_shaders`, and add a row to this doc's per-architecture table.
 
 ## Related
 

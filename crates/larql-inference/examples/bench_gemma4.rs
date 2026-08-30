@@ -158,7 +158,7 @@ fn main() {
 
     bench("GQA attention (sliding, scale=1.0)", 500, || {
         let _ = gqa_attention_with_weights(
-            &q_rope, &k_rope, &v_normed, nq, hd_sliding, reps, 1.0, seq_len, false, None,
+            &q_rope, &k_rope, &v_normed, nq, hd_sliding, reps, 1.0, seq_len, false, None, None,
         );
     });
 

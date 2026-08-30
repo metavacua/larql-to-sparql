@@ -189,6 +189,7 @@ async fn quic_round_trip_announce_to_ack() {
                 vindex_hash: "feedface".into(),
                 expert_start: 0,
                 expert_end: 0,
+                serves_openai: false,
             })),
         })
         .await

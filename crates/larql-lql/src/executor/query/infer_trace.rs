@@ -17,6 +17,11 @@ impl Session {
         relations_only: bool,
         with_attention: bool,
     ) -> Result<Vec<String>, LqlError> {
+        // VINDEX3 binding: EXPLAIN INFER renders the executable plan —
+        // static, no reconstruction, no execution (LQL-2).
+        if matches!(self.backend, crate::executor::Backend::Vindex3 { .. }) {
+            return self.exec_v3_explain();
+        }
         let top_k = top.unwrap_or(5) as usize;
         let per_layer = top.unwrap_or(3) as usize;
 
@@ -47,10 +52,7 @@ impl Session {
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
             .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
-        let encoding = tokenizer
-            .encode(prompt, true)
-            .map_err(|e| LqlError::exec("tokenize error", e))?;
-        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+        let token_ids = super::encode_vindex_prompt(config, &tokenizer, prompt)?;
 
         let token_strs: Vec<Option<String>> = if with_attention {
             token_ids
@@ -193,10 +195,7 @@ impl Session {
         prompt: &str,
         top_k: usize,
     ) -> Result<Vec<String>, LqlError> {
-        let encoding = tokenizer
-            .encode(prompt, true)
-            .map_err(|e| LqlError::exec("tokenize error", e))?;
-        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+        let token_ids = super::encode_dense_prompt(weights, tokenizer, prompt)?;
 
         let start = std::time::Instant::now();
         let result = larql_inference::predict(weights, tokenizer, &token_ids, top_k);
@@ -466,12 +465,7 @@ mod tests {
     }
 
     fn hit(layer: usize, feature: usize, gate: f32, top: &str, top_k: &[&str]) -> WalkHit {
-        WalkHit {
-            layer,
-            feature,
-            gate_score: gate,
-            meta: meta(top, top_k),
-        }
+        WalkHit::from_gate(layer, feature, gate, meta(top, top_k))
     }
 
     fn bands() -> LayerBands {

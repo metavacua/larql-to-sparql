@@ -29,6 +29,17 @@ impl Session {
                     p
                 };
 
+                // The one V2/V3 decision in LQL: bind by the container's
+                // own generation marker. Everything after binding
+                // consumes the bound runtime's facts and capabilities —
+                // no statement executor asks "is this VINDEX3?" again.
+                if matches!(
+                    larql_vindex::format::generation::detect_generation(&path),
+                    Ok(larql_vindex::format::generation::ContainerGeneration::V3)
+                ) {
+                    return self.bind_v3_session(path);
+                }
+
                 let config = larql_vindex::load_vindex_config(&path)
                     .map_err(|e| LqlError::exec("failed to load vindex config", e))?;
 
@@ -135,5 +146,60 @@ impl Session {
             }
             UseTarget::Remote(url) => self.exec_use_remote(url),
         }
+    }
+
+    /// Bind a VINDEX3 container as the session backend — the single V3
+    /// binding block, shared by `USE` and by `EXTRACT ... FORMAT VINDEX3`'s
+    /// auto-bind so the two can never drift.
+    pub(crate) fn bind_v3_session(
+        &mut self,
+        path: std::path::PathBuf,
+    ) -> Result<Vec<String>, LqlError> {
+        let (runtime, tokenizer, knowledge) = crate::executor::vindex3::bind(&path)?;
+        let plan_layers = runtime.plan().layers.len();
+        let out = vec![
+            format!(
+                "Using: {} (VINDEX3, model: {}, component {}, {} layers, \
+                 execution closed)",
+                path.display(),
+                runtime.model_name(),
+                crate::executor::vindex3::V3_COMPONENT,
+                plan_layers,
+            ),
+            format!(
+                "Supported: {}. Tokenizer: {}.",
+                crate::executor::vindex3::SUPPORTED,
+                if tokenizer.is_some() {
+                    "present"
+                } else {
+                    "absent (token-id capability only)"
+                },
+            ),
+        ];
+        // A compiled container carries its L0 knowledge as
+        // `knn_store.bin` (the same file V2 binds) — load it into the
+        // overlay's store, exactly as the V2 arm does.
+        let mut overlay = larql_vindex::format::vindex3::knowledge::KnowledgeOverlay::default();
+        let knn_path = path.join(KNN_STORE_BIN);
+        if knn_path.exists() {
+            match larql_vindex::KnnStore::load(&knn_path) {
+                Ok(store) => overlay.knn_store = store,
+                Err(e) => {
+                    eprintln!("warning: failed to load knn_store.bin: {e}");
+                }
+            }
+        }
+        let bos_token = crate::executor::vindex3::declared_bos_token(&path);
+        self.backend = Backend::Vindex3 {
+            path,
+            runtime,
+            tokenizer,
+            knowledge,
+            overlay,
+            bos_token,
+        };
+        self.patch_recording = None;
+        self.auto_patch = false;
+        Ok(out)
     }
 }

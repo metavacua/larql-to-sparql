@@ -13,6 +13,9 @@ use super::dequant::dequantize_matrix;
 
 /// End-to-end predict on a Q4_K vindex with the FFN served by an external
 /// [`crate::ffn::FfnBackend`].
+///
+/// A refusal propagates rather than degrading to the dense half of the layer
+/// that refused — see [`predict_kquant_hidden_inner`].
 pub fn predict_kquant_with_ffn(
     weights: &mut ModelWeights,
     tokenizer: &Tokenizer,
@@ -20,9 +23,11 @@ pub fn predict_kquant_with_ffn(
     top_k: usize,
     index: &VectorIndex,
     ffn_backend: &dyn crate::ffn::FfnBackend,
-) -> PredictResult {
-    let h = predict_kquant_hidden_with_ffn(weights, token_ids, index, ffn_backend);
-    crate::forward::predict::logits_to_predictions_pub(weights, &h, tokenizer, top_k, 1.0)
+) -> Result<PredictResult, larql_execution::BoxRefusal> {
+    let h = predict_kquant_hidden_with_ffn(weights, token_ids, index, ffn_backend)?;
+    Ok(crate::forward::predict::logits_to_predictions_pub(
+        weights, &h, tokenizer, top_k, 1.0,
+    ))
 }
 
 /// **Early-exit** Q4_K predict — the q4k twin of
@@ -41,7 +46,7 @@ pub fn predict_kquant_with_ffn_early_exit(
     ffn_backend: &dyn crate::ffn::FfnBackend,
     stop_layer: usize,
     on_stop: &mut dyn FnMut() -> Option<Vec<(String, f64)>>,
-) -> (Vec<(String, f64)>, bool) {
+) -> Result<(Vec<(String, f64)>, bool), larql_execution::BoxRefusal> {
     let mut early_preds: Option<Vec<(String, f64)>> = None;
     let (h, exited);
     {
@@ -59,41 +64,53 @@ pub fn predict_kquant_with_ffn_early_exit(
             index,
             ffn_backend,
             Some((stop_layer, &mut stop_hook)),
-        );
+        )?;
     }
     if exited {
-        (early_preds.unwrap_or_default(), true)
+        Ok((early_preds.unwrap_or_default(), true))
     } else {
-        (
+        Ok((
             crate::forward::predict::logits_to_predictions_pub(weights, &h, tokenizer, top_k, 1.0)
                 .predictions,
             false,
-        )
+        ))
     }
 }
 
 /// End-to-end hidden-state forward on a Q4_K vindex with the FFN served by an
 /// external [`crate::ffn::FfnBackend`].
+///
+/// A refusal propagates — see [`predict_kquant_hidden_inner`].
 pub fn predict_kquant_hidden_with_ffn(
     weights: &mut ModelWeights,
     token_ids: &[u32],
     index: &VectorIndex,
     ffn_backend: &dyn crate::ffn::FfnBackend,
-) -> ndarray::Array2<f32> {
-    predict_kquant_hidden_inner(weights, token_ids, index, ffn_backend, None).0
+) -> Result<ndarray::Array2<f32>, larql_execution::BoxRefusal> {
+    Ok(predict_kquant_hidden_inner(weights, token_ids, index, ffn_backend, None)?.0)
 }
 
 /// Core Q4_K hidden forward with an optional early-exit hook. `early =
 /// Some((stop_layer, on_stop))` checks `on_stop()` after `stop_layer` completes;
 /// `true` returns the current hidden + `exited = true`. `None` runs the full
 /// stack (the behaviour of [`predict_kquant_hidden_with_ffn`]).
+///
+/// # A refusal is not a hidden state
+///
+/// The hybrid-MoE branch below routes a whole layer to `ffn_backend`. When that
+/// route refuses, this returns the refusal instead of falling through to the
+/// dense-only path: completing the layer with its dense half would answer with
+/// a hidden state the model never computed, and the caller has no way to tell
+/// that from a real one. Same contract as
+/// [`crate::kv_dispatch::helpers`]'s per-layer dispatch — the hook's three
+/// outcomes stay three all the way out.
 fn predict_kquant_hidden_inner(
     weights: &mut ModelWeights,
     token_ids: &[u32],
     index: &VectorIndex,
     ffn_backend: &dyn crate::ffn::FfnBackend,
     mut early: Option<(usize, &mut dyn FnMut() -> bool)>,
-) -> (ndarray::Array2<f32>, bool) {
+) -> Result<(ndarray::Array2<f32>, bool), larql_execution::BoxRefusal> {
     let num_layers = weights.num_layers;
     let hidden = weights.hidden_size;
 
@@ -137,7 +154,26 @@ fn predict_kquant_hidden_inner(
                 &h,
                 layer,
             ) {
-                if let Some(h_out) = ffn_backend.forward_moe_full_layer(layer, &h_post_attn) {
+                // A refusal propagates; `None` falls through to the dense path
+                // below. Not-applicable means this backend does not serve the
+                // layer, and the local dispatch is the correct answer — a
+                // refusal is not that, and must not wear its shape.
+                let routed = match ffn_backend.forward_moe_full_layer(layer, &h_post_attn) {
+                    Ok(out) => out,
+                    Err(refusal) => {
+                        // The four dequantised attention tensors inserted
+                        // above are this loop's scratch, and every other exit
+                        // drops them. Propagating without this would leave a
+                        // layer of f32 attention weights in the caller's
+                        // `weights` — a refusal that silently grows the model.
+                        weights.tensors.remove(&q_key);
+                        weights.tensors.remove(&k_key);
+                        weights.tensors.remove(&v_key);
+                        weights.tensors.remove(&o_key);
+                        return Err(refusal);
+                    }
+                };
+                if let Some(h_out) = routed {
                     h = h_out;
                     weights.tensors.remove(&q_key);
                     weights.tensors.remove(&k_key);
@@ -178,12 +214,12 @@ fn predict_kquant_hidden_inner(
         // residual trace, so the verified route would abstain there anyway.
         if let Some((stop, on_stop)) = early.as_mut() {
             if layer == *stop && on_stop() {
-                return (h, true);
+                return Ok((h, true));
             }
         }
     }
 
-    (h, false)
+    Ok((h, false))
 }
 
 #[cfg(test)]
@@ -194,6 +230,83 @@ mod tests {
         make_test_gemma4_moe_weights, make_test_q4k_vindex, make_test_q4k_weights,
         make_test_tokenizer,
     };
+    use larql_execution::{ExecutionRefusal, RefusalKind};
+
+    /// An FFN backend that refuses every routed layer.
+    #[derive(Debug)]
+    struct RefusingFfn;
+
+    #[derive(Debug)]
+    struct NoExpertHere;
+
+    impl std::fmt::Display for NoExpertHere {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("expert not resident on this shard")
+        }
+    }
+    impl std::error::Error for NoExpertHere {}
+    impl ExecutionRefusal for NoExpertHere {
+        fn kind(&self) -> RefusalKind {
+            RefusalKind::Residency
+        }
+    }
+
+    impl larql_compute::ffn::FfnBackend for RefusingFfn {
+        fn forward(&self, _layer: usize, x: &ndarray::Array2<f32>) -> ndarray::Array2<f32> {
+            x.clone()
+        }
+        fn name(&self) -> &str {
+            "refusing"
+        }
+        fn forward_moe_full_layer(
+            &self,
+            _layer: usize,
+            _h_post_attn: &ndarray::Array2<f32>,
+        ) -> Result<Option<ndarray::Array2<f32>>, larql_execution::BoxRefusal> {
+            Err(Box::new(NoExpertHere))
+        }
+    }
+
+    /// The point of the error channel: a routed layer that refused must not
+    /// come back as a hidden state. Before this propagated, the refusal was
+    /// logged and the loop fell through to the dense-only path, so the caller
+    /// received a plausible hidden built without the expert that declined —
+    /// indistinguishable from a real one.
+    #[test]
+    fn a_refused_layer_does_not_become_a_hidden_state() {
+        let mut weights = make_test_gemma4_moe_weights();
+        let index = make_test_q4k_vindex(&weights);
+        let err = predict_kquant_hidden_with_ffn(&mut weights, &[0u32, 1], &index, &RefusingFfn)
+            .expect_err("a refused MoE layer must not yield a hidden state");
+        assert_eq!(err.kind(), RefusalKind::Residency);
+    }
+
+    /// The refusal path cleans up after itself. The loop inserts four
+    /// dequantised attention matrices per layer as scratch and drops them on
+    /// every other exit; propagating without that cleanup would leave a
+    /// layer's worth of f32 weights in the caller's model on the way out.
+    #[test]
+    fn a_refusal_leaves_no_scratch_attention_tensors_behind() {
+        let mut weights = make_test_gemma4_moe_weights();
+        let index = make_test_q4k_vindex(&weights);
+        let scratch = {
+            let arch = &*weights.arch;
+            [
+                arch.attn_q_key(0),
+                arch.attn_k_key(0),
+                arch.attn_v_key(0),
+                arch.attn_o_key(0),
+            ]
+        };
+        let _ = predict_kquant_hidden_with_ffn(&mut weights, &[0u32, 1], &index, &RefusingFfn)
+            .expect_err("fixture refuses");
+        for key in &scratch {
+            assert!(
+                !weights.tensors.contains_key(key),
+                "refusal left dequantised scratch tensor {key} in the caller's weights"
+            );
+        }
+    }
 
     /// `predict_kquant_hidden_with_ffn` end-to-end against the Q4K
     /// fixture using a `WeightFfn` backend. Non-MoE arch → the
@@ -211,7 +324,8 @@ mod tests {
         let ffn = WeightFfn {
             weights: weights_ref,
         };
-        let h = predict_kquant_hidden_with_ffn(&mut weights, &[0u32, 1], &index, &ffn);
+        let h = predict_kquant_hidden_with_ffn(&mut weights, &[0u32, 1], &index, &ffn)
+            .expect("WeightFfn never refuses");
         assert_eq!(h.shape(), &[2, weights.hidden_size]);
         assert!(h.iter().all(|v| v.is_finite()));
     }
@@ -228,7 +342,8 @@ mod tests {
         let ffn = WeightFfn {
             weights: weights_ref,
         };
-        let h = predict_kquant_hidden_with_ffn(&mut weights, &[0u32, 1], &index, &ffn);
+        let h = predict_kquant_hidden_with_ffn(&mut weights, &[0u32, 1], &index, &ffn)
+            .expect("WeightFfn never refuses");
         assert_eq!(h.shape(), &[2, weights.hidden_size]);
         assert!(h.iter().all(|v| v.is_finite()));
     }
@@ -242,7 +357,8 @@ mod tests {
         let ffn = WeightFfn {
             weights: weights_ref,
         };
-        let result = predict_kquant_with_ffn(&mut weights, &tokenizer, &[0u32, 1], 3, &index, &ffn);
+        let result = predict_kquant_with_ffn(&mut weights, &tokenizer, &[0u32, 1], 3, &index, &ffn)
+            .expect("WeightFfn never refuses");
         assert!(result.predictions.len() <= 3);
     }
 }

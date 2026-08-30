@@ -65,7 +65,8 @@ model as a queryable knowledge graph I can edit at runtime".
 
 ## Features
 
-- **OpenAI-compatible API** — `GET /v1/models`, `POST /v1/embeddings` (with `encoding_format: "base64"`), `POST /v1/completions`, `POST /v1/chat/completions` with SSE streaming, structured outputs (`response_format: json_object | json_schema`), function calling (`tools` + `tool_choice`), tool-result replay (`role: "tool"`), repetition penalties (`frequency_penalty` / `presence_penalty`), and top-k logprobs all live. Existing `openai` Python/JS SDKs work unmodified — chat templates auto-detected from the model family (Gemma / Llama / ChatML / Mistral / plain)
+- **OpenAI-compatible API** — `GET /v1/models`, `POST /v1/embeddings` (with `encoding_format: "base64"`), `POST /v1/completions`, `POST /v1/chat/completions`, and `POST /v1/responses` (+ `GET`/`DELETE /v1/responses/{id}`), all with SSE streaming, structured outputs (`response_format` / `text.format`: `json_object | json_schema`), function calling (`tools` + `tool_choice`), tool-result replay (`role: "tool"`), repetition penalties (`frequency_penalty` / `presence_penalty`), and top-k logprobs. Served by both VINDEX2 and VINDEX3 runtimes. Existing `openai` Python/JS SDKs work unmodified — chat templates auto-detected from the model family (Gemma / Llama / ChatML / Mistral / plain)
+- **Stateful continuation** — `/v1/responses` chains via `previous_response_id` resume from a resident KV state on V3 runtimes instead of re-prefilling the conversation; `GET`/`DELETE /v1/sessions` observe and evict session state
 - **Browse endpoints** — DESCRIBE, WALK, SELECT, RELATIONS, STATS (no weights needed)
 - **Inference** — full forward pass with WalkFfn (weights lazy-loaded on first request)
 - **Remote MoE expert** — `/v1/experts/layer-batch` (residual once + K experts), gRPC streaming with overlap, f16 wire opt-in, UDS transport for same-host shards
@@ -106,12 +107,14 @@ larql serve output/gemma3-4b-v2.vindex --api-key "sk-abc123" --tls-cert cert.pem
 larql-server speaks the OpenAI API. Point any existing `openai`
 Python or JS client at the larql `base_url` and it works unmodified.
 The full surface — `/v1/models`, `/v1/embeddings` (`encoding_format:
-"base64"`), `/v1/completions`, `/v1/chat/completions` with SSE
-streaming, structured outputs (`response_format: json_object` /
-`json_schema`), function calling (`tools` + `tool_choice`),
-multi-turn tool-result replay, repetition penalties, and top-k
-logprobs — is live. Chat completions auto-detect the chat template
-from the model family (Gemma / Llama / ChatML / Mistral / plain).
+"base64"`), `/v1/completions`, `/v1/chat/completions`, and
+`/v1/responses` — is live, with SSE streaming, structured outputs
+(`response_format: json_object` / `json_schema`), function calling
+(`tools` + `tool_choice`), multi-turn tool-result replay, repetition
+penalties, and top-k logprobs. Chat completions auto-detect the chat
+template from the model family (Gemma / Llama / ChatML / Mistral /
+plain). `/v1/responses` additionally stores conversations server-side
+and continues them via `previous_response_id`.
 
 **Python:**
 
@@ -317,12 +320,12 @@ and exercises every endpoint with a real vindex:
 
 ```bash
 # f16 vindex (fastest, KV-cached attention):
-cargo run --release -p larql-server --example openai_demo -- \
+cargo run --release -p larql-demos --example openai_demo -- \
   output/gemma3-4b-f16.vindex
 
 # Q4_K vindex (also produces real output; per-step Q4_K decode is
 # O(N²) so high `max_tokens` runs are slow on CPU):
-cargo run --release -p larql-server --example openai_demo -- \
+cargo run --release -p larql-demos --example openai_demo -- \
   output/gemma3-4b-q4k-streaming.vindex
 ```
 
@@ -340,6 +343,10 @@ CPU path based on the loaded vindex format.
 | `--port <PORT>` | Listen port | 8080 |
 | `--host <HOST>` | Bind address | 0.0.0.0 |
 | `--no-infer` | Disable `/v1/infer` (browse-only, saves no memory directly — `walk-ffn` still loads weights lazily; pair with `--warmup-walk-ffn` to pay that cost at boot). | false |
+| `--lazy-weights` | Defer model-weight loading until the first `/v1/infer` (or other inference) request instead of loading at startup. Eager load is the default so a too-small-RAM condition fails loudly at boot rather than OOM-killing under HTTP backpressure. Also skips the startup memory pre-flight check. | false |
+| `--no-memcheck` | Skip the startup cgroup memory pre-flight check. By default the server reads `memory.max` and refuses to start when the estimated resident size + headroom exceeds the limit. Use when the estimate is wrong or without cgroup v2. | false |
+| `--memcheck-headroom-mib <MIB>` | Headroom (MiB) reserved below `memory.max` for the OS, allocator overhead, and the request-handling working set. Ignored with `--no-memcheck`. | 512 |
+| `--infer-timeout-secs <SECS>` | Per-request hard timeout for `/v1/infer` and other inference endpoints. On expiry the handler responds 504 and drops the `spawn_blocking` handle (the blocking thread runs to completion in the background; result discarded). 0 = disabled. | 60 |
 | `--ffn-only` | Run as an FFN-service endpoint for `RemoteWalkBackend` clients. Skips the f16→f32 gate warmup (10× smaller startup RSS on 31B Q4_K) | false |
 | `--embed-only` | Run as an embed-service endpoint (ADR-0008). Loads only embeddings + lm_head + tokenizer; skips all FFN and attention weights. Enables `/v1/embed`, `/v1/logits`, `/v1/token/*`. Advertises `mode: embed-service`. | false |
 | `--layers <START-END>` | Serve only this layer range (inclusive). Out-of-range requests return HTTP 400. Pages outside the range are never touched. | all |
@@ -357,21 +364,27 @@ CPU path based on the loaded vindex format.
 | `--grid-key <KEY>` | Shared secret matching the router's `--grid-key`. Required when the router enforces grid auth. Reads `LARQL_GRID_KEY` env. | — |
 | `--public-url <URL>` | HTTP URL clients should use to reach this server, advertised when joining the grid (e.g. `http://shard-a:9181`). Required with `--join`. | — |
 | `--cors` | Enable CORS headers | false |
+| `--no-docs` | Disable the built-in Swagger UI and `/v1/openapi.json` endpoint. | false |
 | `--api-key <KEY>` | Require Bearer token auth (health exempt) | — |
 | `--rate-limit <SPEC>` | Per-IP rate limit (e.g., "100/min", "10/sec") | — |
 | `--trust-forwarded-for` | Use the first `X-Forwarded-For` IP for rate limiting. Enable only behind a trusted reverse proxy. | false |
 | `--max-concurrent <N>` | Max concurrent requests | 100 |
 | `--cache-ttl <SECS>` | Cache TTL for DESCRIBE results (0 = disabled) | 0 |
 | `--grpc-port <PORT>` | Enable gRPC server on this port (separate from the router-announce gRPC) | — |
+| `--shard-query-tau <TAU>` | Cosine threshold for the Exp 53 `ShardService.Query` KNN cache. When set, the gRPC server registers a `ShardService` backed by an in-memory cache; clients hit it when their query vector matches an indexed entry at `cos >= tau`. The v1 cache starts empty and is populated in-process. Common production value: `0.97`. | — |
 | `--tls-cert <PATH>` | TLS certificate for HTTPS | — |
 | `--tls-key <PATH>` | TLS private key for HTTPS | — |
+| `--http3-port <PORT>` | (ADR-0019, requires building with `--features http3`) Enable an HTTP/3 listener on this port, serving the same axum router as `--port`. Reuses `--tls-cert`/`--tls-key` when set; otherwise generates an in-memory self-signed cert and logs its SHA-256 fingerprint for the router's `--shard-cert-fingerprint` pin. | — |
+| `--available-ram <SIZE>` | Mode B: advertise available RAM to the router (no vindex preloaded); the router assigns a shard via AssignMsg. E.g. `24GB`, `16384MB`, or raw bytes. Requires `--join` and `--vindex-store`. | — |
+| `--vindex-store <PATH>` | Mode B: directory where router-assigned shards are downloaded. | — |
+| `--quic-cert-fingerprint <HEX>` | (ADR-0010) SHA-256 fingerprint of the router's QUIC server cert. Required only when `--join` uses the `quic://` scheme; without it the QUIC client skips certificate verification (LAN / dev only). | — |
 | `--log-level <LEVEL>` | Logging level | info |
 
 ### Environment variables
 
 The server and inference client share a small set of env-var knobs for
 tuning the MoE remote-expert path. Most have data-driven defaults from
-the 2026-05-01 perf session — see `ROADMAP.md` for measurement context.
+the 2026-05-01 perf session — see `CHANGELOG.md` for measurement context.
 
 | Var | Effect | Default |
 |---|---|---|
@@ -402,19 +415,55 @@ modes and compose cleanly (`--ffn-only` skips startup warmup,
 `--max-gate-cache-layers` caps decoded heap, `--release-mmap-after-request`
 hints the kernel to drop mmap pages).
 
+## Serving VINDEX3 containers (VI3-SERVE-1)
+
+`larql serve` accepts VINDEX3 containers through the same CLI. The
+container generation is detected once, at binding time
+(`bootstrap::load_artifact` in `src/bootstrap/load.rs`): a VINDEX3 container
+binds as `LoadedArtifact::V3` carrying a `V3Model` (`src/vindex3.rs`) —
+a `Vindex3Runtime` opened with the `ProductionBackend` on the
+container's `target` component, plus the container's `tokenizer.json` —
+while VINDEX2 vindexes take the existing `load_single_vindex` path.
+Requests resolve their model across both registries via
+`AppState::served` (`src/state.rs`); routes match the returned binding
+once, at the top, and no version check leaks into generation code.
+
+What a V3 model serves today:
+
+- `GET /v1/models` lists it with a larql-specific `generation: 3` extra
+  and no `features` count (a V3 container is an executable program, not
+  a feature index).
+- `POST /v1/completions` (buffered and SSE streaming) runs on the V3
+  runtime via `src/routes/openai/v3_completions.rs`. Request validation,
+  chunk shape, stop-string trimming, and `finish_reason` semantics are
+  shared with the V2 path, so the two runtimes cannot drift in what a
+  client sees — only the token source differs.
+
+Each request opens a fresh session (`generate_v3` in `src/vindex3.rs`):
+a caller-owned `CanonicalKvState`, batch `prefill_into`,
+`session_with_kv`, then `continue_session` drives the sampler and
+streams each token's `(id, text)` through the incremental detokenizer.
+Plan operands stay resident per session, not per server; a shared
+resident session/operand pool is later, perf-shaped work. The other
+generation and browse endpoints (`/v1/chat/completions`,
+`/v1/embeddings`, `/v1/describe`, …) resolve V2 models only for now.
+
 ## Examples and Benchmarks
 
-All examples compile with:
+The benchmarks live in this crate; the demos moved to the
+`larql-demos` crate (`crates/larql-demos/examples/server/`, registered
+under the same example names). All compile with:
 
 ```bash
 cargo check -p larql-server --examples
+cargo check -p larql-demos --examples
 ```
 
 Synthetic demos do not require a real vindex:
 
 ```bash
-cargo run -p larql-server --example server_demo
-cargo run -p larql-server --example embed_demo
+cargo run -p larql-demos --example server_demo
+cargo run -p larql-demos --example embed_demo
 ```
 
 The OpenAI-compat live demo boots an in-process server and exercises
@@ -422,7 +471,7 @@ The OpenAI-compat live demo boots an in-process server and exercises
 vindex (no port binding, no external HTTP client):
 
 ```bash
-cargo run --release -p larql-server --example openai_demo -- \
+cargo run --release -p larql-demos --example openai_demo -- \
   output/gemma3-4b-q4k-streaming.vindex
 ```
 
@@ -515,9 +564,9 @@ Reference numbers on M3 Max (single in-process shard, layer 15, top-K=8;
 | UDS + f16 | 0.71 ms | 21.7 ms |
 
 Full perf snapshot (per-layer breakdown, RSS, vindex load time, etc.)
-is in `ROADMAP.md` → "Live perf snapshot → Remote MoE expert path".
+is in `CHANGELOG.md` → 2026-05-07 "Perf snapshot" → "Remote MoE expert path".
 The numbers above are the 2026-05-01 baseline (re-validated post Q1
-cleanup); the ROADMAP also tracks the historical progression
+cleanup); the CHANGELOG also tracks the historical progression
 (4.86 ms → 1.91 ms → 0.78 ms `forward_moe` warm across the 2026-04-26
 + 2026-05-01 sessions).
 
@@ -635,7 +684,7 @@ cargo run --release -p larql-cli --example convert_moe_to_per_layer -- \
 # Then strip `packed_bf16` rows from weight_manifest.json and rm experts_packed.bin.
 ```
 
-The loader (`format/weights/load.rs:614`) auto-detects the layout via
+The loader (`format/weights/load/`) auto-detects the layout via
 `index.json`'s `"ffn_layout": "per_layer"`. Both old and new vindexes are
 supported through the same code path.
 
@@ -1085,6 +1134,35 @@ List active patches (session-aware).
 
 Remove a patch by description (session-aware).
 
+### Session Endpoints
+
+Observe and evict runtime session state. Observability and termination
+only — sessions are *created* by being used (an `X-Session-Id` on
+`/v1/patches/apply`, `/v1/insert`, or `/v1/responses`), and model state
+is still mutated only through `/v1/patches`.
+
+#### GET /v1/sessions
+
+Live sessions, most recently used first: identity, model binding,
+lifecycle stamps, patch identities, and continuation metadata
+(availability, absorbed prompt tokens, cumulative resumptions).
+
+#### GET /v1/sessions/{id}
+
+The same object for one session; `404` if absent or expired.
+
+#### DELETE /v1/sessions/{id}
+
+Frees the session's patch overlay **and** every KV continuation it
+owns, and retires it so an in-flight generation cannot re-insert one
+afterwards. Idempotent — a repeat reports `deleted: false` rather than
+404. Unrelated sessions are untouched.
+
+```bash
+curl http://localhost:8080/v1/sessions
+curl -X DELETE http://localhost:8080/v1/sessions/sess-a
+```
+
 ### Management Endpoints
 
 #### GET /v1/health
@@ -1260,8 +1338,68 @@ single delta chunk rather than per-token argument streaming
 entries only — full top-K alternatives need inference work (F18
 follow-up).
 
-Coming next:
-- **N0.3** Responses API (`/v1/responses`) — pairs with N1 stateful sessions
+#### POST /v1/responses
+
+The Responses API, with server-side conversation storage and
+continuation. Served by both V2 and V3 runtimes.
+
+```json
+POST /v1/responses
+{
+  "model": "gemma-3-4b-it",
+  "input": "What is the capital of France?",
+  "instructions": "You are concise.",
+  "max_output_tokens": 16
+}
+
+→ {
+  "id": "resp_abc123...",
+  "object": "response",
+  "created_at": 1746094800,
+  "model": "gemma-3-4b-it",
+  "status": "completed",
+  "output": [{
+    "type": "message",
+    "role": "assistant",
+    "content": [{"type": "output_text", "text": " Paris."}]
+  }],
+  "usage": {
+    "input_tokens": 16, "output_tokens": 2, "total_tokens": 18,
+    "input_tokens_details": {"cached_tokens": 0}
+  }
+}
+```
+
+Continue the conversation by passing the previous id — the stored
+conversation is replayed ahead of the new input, and the stored model
+becomes the default so the follow-up lands on the same runtime:
+
+```json
+{"previous_response_id": "resp_abc123...", "input": "And of Germany?"}
+```
+
+`store: false` retains nothing (and makes the response un-chainable).
+`GET /v1/responses/{id}` returns a stored envelope, `DELETE
+/v1/responses/{id}` removes it.
+
+`stream: true` emits the typed event sequence (`response.created` →
+`response.output_item.added` → `response.content_part.added` →
+`response.output_text.delta`… → `response.completed`), terminated by
+`data: [DONE]`.
+
+**KV continuation (V3).** On a VINDEX3 runtime a chained request can
+resume from the producing turn's resident KV state instead of
+re-prefilling the whole conversation. Resumption is purely an
+optimisation — it engages only when the new prompt's token ids extend
+the absorbed ids exactly, and falls back to a full prefill otherwise,
+so the produced tokens are identical either way. A hit surfaces as
+`usage.input_tokens_details.cached_tokens`; `--v3-kv-cache-entries`
+and `--v3-kv-ttl-secs` bound it. Send an `X-Session-Id` and the
+retained state is owned by that session, so `DELETE /v1/sessions/{id}`
+frees it.
+
+Limitations: `background: true` → 400 (larql serves responses
+synchronously); no `type: "reasoning"` output items.
 
 ## Authentication
 
@@ -1416,16 +1554,14 @@ larql-server/
 ├── Cargo.toml
 ├── README.md
 ├── ROADMAP.md
+├── CHANGELOG.md
 ├── examples/
-│   ├── server_demo.rs          Synthetic vindex API demo (no real model)
-│   ├── embed_demo.rs           Synthetic embed/logits/token demo
-│   ├── openai_demo.rs          Live OpenAI-compat walkthrough — boots an
-│   │                           in-process server with the given vindex and
-│   │                           exercises /v1/models, /v1/embeddings, /v1/completions
 │   ├── server_bench.rs         Synthetic endpoint latency benchmarks
 │   ├── bench_embed_server.rs   Live vindex embed-service benchmark
 │   └── bench_expert_server.rs  Live MoE expert benchmark (cpu_moe_forward
 │                               floor + forward_moe HTTP RTT + 30-layer sweep)
+│   (the demos — server_demo, embed_demo, openai_demo, shard_query_demo —
+│   live in crates/larql-demos/examples/server/, same example names)
 ├── docs/
 │   ├── server-spec.md          Full endpoint reference + wire formats
 │   └── router-spec.md          larql-router (grid coordinator) spec
@@ -1442,10 +1578,12 @@ larql-server/
     ├── main.rs                 Thin entry: parse Cli, init tracing, hand off
     │                           to bootstrap::serve. ~26 LOC.
     ├── lib.rs                  Crate-public exports
-    ├── bootstrap.rs            Cli struct + serve(): vindex load, warmups,
-    │                           listener setup (TCP + optional UDS via
-    │                           --uds-path, TCP_NODELAY on accepted conns,
-    │                           TLS, gRPC, grid announce).
+    ├── bootstrap/             Boot orchestration, split by concern
+    │   ├── cli.rs             Cli struct + flag defaults
+    │   ├── load.rs            load_artifact: V2 vs VINDEX3 binding
+    │   ├── listeners.rs       TCP + optional UDS (--uds-path), TCP_NODELAY, TLS
+    │   └── mod.rs             serve(): vindex load, warmups, sweeper, gRPC,
+    │                          grid announce
     ├── state.rs                AppState: loaded models, probe labels, lazy
     │                           weights, expert_filter / unit_filter
     ├── error.rs                ServerError → HTTP status codes
@@ -1457,9 +1595,18 @@ larql-server/
     │                           (BINARY_FFN_*, JSON_CONTENT_TYPE,
     │                           REQUEST_BODY_LIMIT_*, BEARER_PREFIX, …)
     ├── auth.rs                 API key Bearer token middleware
-    ├── ratelimit.rs            Per-IP token bucket rate limiting
+    ├── ratelimit/             Per-IP token bucket rate limiting
     ├── cache.rs                TTL cache for DESCRIBE results
-    ├── session.rs              Per-session PatchedVindex isolation
+    ├── maintenance/           Background sweeper for every bounded store
+    │                          (sessions, rate-limit buckets, V3 KV cache)
+    ├── session/               Session identity + lifecycle
+    │   ├── clock.rs           One monotonic timebase, wall-clock projection
+    │   ├── lease.rs           Lock-free identity/liveness record
+    │   ├── state.rs           Lazy per-session PatchedVindex overlay
+    │   └── manager.rs         The session map: TTL eviction, list/get/delete
+    ├── response_store/        Bounded FIFO of stored /v1/responses envelopes
+    ├── response_kv/           N1 KV continuation cache (bounded + TTL, owned
+    │                          by the session that produced the state)
     ├── etag.rs                 ETag generation for CDN caching
     ├── ffn_l2_cache.rs         Per-model FFN L2 score cache
     ├── embed_store.rs          mmap-backed f16 embedding lookup (--embed-only)
@@ -1467,6 +1614,8 @@ larql-server/
     ├── announce.rs             Grid `--join` announce + heartbeat loop
     ├── grpc.rs                 gRPC service (tonic, all browse/infer endpoints)
     ├── grpc_expert.rs          gRPC MoE expert dispatch (used with grpc:// shards)
+    ├── vindex3.rs              VINDEX3 binding: V3Model (Vindex3Runtime +
+    │                           tokenizer) + generate_v3 session stack
     └── routes/
         ├── mod.rs              Router setup (single + multi-model)
         ├── describe.rs         GET /v1/describe (cached, ETag, relation labels)
@@ -1477,6 +1626,7 @@ larql-server/
         ├── infer.rs            POST /v1/infer (walk/dense/compare)
         ├── explain.rs          POST /v1/explain-infer (per-layer attention/FFN)
         ├── stream.rs           WS /v1/stream (layer-by-layer streaming)
+        ├── sessions/           GET/DELETE /v1/sessions (observe + evict)
         ├── walk_ffn.rs         POST /v1/walk-ffn (decoupled FFN dispatch)
         ├── expert/             MoE expert dispatch — split by concern
         │   ├── mod.rs          Re-exports + shared request/response types
@@ -1495,7 +1645,22 @@ larql-server/
         ├── embed.rs            POST /v1/embed, /v1/logits, /v1/token/*
         ├── insert.rs           POST /v1/insert (knowledge mutation)
         ├── patches.rs          POST/GET/DELETE /v1/patches (session-aware)
+        ├── sessions/           GET/DELETE /v1/sessions (observe + evict)
         ├── warmup.rs           POST /v1/warmup (manual weight + mmap warmup)
+        ├── openai/             OpenAI-compat surface
+        │   ├── embeddings.rs   POST /v1/embeddings
+        │   ├── completions.rs  POST /v1/completions (V2)
+        │   ├── v3_completions.rs  … the same endpoint on a VINDEX3 runtime
+        │   ├── chat/           POST /v1/chat/completions (types, handler,
+        │   │                   stream, tools, v3)
+        │   ├── responses/      POST /v1/responses + GET/DELETE by id
+        │   │                   (handler, stream, events, engine, input,
+        │   │                   tools, retrieve)
+        │   ├── schema/         JSON Schema → FSM → per-token logits mask
+        │   ├── prompt.rs       Chat-template rendering + tool formatting
+        │   ├── token_tap.rs    Shared per-token emit policy for the 4 streams
+        │   ├── util.rs         StopSpec, id suffixes, unix_now, sampling
+        │   └── error.rs        OpenAI-shape error envelope
         ├── health.rs           GET /v1/health
         └── models.rs           GET /v1/models
 ```
@@ -1533,16 +1698,16 @@ make larql-server-coverage-policy         # re-run policy check on existing repo
 # debt + the 90% default floor live in `coverage-policy.json`; baselines
 # only ratchet upward. New / split files must hit 90% on first commit.
 
-# Synthetic demos (no real vindex)
-cargo run -p larql-server --example server_demo
-cargo run -p larql-server --example embed_demo
+# Synthetic demos (no real vindex; live in the larql-demos crate)
+cargo run -p larql-demos --example server_demo
+cargo run -p larql-demos --example embed_demo
 
 # Synthetic endpoint latency benchmark
 cargo run -p larql-server --example server_bench --release
 
 # Live OpenAI-compat walkthrough — boots in-process server and
 # exercises /v1/models, /v1/embeddings, /v1/completions
-cargo run --release -p larql-server --example openai_demo -- \
+cargo run --release -p larql-demos --example openai_demo -- \
   output/gemma3-4b-q4k-streaming.vindex
 
 # Live embed benchmark (requires a real vindex)
@@ -1636,9 +1801,10 @@ The full forward-looking work is in `ROADMAP.md`. Grouped by track (see
   Cursor, Continue, Aider, eval harnesses, dashboards) becomes a larql
   client unmodified. Highest-leverage parity item — it's the adapter
   layer the rest of the ecosystem speaks.
-- **N1. Stateful chat sessions** — KV-cache as a first-class resource
-  (`POST /v1/sessions`, `/v1/sessions/{id}/append`). Today every
-  `/v1/infer` re-prefills from scratch; with sessions the KV-cache stays
+- **N1. Stateful chat sessions** — KV-cache as a first-class resource.
+  Shipped so far: `previous_response_id` continuation on V3 runtimes,
+  and `GET`/`DELETE /v1/sessions` to observe and evict session state.
+  Today every `/v1/infer` re-prefills from scratch; with sessions the KV-cache stays
   resident across turns. Pairs with N0.3 (Responses API).
 - **N2. Async batch inference job queue** — `/v1/jobs` for
   throughput-bound workloads (RAG document processing, evals, embedding

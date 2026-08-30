@@ -36,6 +36,10 @@ pub mod index;
 pub mod kv_index_impl;
 pub mod patch;
 pub mod quant;
+/// The VINDEX3-only registry/resolver (the `vindex3-registry` initiative).
+/// See the module docs for scope and what is deliberately not wired yet.
+pub mod registry;
+pub mod runtime;
 pub mod trie;
 pub mod walker;
 // Back-compat alias — the top-level lifecycle dir was renamed
@@ -66,16 +70,20 @@ pub use error::VindexError;
 // Index
 pub use index::core::{
     FeatureMeta, FfnRowAccess, Fp4FfnAccess, GateIndex, GateLookup, IndexLoadCallbacks,
-    NativeFfnAccess, PatchOverrides, QuantizedFfnAccess, SilentLoadCallbacks, StorageBucket,
-    VectorIndex, WalkHit, WalkTrace,
+    NativeFfnAccess, OverrideSlot, PatchOverrides, QuantizedFfnAccess, SilentLoadCallbacks,
+    StorageBucket, VectorIndex, WalkHit, WalkTrace,
 };
 pub use index::residency::{LayerState, ResidencyManager};
 pub use index::router::{RouteResult, RouterIndex};
+// FFN component indices for `ffn_row_*` / `kquant_ffn_layer*` calls —
+// compile-time pinned equal to `larql_compute`'s in `kv_index_impl.rs`.
+pub use index::storage::ffn_store::{FFN_COMPONENTS_PER_LAYER, FFN_DOWN, FFN_GATE, FFN_UP};
 
 // Describe
 pub use describe::{DescribeEdge, LabelSource};
 
 // Extract
+pub use extract::target::ExtractionRequest;
 pub use extract::{
     build_vindex, build_vindex_dense_only, build_vindex_from_vectors, build_vindex_streaming,
     snapshot_hf_metadata, IndexBuildCallbacks, SilentBuildCallbacks, SNAPSHOT_FILES,
@@ -91,14 +99,23 @@ pub use format::load::{
 pub use format::huggingface::{
     dataset_repo_exists, download_hf_weights, ensure_collection, fetch_collection_items,
     is_hf_path, publish_vindex, publish_vindex_with_opts, repo_exists,
-    resolve_hf_model_with_progress, resolve_hf_vindex, resolve_hf_vindex_with_progress,
-    CollectionItem, DownloadProgress, PublishCallbacks, PublishOptions, SilentPublishCallbacks,
+    resolve_hf_model_with_progress, resolve_hf_vindex, resolve_hf_vindex_complete,
+    resolve_hf_vindex_with_progress, set_repo_visibility, CollectionItem, DownloadProgress,
+    PublishCallbacks, PublishOptions, PublishResult, SilentPublishCallbacks,
 };
 pub use format::weights::{
-    load_model_weights, load_model_weights_kquant, load_model_weights_kquant_shard,
-    load_model_weights_with_opts, write_model_weights, write_model_weights_kquant,
-    write_model_weights_kquant_with_opts, write_model_weights_with_opts, DownProjFormat,
-    KquantWriteOptions, LoadWeightsOptions, StreamingWeights, WeightSource, WriteWeightsOptions,
+    arch_from_vindex_config, load_model_weights, load_model_weights_kquant,
+    load_model_weights_kquant_shard, load_model_weights_with_opts, write_model_weights,
+    write_model_weights_kquant, write_model_weights_kquant_with_opts,
+    write_model_weights_with_opts, DownProjFormat, KquantWriteOptions, LoadWeightsOptions,
+    StreamingWeights, WeightSource, WriteWeightsOptions,
+};
+
+// Registry — VINDEX3-only model reference resolution.
+pub use registry::{
+    resolve as resolve_vindex3_reference, ArtifactRef as Vindex3ArtifactRef, ModelName,
+    ModelReference, Provenance as Vindex3Provenance, RegistryError, RegistryManifest,
+    ResolvedVindex3, VariantName, Vindex3Abi, Vindex3Resolution,
 };
 
 // Patch

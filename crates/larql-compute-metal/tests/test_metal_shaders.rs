@@ -892,7 +892,17 @@ fn rope_apply_matches_cpu() {
     enc.set_compute_pipeline_state(&pipeline);
     enc.set_buffer(0, Some(&buf), 0);
     enc.set_bytes(1, 4, &dim as *const u32 as *const std::ffi::c_void);
-    enc.set_bytes(2, 4, &base as *const f32 as *const std::ffi::c_void);
+    // Buffer 2 is the frequency table; amplitude at 4. See §4.10.
+    let rope_plan =
+        larql_compute::attention::rope::RopeFreqPlan::unscaled(dim as usize, 0, base as f64);
+    let inv_freq = rope_plan.inv_freq_f32();
+    enc.set_bytes(
+        2,
+        std::mem::size_of_val(&inv_freq[..]) as u64,
+        inv_freq.as_ptr() as *const std::ffi::c_void,
+    );
+    let amplitude = rope_plan.amplitude as f32;
+    enc.set_bytes(4, 4, &amplitude as *const f32 as *const std::ffi::c_void);
     let rotary_dim_val = 0u32; // 0 = full dim rotation
     enc.set_bytes(
         3,
@@ -965,7 +975,20 @@ fn rope_apply_partial_rotation() {
     enc.set_compute_pipeline_state(&pipeline);
     enc.set_buffer(0, Some(&buf), 0);
     enc.set_bytes(1, 4, &dim as *const u32 as *const std::ffi::c_void);
-    enc.set_bytes(2, 4, &base as *const f32 as *const std::ffi::c_void);
+    // Buffer 2 is the frequency table; amplitude at 4. See §4.10.
+    let rope_plan = larql_compute::attention::rope::RopeFreqPlan::unscaled(
+        dim as usize,
+        rotary_dim as usize,
+        base as f64,
+    );
+    let inv_freq = rope_plan.inv_freq_f32();
+    enc.set_bytes(
+        2,
+        std::mem::size_of_val(&inv_freq[..]) as u64,
+        inv_freq.as_ptr() as *const std::ffi::c_void,
+    );
+    let amplitude = rope_plan.amplitude as f32;
+    enc.set_bytes(4, 4, &amplitude as *const f32 as *const std::ffi::c_void);
     enc.set_bytes(3, 4, &rotary_dim as *const u32 as *const std::ffi::c_void);
     enc.dispatch_threads(
         metal::MTLSize::new(half_rotary as u64, seq_len as u64, 1),
@@ -1062,6 +1085,16 @@ fn fused_attention_single_token() {
         13,
         4,
         &rotary_dim_val as *const u32 as *const std::ffi::c_void,
+    );
+    // Buffers 14/15: attention sinks. Bound even when unused — Metal has
+    // no null buffer, and an unbound `has_sinks` would be read as garbage.
+    let no_sinks = [0.0f32];
+    enc.set_bytes(14, 4, no_sinks.as_ptr() as *const std::ffi::c_void);
+    let has_sinks_val = 0u32;
+    enc.set_bytes(
+        15,
+        4,
+        &has_sinks_val as *const u32 as *const std::ffi::c_void,
     );
     enc.dispatch_thread_groups(
         metal::MTLSize::new(num_q as u64, seq_len as u64, 1),
@@ -1364,47 +1397,56 @@ fn full_pipeline_seq1_produces_nonzero() {
     let wk_data = quantize_q4_0(&vec![0.01f32; kv_dim * hidden]);
     let wv_data = quantize_q4_0(&vec![0.01f32; kv_dim * hidden]);
     let wo_data = quantize_q4_0(&vec![0.01f32; hidden * q_dim]);
-    let (_q8_x_q, q8_s_q) = q4::quantize_to_q8(&vec![0.01f32; hidden]);
 
     let norm = vec![1.0f32; hidden];
     let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
 
+    // Q4_0 packs its f16 scale inside each 18-byte block, so no external
+    // scale array exists. This fixture used to fabricate one out of
+    // *input*-quantization scales — the wrong object entirely — which
+    // `QuantWeight::new` now refuses.
     let layer = larql_compute::FullPipelineLayer {
-        wq: larql_compute::QuantWeight {
-            data: &wq_data,
-            scales: Some(&q8_s_q),
-            format: larql_compute::QuantFormat::Q4_0,
-        },
-        wk: larql_compute::QuantWeight {
-            data: &wk_data,
-            scales: Some(&q8_s_q),
-            format: larql_compute::QuantFormat::Q4_0,
-        },
-        wv: larql_compute::QuantWeight {
-            data: &wv_data,
-            scales: Some(&q8_s_q),
-            format: larql_compute::QuantFormat::Q4_0,
-        },
-        wo: larql_compute::QuantWeight {
-            data: &wo_data,
-            scales: Some(&q8_s_q),
-            format: larql_compute::QuantFormat::Q4_0,
-        },
-        gate: larql_compute::QuantWeight {
-            data: &gate_data,
-            scales: None,
-            format: larql_compute::QuantFormat::Q4_0,
-        },
-        up: larql_compute::QuantWeight {
-            data: &up_data,
-            scales: None,
-            format: larql_compute::QuantFormat::Q4_0,
-        },
-        down: larql_compute::QuantWeight {
-            data: &down_data,
-            scales: None,
-            format: larql_compute::QuantFormat::Q4_0,
-        },
+        attn_sinks: None,
+        attn_q_bias: None,
+        attn_k_bias: None,
+        attn_v_bias: None,
+        attn_o_bias: None,
+        attn_softcap: 0.0,
+        wq: larql_compute::QuantWeight::new(
+            larql_compute::QuantFormat::Q4_0,
+            &wq_data,
+            larql_compute::QuantAux::None,
+        ),
+        wk: larql_compute::QuantWeight::new(
+            larql_compute::QuantFormat::Q4_0,
+            &wk_data,
+            larql_compute::QuantAux::None,
+        ),
+        wv: larql_compute::QuantWeight::new(
+            larql_compute::QuantFormat::Q4_0,
+            &wv_data,
+            larql_compute::QuantAux::None,
+        ),
+        wo: larql_compute::QuantWeight::new(
+            larql_compute::QuantFormat::Q4_0,
+            &wo_data,
+            larql_compute::QuantAux::None,
+        ),
+        gate: larql_compute::QuantWeight::new(
+            larql_compute::QuantFormat::Q4_0,
+            &gate_data,
+            larql_compute::QuantAux::None,
+        ),
+        up: larql_compute::QuantWeight::new(
+            larql_compute::QuantFormat::Q4_0,
+            &up_data,
+            larql_compute::QuantAux::None,
+        ),
+        down: larql_compute::QuantWeight::new(
+            larql_compute::QuantFormat::Q4_0,
+            &down_data,
+            larql_compute::QuantAux::None,
+        ),
         input_norm: &norm,
         post_attn_norm: &norm,
         pre_ffn_norm: None,
@@ -1422,6 +1464,11 @@ fn full_pipeline_seq1_produces_nonzero() {
         num_kv_heads,
         rope_base: 10000.0,
         rotary_dim: 0,
+        rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+            head_dim,
+            0_usize,
+            10000.0_f64,
+        ),
         sliding_window: 0,
         has_v_norm: false,
         layer_scalar: 0.0,
@@ -1456,9 +1503,23 @@ fn full_pipeline_seq1_produces_nonzero() {
     assert!(result.is_some(), "full_pipeline_q4 should return Some");
     let output = result.unwrap();
     assert_eq!(output.len(), hidden);
+    // Finiteness is checked separately from magnitude. `v.abs() > 1e-6` is
+    // false for NaN, so a NaN-filled result used to fail here with the message
+    // "output should be nonzero" — which sent the investigation hunting for a
+    // zeroed buffer when in fact every element was NaN. See the construction
+    // lock in `backend::MetalBackend::with_options`.
+    let non_finite = output.iter().filter(|v| !v.is_finite()).count();
+    assert_eq!(
+        non_finite,
+        0,
+        "Pipeline output has {non_finite}/{} non-finite values; head={:?}",
+        output.len(),
+        &output[..output.len().min(8)]
+    );
     assert!(
         output.iter().any(|&v| v.abs() > 1e-6),
-        "Pipeline output should be nonzero"
+        "Pipeline output is finite but all-zero; head={:?}",
+        &output[..output.len().min(8)]
     );
 }
 

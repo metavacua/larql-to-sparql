@@ -2,19 +2,26 @@
 //! pointer/upload protocol + callback hooks.
 //!
 //! Carved out of the monolithic `huggingface.rs` in the 2026-04-25
-//! reorg, then split again 2026-05-09 into:
-//!   - `mod.rs`     — public API (`publish_vindex*`, `PublishOptions`,
-//!                    `PublishCallbacks`), URL helpers,
-//!                    `enumerate_publishable_files`, `get_hf_token`,
-//!                    tests
-//!   - `remote.rs`  — `fetch_remote_lfs_oids`, `create_hf_repo`
-//!   - `upload.rs`  — `upload_file_to_hf` + preupload + `upload_regular`
-//!   - `lfs.rs`     — LFS protocol (batch / verify / commit) + streaming
-//!                    PUT + `CountingReader`
+//! reorg, then split again 2026-05-09, then again 2026-08-23 (each
+//! implementation file's tests moved to a sibling `*_tests.rs`, per the
+//! `format/generation.rs`+`format/generation_tests.rs` pattern) into:
+//!   - `mod.rs`          — public API (`publish_vindex*`, `PublishOptions`,
+//!                         `PublishResult`, `PublishCallbacks`), URL
+//!                         helpers, `enumerate_publishable_files`,
+//!                         `get_hf_token`
+//!   - `tests.rs`        — tests for `mod.rs`
+//!   - `remote.rs`       — `fetch_remote_lfs_oids`, `create_hf_repo`,
+//!                         `fetch_repo_head_sha`
+//!   - `remote_tests.rs` — tests for `remote.rs`
+//!   - `upload.rs`       — `upload_file_to_hf` + preupload + `upload_regular`
+//!   - `lfs.rs`          — LFS protocol (batch / verify / commit) +
+//!                         streaming PUT + `CountingReader`
 
 mod lfs;
 pub(super) mod protocol;
 mod remote;
+#[cfg(test)]
+mod remote_tests;
 mod upload;
 
 use std::path::{Path, PathBuf};
@@ -23,8 +30,29 @@ use crate::error::VindexError;
 use crate::format::filenames::*;
 
 use protocol::{hf_base, repo_type_plural, REPO_TYPE_DATASET, REPO_TYPE_MODEL};
-use remote::{create_hf_repo, fetch_remote_lfs_oids};
+use remote::{
+    create_hf_repo, delete_remote_files, fetch_remote_file_paths, fetch_remote_lfs_oids,
+    fetch_repo_head_sha, is_prune_exempt, update_repo_visibility,
+};
 use upload::upload_file_to_hf;
+
+/// What a successful publish produced: where it's browsable, and the
+/// exact commit its bytes landed at.
+///
+/// Publishing is not one atomic commit — each file lands as its own
+/// commit against `main` (`upload_file_to_hf`'s per-file protocol) — so
+/// `revision` is not "the commit this publish made" in a strict sense;
+/// it's `main`'s HEAD immediately after the last file landed, fetched
+/// with one extra API call once uploads finish
+/// (`docs/vindex3-registry-publishing-design.md` §1/§6). That is the
+/// only meaningful "pinned revision" a multi-commit upload can produce,
+/// and it is what an official registry entry's `RegistryArtifactRef::revision`
+/// needs — a caller no longer has to look this up and retype it by hand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishResult {
+    pub url: String,
+    pub revision: String,
+}
 
 /// Options controlling [`publish_vindex_with_opts`]. Kept as a struct so
 /// the signature can grow without breaking callers.
@@ -38,6 +66,24 @@ pub struct PublishOptions {
     pub skip_unchanged: bool,
     /// HuggingFace repo type: `"model"` (default) or `"dataset"`.
     pub repo_type: String,
+    /// Create the repo private. Vindex Factory (docs/vindex-factory.md
+    /// §7/§8.3) publishes private, verifies the published bytes, and
+    /// only then flips public via [`set_repo_visibility`] — "nothing
+    /// goes public unverified". Default `false` preserves every
+    /// existing caller's behaviour (`larql publish`/`larql hf publish`
+    /// have always created public repos).
+    pub private: bool,
+    /// Delete remote files that no longer exist in the source vindex.
+    ///
+    /// Publishing only ever *added* files until 2026-08-07. When the Q6_K
+    /// weight files were renamed (`interleaved_q4k.bin` →
+    /// `interleaved_kquant.bin`) a republish left both generations in the
+    /// repo, and `pick_bin` chose between them by name — so a repo could
+    /// silently serve a stale weight file that the source vindex no longer
+    /// contained. Mirroring the source is the intended meaning of "publish
+    /// this vindex", so this defaults to `true`; see [`is_prune_exempt`]
+    /// for what is never removed.
+    pub prune_remote: bool,
 }
 
 impl Default for PublishOptions {
@@ -45,6 +91,8 @@ impl Default for PublishOptions {
         Self {
             skip_unchanged: false,
             repo_type: REPO_TYPE_MODEL.into(),
+            private: false,
+            prune_remote: true,
         }
     }
 }
@@ -89,8 +137,26 @@ pub fn publish_vindex(
     vindex_dir: &Path,
     repo_id: &str,
     callbacks: &mut dyn PublishCallbacks,
-) -> Result<String, VindexError> {
+) -> Result<PublishResult, VindexError> {
     publish_vindex_with_opts(vindex_dir, repo_id, &PublishOptions::default(), callbacks)
+}
+
+/// Flip an already-published repo's visibility. The RELEASE step of
+/// docs/vindex-factory.md §7: a build publishes PRIVATE
+/// ([`PublishOptions::private`]), verifies the published bytes
+/// (VERIFY-B, §8.2), and only then calls this to go public — "nothing
+/// goes public unverified" (§8).
+///
+/// `repo_type` is `"model"` or `"dataset"`, matching
+/// [`PublishOptions::repo_type`]. Requires `HF_TOKEN` or
+/// `~/.huggingface/token`, same as publishing.
+pub fn set_repo_visibility(
+    repo_id: &str,
+    repo_type: &str,
+    private: bool,
+) -> Result<(), VindexError> {
+    let token = get_hf_token()?;
+    update_repo_visibility(repo_id, &token, repo_type, private)
 }
 
 /// Upload a vindex directory with explicit options. See [`PublishOptions`].
@@ -99,7 +165,7 @@ pub fn publish_vindex_with_opts(
     repo_id: &str,
     opts: &PublishOptions,
     callbacks: &mut dyn PublishCallbacks,
-) -> Result<String, VindexError> {
+) -> Result<PublishResult, VindexError> {
     if !vindex_dir.is_dir() {
         return Err(VindexError::NotADirectory(vindex_dir.to_path_buf()));
     }
@@ -114,7 +180,7 @@ pub fn publish_vindex_with_opts(
     let token = get_hf_token()?;
     let repo_type = opts.repo_type.as_str();
     callbacks.on_start(repo_id);
-    create_hf_repo(repo_id, &token, repo_type)?;
+    create_hf_repo(repo_id, &token, repo_type, opts.private)?;
 
     // Pull remote LFS index so we can skip unchanged files. Non-fatal
     // if the tree API errors (brand-new repo returns 404 here) — we just
@@ -148,9 +214,40 @@ pub fn publish_vindex_with_opts(
         callbacks.on_file_done(filename);
     }
 
+    // Mirror the source: anything on the Hub that the vindex no longer
+    // contains is removed. Runs *after* the uploads so a failed upload
+    // never leaves the repo with neither the old file nor the new one.
+    if opts.prune_remote {
+        let local: std::collections::HashSet<&str> =
+            files.iter().map(|(_, name)| name.as_str()).collect();
+        // A listing failure is not fatal — the upload already succeeded and
+        // stale files are a tidiness problem, not a correctness one now that
+        // the current generation is present.
+        if let Ok(remote) = fetch_remote_file_paths(repo_id, &token, repo_type) {
+            let stale: Vec<String> = remote
+                .into_iter()
+                .filter(|p| !local.contains(p.as_str()) && !is_prune_exempt(p))
+                .collect();
+            if !stale.is_empty() {
+                delete_remote_files(repo_id, &token, repo_type, &stale)?;
+                for p in &stale {
+                    callbacks.on_file_deleted(p);
+                }
+            }
+        }
+    }
+
+    // The pinned-revision step (design doc §1/§6): publishing is N
+    // per-file commits, not one atomic commit, so there is no commit
+    // sha to have captured along the way — the only meaningful
+    // "revision this publish produced" is `main`'s HEAD now that every
+    // file has landed. Fetched, not left to a caller to look up and
+    // retype: a hand-typed pin is exactly the provenance bug this
+    // exists to prevent.
+    let revision = fetch_repo_head_sha(repo_id, &token, repo_type)?;
     let url = hf_repo_url(repo_type, repo_id);
     callbacks.on_complete(&url);
-    Ok(url)
+    Ok(PublishResult { url, revision })
 }
 
 /// Enumerate publishable files in a vindex directory: every file at the
@@ -209,6 +306,22 @@ pub trait PublishCallbacks {
     /// `lfs.oid` and the upload is skipped. Default no-op so existing
     /// callbacks don't need to change.
     fn on_file_skipped(&mut self, _filename: &str, _size: u64, _sha256: &str) {}
+    /// Fired before sleeping to retry a transient upload failure —
+    /// `attempt` is the one about to be made, `reason` the status or
+    /// transport error that triggered it. Default no-op; surface it, because
+    /// a silent multi-minute backoff looks identical to a hung upload.
+    fn on_retry(
+        &mut self,
+        _filename: &str,
+        _attempt: u32,
+        _max_attempts: u32,
+        _reason: &str,
+        _wait: std::time::Duration,
+    ) {
+    }
+    /// Fired for each remote file deleted because it no longer exists in
+    /// the source vindex. Default no-op.
+    fn on_file_deleted(&mut self, _filename: &str) {}
     fn on_complete(&mut self, _url: &str) {}
 }
 
@@ -245,490 +358,4 @@ pub(in crate::format::huggingface) fn get_hf_token() -> Result<String, VindexErr
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serial_test::serial;
-    use std::fs;
-
-    /// Clear the test base-URL override so URL-builder tests see the
-    /// production default. Saved/restored around the assertion to
-    /// avoid leaking the change to other tests.
-    fn with_default_base<F: FnOnce()>(f: F) {
-        let prev = std::env::var(protocol::TEST_BASE_ENV).ok();
-        std::env::remove_var(protocol::TEST_BASE_ENV);
-        f();
-        if let Some(v) = prev {
-            std::env::set_var(protocol::TEST_BASE_ENV, v);
-        }
-    }
-
-    // ─── URL builders ──────────────────────────────────────────────
-
-    #[test]
-    #[serial]
-    fn hf_repo_url_model() {
-        with_default_base(|| {
-            assert_eq!(
-                hf_repo_url("model", "org/repo"),
-                "https://huggingface.co/org/repo"
-            );
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn hf_repo_url_dataset() {
-        with_default_base(|| {
-            assert_eq!(
-                hf_repo_url("dataset", "org/repo"),
-                "https://huggingface.co/datasets/org/repo"
-            );
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn hf_repo_url_unknown_type_falls_back_to_model() {
-        // Unknown repo types should fall back to the model URL shape so a
-        // typo doesn't silently route to a "datasets" 404.
-        with_default_base(|| {
-            assert_eq!(
-                hf_repo_url("space", "org/repo"),
-                "https://huggingface.co/org/repo"
-            );
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn hf_api_url_model() {
-        with_default_base(|| {
-            assert_eq!(
-                hf_api_url("model", "org/repo", "preupload/main"),
-                "https://huggingface.co/api/models/org/repo/preupload/main"
-            );
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn hf_api_url_dataset() {
-        with_default_base(|| {
-            assert_eq!(
-                hf_api_url("dataset", "org/repo", "tree/main"),
-                "https://huggingface.co/api/datasets/org/repo/tree/main"
-            );
-        });
-    }
-
-    // ─── PublishOptions ────────────────────────────────────────────
-
-    #[test]
-    fn publish_options_default_is_model_no_skip() {
-        let opts = PublishOptions::default();
-        assert!(!opts.skip_unchanged);
-        assert_eq!(opts.repo_type, "model");
-    }
-
-    #[test]
-    fn publish_options_skip_unchanged_helper() {
-        let opts = PublishOptions::skip_unchanged();
-        assert!(opts.skip_unchanged);
-        // Should keep the default repo_type — the helper only flips skip.
-        assert_eq!(opts.repo_type, "model");
-    }
-
-    // ─── enumerate_publishable_files ───────────────────────────────
-
-    #[test]
-    fn enumerate_files_root_and_subdir() {
-        let dir = tempfile::tempdir().unwrap();
-        // Root files.
-        fs::write(dir.path().join("index.json"), "{}").unwrap();
-        fs::write(dir.path().join("gate_vectors.bin"), b"x").unwrap();
-        // Subdirectory.
-        fs::create_dir_all(dir.path().join("layers")).unwrap();
-        fs::write(dir.path().join("layers/layer_00.weights"), b"y").unwrap();
-        fs::write(dir.path().join("layers/layer_01.weights"), b"z").unwrap();
-
-        let files = enumerate_publishable_files(dir.path()).unwrap();
-        let names: Vec<&str> = files.iter().map(|(_, n)| n.as_str()).collect();
-
-        // Sorted by repo path so the commit order is stable.
-        assert_eq!(
-            names,
-            vec![
-                "gate_vectors.bin",
-                "index.json",
-                "layers/layer_00.weights",
-                "layers/layer_01.weights",
-            ]
-        );
-        // Subdir paths use forward slashes regardless of platform.
-        assert!(files.iter().any(|(_, n)| n.contains('/')));
-    }
-
-    #[test]
-    fn enumerate_files_skips_nested_subdirs() {
-        // Only immediate subdirectories are walked. Files in `a/b/foo`
-        // must not appear — HF dataset layouts are at most two levels.
-        let dir = tempfile::tempdir().unwrap();
-        fs::create_dir_all(dir.path().join("a/b")).unwrap();
-        fs::write(dir.path().join("a/b/foo.bin"), b"deep").unwrap();
-        fs::write(dir.path().join("a/top.bin"), b"shallow").unwrap();
-
-        let files = enumerate_publishable_files(dir.path()).unwrap();
-        let names: Vec<&str> = files.iter().map(|(_, n)| n.as_str()).collect();
-
-        assert_eq!(names, vec!["a/top.bin"]);
-    }
-
-    #[test]
-    fn enumerate_files_empty_dir_returns_empty_vec() {
-        let dir = tempfile::tempdir().unwrap();
-        let files = enumerate_publishable_files(dir.path()).unwrap();
-        assert!(files.is_empty());
-    }
-
-    // ─── publish_vindex_with_opts validation ───────────────────────
-
-    #[test]
-    fn publish_rejects_non_directory() {
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("not-a-dir.txt");
-        fs::write(&file_path, "x").unwrap();
-
-        let mut cb = SilentPublishCallbacks;
-        let err =
-            publish_vindex_with_opts(&file_path, "org/repo", &PublishOptions::default(), &mut cb)
-                .expect_err("path is a file, not a directory");
-        assert!(matches!(err, VindexError::NotADirectory(_)));
-    }
-
-    #[test]
-    fn publish_rejects_directory_without_index_json() {
-        let dir = tempfile::tempdir().unwrap();
-        // Directory exists but has no index.json — should fail before any
-        // network call (no token required to reach this branch).
-        let mut cb = SilentPublishCallbacks;
-        let err =
-            publish_vindex_with_opts(dir.path(), "org/repo", &PublishOptions::default(), &mut cb)
-                .expect_err("missing index.json must error");
-        match err {
-            VindexError::Parse(msg) => assert!(
-                msg.contains("not a vindex directory"),
-                "unexpected error message: {msg}",
-            ),
-            other => panic!("expected Parse error, got {other:?}"),
-        }
-    }
-
-    // ─── get_hf_token ──────────────────────────────────────────────
-
-    #[test]
-    #[serial]
-    fn get_hf_token_reads_env_var() {
-        // Process-wide env mutation must be serialised against the other
-        // `get_hf_token_*` tests below — they share `HF_TOKEN` and `HOME`
-        // and Windows scheduling has surfaced the race that Linux/macOS
-        // happened to mask (this test sets HF_TOKEN to a sentinel and
-        // `errors_when_no_source_present` then read the sentinel instead
-        // of erroring on a missing token).
-        let prev = std::env::var("HF_TOKEN").ok();
-        std::env::set_var("HF_TOKEN", "sentinel-token-XYZ");
-        let result = get_hf_token();
-        // Restore before asserting so a panic doesn't leak the override.
-        match prev {
-            Some(v) => std::env::set_var("HF_TOKEN", v),
-            None => std::env::remove_var("HF_TOKEN"),
-        }
-        assert_eq!(result.unwrap(), "sentinel-token-XYZ");
-    }
-
-    /// RAII guard for HF_TOKEN + HOME env vars, restored on drop.
-    struct HfTokenEnvGuard {
-        prev_token: Option<String>,
-        prev_home: Option<String>,
-        _tmp: tempfile::TempDir,
-    }
-    impl HfTokenEnvGuard {
-        /// Clear HF_TOKEN, point HOME at a tempdir so the
-        /// file-based token lookup doesn't leak into the real
-        /// user home. Returns the tempdir handle for callers to
-        /// populate.
-        fn new() -> Self {
-            let prev_token = std::env::var("HF_TOKEN").ok();
-            let prev_home = std::env::var("HOME").ok();
-            let tmp = tempfile::tempdir().unwrap();
-            std::env::remove_var("HF_TOKEN");
-            std::env::set_var("HOME", tmp.path());
-            Self {
-                prev_token,
-                prev_home,
-                _tmp: tmp,
-            }
-        }
-        fn home(&self) -> &std::path::Path {
-            self._tmp.path()
-        }
-    }
-    impl Drop for HfTokenEnvGuard {
-        fn drop(&mut self) {
-            match self.prev_token.take() {
-                Some(v) => std::env::set_var("HF_TOKEN", v),
-                None => std::env::remove_var("HF_TOKEN"),
-            }
-            match self.prev_home.take() {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn get_hf_token_reads_legacy_huggingface_token_file() {
-        let g = HfTokenEnvGuard::new();
-        let token_path = g.home().join(".huggingface").join("token");
-        fs::create_dir_all(token_path.parent().unwrap()).unwrap();
-        fs::write(&token_path, "legacy-token-123\n").unwrap();
-
-        let token = get_hf_token().expect("legacy token file must be read");
-        // Trailing whitespace is stripped.
-        assert_eq!(token, "legacy-token-123");
-    }
-
-    #[test]
-    #[serial]
-    fn get_hf_token_reads_cache_huggingface_token_file() {
-        let g = HfTokenEnvGuard::new();
-        let token_path = g.home().join(".cache").join("huggingface").join("token");
-        fs::create_dir_all(token_path.parent().unwrap()).unwrap();
-        fs::write(&token_path, "cache-token-456").unwrap();
-
-        let token = get_hf_token().expect("cache token file must be read");
-        assert_eq!(token, "cache-token-456");
-    }
-
-    #[test]
-    #[serial]
-    fn get_hf_token_errors_when_no_source_present() {
-        let _g = HfTokenEnvGuard::new();
-        let err = get_hf_token().expect_err("no env + no file → error");
-        match err {
-            VindexError::Parse(msg) => {
-                assert!(msg.contains("HuggingFace token not found"), "got: {msg}")
-            }
-            other => panic!("expected Parse error, got {other:?}"),
-        }
-    }
-
-    // ─── PublishCallbacks default impls ────────────────────────────
-
-    #[test]
-    fn silent_callbacks_default_methods_are_noop() {
-        // Cover the default no-op impls of every PublishCallbacks
-        // method via the SilentPublishCallbacks impl-by-default path.
-        let mut cb = SilentPublishCallbacks;
-        cb.on_start("org/repo");
-        cb.on_file_start("a.bin", 100);
-        cb.on_file_progress("a.bin", 50, 100);
-        cb.on_file_done("a.bin");
-        cb.on_file_skipped("a.bin", 100, "sha256-deadbeef");
-        cb.on_complete("https://huggingface.co/org/repo");
-    }
-
-    // ─── publish_vindex thin wrapper ───────────────────────────────
-
-    #[test]
-    fn publish_vindex_wrapper_dispatches_to_with_opts() {
-        // Pin that the no-options helper delegates: a missing
-        // directory must surface the same NotADirectory error the
-        // with_opts variant returns. Hits the wrapper body without
-        // needing a working HF endpoint.
-        let dir = tempfile::tempdir().unwrap();
-        let missing = dir.path().join("does-not-exist");
-        let mut cb = SilentPublishCallbacks;
-        let err =
-            publish_vindex(&missing, "org/repo", &mut cb).expect_err("missing path must error");
-        assert!(matches!(err, VindexError::NotADirectory(_)));
-    }
-
-    // ─── publish_vindex_with_opts happy path with mockito ──────────
-
-    /// Build a single-file vindex on disk with the smallest possible
-    /// `index.json` so the publish flow has something to enumerate.
-    /// Returns the directory path; caller is responsible for keeping
-    /// the tempdir alive.
-    fn make_minimal_vindex(dir: &std::path::Path) {
-        fs::write(dir.join("index.json"), r#"{"version":2}"#).unwrap();
-    }
-
-    /// RAII guard for an env-var: sets to `value`, restores on drop.
-    struct EnvGuard {
-        key: &'static str,
-        prev: Option<String>,
-    }
-    impl EnvGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let prev = std::env::var(key).ok();
-            std::env::set_var(key, value);
-            Self { key, prev }
-        }
-    }
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.prev.take() {
-                Some(v) => std::env::set_var(self.key, v),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn publish_vindex_with_opts_happy_path_invokes_callbacks() {
-        // End-to-end mock: HF_TOKEN set, HF base pointed at mockito,
-        // create_hf_repo returns 200, preupload returns inline mode,
-        // commit returns 200. Verifies the function progresses through
-        // every callback (on_start → on_file_start → on_file_done →
-        // on_complete) and returns the canonical web URL.
-        let mut server = mockito::Server::new();
-        let _base = EnvGuard::set(protocol::TEST_BASE_ENV, &server.url());
-        let _tok = EnvGuard::set("HF_TOKEN", "tok");
-
-        // POST /api/repos/create → 200 (repo creation succeeds).
-        let _create = server
-            .mock("POST", "/api/repos/create")
-            .with_status(200)
-            .with_body("{}")
-            .expect_at_least(1)
-            .create();
-        // POST /api/models/org/repo/preupload/main → returns "regular"
-        // mode for the single small file. The upload handler then
-        // inlines the bytes in the commit body.
-        let _preupload = server
-            .mock("POST", "/api/models/org/repo/preupload/main")
-            .with_status(200)
-            .with_body(r#"{"files":[{"path":"index.json","uploadMode":"regular"}]}"#)
-            .expect_at_least(1)
-            .create();
-        // POST /api/models/org/repo/commit/main → 200 (commit accepted).
-        let _commit = server
-            .mock("POST", "/api/models/org/repo/commit/main")
-            .with_status(200)
-            .with_body("{}")
-            .expect_at_least(1)
-            .create();
-
-        // Build the vindex dir.
-        let tmp = tempfile::tempdir().unwrap();
-        make_minimal_vindex(tmp.path());
-
-        // Capture callback firings.
-        #[derive(Default)]
-        struct Recorder {
-            started: bool,
-            files_started: Vec<String>,
-            files_done: Vec<String>,
-            completed_url: Option<String>,
-        }
-        impl PublishCallbacks for Recorder {
-            fn on_start(&mut self, _repo: &str) {
-                self.started = true;
-            }
-            fn on_file_start(&mut self, f: &str, _size: u64) {
-                self.files_started.push(f.into());
-            }
-            fn on_file_done(&mut self, f: &str) {
-                self.files_done.push(f.into());
-            }
-            fn on_complete(&mut self, url: &str) {
-                self.completed_url = Some(url.into());
-            }
-        }
-        let mut rec = Recorder::default();
-
-        let url =
-            publish_vindex_with_opts(tmp.path(), "org/repo", &PublishOptions::default(), &mut rec)
-                .expect("happy path must return Ok");
-
-        assert!(rec.started, "on_start must fire");
-        assert_eq!(rec.files_started, vec!["index.json".to_string()]);
-        assert_eq!(rec.files_done, vec!["index.json".to_string()]);
-        assert_eq!(rec.completed_url.as_deref(), Some(url.as_str()));
-        assert!(
-            url.ends_with("/org/repo"),
-            "model repo URL should end with /org/repo, got: {url}"
-        );
-    }
-
-    #[test]
-    #[serial]
-    fn publish_vindex_with_opts_skip_unchanged_skips_matching_lfs_oid() {
-        // skip_unchanged path: the tree endpoint returns a remote oid
-        // that matches the local SHA256 of our file → on_file_skipped
-        // fires and the upload endpoints are NOT called.
-        let mut server = mockito::Server::new();
-        let _base = EnvGuard::set(protocol::TEST_BASE_ENV, &server.url());
-        let _tok = EnvGuard::set("HF_TOKEN", "tok");
-
-        // Build the vindex dir.
-        let tmp = tempfile::tempdir().unwrap();
-        make_minimal_vindex(tmp.path());
-        let local_sha = crate::format::checksums::sha256_file(&tmp.path().join("index.json"))
-            .expect("sha must compute");
-
-        // create_hf_repo + tree endpoint that reports our exact local SHA.
-        let _create = server
-            .mock("POST", "/api/repos/create")
-            .with_status(200)
-            .with_body("{}")
-            .expect_at_least(1)
-            .create();
-        let tree_body = serde_json::json!([
-            {"type":"file","path":"index.json","lfs":{"oid":local_sha}}
-        ])
-        .to_string();
-        let _tree = server
-            .mock("GET", "/api/models/org/repo/tree/main?recursive=true")
-            .with_status(200)
-            .with_body(tree_body)
-            .expect_at_least(1)
-            .create();
-        // If the function uploads instead of skipping, this mock fires
-        // and the test detects the bug via the skipped-files check
-        // below. Don't actually mock the upload endpoints — they
-        // shouldn't be called.
-
-        #[derive(Default)]
-        struct Recorder {
-            skipped: Vec<String>,
-            uploaded: Vec<String>,
-        }
-        impl PublishCallbacks for Recorder {
-            fn on_file_skipped(&mut self, f: &str, _: u64, _: &str) {
-                self.skipped.push(f.into());
-            }
-            fn on_file_start(&mut self, f: &str, _: u64) {
-                self.uploaded.push(f.into());
-            }
-        }
-        let mut rec = Recorder::default();
-
-        publish_vindex_with_opts(
-            tmp.path(),
-            "org/repo",
-            &PublishOptions::skip_unchanged(),
-            &mut rec,
-        )
-        .expect("skip-unchanged happy path must return Ok");
-
-        assert_eq!(rec.skipped, vec!["index.json".to_string()]);
-        assert!(
-            rec.uploaded.is_empty(),
-            "file with matching remote SHA must not be uploaded: {:?}",
-            rec.uploaded
-        );
-    }
-}
+mod tests;

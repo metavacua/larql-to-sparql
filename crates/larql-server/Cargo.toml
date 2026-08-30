@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "HTTP server for vindex knowledge queries and inference"
 
 [lib]
@@ -17,6 +18,9 @@ path = "src/main.rs"
 [dependencies]
 larql-vindex = { path = "../larql-vindex" }
 larql-inference = { path = "../larql-inference" }
+# Continuation-state providers for the VINDEX3 serving path
+# (VI3-SERVE-1): the canonical KvCache behind the V3 KvState contract.
+larql-kv = { path = "../larql-kv" }
 larql-models = { path = "../larql-models" }
 larql-router-protocol = { path = "../larql-router-protocol" }
 # Optional Metal backend for shard-side GPU experts (macOS).  When the
@@ -102,6 +106,7 @@ quic = ["larql-router-protocol/quic", "dep:rustls"]
 http3 = ["quic", "larql-router-protocol/http3"]
 
 [build-dependencies]
+prost-build = "0.14.4"
 tonic-build = "0.13"
 
 # See `crates/larql-router-protocol/Cargo.toml` for the Windows
@@ -110,3 +115,6 @@ tonic-build = "0.13"
 # (installed by CI via `arduino/setup-protoc`).
 [target.'cfg(not(windows))'.build-dependencies]
 protobuf-src = "2"
+
+[lints]
+workspace = true

@@ -56,7 +56,7 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     let weights = model.weights();
     let hidden = weights.hidden_size;
     let num_layers = weights.num_layers;
-    let embed_scale = weights.arch.embed_scale();
+    let embed_scale = weights.arch.embed_scale_multiplier();
 
     eprintln!(
         "  {} layers, hidden={}, embed_scale={:.1} ({:.1}s)",

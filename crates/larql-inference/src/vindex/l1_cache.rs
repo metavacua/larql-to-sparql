@@ -64,6 +64,16 @@ impl FfnL1Cache {
         hasher.finish()
     }
 
+    /// Non-mutating presence probe — records NO hit/miss statistics.
+    /// For plan inspection (`WalkFfn::plan_for`), which must be able
+    /// to ask "would this hit?" without disturbing the accounting the
+    /// executed forward maintains through [`FfnL1Cache::get`].
+    pub fn peek(&self, layer: usize, key: u64) -> bool {
+        self.layers
+            .get(layer)
+            .is_some_and(|cell| cell.borrow().contains_key(&key))
+    }
+
     pub fn get(&self, layer: usize, key: u64) -> Option<Vec<f32>> {
         let map = self.layers.get(layer)?.borrow();
         if let Some(v) = map.get(&key) {
@@ -134,6 +144,18 @@ mod tests {
     #[test]
     fn empty_feature_set_has_stable_key() {
         assert_eq!(FfnL1Cache::key(&[]), FfnL1Cache::key(&[]));
+    }
+
+    #[test]
+    fn peek_probes_without_touching_stats() {
+        let cache = FfnL1Cache::new(2);
+        let key = FfnL1Cache::key(&[1, 2]);
+        assert!(!cache.peek(0, key), "empty cache: no entry");
+        cache.insert(0, key, vec![1.0]);
+        assert!(cache.peek(0, key), "inserted entry is visible");
+        assert!(!cache.peek(1, key), "other layer: no entry");
+        assert!(!cache.peek(99, key), "out-of-range layer is safe");
+        assert_eq!((cache.hits(), cache.misses()), (0, 0), "peek is stats-free");
     }
 
     #[test]

@@ -59,10 +59,13 @@ use crate::error::ServerError;
 use crate::routes::openai::OpenAIError;
 use crate::state::{AppState, LoadedModel};
 
-use super::util::{contains_any, error_chunk, new_id_suffix, trim_at_stop, unix_now, StopSpec};
+use super::util::{
+    contains_any, error_chunk, new_id_suffix, trim_at_stop, unix_now, StopSpec,
+    FINISH_REASON_LENGTH, FINISH_REASON_STOP, SSE_CHANNEL_DEPTH, SSE_DONE,
+};
 
-const TEXT_COMPLETION_OBJECT: &str = "text_completion";
-const DEFAULT_MAX_TOKENS: usize = 16;
+pub(super) const TEXT_COMPLETION_OBJECT: &str = "text_completion";
+pub(super) const DEFAULT_MAX_TOKENS: usize = 16;
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -190,11 +193,16 @@ pub async fn handle_completions(
         ));
     }
 
-    let model = state.model_or_err(req.model.as_deref())?;
-    if model.infer_disabled {
-        return Err(OpenAIError::service_unavailable(
-            "inference disabled (--no-infer / --embed-only / --ffn-only)",
-        ));
+    // The one V2/V3 decision point: the registry resolves the request's
+    // model to a runtime binding; below this match nothing re-detects
+    // the container generation.
+    let served = state.served_or_err(req.model.as_deref())?;
+    if let crate::state::ServedModel::V2(model) = &served {
+        if model.infer_disabled {
+            return Err(OpenAIError::service_unavailable(
+                "inference disabled (--no-infer / --embed-only / --ffn-only)",
+            ));
+        }
     }
 
     let prompts: Vec<String> = match req.prompt {
@@ -219,16 +227,13 @@ pub async fn handle_completions(
         .map(|s| s.as_slice().to_vec())
         .unwrap_or_default();
     let echo = req.echo.unwrap_or(false);
+    let stream = req.stream.unwrap_or(false);
 
-    // Model id for the response (matches the request when given,
-    // otherwise the loaded model's id).
-    let model_id = req.model.clone().unwrap_or_else(|| model.id.clone());
-    let model_arc = model.clone();
-
-    if req.stream.unwrap_or(false) {
+    if stream {
         // Streaming mode: SSE response. `echo` and batched prompts are
         // not supported in stream mode (OpenAI's stream contract is
-        // one prompt → one stream of chunks).
+        // one prompt → one stream of chunks). Validated here, before
+        // runtime dispatch, so both runtimes share one contract.
         if echo {
             return Err(OpenAIError::invalid_request(
                 "echo=true is not supported with stream=true",
@@ -240,6 +245,35 @@ pub async fn handle_completions(
                  send one prompt per request",
             ));
         }
+    }
+
+    // Model id for the response (matches the request when given,
+    // otherwise the loaded model's id).
+    let model_id = req.model.clone().unwrap_or_else(|| match &served {
+        crate::state::ServedModel::V2(m) => m.id.clone(),
+        crate::state::ServedModel::V3(m) => m.id.clone(),
+    });
+
+    let model_arc = match served {
+        crate::state::ServedModel::V3(v3) => {
+            return super::v3_completions::respond(
+                v3.clone(),
+                prompts,
+                max_tokens,
+                sampling_params,
+                stop_strings,
+                echo,
+                stream,
+                model_id,
+                state.infer_timeout,
+                Arc::clone(&state.runtime),
+            )
+            .await;
+        }
+        crate::state::ServedModel::V2(model) => model.clone(),
+    };
+
+    if stream {
         let prompt = prompts.into_iter().next().unwrap();
         return Ok(stream_completions(
             model_arc,
@@ -248,26 +282,61 @@ pub async fn handle_completions(
             sampling_params,
             stop_strings,
             model_id,
+            Arc::clone(&state.runtime),
         )
         .into_response());
     }
 
-    // Non-streaming: the existing buffered path.
+    // Non-streaming: the existing buffered path. Racing the blocking
+    // generation against `state.infer_timeout` mirrors
+    // `run_infer_with_timeout` (routes/infer.rs, BUG-infer-deadlock §5.6):
+    // without it, a stuck/slow generation call holds `LoadedModel.weights`'
+    // write guard for as long as the spawned thread runs, and every other
+    // OpenAI-route request queues on that guard indefinitely. On timeout we
+    // drop the JoinHandle and respond 504; the spawned thread finishes (or
+    // doesn't) in the background, same tradeoff /v1/infer already accepts.
     let logprobs_requested = req.logprobs;
-    let (choices, prompt_tokens, completion_tokens) =
-        tokio::task::spawn_blocking(move || -> Result<_, ServerError> {
-            run_completions_loop(
-                &model_arc,
-                &prompts,
-                max_tokens,
-                sampling_params,
-                &stop_strings,
-                echo,
-                logprobs_requested,
-            )
-        })
-        .await
-        .map_err(|e| ServerError::Internal(e.to_string()))??;
+    let started = std::time::Instant::now();
+    let _gen_guard = Arc::clone(&state.runtime).enter_generation();
+    let handle = tokio::task::spawn_blocking(move || -> Result<_, ServerError> {
+        let mut tally = crate::runtime_stats::GenerationTally::new();
+        let out = run_completions_loop(
+            &model_arc,
+            &prompts,
+            max_tokens,
+            sampling_params,
+            &stop_strings,
+            echo,
+            logprobs_requested,
+            &mut tally,
+        )?;
+        Ok((out, tally))
+    });
+    let timeout = state.infer_timeout;
+    let ((choices, prompt_tokens, completion_tokens), tally) = if timeout.is_zero() {
+        handle
+            .await
+            .map_err(|e| ServerError::Internal(e.to_string()))??
+    } else {
+        match tokio::time::timeout(timeout, handle).await {
+            Ok(join_result) => join_result.map_err(|e| ServerError::Internal(e.to_string()))??,
+            Err(_elapsed) => {
+                tracing::warn!(
+                    target: "larql_server::openai::completions",
+                    "completion timed out after {:.1}s; dropping in-flight task and \
+                     responding 504 (background thread will finish on its own)",
+                    started.elapsed().as_secs_f64(),
+                );
+                return Err(OpenAIError::from(ServerError::Timeout(format!(
+                    "completion exceeded server-side timeout of {}s",
+                    timeout.as_secs(),
+                ))));
+            }
+        }
+    };
+    state
+        .runtime
+        .record(tally.into_sample(crate::state::elapsed_ms(started)));
 
     Ok(Json(CompletionsResponse {
         id: format!("cmpl-{}", new_id_suffix()),
@@ -295,11 +364,14 @@ fn stream_completions(
     sampling_params: super::util::SamplingParams,
     stop_strings: Vec<String>,
     model_id: String,
+    runtime: Arc<crate::runtime_stats::RuntimeRecorder>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+    let (tx, rx) = tokio::sync::mpsc::channel::<String>(SSE_CHANNEL_DEPTH);
     let cmpl_id = format!("cmpl-{}", new_id_suffix());
+    let call_started = std::time::Instant::now();
 
     tokio::task::spawn_blocking(move || {
+        let _gen_guard = runtime.clone().enter_generation();
         let mut weights_guard = match model.lock_weights_for_gen() {
             Ok(w) => w,
             Err(e) => {
@@ -361,13 +433,17 @@ fn stream_completions(
                     early_stop = true;
                 }
             },
+            None,
         );
 
         let finish_reason: &'static str = if early_stop || result.tokens.len() < max_tokens {
-            "stop"
+            FINISH_REASON_STOP
         } else {
-            "length"
+            FINISH_REASON_LENGTH
         };
+        let mut tally = crate::runtime_stats::GenerationTally::new();
+        tally.add_v2(&result, prompt_ids.len());
+        runtime.record(tally.into_sample(crate::state::elapsed_ms(call_started)));
         let final_chunk =
             build_text_completion_chunk(&cmpl_id, &model_id, None, Some(finish_reason));
         let _ = tx.blocking_send(final_chunk);
@@ -375,13 +451,13 @@ fn stream_completions(
 
     let stream = ReceiverStream::new(rx)
         .map(|data| Event::default().data(data))
-        .chain(tokio_stream::once(Event::default().data("[DONE]")))
+        .chain(tokio_stream::once(Event::default().data(SSE_DONE)))
         .map(Ok::<_, Infallible>);
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-fn build_text_completion_chunk(
+pub(super) fn build_text_completion_chunk(
     id: &str,
     model: &str,
     text: Option<&str>,
@@ -416,24 +492,24 @@ fn build_text_completion_chunk(
 /// non-deterministic across platforms: the synthetic CI model emits
 /// different tokens on Ubuntu vs macOS, which is exactly what made
 /// `completions.rs` coverage flap. Keeping this logic pure pins it.)
-fn finalize_completion(
+pub(super) fn finalize_completion(
     tokens: &[(String, f64)],
     stop_strings: &[String],
 ) -> (String, Vec<(String, f64)>, &'static str) {
     let mut completion_text = String::new();
     let mut completion_tokens: Vec<(String, f64)> = Vec::new();
-    let mut finish_reason = "length";
+    let mut finish_reason = FINISH_REASON_LENGTH;
     for (text, prob) in tokens {
         completion_text.push_str(text);
         completion_tokens.push((text.clone(), *prob));
         if larql_inference::vindex::is_end_of_turn(text) {
-            finish_reason = "stop";
+            finish_reason = FINISH_REASON_STOP;
             break;
         }
     }
     if !stop_strings.is_empty() && contains_any(&completion_text, stop_strings) {
         completion_text = trim_at_stop(&completion_text, stop_strings);
-        finish_reason = "stop";
+        finish_reason = FINISH_REASON_STOP;
         // Drop tokens past the byte boundary so logprobs and text stay
         // length-aligned.
         let target = completion_text.len();
@@ -458,6 +534,7 @@ fn run_completions_loop(
     stop_strings: &[String],
     echo: bool,
     logprobs_requested: Option<usize>,
+    tally: &mut crate::runtime_stats::GenerationTally,
 ) -> Result<(Vec<CompletionChoice>, usize, usize), ServerError> {
     // Take an exclusive write guard on the weights. Each prompt in
     // the batch is generated in turn under the same guard so the
@@ -508,6 +585,7 @@ fn run_completions_loop(
             sampling,
             &eos,
         );
+        tally.add_v2(&result, prompt_ids.len());
 
         let (completion_text, completion_tokens, finish_reason) =
             finalize_completion(&result.tokens, stop_strings);
@@ -605,7 +683,8 @@ mod tests {
         assert!(v["choices"][0]["logprobs"].is_null());
 
         // Final chunk: no text (defaults to ""), finish_reason set.
-        let last = build_text_completion_chunk("cmpl-1", "synthetic", None, Some("stop"));
+        let last =
+            build_text_completion_chunk("cmpl-1", "synthetic", None, Some(FINISH_REASON_STOP));
         let v: serde_json::Value = serde_json::from_str(&last).unwrap();
         assert_eq!(v["choices"][0]["text"], "");
         assert_eq!(v["choices"][0]["finish_reason"], "stop");

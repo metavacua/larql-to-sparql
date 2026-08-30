@@ -12,7 +12,7 @@ use ndarray::Array2;
 pub fn embed_tokens_pub(weights: &ModelWeights, token_ids: &[u32]) -> Array2<f32> {
     let seq_len = token_ids.len();
     let hidden = weights.hidden_size;
-    let scale = weights.arch.embed_scale();
+    let scale = weights.arch.embed_scale_multiplier();
 
     let mut h = Array2::<f32>::zeros((seq_len, hidden));
     for (i, &tok_id) in token_ids.iter().enumerate() {
@@ -67,7 +67,7 @@ pub fn embed_plan(weights: &ModelWeights, plan: &EmbeddingPlan) -> Array2<f32> {
     // Mixed-modality (or M-RoPE-positioned) path. Build chunks
     // independently then row-stack.
     let hidden = weights.hidden_size;
-    let scale = weights.arch.embed_scale();
+    let scale = weights.arch.embed_scale_multiplier();
     let precomputed_scaling = weights
         .arch
         .multimodal()
@@ -104,6 +104,60 @@ pub fn embed_plan(weights: &ModelWeights, plan: &EmbeddingPlan) -> Array2<f32> {
         }
     }
 
+    h
+}
+
+/// Multi-table summed embedding — one id column per table, rows summed.
+///
+/// The input algebra of multi-codebook speech models (MOSS-TTS-Realtime,
+/// `docs/tts-funnel.md` §1.3): each sequence position carries one id per
+/// table (text + one per RVQ codebook), and the position's embedding is
+/// the **sum** of the looked-up rows. Contrast [`embed_plan`], which
+/// row-*stacks* chunks: stacking extends the sequence, summing fuses
+/// channels into one position.
+///
+/// No scaling is applied — the reference sums raw rows. Summation runs in
+/// ascending table order so results are bit-stable against the reference,
+/// which accumulates tables 0..C in order.
+///
+/// Panics (loudly, with context) on: no tables, id-column/table-count
+/// mismatch, hidden-size mismatch between tables, or an id outside its
+/// table — each of which is a caller bug, not a data condition.
+pub fn embed_tables_sum(tables: &[ndarray::ArrayView2<f32>], ids: &Array2<u32>) -> Array2<f32> {
+    assert!(!tables.is_empty(), "embed_tables_sum: no embedding tables");
+    assert_eq!(
+        tables.len(),
+        ids.ncols(),
+        "embed_tables_sum: {} tables but ids have {} columns",
+        tables.len(),
+        ids.ncols()
+    );
+    let hidden = tables[0].ncols();
+    for (index, table) in tables.iter().enumerate() {
+        assert_eq!(
+            table.ncols(),
+            hidden,
+            "embed_tables_sum: table {index} hidden size {} != table 0 hidden size {hidden}",
+            table.ncols()
+        );
+    }
+
+    let mut h = Array2::<f32>::zeros((ids.nrows(), hidden));
+    for position in 0..ids.nrows() {
+        for (index, table) in tables.iter().enumerate() {
+            let id = ids[[position, index]] as usize;
+            assert!(
+                id < table.nrows(),
+                "embed_tables_sum: id {id} out of range for table {index} \
+                 with {} rows (position {position})",
+                table.nrows()
+            );
+            let row = table.row(id);
+            for j in 0..hidden {
+                h[[position, j]] += row[j];
+            }
+        }
+    }
     h
 }
 
@@ -162,7 +216,7 @@ mod tests {
         // architectures that override the scale.
         let weights = make_test_weights();
         let out = embed_tokens_pub(&weights, &[2u32]);
-        let scale = weights.arch.embed_scale();
+        let scale = weights.arch.embed_scale_multiplier();
         let raw = weights.embed.row(2);
         for (j, v) in out.row(0).iter().enumerate() {
             assert!(
@@ -377,6 +431,80 @@ mod tests {
             out, sentinel,
             "precomputed-only plan must pass rows through verbatim"
         );
+    }
+
+    // ─── embed_tables_sum: the multi-codebook input algebra ──────────────
+
+    fn two_tables() -> (Array2<f32>, Array2<f32>) {
+        // Distinguishable values: table 0 rows carry 10*row, table 1 rows
+        // carry 0.1*row, so any sum uniquely identifies its inputs.
+        let a = Array2::from_shape_fn((4, 3), |(r, _)| 10.0 * r as f32);
+        let b = Array2::from_shape_fn((5, 3), |(r, _)| 0.1 * r as f32);
+        (a, b)
+    }
+
+    #[test]
+    fn tables_sum_sums_one_row_per_column() {
+        let (a, b) = two_tables();
+        let ids = ndarray::arr2(&[[1u32, 2], [3, 0]]);
+        let out = embed_tables_sum(&[a.view(), b.view()], &ids);
+        assert_eq!(out.shape(), &[2, 3]);
+        assert_eq!(out[[0, 0]], 10.0 + 0.2);
+        assert_eq!(out[[1, 0]], 30.0 + 0.0);
+    }
+
+    #[test]
+    fn tables_sum_single_table_is_plain_lookup() {
+        let (a, _) = two_tables();
+        let ids = ndarray::arr2(&[[2u32], [0]]);
+        let out = embed_tables_sum(&[a.view()], &ids);
+        assert_eq!(out[[0, 0]], 20.0);
+        assert_eq!(out[[1, 0]], 0.0);
+    }
+
+    #[test]
+    fn tables_sum_zero_rows() {
+        let (a, b) = two_tables();
+        let ids = Array2::<u32>::zeros((0, 2));
+        let out = embed_tables_sum(&[a.view(), b.view()], &ids);
+        assert_eq!(out.shape(), &[0, 3]);
+    }
+
+    #[test]
+    fn tables_sum_matches_manual_accumulation_order() {
+        // Bit-stability contract: identical to a manual ascending-order sum.
+        let (a, b) = two_tables();
+        let ids = ndarray::arr2(&[[3u32, 4]]);
+        let out = embed_tables_sum(&[a.view(), b.view()], &ids);
+        for j in 0..3 {
+            let manual = a[[3, j]] + b[[4, j]];
+            assert_eq!(out[[0, j]], manual);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "ids have")]
+    fn tables_sum_rejects_column_mismatch() {
+        let (a, b) = two_tables();
+        let ids = ndarray::arr2(&[[1u32, 2, 3]]);
+        embed_tables_sum(&[a.view(), b.view()], &ids);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn tables_sum_rejects_out_of_range_id() {
+        let (a, b) = two_tables();
+        let ids = ndarray::arr2(&[[9u32, 0]]);
+        embed_tables_sum(&[a.view(), b.view()], &ids);
+    }
+
+    #[test]
+    #[should_panic(expected = "hidden size")]
+    fn tables_sum_rejects_hidden_mismatch() {
+        let (a, _) = two_tables();
+        let narrow = Array2::<f32>::zeros((4, 2));
+        let ids = ndarray::arr2(&[[0u32, 0]]);
+        embed_tables_sum(&[a.view(), narrow.view()], &ids);
     }
 
     #[test]

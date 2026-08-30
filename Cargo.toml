@@ -1,25 +1,31 @@
 [workspace]
 resolver = "2"
+# Trimmed to larql-cli's real dependency closure on this branch only --
+# larql-demos, larql-python, larql-router, larql-server, and
+# model-compute removed. This branch cares about one binary
+# (larql-cli); the other five crates were pulling their own feature
+# requests on shared dependencies into every larql-cli build via
+# Cargo's workspace-wide feature unification (see
+# chrishayuk/larql#314), even though none of them are larql-cli
+# dependencies. Makefile targets for the removed crates
+# (`demos`, `larql-router-*`, `larql-python-*`) no longer resolve by
+# `-p <name>` on this branch as a result -- accepted, deliberately,
+# for this branch's scope.
 members = [
-    # larql-specific
     "crates/larql-models",
     "crates/larql-compute",
     "crates/larql-compute-metal",
     "crates/larql-core",
     "crates/larql-vindex",
     "crates/larql-vindex-spec",
+    "crates/larql-execution",
+    "crates/larql-factory",
     "crates/larql-inference",
     "crates/larql-kv",
     "crates/larql-lql",
     "crates/larql-cli",
-    "crates/larql-server",
-    "crates/larql-router",
     "crates/larql-router-protocol",
-    "crates/larql-python",
-    # boundary codec (Phase 1-3 of BOUNDARY_REF_PROTOCOL)
     "crates/larql-boundary",
-    # portable (extract to sibling repos later, names stable)
-    "crates/model-compute",
 ]
 default-members = [
     "crates/larql-models",
@@ -28,24 +34,34 @@ default-members = [
     "crates/larql-core",
     "crates/larql-vindex",
     "crates/larql-vindex-spec",
+    "crates/larql-factory",
     "crates/larql-inference",
     "crates/larql-kv",
     "crates/larql-lql",
     "crates/larql-cli",
-    "crates/larql-server",
-    "crates/larql-router",
     "crates/larql-router-protocol",
     "crates/larql-boundary",
-    "crates/model-compute",
 ]
 
+# Workspace-wide lint policy, inherited by every member via
+# `[lints] workspace = true`. New toolchains ship new clippy lints that
+# would otherwise turn CI red overnight (every workflow runs
+# `clippy -D warnings` on latest stable); allows recorded here are
+# deliberate deferrals with a cleanup owner, not permanent exemptions.
+[workspace.lints.clippy]
+# rust 1.98: prefers `as_chunks::<N>()` over `chunks_exact(N)`. Dozens
+# of pre-existing sites across the workspace (models, cli, compute…);
+# the touched crates were converted in-place, the long tail is a
+# dedicated mechanical cleanup.
+chunks_exact_to_as_chunks = "allow"
+
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.88"
 authors = []
 license = "Apache-2.0"
-repository = "https://github.com/chrishayuk/chuk-larql-rs"
+repository = "https://github.com/chrishayuk/larql"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -71,3 +87,11 @@ debug = false
 [profile.release]
 debug = "line-tables-only"
 split-debuginfo = "packed"
+
+# Distribution builds only (ADR-0026 release binaries) — full strip, no
+# line tables. Kept separate from [profile.release] so local profiling
+# builds are unaffected; CI's release.yml is the only user.
+[profile.release-dist]
+inherits = "release"
+debug = false
+strip = true

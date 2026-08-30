@@ -37,7 +37,7 @@ pub fn embedding_row(weights: &ModelWeights, token_id: u32) -> Option<Vec<f32>> 
 /// matches the residual the forward pass writes for this token.
 pub fn embedding_row_scaled(weights: &ModelWeights, token_id: u32) -> Option<Vec<f32>> {
     let mut row = embedding_row(weights, token_id)?;
-    let scale = weights.arch.embed_scale();
+    let scale = weights.arch.embed_scale_multiplier();
     if scale != 1.0 {
         for v in row.iter_mut() {
             *v *= scale;

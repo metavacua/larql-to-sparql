@@ -691,7 +691,7 @@ async fn http_patches_apply_insert_op_enrich_with_functional_tokenizer() {
 #[tokio::test]
 async fn http_patches_session_remove_returns_session_field() {
     let st = state(vec![model_functional("test")]);
-    let m = st.models[0].clone();
+    let m = st.first_model().unwrap();
     // Pre-create the session to avoid blocking_read in async context.
     st.sessions.get_or_create("rm-session", &m).await;
 

@@ -58,6 +58,11 @@ pub trait QuantMatVec {
         match format {
             QuantFormat::Q4_K | QuantFormat::Q4_KF => self.q4k_matvec(weights, x, num_rows, hidden),
             QuantFormat::Q6_K => self.q6k_matvec(weights, x, num_rows, hidden),
+            // Q5_K is expressible as a container (it is the cheapest
+            // exact one for MXFP4 weights) but has no kernel on any
+            // backend yet. `None` is the established "loud missing
+            // capability" answer here, same as Q8_0's.
+            QuantFormat::Q5_K => None,
             QuantFormat::Q4_0 => {
                 let (q8_x, q8_scales) = crate::cpu::ops::q4_common::quantize_to_q8(x);
                 self.q4_matvec(weights, &q8_x, &q8_scales, num_rows, hidden)
@@ -80,6 +85,14 @@ pub trait QuantMatVec {
             // `&[u8]`-only signature, so `quant_matvec` returns `None` (loud
             // missing capability), same as Q8_0's dedicated-kernel story.
             QuantFormat::I2S => None,
+            // MXFP4 is the same story as I2S: its e8m0 exponent stream is
+            // external, and this `&[u8]`-only signature has nowhere to put
+            // it. Served by the dedicated `mxfp4_matvec` /
+            // `mxfp4_grouped_experts` kernels, which take the packed and
+            // scale streams as separate bindings. Returning `None` keeps
+            // the missing capability loud rather than letting a caller
+            // reach a kernel that reads scales it was never handed.
+            QuantFormat::MXFP4 => None,
             QuantFormat::BF16 | QuantFormat::F16 | QuantFormat::F32 => None,
         }
     }
@@ -118,10 +131,21 @@ pub trait QuantMatVec {
                 let x_f32 = dequantise_q8(q8_x, q8_scales);
                 self.quant_matvec(format, weights, &x_f32, num_rows, hidden)
             }
+            // No kernel yet — see the note on `quant_matvec`. Routed
+            // through the same f32 path so it starts working the moment
+            // one lands, rather than needing a second edit here.
+            QuantFormat::Q5_K => {
+                let x_f32 = dequantise_q8(q8_x, q8_scales);
+                self.quant_matvec(format, weights, &x_f32, num_rows, hidden)
+            }
             // Ternary has its own int8-activation (A8) quantisation and weight
             // container — it doesn't consume the legacy block-32 Q8 input.
             // Use [`Self::ternary_matvec`] with a `BitLinearWeight`.
             QuantFormat::I2S => None,
+            // Nor does MXFP4 consume the legacy block-32 Q8 input: its
+            // weights need the external e8m0 stream this signature cannot
+            // carry. See the note on `quant_matvec`.
+            QuantFormat::MXFP4 => None,
             QuantFormat::BF16 | QuantFormat::F16 | QuantFormat::F32 => None,
         }
     }
@@ -235,6 +259,23 @@ pub trait QuantMatVec {
         None
     }
 
+    /// Q4_K matvec + GPU partial top-K in one submission — the Q4_K
+    /// sibling of [`Self::q4_matvec_topk`], for lm_heads stored as Q4_K.
+    /// Returns up to `top_k` `(row, score)` pairs sorted descending
+    /// without the full-vocab scores readback. `None` when not
+    /// specialised or `top_k` exceeds the kernel's per-TG capacity; the
+    /// caller falls back to [`Self::q4k_matvec`] + a CPU reduce.
+    fn q4k_matvec_topk(
+        &self,
+        _q4k_data: &[u8],
+        _x: &[f32],
+        _num_rows: usize,
+        _hidden: usize,
+        _top_k: usize,
+    ) -> Option<Vec<(u32, f32)>> {
+        None
+    }
+
     /// Fused two-weight Q4_K matvec sharing one input vector.
     ///
     /// `out_a[N] = W_a[N, K] · x[K]`, `out_b[N] = W_b[N, K] · x[K]`
@@ -333,6 +374,115 @@ pub trait QuantMatVec {
 mod tests {
     use super::*;
     use crate::CpuBackend;
+
+    /// A backend that implements NOTHING, so every call lands on the
+    /// trait's default body.
+    ///
+    /// `CpuBackend` overrides most of these, which is why the defaults sat
+    /// uncovered: a trait default is only exercised by an implementor that
+    /// declines to override it, and every real backend overrides the ones
+    /// it supports. The contract they encode — "a backend that does not
+    /// implement this returns None rather than producing a wrong answer" —
+    /// is exactly what a *new* backend relies on, so it is worth pinning.
+    struct UnimplementedBackend;
+    impl QuantMatVec for UnimplementedBackend {}
+
+    /// Every default that reports "unsupported" must say so with `None`.
+    #[test]
+    fn trait_defaults_refuse_rather_than_guess() {
+        let b = UnimplementedBackend;
+        let x = vec![0.25f32; 32];
+        let q8_x = vec![1i8; 32];
+        let q8_scales = vec![0.5f32; 1];
+        let w = vec![0u8; 64];
+
+        assert!(b.q4_matvec(&w, &q8_x, &q8_scales, 1, 32).is_none());
+        assert!(b.q8_matvec(&w, &q8_x, &q8_scales, 1, 32).is_none());
+        assert!(b.q4k_matvec(&w, &x, 1, 32).is_none());
+        assert!(b.q6k_matvec(&w, &x, 1, 32).is_none());
+        assert!(b.q4k_matvec_topk(&w, &x, 1, 32, 4).is_none());
+        assert!(b.q4k_dual_matvec(&w, &w, &x, 1, 32).is_none());
+
+        let tern = crate::cpu::ops::ternary_matvec::BitLinearWeight {
+            rows: 1,
+            cols: 4,
+            i2s_bytes: vec![0u8; 1],
+            channel_scales: vec![1.0f32; 1],
+        };
+        assert!(b.ternary_matvec(&tern, &[0.0f32; 4]).is_none());
+
+        // And the format predicate defaults to "supports nothing", so a
+        // backend cannot be treated as capable by omission.
+        for f in [
+            QuantFormat::Q4_0,
+            QuantFormat::Q8_0,
+            QuantFormat::Q4_K,
+            QuantFormat::Q6_K,
+        ] {
+            assert!(
+                !b.supports_quant(f),
+                "{f:?} must not be supported by default"
+            );
+        }
+    }
+
+    /// Formats with no kernel behind them must return `None` from BOTH
+    /// entry points. The danger these pin is a future `_ => ` catch-all
+    /// that routes an unknown format into some other format's kernel —
+    /// the exact failure `q8_0_weights_do_not_silently_route_through_q4_kernel`
+    /// records for Q8_0, which produced garbage rather than `None`.
+    #[test]
+    fn unsupported_formats_return_none_from_both_entry_points() {
+        let b = CpuBackend;
+        let x = vec![0.1f32; 32];
+        let q8_x = vec![1i8; 32];
+        let q8_scales = vec![0.5f32; 1];
+        let w = vec![0u8; 256];
+
+        for f in [QuantFormat::Q5_K, QuantFormat::I2S, QuantFormat::MXFP4] {
+            assert!(
+                b.quant_matvec(f, &w, &x, 1, 32).is_none(),
+                "{f:?} has no f32-input kernel and must refuse"
+            );
+        }
+        for f in [QuantFormat::I2S, QuantFormat::MXFP4] {
+            assert!(
+                b.quant_matvec_q8_input(f, &w, &q8_x, &q8_scales, 1, 32)
+                    .is_none(),
+                "{f:?} has no Q8-input kernel and must refuse"
+            );
+        }
+    }
+
+    /// `quant_matvec_q8_input` for a k-quant has to bridge back to f32 via
+    /// `dequantise_q8`, because Q4_K / Q6_K kernels consume f32 directly.
+    /// The bridge must reconstruct `q * scale` per 32-element block —
+    /// asserted here against a hand-computed value rather than just
+    /// "returns Some", so a bridge that dropped the scale would fail.
+    #[test]
+    fn q8_input_bridges_k_quants_back_to_f32_through_the_block_scale() {
+        let b = CpuBackend;
+        // One Q6_K super-block is 256 elements / 210 bytes.
+        let hidden = 256usize;
+        let q8_x = vec![2i8; hidden];
+        let q8_scales = vec![0.25f32; hidden / 32];
+        let w = vec![0u8; 210];
+
+        let out = b.quant_matvec_q8_input(QuantFormat::Q6_K, &w, &q8_x, &q8_scales, 1, hidden);
+        assert!(
+            out.is_some(),
+            "Q6_K must bridge Q8 input to its f32 kernel rather than refuse"
+        );
+
+        // The bridge itself, checked directly: 2 * 0.25 = 0.5 everywhere.
+        let round_tripped = dequantise_q8(&q8_x, &q8_scales);
+        assert_eq!(round_tripped.len(), hidden);
+        assert!(
+            round_tripped.iter().all(|v| (*v - 0.5).abs() < 1e-6),
+            "dequantise_q8 must multiply each block by its scale; got {:?}",
+            &round_tripped[..4]
+        );
+    }
 
     /// Pin the Q4_0/Q8_0 dispatch split: Q4_0 must continue to route
     /// through `q4_matvec`, and Q8_0 must route through the new

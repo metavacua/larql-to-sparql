@@ -25,7 +25,7 @@ pub fn predict_kquant_hidden_hooked(
     capture_attention: bool,
     hook: &mut dyn LayerHook,
 ) -> Result<Array2<f32>, String> {
-    if weights.arch.is_hybrid_moe() {
+    if weights.arch.is_moe() || weights.arch.is_hybrid_moe() {
         return Err(
             "predict_kquant_hidden_hooked currently supports dense FFN vindexes only".into(),
         );

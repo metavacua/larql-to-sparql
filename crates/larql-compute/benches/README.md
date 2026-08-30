@@ -3,7 +3,7 @@
 Three Criterion benches, each scoped to one concern. Run any with:
 
 ```
-cargo bench -p larql-compute --bench <name> --features metal
+cargo bench -p larql-compute --bench <name> 
 ```
 
 Reports land under `target/criterion/<bench>/` as HTML + raw JSON.
@@ -38,7 +38,7 @@ all three compute benches by default. Tunables:
 | `BASELINE_NAME` | `main` | Criterion baseline name |
 | `THRESHOLD` | `0.10` | Per-cell regression threshold (informational; Criterion does its own significance check) |
 | `BENCHES` | `quant_matvec matmul linalg` | Subset to run; pass e.g. `BENCHES=quant_matvec` to focus |
-| `FEATURES` | `--features metal` | Cargo features for the bench build |
+| `FEATURES` | `` | Cargo features for the bench build |
 
 CI starter at `.github/workflows/bench-regress.yml` (saves baseline
 on `main` pushes, runs `make bench-check` on PRs, treats a cold
@@ -68,9 +68,9 @@ For a Metal shader inventory plus direct isolated/batched GPU timings,
 use:
 
 ```
-cargo run --release --features metal -p larql-compute --example diag_shader_bench
-cargo run --release --features metal -p larql-compute --example diag_shader_bench -- --profile gemma3 --json /tmp/larql-shaders.json
-cargo run --release --features metal -p larql-compute --example diag_shader_bench -- --profile gemma3 --compare /tmp/larql-shaders.json --threshold 5
+cargo run --release  -p larql-compute-metal --example diag_shader_bench
+cargo run --release  -p larql-compute-metal --example diag_shader_bench -- --profile gemma3 --json /tmp/larql-shaders.json
+cargo run --release  -p larql-compute-metal --example diag_shader_bench -- --profile gemma3 --compare /tmp/larql-shaders.json --threshold 5
 ```
 
 The shader bench is diagnostic rather than Criterion-based. Treat the

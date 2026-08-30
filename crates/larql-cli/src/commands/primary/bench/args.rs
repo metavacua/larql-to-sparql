@@ -22,6 +22,34 @@ pub struct BenchArgs {
     #[arg(long, default_value = "3")]
     pub warmup: usize,
 
+    /// QUARANTINED — values above 1 are refused. Re-runs the timed
+    /// generate in the SAME process, emitting one row per repeat.
+    ///
+    /// The intent was to amortise model-open and page-cache re-faulting
+    /// across samples, which is the dominant cost when the model is tens
+    /// of GB. The flaw is not in that reasoning but in what a repeat can
+    /// sample: every repeat inherits its process's state, so N repeats are
+    /// N *correlated* observations of one draw. gpt-oss-20b on Metal
+    /// intermittently starts a process in a broken state — decode
+    /// short-circuits to ~0.5 ms/token and generates different text — and
+    /// a process-scoped startup fault is precisely what repeats cannot
+    /// see. They multiply one outcome into a row count that reads like
+    /// replication.
+    ///
+    /// `--repeat` does **not** cause that fault; it occurs at
+    /// `--repeat 1`. That attribution was made and falsified on
+    /// 2026-08-16.
+    ///
+    /// The `fp=` hash of the generated (token, probability) sequence is
+    /// still a good determinism detector — far more sensitive than
+    /// watching for an early stop, which only fires when a divergence
+    /// crosses an argmax boundary. Run it across separate processes.
+    ///
+    /// See the quarantine note in `run.rs` for the fresh-process readings,
+    /// and `docs/kv-attention-scaling.md` §Run hygiene.
+    #[arg(long, default_value = "1", value_name = "N")]
+    pub repeat: usize,
+
     /// Comma-separated backend list. Supported: `metal`, `cpu`.
     #[arg(long, default_value = "metal")]
     pub backends: String,
@@ -53,9 +81,9 @@ pub struct BenchArgs {
     ///   no-cache                              — full re-forward per step (O(N²)); debug
     ///   markov-rs[:window=N]                  — residual-stream replacement
     ///   markov-rs-codec[:window=N]            — markov-rs with bf16 cold tier (2× cold saving)
-    ///   unlimited-context:window=N            — per-window K/V checkpoints
+    ///   windowed-checkpoint:window=N            — per-window K/V checkpoints
     ///   turbo-quant[:bits=3|4]                — WHT + Lloyd-Max codec; experimental
-    ///   apollo:layer=N,coef=F,top_k=K         — boundary-residual injection; experimental
+    ///   apollo:layer=N,coef=F,top_k=K,bos=B   — boundary-residual injection; experimental
     ///   boundary-kv:chunk_tokens=N,sequence_id=S  — Standard + larql-boundary frame emission
     ///
     /// List separator: `;` (preferred) or `,` (legacy). Use `;` when any engine
@@ -123,6 +151,13 @@ pub struct BenchArgs {
     #[arg(long, value_name = "SHARDS")]
     pub moe_shards: Option<String>,
 
+    /// Serve the routed expert banks from a VINDEX3 container, exactly as
+    /// `larql run --routed-from` composes them. Everything else — the
+    /// prompt, the instrument, the spine — is identical to the plain
+    /// bench, so a run without this flag is the controlled comparison.
+    #[arg(long, value_name = "DIR")]
+    pub routed_from: Option<String>,
+
     /// Dispatch strategy for --moe-shards.
     ///   streaming  (default) — one round-trip per layer per token.
     ///   batch      — all layers in one round-trip per token (approximate).
@@ -149,7 +184,7 @@ pub struct BenchArgs {
     /// is safe to set globally.
     ///
     /// Note: as of the 2026-05-17 bypass-removal cut, every per-layer
-    /// engine (`markov-rs`, `markov-rs-codec`, `unlimited-context`,
+    /// engine (`markov-rs`, `markov-rs-codec`, `windowed-checkpoint`,
     /// `turbo-quant`, `apollo`, `boundary-per-layer`) always runs its
     /// own state-policy code regardless of this flag. The fused fast
     /// path is exclusive to `standard` / `boundary-kv`. This flag now

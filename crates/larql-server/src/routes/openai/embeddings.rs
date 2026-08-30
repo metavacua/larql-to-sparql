@@ -318,8 +318,10 @@ mod tests {
         // 4 bytes per f32, little-endian.
         assert_eq!(decoded.len(), v.len() * 4);
         let recovered: Vec<f32> = decoded
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
             .collect();
         for (a, b) in v.iter().zip(recovered.iter()) {
             assert!((a - b).abs() < 1e-6, "{a} != {b}");

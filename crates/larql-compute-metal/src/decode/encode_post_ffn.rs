@@ -197,12 +197,14 @@ mod tests {
     /// the `encode_post_ffn_residual` branches.  Pure CPU-side struct —
     /// no quantised weights are read by the residual encoder.
     fn layer_with(post_ffn_norm: Option<&[f32]>, has_post_norms: bool) -> FullPipelineLayer<'_> {
-        let empty_q4 = QuantWeight {
-            data: &[],
-            scales: None,
-            format: QuantFormat::Q4_K,
-        };
+        let empty_q4 = QuantWeight::new(QuantFormat::Q4_K, &[], larql_compute::QuantAux::None);
         FullPipelineLayer {
+            attn_sinks: None,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
+            attn_o_bias: None,
+            attn_softcap: 0.0,
             wq: empty_q4,
             wk: empty_q4,
             wv: empty_q4,
@@ -229,6 +231,11 @@ mod tests {
             num_kv_heads: 4,
             rope_base: 10000.0,
             rotary_dim: 0,
+            rope_freq: larql_compute::attention::rope::RopeFreqPlan::unscaled(
+                64_usize,
+                0_usize,
+                10000.0_f64,
+            ),
             sliding_window: 0,
             has_v_norm: false,
             layer_scalar: 0.0,
@@ -271,7 +278,10 @@ mod tests {
         );
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/decode/encode_post_ffn.rs:281",
+        );
 
         let out = crate::buffers::read_buffer_f32(&new_h, hidden);
         assert_eq!(out.len(), hidden);

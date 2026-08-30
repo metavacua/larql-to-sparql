@@ -12,6 +12,7 @@ use crate::format::filenames::{
     has_kquant_lm_head, resolve_interleaved_kquant, DOWN_META_BIN, DOWN_META_JSONL, EMBEDDINGS_BIN,
     GATE_VECTORS_BIN, INDEX_JSON, LM_HEAD_BIN, TOKENIZER_JSON,
 };
+use crate::format::generation::{detect_generation, ContainerGeneration};
 use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER;
 use crate::index::{IndexLoadCallbacks, VectorIndex};
 
@@ -43,6 +44,13 @@ impl VectorIndex {
         callbacks: &mut dyn IndexLoadCallbacks,
         layer_range: Option<(usize, usize)>,
     ) -> Result<Self, VindexError> {
+        // Same gate, same reason as `load_vindex_config`: this builds the v1
+        // vector index over a v1 layout, and a VINDEX3 directory reaching it
+        // would be read against weights that live somewhere else entirely.
+        // `larql serve` enters here via `bootstrap`, so an ungated parse would
+        // put the mis-detection on the serving path rather than the CLI's.
+        detect_generation(dir)?.require(ContainerGeneration::V2)?;
+
         // Read config
         let config_path = dir.join(INDEX_JSON);
         let config_text = std::fs::read_to_string(&config_path)?;
@@ -78,6 +86,7 @@ impl VectorIndex {
             ];
             let mut total_gate = 0;
             for info in &config.layers {
+                check_layer_in_bounds(info.layer, num_layers)?;
                 gate_slices[info.layer] = crate::index::core::GateLayerSlice {
                     float_offset: info.offset as usize / bpf,
                     num_features: info.num_features,
@@ -122,7 +131,7 @@ impl VectorIndex {
                 "gate_vectors (absent — client-only slice)",
                 &dir.display().to_string(),
             );
-            let empty = memmap2::MmapMut::map_anon(0)?.make_read_only()?;
+            let empty = crate::mmap_util::map_anon_min_one(0)?.make_read_only()?;
             let gate_slices: Vec<crate::index::core::GateLayerSlice> = vec![
                 crate::index::core::GateLayerSlice { float_offset: 0, num_features: 0 };
                 num_layers
@@ -237,6 +246,19 @@ impl VectorIndex {
     }
 }
 
+/// Validate a layer index parsed from `index.json` against the
+/// config's layer count. Layer entries index into vecs sized
+/// `config.num_layers`, so an out-of-range entry (truncated or
+/// hand-edited manifest) must surface as a parse error, not a panic.
+fn check_layer_in_bounds(layer: usize, num_layers: usize) -> Result<(), VindexError> {
+    if layer >= num_layers {
+        return Err(VindexError::Parse(format!(
+            "index.json layer entry {layer} out of range (num_layers = {num_layers})"
+        )));
+    }
+    Ok(())
+}
+
 /// Dequantize gate slices from `interleaved_kquant.bin` into an anonymous
 /// f16 mmap shaped like a real `gate_vectors.bin` file. Used when a
 /// Q4K vindex was extracted with `--drop-gate-vectors`.
@@ -287,6 +309,7 @@ fn synthesize_gate_from_q4k(
         num_layers
     ];
     for info in &config.layers {
+        check_layer_in_bounds(info.layer, num_layers)?;
         if !is_owned(info.layer) {
             continue;
         }
@@ -299,7 +322,10 @@ fn synthesize_gate_from_q4k(
     }
     let total_bytes = byte_offset as usize;
 
-    let mut anon = memmap2::MmapMut::map_anon(total_bytes)
+    // `map_anon_min_one`, not `map_anon`: a layer range that owns no features
+    // leaves `total_bytes` at 0, and the `make_read_only()` below then fails
+    // on Windows only (os error 87). Same class as the client-slice buffer.
+    let mut anon = crate::mmap_util::map_anon_min_one(total_bytes)
         .map_err(|e| VindexError::Parse(format!("anon mmap: {e}")))?;
 
     for info in &config.layers {
@@ -365,7 +391,18 @@ fn synthesize_gate_from_q4k(
 }
 
 /// Load embeddings from a .vindex directory.
+///
+/// Gated on the generation for the reason [`load_vindex_config`] states, and
+/// with more urgency: this is the **first** thing the walk/run path touches
+/// (`walk_cmd` reads embeddings before it reads the config), so an ungated
+/// parse here is the one that decides whether a VINDEX3 directory is refused
+/// by name or wanders into the v1 layout. It refused only by luck — VINDEX3's
+/// `index.json` happens to omit `intermediate_size`, so serde rejected it with
+/// a field-level message that names nothing about generations. Any
+/// `#[serde(default)]` added for schema-1 compatibility would have opened it
+/// silently, which is exactly the failure this check exists to prevent.
 pub fn load_vindex_embeddings(dir: &Path) -> Result<(Array2<f32>, f32), VindexError> {
+    detect_generation(dir)?.require(ContainerGeneration::V2)?;
     let config_text = std::fs::read_to_string(dir.join(INDEX_JSON))?;
     let config: VindexConfig =
         serde_json::from_str(&config_text).map_err(|e| VindexError::Parse(e.to_string()))?;
@@ -394,8 +431,23 @@ pub fn load_vindex_tokenizer(dir: &Path) -> Result<tokenizers::Tokenizer, Vindex
     tokenizers::Tokenizer::from_file(&path).map_err(|e| VindexError::Parse(e.to_string()))
 }
 
-/// Load the vindex config.
+/// Load the VINDEX2 config.
+///
+/// Refuses any other container generation by name (spec §12.1). Without this
+/// check a VINDEX3 directory deserialises into `VindexConfig` on the strength
+/// of its shared field names, and the v1 loader proceeds against a layout whose
+/// weights live somewhere else entirely — a served model with wrong weights
+/// rather than an error.
 pub fn load_vindex_config(dir: &Path) -> Result<VindexConfig, VindexError> {
+    detect_generation(dir)?.require(ContainerGeneration::V2)?;
+    load_vindex_config_unchecked(dir)
+}
+
+/// Parse `index.json` as a v1 config without the generation gate.
+///
+/// For callers that have already established the generation — notably the
+/// generation-dispatching open path, which must not pay for a second read.
+pub fn load_vindex_config_unchecked(dir: &Path) -> Result<VindexConfig, VindexError> {
     let text = std::fs::read_to_string(dir.join(INDEX_JSON))?;
     serde_json::from_str(&text).map_err(|e| VindexError::Parse(e.to_string()))
 }
@@ -486,6 +538,70 @@ mod tests {
         assert_eq!(cfg.hidden_size, 8);
         assert_eq!(cfg.model, "test/unit");
         assert_eq!(cfg.family, "llama");
+    }
+
+    /// A VINDEX3 `index.json` carrying **every** field `VindexConfig` needs.
+    ///
+    /// The real one omits `intermediate_size`, which is the only reason the
+    /// ungated v1 entry points refused it — an accident of field overlap, not
+    /// a decision. This fixture removes that accident so the test measures the
+    /// generation gate itself. Without the gate, these parse cleanly and the
+    /// v1 loader proceeds against a layout whose weights are not there.
+    fn write_v3_index_json_that_would_parse_as_v1(dir: &Path) {
+        let json = serde_json::json!({
+            "version": 3,
+            "model": "test/v3",
+            "family": "gemma4",
+            "num_layers": 2,
+            "hidden_size": 8,
+            "intermediate_size": 4,
+            "vocab_size": 16,
+            "embed_scale": 1.0,
+            "layers": [],
+            "down_top_k": 5,
+            "has_model_weights": false,
+            "extract_level": "browse",
+            "dtype": "f32",
+            "quant": "none",
+            "moe_manifest": "moe_manifest.json",
+            "segments": { "routed/layer_000": 1 }
+        });
+        std::fs::write(dir.join("index.json"), json.to_string()).unwrap();
+    }
+
+    #[test]
+    fn every_v1_entry_point_refuses_a_v3_container_by_generation() {
+        // The regression this guards: each of these reads `index.json` for
+        // itself, and `walk_cmd` reaches `load_vindex_embeddings` *before* the
+        // gated `load_vindex_config`. If any one of them loses its gate, a
+        // VINDEX3 directory is served against v1 offsets rather than refused.
+        let dir = TempDir::new().unwrap();
+        write_v3_index_json_that_would_parse_as_v1(dir.path());
+
+        for (entry, err) in [
+            ("load_vindex_config", load_vindex_config(dir.path()).err()),
+            (
+                "load_vindex_embeddings",
+                load_vindex_embeddings(dir.path()).err(),
+            ),
+            (
+                "load_vindex_with_range",
+                VectorIndex::load_vindex_with_range(
+                    dir.path(),
+                    &mut crate::SilentLoadCallbacks,
+                    None,
+                )
+                .err(),
+            ),
+        ] {
+            let err = err.unwrap_or_else(|| panic!("{entry} accepted a VINDEX3 container"));
+            let msg = err.to_string();
+            assert!(
+                msg.contains("VINDEX3") || msg.contains("VINDEX2 loader"),
+                "{entry} refused for the wrong reason — the message must name \
+                 the generation, not a missing field. Got: {msg}"
+            );
+        }
     }
 
     #[test]
@@ -621,6 +737,60 @@ mod tests {
         let index = VectorIndex::load_vindex(dir.path(), &mut cb).unwrap();
         assert_eq!(index.num_layers, 3);
         assert_eq!(index.hidden_size, 8);
+    }
+
+    /// Regression (review 2026-07-30 H4): an index.json layer entry
+    /// with `layer >= num_layers` used to panic on
+    /// `gate_slices[info.layer] = …`. Malformed manifests must surface
+    /// as `VindexError::Parse`.
+    #[test]
+    fn load_vindex_out_of_range_layer_entry_errors() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("gate_vectors.bin"), vec![0u8; 32]).unwrap();
+        let json = serde_json::json!({
+            "version": 2,
+            "model": "test/unit",
+            "family": "llama",
+            "num_layers": 2,
+            "hidden_size": 8,
+            "intermediate_size": 4,
+            "vocab_size": 16,
+            "embed_scale": 1.0,
+            // layer 5 >= num_layers 2 — corrupt/hand-edited manifest
+            "layers": [
+                {"layer": 5, "num_features": 1, "offset": 0, "length": 32}
+            ],
+            "down_top_k": 5,
+            "has_model_weights": false,
+            "extract_level": "browse",
+            "dtype": "f32",
+            "quant": "none"
+        });
+        std::fs::write(dir.path().join("index.json"), json.to_string()).unwrap();
+        let mut cb = crate::index::SilentLoadCallbacks;
+        let err = match VectorIndex::load_vindex(dir.path(), &mut cb) {
+            Ok(_) => panic!("out-of-range layer entry must error, not load"),
+            Err(e) => e,
+        };
+        match err {
+            VindexError::Parse(msg) => {
+                assert!(msg.contains('5'), "should name the layer: {msg}");
+                assert!(msg.contains('2'), "should name the bound: {msg}");
+            }
+            other => panic!("expected Parse error, got {other:?}"),
+        }
+    }
+
+    /// Direct check of the shared bounds helper — also covers the
+    /// `synthesize_gate_from_q4k` path, which needs a full Q4K fixture
+    /// to reach end-to-end but calls the same helper first.
+    #[test]
+    fn check_layer_in_bounds_rejects_out_of_range() {
+        assert!(check_layer_in_bounds(0, 2).is_ok());
+        assert!(check_layer_in_bounds(1, 2).is_ok());
+        let err = check_layer_in_bounds(2, 2).expect_err("layer == num_layers");
+        assert!(err.to_string().contains("out of range"), "{err}");
+        assert!(check_layer_in_bounds(usize::MAX, 0).is_err());
     }
 
     #[test]

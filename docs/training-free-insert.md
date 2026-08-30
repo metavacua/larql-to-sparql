@@ -248,7 +248,31 @@ larql> INFER "The capital of Atlantis is" TOP 5;
 
 The executor synthesises the trace prompt as `"The {relation} of {entity} is"`
 (with `-`/`_` in the relation replaced by spaces), so `("Atlantis", "capital-of",
-"Poseidon")` becomes the exact prompt this experiment validated. INSERT always
-installs a multi-layer constellation (~8 layers × alpha=0.25) — the only
-validated regime. The default span sits in the upper half of the knowledge
-band; pass `AT LAYER N` to center the span on layer N instead.
+"Poseidon")` becomes the exact prompt this experiment validated.
+
+> **Corrected 2026-08-23 — the paragraph that stood here described a
+> regime the engine measured as HARMFUL and removed.** Four claims, all
+> now false:
+>
+> | it said | actually |
+> |---|---|
+> | "INSERT **always** installs a multi-layer constellation" | the default mode is **KNN** (`ast.rs` `#[default] Knn`), which never enters the constellation path at all. Reaching it needs an explicit `MODE COMPOSE` clause, which this document never mentions. |
+> | "~8 layers" | **single layer**: `SPAN_HALF_LO = SPAN_HALF_HI = 0` |
+> | "alpha = 0.25" | `DEFAULT_INSERT_ALPHA_MUL = 0.1`, and it multiplies the layer's **median down-vector norm** rather than being an absolute |
+> | "`AT LAYER N` centres the span" | `AT LAYER N` **pins** the install to exactly layer N; the code rejects the centring semantics by name |
+>
+> The 8-layer span was not merely superseded — it was measured and
+> deleted. From `insert/plan.rs`: *"spreading the payload across 8 layers
+> lets the slot fire on any prompt with even weak cosine alignment and
+> hijacks unrelated prompts (0/10 retrieval + 4/4 bleed on the 10-fact
+> constellation)"*. One layer is what keeps the signal-to-noise ratio the
+> reference validated.
+>
+> **So the 94.6% headline above, and the whole "why multi-layer works"
+> argument, describe the configuration the engine now refuses to
+> produce.** Following the Reproduction section as written gets a
+> single-layer KNN install and none of the reported behaviour. The
+> alpha-sweep tables further down predate `GATE_SCALE = 30.0`, the
+> 16-iteration BALANCE loop and the cross-fact regression check, and are
+> not reproducible either. Retained as the record of how the parameters
+> were chosen — not as instructions.

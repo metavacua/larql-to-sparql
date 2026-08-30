@@ -12,7 +12,8 @@
 //! v2 (planned) — Metal as a third backend, attention/dense-ffn/layer/forward
 //! components. v3 — HF Python sidecar for ground-truth reference.
 //!
-//! See `crates/larql-cli/ROADMAP.md` P0 → "`larql parity`" for the full design.
+//! What shipped is in `crates/larql-cli/CHANGELOG.md` (2026-05-10); the
+//! remaining open scoping work is `ROADMAP.md` → "P2: parity polish".
 
 // Without the `gpu`+macOS feature the real `run` (and everything it calls —
 // the naive reference impls, MoE helpers, dump utilities) is `#[cfg]`'d out,
@@ -156,10 +157,13 @@ pub fn run(args: ParityArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // lm-head parity is backend-agnostic (Q4_K matvec vs f32 reference) —
-    // works on any vindex that has an lm_head, MoE or dense.
-    if !arch.is_hybrid_moe() && args.component != "lm-head" {
+    // works on any vindex that has an lm_head, MoE or dense. The moe-*
+    // components need an expert store, which pure MoE (GPT-OSS, OLMoE,
+    // GraniteMoE) has exactly as hybrid does — gating on hybrid alone was
+    // the `is_hybrid_moe()`-only assumption this codebase keeps finding.
+    if !(arch.is_moe() || arch.is_hybrid_moe()) && args.component != "lm-head" {
         return Err(format!(
-            "vindex {} is not hybrid-MoE — moe-* components are MoE-only",
+            "vindex {} is not MoE — moe-* components are MoE-only",
             args.model
         )
         .into());
@@ -348,7 +352,7 @@ fn run_moe_expert(
                 arch.norm_weight_offset(),
                 arch.norm_eps(),
                 QuantFormat::Q4_K,
-                activation,
+                larql_compute::ExpertMlp::gated(activation),
             ),
             _ => return Err(format!("backend '{backend}' not yet wired for moe-expert").into()),
         };
@@ -409,11 +413,23 @@ fn run_moe_block(
     }
 
     let moe = MoeLayerWeights {
+        // Both describe the VINDEX2 store this diagnostic reads — k-quant
+        // blocks with inline scales, de-interleaved by the extraction path —
+        // and match what `build_moe_weights` declares for the same bytes.
+        // A parity probe that described the store differently from the route
+        // it is checking would be comparing two different reads.
+        expert_scales: larql_compute::MoeExpertScales::Inline,
+        fused_row_layout: larql_compute::MoeFusedRowLayout::ContiguousHalves,
         experts_gate_up: experts_gate_up.clone(),
         experts_down: experts_down.clone(),
-        routing_policy: match arch.moe_router_type() {
-            "gemma4_top_k_softmax" => MoeRoutingPolicy::gemma4_hybrid(),
-            _ => MoeRoutingPolicy::top_k_softmax(),
+        // Typed dispatch on `MoeRouterKind` — the string form
+        // (`moe_router_type()`) is serialisation-only, and a missed
+        // string arm here would silently rescale the whole expert
+        // branch (the §4.7.10 failure class).
+        routing_policy: match arch.moe_router_kind() {
+            larql_models::MoeRouterKind::TopKSoftmax => MoeRoutingPolicy::top_k_softmax(),
+            larql_models::MoeRouterKind::TopKThenSoftmax => MoeRoutingPolicy::top_k_then_softmax(),
+            larql_models::MoeRouterKind::Gemma4Hybrid => MoeRoutingPolicy::gemma4_hybrid(),
         },
         weight_layout: MoeWeightLayout::default(),
         expert_data_format: QuantFormat::Q4_K,
@@ -429,7 +445,10 @@ fn run_moe_block(
         num_experts,
         top_k,
         intermediate_size: inter,
-        activation,
+        router_bias: &[],
+        experts_gate_up_bias: &[],
+        experts_down_bias: &[],
+        gate_rule: larql_compute::MoeGateRule::Gated(activation),
     };
 
     let mut traces: Vec<(&str, Vec<f32>)> = Vec::new();

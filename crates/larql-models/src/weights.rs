@@ -155,6 +155,19 @@ pub struct ModelWeights {
     pub skipped_tensors: Vec<(String, String)>,
     /// Byte ranges into `packed_mmaps`: maps tensor key → (file_name, offset, length).
     pub packed_byte_ranges: HashMap<String, (String, usize, usize)>,
+    /// Registry tag of each per-layer FFN store's weight format, keyed by
+    /// layer, recorded from the `layers/layer_XX.weights` header at load
+    /// time. The header is the format authority; a consumer that assumes
+    /// Q4_K decodes a Q6_K store (MXFP4-transcoded experts, GPT-OSS) as
+    /// garbage. Empty for legacy vindexes and non-per-layer layouts —
+    /// consumers fall back to Q4_K, which is the only format those ever
+    /// carried.
+    pub per_layer_ffn_format: HashMap<usize, String>,
+    /// How each per-layer FFN store arranges its bytes, recorded from the
+    /// same header as `per_layer_ffn_format` and travelling with it. Empty
+    /// for legacy vindexes and non-per-layer layouts, whose stores are all
+    /// inline-scale contiguous-halves — see [`PerLayerFfnArrangement`].
+    pub per_layer_ffn_arrangement: HashMap<usize, PerLayerFfnArrangement>,
     pub embed: WeightArray,
     /// Output projection matrix. Same as embed if tie_word_embeddings=true,
     /// separate lm_head.weight otherwise.
@@ -198,6 +211,55 @@ impl ModelWeights {
         let gu = self.get_packed_bytes(&per_layer_ffn_key(layer, entry, PER_LAYER_FFN_GATE_UP))?;
         let dn = self.get_packed_bytes(&per_layer_ffn_key(layer, entry, PER_LAYER_FFN_DOWN))?;
         Some((gu, dn))
+    }
+
+    /// Return the gate+up and down byte slices for the lowest-numbered FFN
+    /// entry this process actually holds at `layer`, or `None` if the layer
+    /// has no per-layer entries.
+    ///
+    /// Use this (never a hard-coded entry 0) when probing "some expert's"
+    /// bytes: a shard started with a non-zero expert range (e.g.
+    /// `--experts 64-127`) has `layers/{layer}/64/gate_up` but not
+    /// `layers/{layer}/0/gate_up`, so an entry-0 probe reports `None` on a
+    /// perfectly healthy shard — same failure mode `has_per_layer_ffn`
+    /// was fixed for. Scans both `packed_byte_ranges` (production mmaps)
+    /// and `raw_bytes` (tests / in-memory tensors), mirroring the lookup
+    /// order of `get_packed_bytes`.
+    pub fn first_layer_entry_bytes(&self, layer: usize) -> Option<(&[u8], &[u8])> {
+        let prefix = format!("layers/{layer}/");
+        let suffix = format!("/{PER_LAYER_FFN_GATE_UP}");
+        let entry = self
+            .packed_byte_ranges
+            .keys()
+            .chain(self.raw_bytes.keys())
+            .filter_map(|k| {
+                k.strip_prefix(&prefix)?
+                    .strip_suffix(&suffix)?
+                    .parse::<usize>()
+                    .ok()
+            })
+            .min()?;
+        self.get_layer_entry_bytes(layer, entry)
+    }
+
+    /// Registry tag of the per-layer FFN store's format at `layer`, as
+    /// recorded from the store file's own header. `None` for legacy
+    /// vindexes loaded before the format was threaded through (Q4_K, the
+    /// only format they carried) and for non-per-layer layouts.
+    pub fn per_layer_ffn_format_tag(&self, layer: usize) -> Option<&str> {
+        self.per_layer_ffn_format.get(&layer).map(String::as_str)
+    }
+
+    /// How layer `layer`'s per-layer FFN store arranges its bytes.
+    ///
+    /// `None` means no store declared an arrangement — a legacy vindex or a
+    /// non-per-layer layout. Callers should use
+    /// [`PerLayerFfnArrangement::default`], which is what those stores
+    /// contain; it is deliberately not returned here so that "declared
+    /// contiguous halves" and "nothing declared" stay distinguishable at the
+    /// boundary.
+    pub fn per_layer_ffn_arrangement(&self, layer: usize) -> Option<PerLayerFfnArrangement> {
+        self.per_layer_ffn_arrangement.get(&layer).copied()
     }
 
     /// Whether FFN weights are stored in the per-layer format (`layers/`).
@@ -374,6 +436,45 @@ pub fn per_layer_ffn_key(layer: usize, entry: usize, component: &str) -> String 
 pub const PER_LAYER_FFN_GATE_UP: &str = "gate_up";
 /// Component string for the down half of a per-layer FFN entry.
 pub const PER_LAYER_FFN_DOWN: &str = "down";
+/// Component string for the gate+up e8m0 exponent stream of a split-scale
+/// per-layer FFN entry. Registered as its own slot rather than derived from
+/// the payload slot: `payload_offset / 16` holds only when the two streams
+/// were written as parallel banks, which is the writer's choice and not a
+/// property of the format.
+pub const PER_LAYER_FFN_GATE_UP_SCALES: &str = "gate_up_scales";
+/// Component string for the down e8m0 exponent stream of a split-scale
+/// per-layer FFN entry.
+pub const PER_LAYER_FFN_DOWN_SCALES: &str = "down_scales";
+
+/// How one layer's per-layer FFN store arranges its bytes, read off that
+/// store's own header at load time.
+///
+/// Separate from the format tag on purpose. The format answers "how is a
+/// block decoded"; these answer "where are the scales" and "which rows are
+/// gate". Every store written before native MXFP4 answered the latter two
+/// identically, which is why they used to be derivable — and why deriving
+/// them is now a defect rather than a shortcut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PerLayerFfnArrangement {
+    /// Whether each entry carries its own e8m0 exponent streams, reachable
+    /// under [`PER_LAYER_FFN_GATE_UP_SCALES`] / [`PER_LAYER_FFN_DOWN_SCALES`].
+    pub split_scales: bool,
+    /// Which rows of the fused gate+up operand are gate and which are up.
+    pub gate_up_layout: crate::config::experts::GateUpLayout,
+}
+
+impl Default for PerLayerFfnArrangement {
+    /// The arrangement every pre-MXFP4 store on disk actually uses. A
+    /// default is safe here *only* because that is a fact about what those
+    /// writers emitted, not a guess — see `write_layer_weights`, which
+    /// states the same thing on the writing side.
+    fn default() -> Self {
+        Self {
+            split_scales: false,
+            gate_up_layout: crate::config::experts::GateUpLayout::ContiguousHalves,
+        }
+    }
+}
 
 #[cfg(test)]
 mod weights_view_tests {
@@ -437,5 +538,38 @@ mod weights_view_tests {
 
         let via_from: WeightsView = (&weights).into();
         assert_eq!(via_from.tensor("k").unwrap(), &w);
+    }
+
+    /// A shard owning a non-zero expert range (e.g. `--experts 64-127`) has
+    /// no entry 0 — probing `get_layer_entry_bytes(l, 0)` returns `None` on
+    /// a healthy shard. `first_layer_entry_bytes` must find the first OWNED
+    /// entry instead (the /v1/stats `per_expert_bytes` probe regression).
+    #[test]
+    fn first_layer_entry_bytes_finds_first_owned_entry_on_nonzero_shard() {
+        let mut weights = make_test_weights();
+        // Shard owns experts 64 and 65 at layer 0; nothing at entry 0.
+        for entry in [64usize, 65] {
+            weights.raw_bytes.insert(
+                per_layer_ffn_key(0, entry, PER_LAYER_FFN_GATE_UP),
+                vec![entry as u8; 8],
+            );
+            weights.raw_bytes.insert(
+                per_layer_ffn_key(0, entry, PER_LAYER_FFN_DOWN),
+                vec![entry as u8; 4],
+            );
+        }
+
+        // Entry-0 probe: the pre-fix behaviour — None on a healthy shard.
+        assert!(weights.get_layer_entry_bytes(0, 0).is_none());
+
+        // Fixed probe: lowest owned entry (64), both components resolved.
+        let (gu, dn) = weights
+            .first_layer_entry_bytes(0)
+            .expect("shard owns entries at layer 0");
+        assert_eq!(gu, &[64u8; 8][..]);
+        assert_eq!(dn, &[64u8; 4][..]);
+
+        // A layer with no entries at all is still None.
+        assert!(weights.first_layer_entry_bytes(1).is_none());
     }
 }

@@ -41,6 +41,9 @@ async fn spawn_router(grid_key: Option<String>) -> (std::net::SocketAddr, Arc<Rw
     (addr, state)
 }
 
+// The Err shape is tonic's own `Status` (>128 bytes), matching what the
+// service under test returns (clippy::result_large_err, rust 1.98).
+#[allow(clippy::result_large_err)]
 async fn join_with_auth(
     addr: std::net::SocketAddr,
     bearer: Option<&'static str>,
@@ -84,6 +87,7 @@ async fn announce_then_heartbeat_then_dropping() {
             vindex_hash: "h".into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await
@@ -254,6 +258,7 @@ async fn status_rpc_returns_current_grid() {
             vindex_hash: "h".into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await
@@ -285,6 +290,7 @@ async fn unassign_via_serving_sender_reaches_client() {
             vindex_hash: "h".into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await
@@ -347,6 +353,7 @@ async fn available_with_under_replication_triggers_replicate() {
                 vindex_hash: "h".into(),
                 expert_start: 0,
                 expert_end: 0,
+                serves_openai: false,
             })),
         })
         .await
@@ -408,6 +415,7 @@ async fn serving_disconnect_triggers_post_stream_replicate() {
             vindex_hash: "h".into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await
@@ -423,6 +431,7 @@ async fn serving_disconnect_triggers_post_stream_replicate() {
             vindex_hash: "h".into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await
@@ -476,6 +485,7 @@ async fn payload_none_is_silently_skipped() {
             vindex_hash: "h".into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await
@@ -515,6 +525,7 @@ async fn dropping_under_replicated_shard_triggers_replicate_log() {
             vindex_hash: "h".into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await
@@ -530,6 +541,7 @@ async fn dropping_under_replicated_shard_triggers_replicate_log() {
             vindex_hash: "h".into(),
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         })),
     })
     .await

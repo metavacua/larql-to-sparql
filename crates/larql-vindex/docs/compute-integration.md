@@ -88,7 +88,7 @@ All per-layer architecture params (head_dim, rope_base, attention scale, etc.) c
 
 ```
 Vindex build: user chooses quantization level
-  → build_q4k_weights: creates attn_weights_q4k.bin
+  → build_q4k_weights: creates attn_weights_kquant.bin
   → build_attn_q8: creates attn_weights_q8.bin
 
 Inference: auto-selects best available (attention)

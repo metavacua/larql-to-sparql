@@ -198,10 +198,22 @@ fn pull_one(
         }
     }
 
-    let hf_path = normalise_hf_path(model)?;
+    let hf_path = resolve_pull_hf_path(model)?;
     eprintln!("Pulling {hf_path}...");
     let cached: PathBuf = download_with_indicatif(&hf_path)?;
     eprintln!("Cached at: {}", cached.display());
+
+    // VINDEX3 has no metadata/weight split the way VINDEX2 does — the
+    // repo's own file listing IS the required download (design doc
+    // §10.5), so "downloaded" must mean "usable": validate before
+    // handing the result back as a success. VINDEX2 keeps its existing
+    // (unvalidated-here) behaviour.
+    match larql_vindex::format::generation::detect_generation(&cached)? {
+        larql_vindex::format::generation::ContainerGeneration::V3 => {
+            larql_vindex::format::vindex3::validate_downloaded_container(&cached)?;
+        }
+        larql_vindex::format::generation::ContainerGeneration::V2 => {}
+    }
 
     // If --output is set, move the downloaded vindex to the requested path.
     if let Some(out) = output {
@@ -357,6 +369,38 @@ fn normalise_hf_path(model: &str) -> Result<String, Box<dyn std::error::Error>> 
     Err(format!("pull expects `hf://owner/name` or `owner/name`, got: {model}").into())
 }
 
+/// Resolve `model` to the `hf://` reference [`pull_one`] actually
+/// downloads — the resolver-convergence rung's third and final seam
+/// (`docs/vindex3-registry-design.md` §10.5), sharing the exact
+/// claimed/unclaimed dispatch `larql-cli`'s `serve` trampoline and
+/// `larql-server`'s `load_artifact` already use.
+///
+/// A bare name the VINDEX3 registry has claimed resolves through it
+/// **exclusively** — its pinned `hf://repo@revision` reference, any
+/// failure (unknown variant, incompatible ABI) a real refusal. It is
+/// never rescued by falling through to [`normalise_hf_path`]'s legacy
+/// `owner/name`/`hf://` heuristic (`looks_like_hf_repo`) below — that
+/// heuristic is now purely the *unclaimed* path, not `pull`'s only
+/// identity concept.
+fn resolve_pull_hf_path(model: &str) -> Result<String, Box<dyn std::error::Error>> {
+    resolve_pull_hf_path_with(model, &larql_vindex::registry::production_registry())
+}
+
+/// Testable core of [`resolve_pull_hf_path`]. Takes `registry` explicitly
+/// so the claimed/unclaimed dispatch can be proven against a non-empty
+/// registry without depending on the (currently empty) production one —
+/// `resolve_claimed_hf_reference` never touches the network, so this is
+/// hermetic either way.
+fn resolve_pull_hf_path_with(
+    model: &str,
+    registry: &larql_vindex::registry::RegistryManifest,
+) -> Result<String, Box<dyn std::error::Error>> {
+    if let Some(hf_ref) = larql_vindex::registry::resolve_claimed_hf_reference(model, registry)? {
+        return Ok(hf_ref);
+    }
+    normalise_hf_path(model)
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -451,5 +495,95 @@ mod tests {
             DEFAULT_SIBLING_PRESETS,
             &["client", "attn", "embed", "server", "browse"]
         );
+    }
+
+    // ── resolve_pull_hf_path: the claimed/unclaimed convergence seam ────
+    //
+    // `resolve_claimed_hf_reference` never touches the network (identity
+    // only, no fetch — see `larql_vindex::registry`'s own tests for that
+    // contract), so every case here is hermetic.
+
+    fn registry_claiming_qwen38(
+        abi: larql_vindex::registry::Vindex3Abi,
+    ) -> larql_vindex::registry::RegistryManifest {
+        use larql_vindex::registry::{
+            Attestation, Provenance, RegistryArtifactRef, RegistryManifest, RegistryModel,
+            RegistryVariant, REGISTRY_MANIFEST_SCHEMA_VERSION,
+        };
+        let mut variants = std::collections::BTreeMap::new();
+        variants.insert(
+            "27b-nvfp4".to_string(),
+            RegistryVariant {
+                artifact: RegistryArtifactRef {
+                    repo: "larql/qwen3.8-27b-nvfp4".to_string(),
+                    revision: "abc123f0".to_string(),
+                },
+                abi,
+                source: Provenance {
+                    repo: "Qwen/Qwen3.8-27B".to_string(),
+                    revision: "8c4fdeadbeef".to_string(),
+                    attestation: Attestation::Mechanical,
+                },
+            },
+        );
+        let mut models = std::collections::BTreeMap::new();
+        models.insert(
+            "qwen3.8".to_string(),
+            RegistryModel {
+                default_variant: "27b-nvfp4".to_string(),
+                variants,
+            },
+        );
+        RegistryManifest {
+            schema_version: REGISTRY_MANIFEST_SCHEMA_VERSION,
+            models,
+        }
+    }
+
+    #[test]
+    fn a_claimed_name_resolves_to_its_pinned_hf_reference() {
+        let registry = registry_claiming_qwen38(larql_vindex::registry::CURRENT_VINDEX3_ABI);
+        let hf_path = resolve_pull_hf_path_with("qwen3.8", &registry).unwrap();
+        assert_eq!(hf_path, "hf://larql/qwen3.8-27b-nvfp4@abc123f0");
+    }
+
+    #[test]
+    fn an_unclaimed_name_falls_through_to_the_legacy_owner_name_heuristic() {
+        let empty = larql_vindex::registry::RegistryManifest {
+            schema_version: larql_vindex::registry::REGISTRY_MANIFEST_SCHEMA_VERSION,
+            models: std::collections::BTreeMap::new(),
+        };
+        let hf_path = resolve_pull_hf_path_with("me/model", &empty).unwrap();
+        assert_eq!(hf_path, "hf://me/model");
+    }
+
+    #[test]
+    fn a_claimed_name_with_an_unknown_variant_never_falls_through_to_the_heuristic() {
+        // If this fell through, "qwen3.8:does-not-exist" would fail
+        // `looks_like_hf_repo` (a `:` isn't a `/`) with a *different*,
+        // misleading error. The registry's own error must win.
+        let registry = registry_claiming_qwen38(larql_vindex::registry::CURRENT_VINDEX3_ABI);
+        let err = resolve_pull_hf_path_with("qwen3.8:does-not-exist", &registry).unwrap_err();
+        assert!(err.to_string().contains("does-not-exist"), "{err}");
+    }
+
+    #[test]
+    fn a_claimed_name_with_an_incompatible_abi_never_falls_through_to_the_heuristic() {
+        let incompatible = larql_vindex::registry::Vindex3Abi(
+            larql_vindex::registry::CURRENT_VINDEX3_ABI.get() + 1,
+        );
+        let registry = registry_claiming_qwen38(incompatible);
+        let err = resolve_pull_hf_path_with("qwen3.8", &registry).unwrap_err();
+        assert!(err.to_string().contains("ABI"), "{err}");
+    }
+
+    #[test]
+    fn an_explicit_hf_reference_bypasses_the_claim_check() {
+        let registry = registry_claiming_qwen38(larql_vindex::registry::CURRENT_VINDEX3_ABI);
+        // Not a bare registry-shaped reference — `resolve_claimed_hf_reference`
+        // is structurally `None` for it, so the legacy hf:// passthrough wins
+        // even though the registry claims the same short name.
+        let hf_path = resolve_pull_hf_path_with("hf://owner/repo", &registry).unwrap();
+        assert_eq!(hf_path, "hf://owner/repo");
     }
 }

@@ -77,7 +77,7 @@ responsible for capturing them at the correct depth, which is exactly
 what `larql_inference::capture_decoy_residuals` does. Validated against
 synthetic constellations by the unit tests in `patch/refine.rs`; the
 end-to-end Gemma 3 4B reproduction lives in
-`larql-lql/examples/refine_demo.rs`.
+`larql-lql/crates/larql-demos/examples/lql/refine_demo.rs`.
 
 ## The Headline
 
@@ -185,8 +185,8 @@ larql-vindex/src/
 │       │   ├── up.rs           up_features.bin (feature-major f32) + has_full_mmap_ffn
 │       │   ├── interleaved.rs  interleaved.bin (f32 [gate|up|down])
 │       │   ├── interleaved_q4.rs   interleaved_q4.bin (Q4_0)
-│       │   ├── interleaved_q4k.rs  interleaved_q4k.bin + manifests +
-│       │   │                       down_features_q4k.bin (Q4_K/Q6_K)
+│       │   ├── interleaved_kquant_native.rs  interleaved_kquant.bin + manifests +
+│       │   │                       down_features_kquant.bin (Q4_K/Q6_K)
 │       │   ├── gate_q4.rs      Q4_0 gate-vector mmap (KNN side-channel)
 │       │   ├── fp4.rs          FP4 / FP8 FFN storage (exp 26)
 │       │   └── q4k_cache.rs    Bounded LRU dequant cache (q4k_ffn_cache)
@@ -216,15 +216,15 @@ larql-vindex/src/
 │   │   ├── write_f32.rs        write_model_weights (f32/f16), WeightEntry/Source
 │   │   ├── write_q4k/          Q4_K / Q6_K streaming writer (round-5 split — one
 │   │   │                       sibling per emitted artefact)
-│   │   │   ├── mod.rs          Orchestrator + Q4kWriteOptions + QuantBlockFormat +
+│   │   │   ├── mod.rs          Orchestrator + KquantWriteOptions + QuantBlockFormat +
 │   │   │   │                   pad_rows_to_block + resolve_v_tensor + helper tests
-│   │   │   ├── attn.rs         attn_weights_q4k.bin + manifest
-│   │   │   ├── ffn.rs          interleaved_q4k.bin + opt down_features_q4k.bin
+│   │   │   ├── attn.rs         attn_weights_kquant.bin + manifest
+│   │   │   ├── ffn.rs          interleaved_kquant.bin + opt down_features_kquant.bin
 │   │   │   ├── moe_layers.rs   layers/layer_{L:02}.weights (hybrid MoE)
 │   │   │   ├── norms.rs        norms.bin (norms + MoE router/scales)
 │   │   │   ├── ple.rs          ple_weights.bin (Gemma 4 E2B PLE, f16)
 │   │   │   ├── lm_head.rs      lm_head_q4.bin
-│   │   │   └── feature_major_down.rs  W2 down_features_q4k.bin state
+│   │   │   └── feature_major_down.rs  W2 down_features_kquant.bin state
 │   │   ├── write_layers.rs     Per-layer FFN file writer (§5.12)
 │   │   ├── manifest.rs         Q4kManifestEntry + format_tag
 │   │   └── load/               load_model_weights, find_tokenizer_path
@@ -233,6 +233,7 @@ larql-vindex/src/
 │   │       └── q4k.rs          load_model_weights_q4k_shard (Q4_K path)
 │   ├── checksums.rs            SHA256 computation + verification
 │   ├── fp4_codec.rs            FP4 / FP8 codec (extraction-side)
+│   ├── vindex3/                The VINDEX3 container — writing one, and opening one
 │   ├── huggingface/            HuggingFace Hub download/publish
 │   ├── spec.rs                 Translation: VindexConfig → public v1
 │   │                           manifest (`larql-vindex-spec::VindexManifest`).
@@ -272,7 +273,10 @@ larql-vindex/src/
 │   ├── overlay.rs              PatchedVindex (queries, mutators, walk, bake_down)
 │   ├── overlay_apply.rs        apply_patch, remove_patch, rebuild_overrides
 │   ├── overlay_gate_trait.rs   impl GateIndex for PatchedVindex
-│   ├── knn_store.rs            L0 KnnStore (arch-B residual-key KNN)
+│   ├── gate_overlay.rs         GateOverlay — shared retrieval kernel for gate
+│   │                           overrides AND KnnStore keys (one scoring path)
+│   ├── knn_store.rs            L0 KnnStore (arch-B residual-key KNN; scoring
+│   │                           via the shared GateOverlay since 2026-07-31)
 │   ├── knn_store_io.rs         KnnStore .lknn save / load (f16 keys)
 │   └── refine.rs               Gate refine pass (Gram-Schmidt orthogonalisation
 │                               of patched gates + optional decoy residuals)
@@ -335,7 +339,7 @@ pipeline), use `larql-inference::forward::memit`.
 
 | Run | Command |
 |-----|---------|
-| Demo | `cargo run --release -p larql-vindex --example demo_memit_solve` |
+| Demo | `cargo run --release -p larql-demos --example demo_memit_solve` |
 | Bench | `cargo bench -p larql-vindex --bench memit_solve` |
 
 ## Compute Integration
@@ -364,7 +368,6 @@ pipeline), use `larql-inference::forward::memit`.
 | Mistral | Mistral 7B | Gated (SiLU) | Sliding window |
 | Mixtral | Mixtral 8x7B/8x22B | MoE (8 experts) | PerExpert format |
 | Qwen | Qwen 2/2.5/3 | Gated (SiLU) | Attention bias, QK-norm |
-| Phi | Phi 2/3 | Gated | |
 | DeepSeek | DeepSeek V2/V3 | MoE (shared + routed) | MLA, YaRN |
 | Granite | Granite | Gated (SiLU) | Scaling multipliers |
 | StarCoder2 | StarCoder2 | Standard (GELU) | LayerNorm, bias, non-gated FFN |
@@ -386,10 +389,10 @@ model.vindex/
 ├── lm_head.bin             Output projection
 ├── interleaved.bin         gate|up|down packed per layer (optional)
 ├── interleaved_q4.bin      Q4_0 quantized version (optional, 7x smaller)
-├── interleaved_q4k.bin     Q4_K gate/up + Q6_K down (when quant=q4k)
-├── interleaved_q4k_manifest.json  Per-tensor offsets for interleaved_q4k.bin
-├── attn_weights_q4k.bin    Q4_K Q/K/O + Q6_K V (when quant=q4k)
-├── attn_weights_q4k_manifest.json Per-tensor offsets for attn_weights_q4k.bin
+├── interleaved_kquant.bin     Q4_K gate/up + Q6_K down (when quant=q4k)
+├── interleaved_q4k_manifest.json  Per-tensor offsets for interleaved_kquant.bin
+├── attn_weights_kquant.bin    Q4_K Q/K/O + Q6_K V (when quant=q4k)
+├── attn_weights_q4k_manifest.json Per-tensor offsets for attn_weights_kquant.bin
 ├── ple_weights.bin         Per-Layer Embedding tensors at f16 (Gemma 4 E2B only)
 ├── index.json              Config, layer bands, provenance, checksums, quant format
 ├── tokenizer.json          Tokenizer
@@ -416,7 +419,7 @@ compatible blocks:
 - Q/K/O/gate/up → Q4_K (144 bytes per 256 values, GGUF-canonical)
 - V/down → Q6_K (210 bytes per 256 values)
 
-Output files: `attn_weights_q4k.bin` + `interleaved_q4k.bin` with
+Output files: `attn_weights_kquant.bin` + `interleaved_kquant.bin` with
 per-tensor manifests. `VindexConfig.quant = Q4k` in `index.json` so
 loaders can dispatch on config.
 
@@ -562,7 +565,7 @@ when a covering shard is gone), auto-recovery on rejoin.
 
 Either way, each shard `larql-server` mmaps its layer range. Adding
 `--feature-major-down` at extract time (W2, see ADR-009) emits
-`down_features_q4k.bin`, which lets each shard skip the ~840 MB
+`down_features_kquant.bin`, which lets each shard skip the ~840 MB
 heap cache ceiling on its slice. Recommended when:
 
 - shard count is high (per-shard RSS budget is tight),
@@ -608,6 +611,13 @@ index.enable_hnsw(200);
 index.warmup_hnsw_all_layers();
 let trace = index.walk(&query, &layers, 10);
 ```
+
+Scope note: `enable_hnsw` affects **gate-KNN consumers only** — the
+browse `walk()` above, server KNN endpoints, `gate_knn` callers. The
+WalkFfn inference hot path selects features via the exact `gate_walk`
+batched gemv and ignores this toggle entirely (2026-07-30 review,
+item 13; pinned by `gate_walk_ignores_hnsw_toggle` and
+`walk_ffn_sparse_hot_path_ignores_enable_hnsw`).
 
 For batch / prefill (multi-position walks), `gate_knn_batch` already
 parallelises per-position top-K extraction when `seq_len ≥ 16` — no
@@ -673,10 +683,12 @@ larql-router --shards 0-16=http://127.0.0.1:9181,17-33=http://127.0.0.1:9182 \
 ```
 
 Why each flag matters:
-- `--feature-major-down` (extract-time) — emits `down_features_q4k.bin`.
+- `--feature-major-down` (extract-time) — emits `down_features_kquant.bin`.
   Activates when the FFN walk dispatches through the *sparse* path
-  (`walk_ffn_sparse` — INSERT-patched layers, explicit sparse-K, or
-  FP4 storage). On those paths, per-feature down decode reads one row
+  (`walk_ffn_sparse` — explicit sparse-K or FP4 storage; since
+  2026-07-31, INSERT-patched layers first try the exact base+delta
+  dense path — 2026-07-30 review, item 16 — and reach the sparse walk
+  only when its preconditions decline). On those paths, per-feature down decode reads one row
   from the new file instead of dequantising the whole layer +
   transposing through the cache; deletes the binding RSS constraint
   on per-shard memory budget. The default dense Q4K HTTP walk
@@ -723,10 +735,10 @@ make larql-vindex-coverage-html                                                 
 cargo test -p larql-vindex                                                      # 857 lib tests listed as of 2026-05-10
 
 # Demos (synthetic fixtures, no model download needed)
-cargo run -p larql-vindex --example demo_features                               # Feature showcase (build, KNN, patches, MoE, f16)
-cargo run --release -p larql-vindex --example mmap_demo                         # mmap RAM behaviour + scaling table
-cargo run --release -p larql-vindex --example q4k_demo                          # Streaming Q4_K showcase: size comparison, file layout, dequant round-trip
-cargo run --release -p larql-vindex --example demo_memit_solve                  # MEMIT closed-form decomposition + MemitStore round-trip
+cargo run -p larql-demos --example demo_features                               # Feature showcase (build, KNN, patches, MoE, f16)
+cargo run --release -p larql-demos --example mmap_demo                         # mmap RAM behaviour + scaling table
+cargo run --release -p larql-demos --example q4k_demo                          # Streaming Q4_K showcase: size comparison, file layout, dequant round-trip
+cargo run --release -p larql-demos --example demo_memit_solve                  # MEMIT closed-form decomposition + MemitStore round-trip
 
 # Criterion benches (run with --quick for a fast sweep, omit for full sample)
 cargo bench  -p larql-vindex --bench vindex_ops                                 # KNN, walk, save/load, mutate, MoE, batch top-K
@@ -836,7 +848,7 @@ reports go to `target/criterion/`.
 | `hnsw_warmup / dense-8L-10240×2560 / serial` | 395 ms |
 | `hnsw_warmup / dense-8L-10240×2560 / parallel` | **109 ms** (3.6× via `warmup_hnsw_all_layers`) |
 | `q4k_down / cache+transpose / K=100` (Gemma 4B Q4_K) | 77.6 ms |
-| `q4k_down / feature_major / K=100` (Gemma 4B Q4_K) | **31.8 µs** (2440× via `down_features_q4k.bin`, opt-in at extract) |
+| `q4k_down / feature_major / K=100` (Gemma 4B Q4_K) | **31.8 µs** (2440× via `down_features_kquant.bin`, opt-in at extract) |
 | `feature_meta_lookup` (per call) | ~245 ns |
 | `mutate / set_meta_plus_gate` | 301 ns |
 | `save_load / save_gate_vectors` | 2.01 ms |
@@ -909,7 +921,7 @@ pinned layers skip PCIe transfers and the gradient steepens.
 | [PERFORMANCE.md](PERFORMANCE.md) | Benchmark data, scaling projections, compute integration |
 | [ROADMAP.md](ROADMAP.md) | Active P0/P1/P2 work + parked / won't-fix |
 | [CHANGELOG.md](CHANGELOG.md) | Reverse-chronological history of shipped work |
-| [docs/vindex-format.md](docs/vindex-format.md) | File format specification, directory layout, manifest schemas |
+| [docs/vindex-format.md](docs/format-spec.md) | File format specification, directory layout, manifest schemas |
 | [docs/compute-integration.md](docs/compute-integration.md) | How vindex stores data and compute consumes it |
 | [docs/adr/001](docs/adr/001-weights-as-database.md) | Transformer weights as queryable database |
 | [docs/adr/002](docs/adr/002-quantization-strategy.md) | Ollama-compatible Q4_K/Q6_K quantization |
@@ -928,7 +940,7 @@ Tests:      457 passing (306 unit + 151 integration; clippy clean as of 2026-04-
 Coverage:   61% lines / 57% functions (cargo-llvm-cov; W2 files 95–100%)
 Warnings:   0 (build), 0 (clippy --all-targets)
 Formats:    f32, Q8_0, Q4_K, Q6_K, Q4_0, FP4, FP8
-Models:     Gemma 2/3/4, Llama, Mistral, Mixtral, Qwen, Phi, DeepSeek, Granite, StarCoder2, GPT-OSS, GPT-2
+Models:     Gemma 2/3/4, Llama, Mistral, Mixtral, Qwen, DeepSeek, Granite, StarCoder2, GPT-OSS, GPT-2 (others fall back to GenericArch)
 ```
 
 ## License

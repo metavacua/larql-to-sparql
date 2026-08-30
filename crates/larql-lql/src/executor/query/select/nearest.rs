@@ -14,16 +14,14 @@ use super::format::{also_display, banner, format_also, NEAREST_DEFAULT_LIMIT};
 impl Session {
     pub(super) fn exec_select_nearest(
         &self,
-        index: &larql_vindex::PatchedVindex,
-        path: &std::path::Path,
+        ctx: &crate::executor::knowledge::BrowseCtx<'_>,
         nc: &NearestClause,
         limit: Option<u32>,
     ) -> Result<Vec<String>, LqlError> {
         let limit = limit.unwrap_or(NEAREST_DEFAULT_LIMIT) as usize;
 
-        let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-            .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
-        let tokenizer = larql_vindex::load_vindex_tokenizer(path)
+        let (embed, embed_scale) = ctx.embeddings()?;
+        let tokenizer = larql_vindex::load_vindex_tokenizer(ctx.path)
             .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
         let Some(query) = crate::executor::helpers::entity_query_vec(
@@ -36,7 +34,7 @@ impl Session {
             return Ok(vec!["  (entity not found)".into()]);
         };
 
-        let hits = index.gate_knn(nc.layer as usize, &query, limit);
+        let hits = ctx.source.gate_knn(nc.layer as usize, &query, limit);
 
         let classifier = self.relation_classifier();
 
@@ -48,7 +46,7 @@ impl Session {
         out.push(banner(86));
 
         for (feat, score) in &hits {
-            let meta = index.feature_meta(nc.layer as usize, *feat);
+            let meta = ctx.source.feature_meta(nc.layer as usize, *feat);
             let tok = meta
                 .as_ref()
                 .map(|m| m.top_token.clone())

@@ -11,17 +11,13 @@ impl Session {
         layers: Option<&Range>,
         verbose: bool,
     ) -> Result<Vec<String>, LqlError> {
-        let (path, _config, patched) = self.require_vindex()?;
+        let ctx = self.browse()?;
 
-        let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-            .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
-        let tokenizer = larql_vindex::load_vindex_tokenizer(path)
+        let (embed, embed_scale) = ctx.embeddings()?;
+        let tokenizer = larql_vindex::load_vindex_tokenizer(ctx.path)
             .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
-        let encoding = tokenizer
-            .encode(prompt, true)
-            .map_err(|e| LqlError::exec("tokenize error", e))?;
-        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+        let token_ids = ctx.encode_prompt(&tokenizer, prompt)?;
 
         if token_ids.is_empty() {
             return Err(LqlError::Execution("empty prompt".into()));
@@ -31,7 +27,7 @@ impl Session {
         let embed_row = embed.row(last_tok as usize);
         let query: larql_vindex::ndarray::Array1<f32> = embed_row.mapv(|v| v * embed_scale);
 
-        let all_layers = patched.loaded_layers();
+        let all_layers = ctx.source.loaded_layers();
         let walk_layers: Vec<usize> = if let Some(range) = layers {
             (range.start as usize..=range.end as usize)
                 .filter(|l| all_layers.contains(l))
@@ -41,7 +37,7 @@ impl Session {
         };
 
         let top_k = if verbose { 10 } else { 5 };
-        let trace = patched.walk(&query, &walk_layers, top_k);
+        let trace = ctx.source.walk(&query, &walk_layers, top_k);
 
         let mut out = Vec::new();
         for (layer, hits) in &trace.layers {

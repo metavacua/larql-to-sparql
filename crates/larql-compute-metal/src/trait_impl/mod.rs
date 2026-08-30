@@ -5,7 +5,9 @@
 //! here; sub-trait impls are in their own files.
 
 mod decode;
+pub mod grouped_experts;
 mod matmul;
+pub mod mxfp4;
 mod quant_matvec;
 
 use super::*;
@@ -22,6 +24,19 @@ impl ComputeBackend for MetalBackend {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn register_weight_region(&self, region: &[u8]) {
+        // Non-page-aligned bases can't alias zero-copy; resolution simply
+        // misses and the MoE dispatch keeps its staged-copy path.
+        let _ = self.bufs.register_region(region);
+    }
+
+    fn seal_weight_regions(&self) {
+        // Declares the registered regions resident once, per
+        // `LARQL_RESIDENCY_SET`. Unset => implicit residency, i.e. the
+        // behaviour that existed before this hook.
+        self.bufs.seal_residency(&self.queue);
     }
 
     fn supports(&self, cap: Capability) -> bool {
@@ -106,6 +121,21 @@ mod tests {
         let m = backend();
         let any: &dyn std::any::Any = m.as_any();
         assert!(any.downcast_ref::<MetalBackend>().is_some());
+    }
+
+    /// `register_weight_region` is a thin delegator to
+    /// `BufferCache::register_region` — pin that the trait method
+    /// actually reaches it (a page-aligned anon mmap registers) rather
+    /// than silently no-op-ing.
+    #[test]
+    fn register_weight_region_delegates_to_buffer_cache() {
+        let m = backend();
+        let mut region = memmap2::MmapMut::map_anon(8192).expect("anon mmap");
+        region.fill(0);
+        let region = region.make_read_only().expect("read-only mmap");
+        let before = m.bufs.region_count();
+        m.register_weight_region(&region[..]);
+        assert_eq!(m.bufs.region_count(), before + 1);
     }
 
     /// `supports` accepts every capability MetalBackend claims —
@@ -197,6 +227,7 @@ mod tests {
             attn_ms: 3.0,
             gate_up_ms: 1.5,
             down_ms: 0.5,
+            ..Default::default()
         };
         crate::decode::profile::store_last_split_timings(written);
         let read = ComputeBackend::take_split_timings(&m).expect("must surface stored timing");
@@ -226,5 +257,43 @@ mod tests {
         // Trait dispatch is reachable on `&dyn ComputeBackend`.
         let any_backend: &dyn ComputeBackend = &m;
         assert!(any_backend.supports(Capability::HybridAttention));
+    }
+
+    /// `register_weight_region` + `seal_weight_regions` are the two trait
+    /// hooks the serve path calls around model load: register each mmap'd
+    /// bank, then declare them resident once. Both are reachable through
+    /// `&dyn ComputeBackend`, and sealing must be harmless under the
+    /// shipped implicit arm — the composed serve calls it unconditionally.
+    #[test]
+    fn weight_region_registration_and_sealing_are_reachable_via_the_trait() {
+        let m = backend();
+        let any_backend: &dyn ComputeBackend = &m;
+
+        // Page-aligned by construction, the production contract's shape.
+        let mm = memmap2::MmapMut::map_anon(2 * 16384).expect("anon mmap");
+        let region = mm.make_read_only().expect("read-only");
+        any_backend.register_weight_region(&region[..]);
+        assert_eq!(
+            m.bufs.region_count(),
+            1,
+            "the trait hook must reach BufferCache::register_region"
+        );
+
+        // A non-page-aligned base cannot alias zero-copy; the hook
+        // swallows the refusal because resolution simply misses later and
+        // the MoE dispatch keeps its staged-copy path.
+        any_backend.register_weight_region(&region[8..]);
+        assert_eq!(m.bufs.region_count(), 1, "a misaligned base adds nothing");
+
+        // Sealing under the shipped arm is a no-op; the queue still works.
+        any_backend.seal_weight_regions();
+        let cmd = m.queue.new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
+        enc.end_encoding();
+        cmd.commit();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/trait_impl/mod.rs:294",
+        );
     }
 }

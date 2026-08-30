@@ -4,7 +4,7 @@ use tokenizers::Tokenizer;
 
 use crate::forward::PredictResult;
 
-use super::hidden::predict_kquant_hidden;
+use super::hidden::{predict_kquant_hidden, predict_kquant_hidden_checked};
 
 /// End-to-end predict on a Q4_K/Q6_K vindex.
 pub fn predict_kquant(
@@ -65,6 +65,12 @@ pub fn generate_kquant_cpu(
 
 /// Like [`generate_kquant_cpu`] but dispatches MoE expert matmuls to remote shard
 /// servers via [`crate::ffn::RemoteMoeBackend`].
+///
+/// Generation is [`crate::ffn::MoeFailurePolicy::Fatal`]: a shard that fails
+/// mid-decode aborts the request. It does not continue with that layer's
+/// expert contribution zeroed — a network failure cannot produce a valid
+/// continuation, and one that looks valid is worse than none. Tokens already
+/// emitted stay emitted; no further token is produced.
 pub fn generate_kquant_cpu_remote(
     weights: &mut ModelWeights,
     tokenizer: &Tokenizer,
@@ -72,11 +78,40 @@ pub fn generate_kquant_cpu_remote(
     max_tokens: usize,
     index: &VectorIndex,
     moe_remote: &crate::ffn::RemoteMoeBackend,
-) -> Vec<(String, u32)> {
+) -> Result<Vec<(String, u32)>, crate::ffn::MoeBackendError> {
+    generate_kquant_cpu_routed(
+        weights, tokenizer, prompt_ids, max_tokens, index, moe_remote,
+    )
+}
+
+/// Greedy generation with the expert half served by any bound route.
+///
+/// The route is the only variable: embeddings, attention, norms, routers, the
+/// dense slab and the LM head all come from the loaded model exactly as the
+/// default path reads them. That is what lets a run through a VINDEX3
+/// container be compared against a plain one and have the difference mean
+/// *the routed bytes*.
+///
+/// Always [`crate::ffn::MoeFailurePolicy::Fatal`] — this produces a
+/// continuation, and a continuation computed with a layer's experts missing is
+/// not a continuation of the model that was asked for.
+pub fn generate_kquant_cpu_routed(
+    weights: &mut ModelWeights,
+    tokenizer: &Tokenizer,
+    prompt_ids: &[u32],
+    max_tokens: usize,
+    index: &VectorIndex,
+    backend: &dyn crate::ffn::MoeExpertBackend,
+) -> Result<Vec<(String, u32)>, crate::ffn::MoeBackendError> {
     let mut ids = prompt_ids.to_vec();
     let mut out: Vec<(String, u32)> = Vec::with_capacity(max_tokens);
     for _ in 0..max_tokens {
-        let h = predict_kquant_hidden(weights, &ids, index, Some(moe_remote));
+        let h = predict_kquant_hidden_checked(
+            weights,
+            &ids,
+            index,
+            Some(crate::ffn::MoeRoute::fatal(backend)),
+        )?;
         let last = h.nrows().saturating_sub(1);
         let h_last = h.slice(ndarray::s![last..last + 1, ..]).to_owned();
         let logits = crate::forward::hidden_to_raw_logits(weights, &h_last);
@@ -96,7 +131,7 @@ pub fn generate_kquant_cpu_remote(
             break;
         }
     }
-    out
+    Ok(out)
 }
 
 /// KV-cached autoregressive generation: one prefill over the prompt, then
@@ -484,16 +519,34 @@ mod tests {
     /// the remote returns Err (see hidden.rs's `Some(remote)` branch);
     /// the generation loop still picks tokens off the dense path.
     #[test]
-    fn generate_kquant_cpu_remote_runs_against_disconnected_backend() {
+    fn generate_kquant_cpu_remote_aborts_against_a_disconnected_backend() {
+        // Fault injection at the operation boundary. This test previously
+        // asserted the opposite — that generation "still picks tokens off the
+        // dense path" with the backend disconnected — which is precisely the
+        // defect: every expert contribution was zero and the loop emitted
+        // fluent tokens from a model that had lost its entire MoE half, with
+        // one stderr line as the only evidence.
+        //
+        // A disconnected shard cannot produce a valid continuation, so the
+        // only correct outcome is no continuation.
         use crate::ffn::RemoteMoeBackend;
         use crate::test_utils::{make_test_gemma4_moe_weights, make_test_q4k_vindex};
         let mut weights = make_test_gemma4_moe_weights();
         let index = make_test_q4k_vindex(&weights);
         let tokenizer = make_test_tokenizer(weights.vocab_size);
         let remote = RemoteMoeBackend::new_disconnected();
+
         let out =
             generate_kquant_cpu_remote(&mut weights, &tokenizer, &[0u32, 1], 2, &index, &remote);
-        assert!(out.len() <= 2);
+
+        let err = out.expect_err("a disconnected shard must abort generation, not degrade it");
+        assert!(
+            matches!(
+                err,
+                crate::ffn::MoeBackendError::Remote(_) | crate::ffn::MoeBackendError::Container(_)
+            ),
+            "the refusal must name the unreachable operand, got: {err}"
+        );
     }
 
     /// Parity gate for the KV-cached decode loop: on the same fixture,

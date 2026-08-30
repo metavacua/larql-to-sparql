@@ -135,6 +135,7 @@ impl GridService for GridServiceImpl {
                             vindex_hash,
                             expert_start,
                             expert_end,
+                            serves_openai,
                         }) => {
                             let entry = ServerEntry {
                                 server_id: sid.clone(),
@@ -152,6 +153,7 @@ impl GridService for GridServiceImpl {
                                 rtt_ms: None,
                                 expert_start,
                                 expert_end,
+                                serves_openai,
                             };
                             state.write().register_with_sender(entry, tx.clone());
                             if let Some(m) = &metrics {
@@ -306,6 +308,9 @@ impl GridService for GridServiceImpl {
                                 // AssignMsg.
                                 expert_start: r.expert_start,
                                 expert_end: r.expert_end,
+                                // A Mode B gap-fill replica is a layer
+                                // slice, never a full OpenAI backend.
+                                serves_openai: false,
                             };
                             state.write().register_with_sender(entry, tx.clone());
                             if let Some(m) = &metrics {

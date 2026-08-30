@@ -236,6 +236,7 @@ mod tests {
             rtt_ms: None,
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         }
     }
 

@@ -1,11 +1,38 @@
 //! `UPDATE EDGES SET ... WHERE ...` — rewrite feature metadata via the
-//! patch overlay.
+//! session overlay (V2's `PatchedVindex`, V3's `KnowledgeOverlay`).
+//!
+//! One logical operation, written once: candidates resolve through the
+//! knowledge seam, the current (overlay-merged) metadata is read back
+//! through it, and the same `PatchOp::Update` is recorded — so a saved
+//! patch replays identically on either backend. An UPDATE on a
+//! tombstoned slot resurrects it (the V2 contract).
 
 use crate::ast::{Assignment, Condition, Value};
 use crate::error::LqlError;
-use crate::executor::Session;
+use crate::executor::{Backend, Session};
 
 use super::{relation_filter_matches, WhereFilters};
+
+/// Apply the SET assignments onto one feature's current metadata.
+fn apply_assignments(meta: &mut larql_vindex::FeatureMeta, set: &[Assignment]) {
+    for assignment in set {
+        match assignment.field.as_str() {
+            "target" | "top_token" => {
+                if let Value::String(ref s) = assignment.value {
+                    meta.top_token = s.clone();
+                }
+            }
+            "confidence" | "c_score" => {
+                if let Value::Number(n) = assignment.value {
+                    meta.c_score = n as f32;
+                } else if let Value::Integer(n) = assignment.value {
+                    meta.c_score = n as f32;
+                }
+            }
+            _ => {}
+        }
+    }
+}
 
 impl Session {
     pub(crate) fn exec_update(
@@ -15,11 +42,11 @@ impl Session {
     ) -> Result<Vec<String>, LqlError> {
         let filters = WhereFilters::from_conditions(conditions);
 
-        // Collect updates, then record
-        let mut update_ops: Vec<(usize, usize, larql_vindex::FeatureMeta)> = Vec::new();
-        let matches: Vec<(usize, usize)> = {
-            let (_path, _config, patched) = self.require_vindex()?;
-            let candidates = filters.resolve_candidates(patched.base());
+        // Resolve candidates and build the new metas with a readonly
+        // borrow, then apply.
+        let update_ops: Vec<(usize, usize, larql_vindex::FeatureMeta)> = {
+            let ctx = self.browse()?;
+            let candidates = filters.resolve_candidates(&ctx.source);
 
             let mut matches = Vec::new();
             for (layer, feature) in candidates {
@@ -32,40 +59,33 @@ impl Session {
                     matches.push((layer, feature));
                 }
             }
-            matches
+
+            let mut ops = Vec::new();
+            for (layer, feature) in matches {
+                if let Some(mut meta) = ctx.source.feature_meta(layer, feature) {
+                    apply_assignments(&mut meta, set);
+                    ops.push((layer, feature, meta));
+                }
+            }
+            ops
         };
 
-        if matches.is_empty() {
+        if update_ops.is_empty() {
             return Ok(vec!["  (no matching features found)".into()]);
         }
 
-        {
-            let (_path, _config, patched) = self.require_patched_mut()?;
-
-            for &(layer, feature) in &matches {
-                if let Some(meta) = patched.feature_meta(layer, feature) {
-                    let mut new_meta = meta;
-                    for assignment in set {
-                        match assignment.field.as_str() {
-                            "target" | "top_token" => {
-                                if let Value::String(ref s) = assignment.value {
-                                    new_meta.top_token = s.clone();
-                                }
-                            }
-                            "confidence" | "c_score" => {
-                                if let Value::Number(n) = assignment.value {
-                                    new_meta.c_score = n as f32;
-                                } else if let Value::Integer(n) = assignment.value {
-                                    new_meta.c_score = n as f32;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    patched.update_feature_meta(layer, feature, new_meta.clone());
-                    update_ops.push((layer, feature, new_meta));
+        match &mut self.backend {
+            Backend::Vindex { patched, .. } => {
+                for (layer, feature, meta) in &update_ops {
+                    patched.update_feature_meta(*layer, *feature, meta.clone());
                 }
             }
+            Backend::Vindex3 { overlay, .. } => {
+                for (layer, feature, meta) in &update_ops {
+                    overlay.update_feature_meta(*layer, *feature, meta.clone());
+                }
+            }
+            _ => unreachable!("browse() refused every other backend above"),
         }
 
         // Record to patch session

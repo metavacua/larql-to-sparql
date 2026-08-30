@@ -77,6 +77,24 @@ pub struct NormKernels {
     /// the norm registry because it sits in the same residual-stream
     /// "small ops" cluster.
     pub scale_vector_pipeline: ComputePipelineState,
+
+    /// Weightless per-head RMS for Q/K — the judged
+    /// `ParameterFreeQkNorm` semantics, which every weighted `qk_norm`
+    /// kernel here is unable to express (VINDEX3-G6b).
+    pub qk_norm_parameter_free_pipeline: ComputePipelineState,
+    /// `out = a * sigmoid(g)` — the judged attention output gate.
+    pub sigmoid_gate_multiply_pipeline: ComputePipelineState,
+    /// `logits = softcap(multiplier * x)` — the head's two judged
+    /// elementwise ops, fused because their order is semantic.
+    pub head_scale_softcap_pipeline: ComputePipelineState,
+    /// Two-pass argmax over the logits — the sampled id leaves the
+    /// device as four bytes instead of the whole vocabulary.
+    /// One input, up to three RMS-normed outputs in one dispatch.
+    pub rms_norm_multi3_pipeline: ComputePipelineState,
+    /// Embedding row lookup + scale from the device argmax result.
+    pub embed_gather_pipeline: ComputePipelineState,
+    pub argmax_partial_pipeline: ComputePipelineState,
+    pub argmax_final_pipeline: ComputePipelineState,
 }
 
 impl NormKernels {
@@ -125,6 +143,19 @@ impl NormKernels {
                 device, library,
             ),
 
+            qk_norm_parameter_free_pipeline: r::<shaders::plan_glue::QkNormParameterFreeKernel>(
+                device, library,
+            ),
+            sigmoid_gate_multiply_pipeline: r::<shaders::plan_glue::SigmoidGateMultiplyKernel>(
+                device, library,
+            ),
+            head_scale_softcap_pipeline: r::<shaders::plan_glue::HeadScaleSoftcapKernel>(
+                device, library,
+            ),
+            rms_norm_multi3_pipeline: r::<shaders::plan_glue::RmsNormMulti3Kernel>(device, library),
+            embed_gather_pipeline: r::<shaders::plan_glue::EmbedGatherKernel>(device, library),
+            argmax_partial_pipeline: r::<shaders::plan_glue::ArgmaxPartialKernel>(device, library),
+            argmax_final_pipeline: r::<shaders::plan_glue::ArgmaxFinalKernel>(device, library),
             scale_vector_pipeline: r::<shaders::residual_inject::ScaleVectorKernel>(
                 device, library,
             ),

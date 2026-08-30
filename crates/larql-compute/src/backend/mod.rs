@@ -31,12 +31,14 @@
 
 pub mod capability;
 pub mod decode;
+pub mod factory;
 pub mod helpers;
 pub mod matmul;
 pub mod quant_matvec;
 
 pub use capability::Capability;
-pub use decode::{DecodeBackend, DecodeStateDump, ProfileTimings, StateDumpMask};
+pub use decode::{DecodeBackend, DecodeHeadPlan, DecodeStateDump, ProfileTimings, StateDumpMask};
+pub use factory::{backend_from_spec, BackendCtor, BackendKind, BackendSelectError};
 pub use helpers::{dot_proj_gpu, matmul_gpu};
 pub use matmul::{MatMul, MatMulOp};
 pub use quant_matvec::QuantMatVec;
@@ -65,6 +67,29 @@ pub trait ComputeBackend: MatMul + QuantMatVec + DecodeBackend + Send + Sync {
     fn supports(&self, _cap: Capability) -> bool {
         false
     }
+
+    /// Register a stable, page-granular weight allocation (an mmap'd
+    /// weight file) so the backend can alias sub-slices of it zero-copy
+    /// instead of staging per-call copies. GPU backends bind registered
+    /// regions as device buffers and resolve expert/tensor slices to
+    /// byte offsets; the default is a no-op — CPU reads host memory
+    /// directly and has nothing to stage.
+    ///
+    /// # Contract
+    ///
+    /// `region` must never move and must outlive the backend (the mmap
+    /// stability contract weight caches already rely on). Registering
+    /// the same base twice is a cheap no-op.
+    fn register_weight_region(&self, _region: &[u8]) {}
+
+    /// Called once after the last [`Self::register_weight_region`] for a
+    /// model, before any timed work.
+    ///
+    /// A backend that prepares resources up front (Metal declares an explicit
+    /// residency set over the registered allocations) does it here rather than
+    /// per registration, which would rebuild the declaration N times. Default
+    /// is a no-op, which is exactly the pre-existing behaviour.
+    fn seal_weight_regions(&self) {}
 
     /// Expose the concrete type for safe downcasting.
     fn as_any(&self) -> &dyn std::any::Any;

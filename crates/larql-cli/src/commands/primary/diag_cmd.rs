@@ -39,6 +39,24 @@ pub struct DiagArgs {
     /// Token count for `--probe`. Caps at 100 to keep the diagnostic snappy.
     #[arg(long, default_value = "5")]
     pub probe_tokens: usize,
+
+    /// Decode one quantised block of TENSOR and print it, then stop.
+    /// Example: `--block layers.0.mlp.up_proj.weight`.
+    ///
+    /// Stride validation says the bytes are the right *length*; this says what
+    /// they actually decode to. Use it when a vindex passes every structural
+    /// check and still produces wrong numbers.
+    #[arg(long, value_name = "TENSOR")]
+    pub block: Option<String>,
+
+    /// Which block of `--block`'s tensor to decode.
+    #[arg(long, default_value = "0", value_name = "N")]
+    pub block_index: u64,
+
+    /// Float vindex holding the same tensor, to measure quantisation error
+    /// against. Without it `--block` reports the decoded values alone.
+    #[arg(long, value_name = "VINDEX")]
+    pub against: Option<String>,
 }
 
 /// One row in the lm_head-path resolution table.
@@ -50,6 +68,14 @@ struct PathDecision {
 
 pub fn run(args: DiagArgs) -> Result<(), Box<dyn std::error::Error>> {
     let path = cache::resolve_model(&args.model)?;
+
+    // `--block` is a focused query, not a stage of the engine diagnostic:
+    // answer it and stop rather than burying one block under the kernel-path
+    // report the caller didn't ask for.
+    if let Some(key) = args.block.as_deref() {
+        return block_report(&path, key, args.block_index, args.against.as_deref());
+    }
+
     println!("Engine diagnostic — {}", path.display());
     println!("{}", "=".repeat(70));
 
@@ -163,69 +189,205 @@ pub fn run(args: DiagArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Walk every k-quant manifest in the vindex, compare each entry's
-/// recorded `length` to `format.expected_bytes(&shape)`. Returns a single
-/// line summary; on mismatch, the kernel reads off-stride and produces NaN.
-/// Checks both the new kquant-named manifests and their legacy q4k
-/// counterparts so existing vindexes still get validated.
+/// Decode one quantised block and show what physically replaced the floats.
+///
+/// Decoding routes through `QuantFormatInfo::dequantize_block`, the same
+/// dispatch table the kernels use, so this reports the block as the engine
+/// would read it — including reading at a stale offset if the manifest is
+/// stale, which is the honest answer for a diagnostic.
+///
+/// With `--against`, the same 256 weights are read from a float vindex built
+/// from the same checkpoint and the error is measured directly. Note what the
+/// reconstructed column shows even without it: distinct originals collapsing
+/// onto one value is quantisation loss made visible.
+fn block_report(
+    path: &std::path::Path,
+    key: &str,
+    index: u64,
+    against: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tensors = larql_vindex::quant::read_quant_inventory(path)?;
+    let tensor = larql_vindex::quant::find_tensor(&tensors, key).ok_or_else(|| {
+        let mut msg = format!("no quantised tensor {key:?} in {}", path.display());
+        if tensors.is_empty() {
+            msg.push_str("\n  (this vindex has no k-quant manifests — is it a float vindex?)");
+        } else {
+            msg.push_str("\n  try one of:");
+            for t in tensors.iter().take(6) {
+                msg.push_str(&format!("\n    {}", t.key));
+            }
+            msg.push_str(&format!("\n    … {} tensors total", tensors.len()));
+        }
+        msg
+    })?;
+
+    let (raw, decoded) = tensor.read_block(path, index)?;
+    let elems = tensor.format.block_elements;
+
+    println!("Block decode — {key}");
+    println!("{}", "=".repeat(70));
+    println!("  file        {}", tensor.file);
+    println!("  format      {}", tensor.format.tag);
+    println!(
+        "  shape       {:?}  ({} weights)",
+        tensor.shape,
+        thousands(tensor.weights())
+    );
+    println!(
+        "  block       {} of {}",
+        thousands(index),
+        thousands(tensor.block_count())
+    );
+    println!(
+        "  stride      {} bytes / {} weights  =  {:.4} bits/weight",
+        tensor.format.bytes_per_block,
+        elems,
+        tensor.format.bytes_per_block as f64 * 8.0 / elems as f64
+    );
+    match tensor.stride_ok() {
+        Some(true) => println!("  stride ok   ✓ matches canonical geometry"),
+        Some(false) => println!(
+            "  stride ok   ✗ manifest records {} bytes, geometry implies {} — vindex is STALE",
+            tensor.length,
+            tensor
+                .expected_bytes()
+                .map(|b| b.to_string())
+                .unwrap_or_else(|| "?".into())
+        ),
+        None => println!("  stride ok   (shape not checkable)"),
+    }
+
+    println!("\n  raw block ({} bytes):", raw.len());
+    for (i, chunk) in raw.chunks(16).enumerate() {
+        let hex: Vec<String> = chunk.iter().map(|b| format!("{b:02x}")).collect();
+        println!("    {:04x}  {}", i * 16, hex.join(" "));
+    }
+
+    // Without a float reference there is nothing to subtract, so show the
+    // decoded values on their own rather than inventing a baseline.
+    let original = match against {
+        Some(dir) => {
+            let float_dir = cache::resolve_model(dir)?;
+            let cfg = larql_vindex::load_vindex_config(&float_dir)?;
+            Some(larql_vindex::quant::read_float_window(
+                &float_dir,
+                key,
+                cfg.dtype,
+                index * elems as u64,
+                elems,
+            )?)
+        }
+        None => None,
+    };
+
+    let show = decoded.len().min(8);
+    match &original {
+        Some(orig) => {
+            println!("\n   original      reconstructed          error");
+            println!("   {}", "-".repeat(46));
+            for i in 0..show {
+                println!(
+                    "   {:+.6}      {:+.6}      {:+.6}",
+                    orig[i],
+                    decoded[i],
+                    decoded[i] - orig[i]
+                );
+            }
+            println!("   {}", "-".repeat(46));
+        }
+        None => {
+            println!("\n   reconstructed");
+            println!("   {}", "-".repeat(16));
+            for v in decoded.iter().take(show) {
+                println!("   {v:+.6}");
+            }
+            println!("   {}", "-".repeat(16));
+        }
+    }
+
+    println!("\n  over all {elems} weights in this block:");
+    let lo = decoded.iter().cloned().fold(f32::INFINITY, f32::min);
+    let hi = decoded.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    println!("    reconstructed range   {lo:+.5} .. {hi:+.5}");
+    println!(
+        "    distinct values       {} of {elems} weights",
+        distinct_count(&decoded)
+    );
+    if let Some(orig) = &original {
+        let mut max_err = 0f64;
+        let mut sq = 0f64;
+        for (o, d) in orig.iter().zip(&decoded) {
+            let e = (*d - *o) as f64;
+            max_err = max_err.max(e.abs());
+            sq += e * e;
+        }
+        println!("    max error             {max_err:.6}");
+        println!(
+            "    rms error             {:.6}",
+            (sq / orig.len() as f64).sqrt()
+        );
+    }
+    println!();
+    Ok(())
+}
+
+/// How many distinct values survive in a decoded block. The compression is
+/// visible here: a 4-bit format cannot produce more than 16 per sub-block, so
+/// originals that differed collapse onto shared values.
+fn distinct_count(vals: &[f32]) -> usize {
+    let mut bits: Vec<u32> = vals.iter().map(|v| v.to_bits()).collect();
+    bits.sort_unstable();
+    bits.dedup();
+    bits.len()
+}
+
+/// `3208642560` → `3,208,642,560`.
+fn thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Compare every k-quant tensor's recorded `length` to what the current block
+/// geometry implies. Returns a single line summary; on mismatch, the kernel
+/// reads off-stride and produces NaN.
+///
+/// The manifest walk itself lives in `quant::inventory` so this and
+/// `larql show`'s precision map read the same set of tensors — including the
+/// legacy q4k-named manifests, so existing vindexes still get validated.
 fn validate_strides(dir: &std::path::Path) -> Result<String, Box<dyn std::error::Error>> {
-    let manifests = [
-        ATTN_WEIGHTS_KQUANT_MANIFEST_JSON,
-        INTERLEAVED_KQUANT_MANIFEST_JSON,
-        LEGACY_ATTN_WEIGHTS_Q4K_MANIFEST_JSON,
-        LEGACY_INTERLEAVED_Q4K_MANIFEST_JSON,
-    ];
+    let tensors = larql_vindex::quant::read_quant_inventory(dir)?;
     let mut total_clean = 0usize;
     let mut total_bad = 0usize;
     let mut bad_examples: Vec<String> = Vec::new();
 
-    for mname in manifests {
-        let mpath = dir.join(mname);
-        if !mpath.is_file() {
-            continue;
-        }
-        let json: serde_json::Value = match std::fs::read_to_string(&mpath)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-        {
-            Some(v) => v,
-            None => continue,
-        };
-        let entries = match json.as_array() {
-            Some(arr) => arr,
-            None => continue,
-        };
-        for entry in entries {
-            let key = entry["key"].as_str().unwrap_or("?");
-            let fmt = match entry["format"].as_str() {
-                Some(f) => f,
-                None => continue,
-            };
-            let length = entry["length"].as_u64().unwrap_or(0) as usize;
-            let shape: Vec<usize> = entry["shape"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_u64().map(|n| n as usize))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let qfmt = match larql_vindex::quant::registry::lookup(fmt) {
-                Some(q) => q,
-                None => continue,
-            };
-            if let Some(expected) = qfmt.expected_bytes(&shape) {
-                if expected == length {
-                    total_clean += 1;
-                } else {
-                    total_bad += 1;
-                    if bad_examples.len() < 3 {
-                        bad_examples.push(format!(
-                            "{key} ({fmt}, shape {shape:?}): length {length} vs expected {expected}"
-                        ));
-                    }
+    for t in &tensors {
+        // `None` = shape isn't a clean rows × whole-blocks layout, so there's
+        // no expected length to compare against. Not a defect, not a pass.
+        match t.stride_ok() {
+            Some(true) => total_clean += 1,
+            Some(false) => {
+                total_bad += 1;
+                if bad_examples.len() < 3 {
+                    bad_examples.push(format!(
+                        "{} ({}, shape {:?}): length {} vs expected {}",
+                        t.key,
+                        t.format.tag,
+                        t.shape,
+                        t.length,
+                        t.expected_bytes()
+                            .map(|b| b.to_string())
+                            .unwrap_or_else(|| "?".into())
+                    ));
                 }
             }
+            None => {}
         }
     }
 

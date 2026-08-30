@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "Layer-sharding router for distributed larql-server deployments"
 
 [lib]
@@ -16,12 +17,19 @@ path = "src/main.rs"
 
 [dependencies]
 larql-router-protocol = { path = "../larql-router-protocol" }
+# Walk-ffn wire constants + frame codec are single-sourced in
+# larql-inference (ROADMAP hardening item 16). The router imports
+# `BINARY_CT`/`BATCH_MARKER` from there instead of keeping drift-prone
+# local copies; DEC-1A's direction codecs (later phases) land in the
+# same module and will be consumed from here too.
+larql-inference = { path = "../larql-inference" }
 
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tonic = "0.13"
-reqwest = { version = "0.12", features = ["json"] }
+# `stream` powers the N0-router OpenAI proxy's unbuffered SSE pass-through.
+reqwest = { version = "0.12", features = ["json", "stream"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
@@ -70,3 +78,6 @@ http3 = ["quic", "larql-router-protocol/http3"]
 [[bench]]
 name = "routing"
 harness = false
+
+[lints]
+workspace = true

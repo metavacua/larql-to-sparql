@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "gRPC protocol types for the larql-router self-assembling grid"
 
 [dependencies]
@@ -68,6 +69,7 @@ http3 = [
 serde_json = { workspace = true }
 
 [build-dependencies]
+prost-build = "0.14.4"
 tonic-build = "0.13"
 
 # `protobuf-src` builds a fresh `protoc` via cmake. That works on Linux
@@ -78,3 +80,6 @@ tonic-build = "0.13"
 # build script falls back to that.
 [target.'cfg(not(windows))'.build-dependencies]
 protobuf-src = "2"
+
+[lints]
+workspace = true

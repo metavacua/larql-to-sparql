@@ -4,7 +4,7 @@
 **Date:** 2026-04-02  
 **Status:** Implemented  
 **Implementation:** `larql-inference` crate, `trace` module (Rust)  
-**Companion specs:** [Vindex Format](vindex-format-spec.md)
+**Companion specs:** [Vindex Format](../../larql-vindex/docs/format-spec.md)
 
 **Implementation coverage:** All three file formats (chain store, boundary store, context store) fully implemented with mmap'd reading, append-only writing, and zero-copy vector access.
 

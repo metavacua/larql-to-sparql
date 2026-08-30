@@ -147,8 +147,11 @@ fn run_infer(
             // `GET /v1/walk-ffn`).  This mirrors the fix already
             // applied in `session.rs::apply_patch`.
             let sessions = state.sessions.sessions_blocking_read();
-            if let Some(session) = sessions.get(sid) {
-                run_walk(&session.patched)
+            // A session with no overlay has never been patched, so it
+            // reads exactly like the global state — same fallback as an
+            // unknown session id.
+            if let Some(patched) = sessions.get(sid).and_then(|s| s.patched()) {
+                run_walk(patched)
             } else {
                 drop(sessions);
                 let patched = model.patched.blocking_read();
@@ -353,7 +356,7 @@ mod tests {
     /// ~eight.
     #[test]
     fn sessions_reader_does_not_serialize_concurrent_callers() {
-        use crate::session::{SessionManager, SessionState};
+        use crate::session::SessionManager;
         use std::sync::Arc;
         use std::time::Duration;
         use std::time::Instant;
@@ -364,13 +367,7 @@ mod tests {
         // through to slow-path session creation.
         {
             let mut sessions = mgr.sessions_blocking_write();
-            let hidden = 4;
-            let gate = larql_vindex::ndarray::Array2::<f32>::zeros((2, hidden));
-            let index = larql_vindex::VectorIndex::new(vec![Some(gate)], vec![None], 1, hidden);
-            sessions.insert(
-                "test-sid".to_string(),
-                SessionState::new(index, Instant::now()),
-            );
+            mgr.bind_in_guard(&mut sessions, "test-sid", "m-test", Instant::now());
         }
 
         // Eight threads simulating run_infer's sessioned branch:
@@ -384,7 +381,7 @@ mod tests {
             let mgr = Arc::clone(&mgr);
             handles.push(std::thread::spawn(move || {
                 let sessions = mgr.sessions_blocking_read();
-                let _patched = sessions.get("test-sid").map(|s| &s.patched);
+                let _patched = sessions.get("test-sid").and_then(|s| s.patched());
                 std::thread::sleep(Duration::from_millis(100));
                 drop(sessions);
             }));

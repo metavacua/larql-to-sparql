@@ -38,8 +38,8 @@ larql-server).
 | **Introspection** | `SHOW {RELATIONS, LAYERS, FEATURES, MODELS, PATCHES}`, `STATS` | metadata |
 | **Pipe** | `<stmt> \|> <stmt>` | composition |
 
-The full grammar is in `docs/specs/lql-spec.md`. The user-facing tutorial is in
-`docs/lql-guide.md`.
+The full grammar is in [`docs/spec.md`](docs/spec.md). The user-facing tutorial is in
+[`docs/lql-guide.md`](../../docs/lql-guide.md).
 
 ## INSERT: two modes
 
@@ -136,7 +136,8 @@ COMPILE CURRENT INTO VINDEX "out.vindex"
 > The online refine pass (Gram-Schmidt against cached decoy residuals) runs at INSERT time, so
 > no compile-time refine step is needed — INSERT already handles bleed defense.
 
-The full mechanism is documented in `docs/specs/vindex-operations-spec.md` §1.6.
+The full mechanism is documented in
+[`operations-spec.md`](../larql-vindex/docs/operations-spec.md) §1.6.
 
 ## COMPILE INTO MODEL (MEMIT)
 
@@ -180,15 +181,15 @@ cargo test -p larql-lql                                       # full LQL suite
 cargo test -p larql-lql --lib executor::tests                 # executor suite
 cargo test -p larql-lql --lib parser::tests                   # parser unit tests
 
-# Synthetic demos (run in CI, no model download)
-cargo run -p larql-lql --example parser_demo                   # AST output, every statement type
-cargo run -p larql-lql --example lql_demo                      # 61-row spec compliance grid
-cargo run --release -p larql-lql --example compact_demo        # LSM storage-tier walkthrough: INSERT → COMPACT MINOR → SHOW COMPACT STATUS
+# Synthetic demos (run in CI, no model download) — live in larql-demos
+cargo run -p larql-demos --example parser_demo                 # AST output, every statement type
+cargo run -p larql-demos --example lql_demo                    # 61-row spec compliance grid
+cargo run --release -p larql-demos --example compact_demo      # LSM storage-tier walkthrough: INSERT → COMPACT MINOR → SHOW COMPACT STATUS
 
 # Model-dependent demos (skip if output/gemma3-4b-f16.vindex absent)
-cargo run --release -p larql-lql --example compile_demo        # End-to-end COMPILE INTO VINDEX on real Gemma 4B
-cargo run --release -p larql-lql --example refine_demo         # 10-fact INSERT + COMPILE (exp 14 reproduction, 10/10 retrieval + 0 bleed)
-cargo run --release -p larql-lql --example trace_demo          # TRACE variants: residual decomposition, FOR <token>, DECOMPOSE, POSITIONS ALL SAVE
+cargo run --release -p larql-demos --example compile_demo      # End-to-end COMPILE INTO VINDEX on real Gemma 4B
+cargo run --release -p larql-demos --example refine_demo       # 10-fact INSERT + COMPILE (exp 14 reproduction, 10/10 retrieval + 0 bleed)
+cargo run --release -p larql-demos --example trace_demo        # TRACE variants: residual decomposition, FOR <token>, DECOMPOSE, POSITIONS ALL SAVE
 
 # Criterion benches (use --quick for a fast sweep)
 cargo bench  -p larql-lql --bench parser                       # parse_single × 18, parse_batch

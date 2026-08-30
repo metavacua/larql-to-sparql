@@ -25,6 +25,29 @@ use crate::error::VindexError;
 use crate::format::filenames::*;
 use crate::index::core::IndexLoadCallbacks;
 
+/// Memory-map `file`, or return `None` when it is zero bytes.
+///
+/// **This exists for Windows.** `CreateFileMapping` rejects a zero size,
+/// so `Mmap::map` on an empty file fails there with OS error 87
+/// (`ERROR_INVALID_PARAMETER`) while Linux and macOS map it happily. A
+/// dense-only build deliberately omits `gate_vectors.bin`, so a zero-length
+/// file is a legitimate state that reached an unguarded map and took the
+/// whole load down on one platform only (issue #164).
+///
+/// `None` means "absent", which is what a zero-length weight file means in
+/// every case here: a zero-byte mapping carries no data, so there is
+/// nothing a caller could do with it that differs from the file not being
+/// there. Callers must decide whether absent is acceptable — this helper
+/// deliberately does not choose for them.
+pub(crate) fn map_if_nonempty(file: &std::fs::File) -> Result<Option<memmap2::Mmap>, VindexError> {
+    if file.metadata()?.len() == 0 {
+        return Ok(None);
+    }
+    // SAFETY: same contract as every other mmap in this module — the file
+    // is not mutated for the lifetime of the mapping.
+    Ok(Some(unsafe { memmap2::Mmap::map(file)? }))
+}
+
 /// Whether expert `e` is owned by a shard with `expert_filter`. `None`
 /// means "no shard, keep all experts". `Some((start, end_excl))` is a
 /// half-open range — `e == start` is kept, `e == end_excl` is skipped.
@@ -157,6 +180,23 @@ pub fn load_model_weights_kquant_shard(
     expert_filter: Option<(usize, usize)>,
 ) -> Result<ModelWeights, VindexError> {
     q4k::load_model_weights_kquant_shard(dir, callbacks, expert_filter)
+}
+
+/// Reconstruct the model architecture from a vindex's recorded config,
+/// without loading any weights. Same `build_arch_json` →
+/// `detect_from_json` path the weight loaders use, exposed for callers
+/// that need arch-level facts before (or instead of) a full weight
+/// load — e.g. prompt tokenization, where Gemma 4's BOS token must be
+/// prepended manually because the shipped tokenizer.json's
+/// post-processor doesn't add it. Returns `None` for legacy vindexes
+/// that predate `model_config`.
+pub fn arch_from_vindex_config(
+    config: &crate::VindexConfig,
+) -> Option<Box<dyn larql_models::ModelArchitecture>> {
+    let model_cfg = config.model_config.as_ref()?;
+    Some(larql_models::detect_from_json(&arch::build_arch_json(
+        config, model_cfg,
+    )))
 }
 
 /// Find the tokenizer path near a model or vindex directory.
@@ -354,5 +394,44 @@ mod tests {
     fn find_tokenizer_path_returns_none_when_missing() {
         let dir = tempfile::tempdir().unwrap();
         assert!(find_tokenizer_path(dir.path()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod zero_length_mmap_tests {
+    use super::map_if_nonempty;
+
+    /// A zero-length file must read as "absent", not as an error.
+    ///
+    /// This is the #164 guard. It cannot be calibrated on macOS or Linux —
+    /// both map an empty file happily, so removing the guard still passes
+    /// here and only Windows CI goes red. What IS testable everywhere is
+    /// the branch itself: the helper must return `None` for an empty file
+    /// and `Some` for a non-empty one, so a caller's "absent" path is the
+    /// one that runs.
+    #[test]
+    fn an_empty_file_maps_to_none_and_a_populated_one_to_some() {
+        let dir = std::env::temp_dir().join("larql_zero_len_mmap_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let empty = dir.join("empty.bin");
+        std::fs::write(&empty, b"").unwrap();
+        let f = std::fs::File::open(&empty).unwrap();
+        assert!(
+            map_if_nonempty(&f).unwrap().is_none(),
+            "a 0-byte weight file must read as absent; mapping it is what \
+             fails on Windows with OS error 87"
+        );
+
+        let full = dir.join("full.bin");
+        std::fs::write(&full, [1u8, 2, 3, 4]).unwrap();
+        let f = std::fs::File::open(&full).unwrap();
+        let m = map_if_nonempty(&f)
+            .unwrap()
+            .expect("a non-empty file must still map");
+        assert_eq!(&m[..], &[1u8, 2, 3, 4], "the mapping must expose the bytes");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

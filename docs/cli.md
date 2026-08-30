@@ -23,6 +23,9 @@ a local directory path — see [Model resolution](#model-resolution) below.
 | `publish <source>` | Publish a vindex to HuggingFace — full + slice siblings + collections. |
 | `rm <model>` | Evict a cached vindex. |
 | `bench <model>` | Benchmark decode throughput on a real vindex (Metal / CPU / Ollama). |
+| `accuracy <model>` | Split-axis accuracy suite for KV engines — parametric vs in-context vs conflict, scored by top-1 match and Shannon bits/token. |
+| `dec-bench <subcmd>` | DEC residual-replay loadgen — `capture` a residual pool, `replay` batch × wire × dispatch sweeps, `drift` the C6 wire-fidelity gate. |
+| `k3-ledger <subcmd>` | K3 serving ledger — miss budget, weight touch, dense-precision frontier and speculative block economics, derived from the checkpoint's own tensor table. |
 | `shannon <subcmd>` | Next-token bit scoring, slot probes, repetition probes, layer lens, demo arithmetic coding. |
 | `serve <model>` | Serve a vindex over HTTP + gRPC. |
 
@@ -39,6 +42,25 @@ a local directory path — see [Model resolution](#model-resolution) below.
 | `verify` | Verify vindex file integrity (SHA256 checksums). |
 | `diag` | Engine diagnostic — print which kernel paths fire for a vindex, validate Q4_K/Q6_K strides, optional `--probe` runs a real forward pass. |
 | `parity` | Cross-backend numerical diff (`reference` / `cpu` / `metal`) at well-known checkpoints. |
+| `moe-locality <trace>` | Expert-selection locality over a routing trace — does speculative decoding amortise the expert bank, and can a hot cache work? |
+
+## Factory
+
+Vindex Factory tooling ([docs/vindex-factory.md](vindex-factory.md)) —
+recipe validation, `build_id`, capability reporting, card generation,
+the PREFLIGHT→RELEASE build driver, checkpoint inventory, and the
+VINDEX3 container verbs.
+
+| Command | Description |
+|---|---|
+| `recipe validate <FILE>` | Structurally validate a recipe file; prints every problem found. |
+| `recipe build-id <FILE>` | Print a recipe's `build_id` (content hash over source+extractor+outputs). |
+| `recipe estimate <FILE>` | Upstream size, per-output size, executor recommendation, and a cost band. Touches the network. |
+| `recipe build <FILE> [--scratch-dir DIR]` | Run PREFLIGHT→RELEASE: fetch the pinned revision, extract, slice, verify checksums, publish private, then flip public. Prints a `BuildRecord` as JSON; exits non-zero on a stage failure. |
+| `capabilities` | Print this release's capability manifest — recognised architectures and what each supports. |
+| `card render` | Render a Hub model card from a recipe, manifest, and verification report. |
+| `inspect-hf <dir>` | Machine-readable architecture inventory of an HF checkpoint dir — identity, per-layer attention policy, tensors, and every config key this build does not consume. |
+| `vindex3 <subcmd>` | VINDEX3 container programme verbs — `plan` / `encode` / `inspect` / `verify` / `ops` / `exec`. |
 
 ## LQL
 
@@ -161,6 +183,7 @@ larql bench <MODEL> [OPTIONS]
 | `--ffn <URL>` | Bench the grid path: route FFN to a remote larql-server | — |
 | `--ffn-dispatch <streaming\|batch>` | Same shape as `larql run --ffn-dispatch` | streaming |
 | `--moe-shards <SPEC>` | Bench the remote MoE expert path | — |
+| `--routed-from <DIR>` | Serve the routed expert banks from a VINDEX3 container, exactly as `larql run --routed-from` composes them — the plain bench on the same spine is the controlled comparison | — |
 | `--moe-dispatch <streaming\|batch>` | Same shape as `larql run --moe-dispatch` | streaming |
 | `--moe-predispatch-iters <N>` | Refinement iterations for batch dispatch | 2 |
 | `--profile` | Print per-stage timing breakdown for each engine (markov-rs only for now) | false |
@@ -176,7 +199,218 @@ Examples:
 larql bench gemma3-4b-it-vindex --backends metal,cpu
 larql bench gemma3-4b-it-vindex --ollama gemma3:4b
 larql bench gemma4-26b-a4b.vindex --moe-shards "0-63=http://a:8081,64-127=http://b:8082"
+LARQL_GPU_ROUTE=1 larql bench gpt-oss-20b-q4k.vindex --warmup 16 -n 256 --routed-from ~/models/gpt-oss-20b-experts-mxfp4.v3
 ```
+
+### `larql accuracy`
+
+Split-axis accuracy suite for KV engines. Runs each selected engine through
+three corpora and reports them **separately**, because a single aggregate score
+hides the thing that discriminates engines:
+
+- **Parametric** — short factual completions; the answer is in the weights, so
+  any K/V strategy should score near 100%. A low score here means something is
+  broken, not compressed.
+- **In-context** — needle-in-haystack at scaling context lengths. The answer is
+  planted in the prompt, so compressed engines (sliding window, residual
+  replacement, quantised K/V) may lose it as context grows.
+- **Conflict** — the in-context premise contradicts pretraining; scored as
+  `followed_context` vs `parametric_fallback`. The most engine-discriminating
+  axis of the three.
+
+Each cell reports both top-1 match rate and Shannon bits-per-token
+(`-log2 P(expected_first_token | prompt)`, lower = more confident).
+
+```
+larql accuracy <MODEL> [OPTIONS]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Vindex dir, `hf://owner/name`, or cache shorthand | — |
+| `--engines <LIST>` | Comma-separated KV engine specs (same syntax as `larql bench --engine`) | `standard,markov-rs,unlimited-context,turbo-quant,apollo` |
+| `--quick` | 5-prompt parametric, 2 shortest needles, 5-prompt conflict | false (full: 101 parametric + 7 needles + 20 conflict) |
+| `--parametric-n <N>` | Override parametric corpus size; ignored under `--quick` | — |
+| `--needle-max-tokens <N>` | Max needle context length; `32768` for the full sweep | 8192 |
+| `--no-conflict` | Skip the conflict corpus | false |
+| `--ffn <SPEC>` | FFN dispatch policy, e.g. `dense`, `walk:k=100`, `'{walk:k=100}@layers=14-27;{dense}@otherwise'` | uniform `dense` |
+| `--output-file <PATH>` | Write a JSON report; the split table still prints to stdout | — |
+
+Apollo is in the default engine set deliberately: without a constellation store
+loaded it shows a 0% served rate on every corpus, surfacing as
+`SkippedRetrievalMiss` outcomes with a visible `served_rate < 1.0`. That row is
+honest about being unable to serve rather than silently dropped or
+mis-attributed.
+
+```bash
+larql accuracy gemma3-4b-it-vindex --quick
+larql accuracy gemma3-4b-it-vindex --engines standard,turbo-quant --needle-max-tokens 32768
+```
+
+### `larql dec-bench`
+
+The DEC funnel's residual-replay loadgen ([`docs/dec-funnel.md`](dec-funnel.md)).
+larql's decode loop is single-sequence — `--ffn-dispatch batch` batches *layer
+dispatches* within one token step, not sequences — so the batch axis cannot be
+measured with `larql bench`. `dec-bench` captures real per-layer residuals from
+single-stream decode, then replays them as B-row requests against an expert
+server. Replay is model-free, so a pool captured on a Mac runs unchanged on the
+x86/Linux arms.
+
+```
+larql dec-bench <capture|replay|drift> [OPTIONS]
+```
+
+#### `larql dec-bench capture`
+
+Runs single-stream decode over a fixed prompt set against a live expert server,
+recording each step's pre-normed per-layer residuals into a portable pool
+(`manifest.json` + `residuals.bin`).
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Vindex dir, `hf://owner/name`, or cache shorthand | — |
+| `--ffn <URL>` | Expert-server URL (loopback for DEC-0 arm M) | — |
+| `--prompts-file <PATH>` | Prompts file, one per line (fixed set, checked in) | — |
+| `--num-prompts <N>` | Prompts to capture — this is the **max replay batch size** | 64 |
+| `--steps <N>` | Decode steps captured per prompt | 16 |
+| `--routing` | Also capture routed-experts sidecars (`raw.bin`/`normed.bin`/`routing.bin`) for the routed replay arm. `top_k` comes from the model arch; errors if the model has no MoE. Without it the pool is byte-identical to the walk-ffn-only format | false |
+| `--metal` | Use the Metal GPU attention backend (required on macOS for remote-FFN decode) | false |
+| `--out <PATH>` | Output pool directory | — |
+| `--ffn-timeout-secs <N>` | Per-request timeout | 60 |
+
+#### `larql dec-bench replay`
+
+Sweeps batch × wire × dispatch against the server using B-row frames built from
+the pool, emitting the `dec/*` metric schema. Distinct prompts per row keep MoE
+routing realistic.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--ffn <URL>` | Expert-server URL | — |
+| `--capture <PATH>` | Capture pool directory | — |
+| `--endpoint <walk-ffn\|experts>` | `walk-ffn` = dense/shared-expert path; `experts` = routed multi-layer path (needs a `--routing` pool; wire limited to f32/q8k) | walk-ffn |
+| `--batch <LIST>` | Comma-separated rows per request | 1,8,16,32,64 |
+| `--wire <LIST>` | `f32`/`f16`/`i8`/`q8k`, or asymmetric in/return pairs like `f16/i8` (walk-ffn only — q8k is its own endpoint and cannot pair) | f32,f16,i8,q8k |
+| `--dispatch <LIST>` | `streaming` (sequential per-layer), `batch` (all layers in parallel) | streaming,batch |
+| `--layers <A-B>` | Inclusive layer range to replay | all |
+| `--steps <N>` | Steps replayed per repeat | all captured |
+| `--repeats <N>` | Repeats per sweep point | 3 |
+| `--warmup-passes <N>` | Discarded full passes per point — mmap-backed weights pay first-touch faults per layer | 1 |
+| `--timeout-secs <N>` | Per-request timeout (note: `capture` and `drift` spell this `--ffn-timeout-secs`) | 60 |
+| `--output-file <PATH>` | Full JSON run record | — |
+| `--pulse-file <PATH>` | `dec/*` pulse JSONL (rig `$CHUK_METRICS` format) | — |
+| `--pulse-per-layer` | Include per-layer p50/p99 in pulse lines (always in the JSON record) | false |
+| `--net-rtt-ms <F>` / `--net-gbps <F>` | Record measured link characteristics (spec §6 gate) | — |
+
+i8 **return** frames need `LARQL_I8_WIRE=1` server-side or the direction falls
+back — the fallback is recorded in `served_wire_out`, never silently.
+
+#### `larql dec-bench drift`
+
+The C6 wire-fidelity gate. Scores a pinned corpus **teacher-forced** (NLL of
+fixed text, not generation) through the production remote-FFN decode path once
+per wire arm plus once at f32/f32 as the in-run baseline, then gates each arm's
+bits/char drift. The metric is exact math given weights + wire — no sampling, no
+timing — so unlike `replay` and `larql bench` it is **battery- and thermal-safe**.
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Client-side attention weights — must match the expert server's model | — |
+| `--ffn <URL>` | Expert-server URL, or an `A-B=URL,...` shard map | — |
+| `--corpus <PATH>` | UTF-8 corpus to score | the shannon-verify CI corpus |
+| `--bytes <N>` | Limit to first N bytes (UTF-8 boundary) | whole corpus |
+| `--wire <LIST>` | Arms to score; the f32/f32 baseline always runs first regardless | f32,f16,i8,q8k |
+| `--gate-pct <F>` | Max \|bits/char drift\| vs baseline, percent (pre-registered C6 gate) | 0.5 |
+| `--metal` | Metal GPU attention backend (required on macOS) | false |
+| `--output-file <PATH>` / `--pulse-file <PATH>` | JSON run record / `dec/*` pulse JSONL | — |
+
+Examples:
+
+```bash
+# capture a 64-prompt pool, routed sidecars included (DEC-0 arm M)
+larql dec-bench capture gemma4-26b-a4b.vindex --ffn http://127.0.0.1:8081 \
+  --prompts-file bench/dec0/prompts.txt --routing --metal \
+  --out bench/dec0/residuals-gemma4-26b-a4b-q4k
+
+# dense batch curve
+larql dec-bench replay --ffn http://127.0.0.1:8081 \
+  --capture bench/dec0/residuals-gemma4-26b-a4b-q4k --pulse-file dec0.jsonl
+
+# routed-experts arm (needs the --routing pool)
+larql dec-bench replay --ffn http://127.0.0.1:8081 --endpoint experts \
+  --capture bench/dec0/residuals-gemma4-26b-a4b-q4k --wire f32,q8k
+
+# C6 fidelity gate, including asymmetric pairs
+larql dec-bench drift gemma4-26b-a4b.vindex --ffn http://127.0.0.1:8081 \
+  --wire f16,i8,q8k,f16/i8 --metal
+```
+
+Drivers wrapping these for whole DEC stages live in `scripts/dec0-loopback.sh`
+(arm M), `scripts/dec0-arm-l.sh` (arm L / Linux) and `scripts/dec0p5-x86.sh`.
+
+### `larql k3-ledger`
+
+Checkpoint-derived serving arithmetic for the DEC-8/9 ladder — see
+[`docs/dec-funnel.md`](dec-funnel.md). Most subcommands are zero-compute: two
+HTTP range requests against the model repo for its tensor table, then division.
+Subcommands: `budget`, `touch`, `frontier`, `block`, `ceilings`, `formats`,
+`transcode-scan`, `symbol-census`, `kda-graph`, `freq-mass`.
+
+`formats` and `freq-mass` take **no checkpoint and no network** — the first is
+decided by counting the source alphabet, the second reads a local capture pool.
+
+#### `larql k3-ledger freq-mass`
+
+**Frequency-mass coverage**: what fraction of routing *events* a resident set of
+C symbols per layer actually serves. Support asks *which* symbols a session
+touches; mass asks *how often* — and only the second prices a cache. Consumes a
+`dec-bench capture --routing` pool.
+
+Four estimators, all scored on the **same** held-out window so only the
+residency-ranking key differs:
+
+| Arm | Key |
+|---|---|
+| `λ=1` static slice | pooled prior, **leave-one-out** so a session never fits itself |
+| `λ=0` causal cache | that session's own history only |
+| interior `λ` | shrinkage cache — the design that exists if neither pure arm wins |
+| oracle | ranks by the scored events themselves; unrealisable upper bound |
+| null | eval half redrawn from the pooled marginal, session identity destroyed |
+
+The null is load-bearing: a short fit window concentrates by counting noise
+alone, so `oracle − null` is the locality signal and `oracle` alone overstates it.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--pool <DIR>` | Capture pool written with `dec-bench capture --routing` | — |
+| `--cache-sizes <LIST>` | Resident-set sizes, symbols per stratum | 1 2 4 8 16 32 64 |
+| `--lambdas <LIST>` | Shrinkage weights on the pooled prior | 0 .25 .5 .75 .9 1 |
+| `--fit-fraction <F>` | Share of each session's steps used to fit the adaptive key | 0.5 |
+| `--seed <N>` | Seed for the marginal-preserving null | 20260801 |
+| `--support-steps <LIST>` | Step counts at which to report support growth | 1 2 4 8 16 |
+| `--operating-residency <F>` | Residency fraction to grade at (K3's 55–65 GB slice is 5–7%) | 0.0625 |
+| `--per-symbol` | Also emit the measured per-symbol mass vector (JSON only) | false |
+| `--json` | Full record as JSON | false |
+
+```bash
+# grade a resident set against the banked DEC-0 routed pool
+larql k3-ledger freq-mass --pool bench/dec0/residuals-gemma4-26b-a4b-q4k-routed
+
+# DEC-8.4's allocator input: per-expert counts and probabilities, per layer
+larql k3-ledger freq-mass --pool bench/dec0/residuals-gemma4-26b-a4b-q4k-routed \
+  --per-symbol --json > mass.json
+```
+
+The instrument is **symbol-agnostic**: `SelectionTrace` calls the selected
+things *symbols* and never learns whether they are MoE experts (DEC-8.4) or FFN
+feature rows (DEC-8.1), so one set of conventions grades the resident-bank bet
+and the compact-subexpert bet. The export names its unit rather than assuming.
+
+Cold-tail counts (`observed_symbols`, `unobserved_symbols`, per-stratum
+coverage) are emitted whether or not `--per-symbol` is set — the row vector is
+opt-in because at K3's 92 × 896 it dwarfs the rest of the document. An absent
+symbol means **unobserved in this capture**, never zero probability.
 
 ### `larql model`
 
@@ -348,6 +582,34 @@ larql show <MODEL>
 Prints layer count, hidden size, dtype, quant format, and each file in
 the vindex with size. Resolves the same way as `run`.
 
+For a quantised vindex it also prints a **precision map**, derived from the
+build's own manifests — which projection got which block format, and the
+effective bits/weight that follows. This is the difference between what a
+build is *called* and what it *is*: the Ollama-compatible Q4_K_M mix is
+neither 4 bits nor uniform.
+
+```
+Precision (from this vindex's own manifests):
+  projection  format          weights           bytes  bits/weight
+  -----------------------------------------------------------------
+  q_proj      Q4_K        178,257,920     100,270,080       4.5000
+  k_proj      Q4_K         89,128,960      50,135,040       4.5000
+  v_proj      Q6_K         89,128,960      73,113,600       6.5625
+  o_proj      Q4_K        178,257,920     100,270,080       4.5000
+  gate_proj   Q4_K        891,289,600     501,350,400       4.5000
+  up_proj     Q4_K        891,289,600     501,350,400       4.5000
+  down_proj   Q6_K        891,289,600     731,136,000       6.5625
+  -----------------------------------------------------------------
+  TOTAL       mixed     3,208,642,560   2,057,625,600       5.1302
+
+  same weights at f16      5.98 GB
+  quantised                1.92 GB   (3.12x)
+```
+
+Rows come from the manifests in layer order and the geometry comes from the
+`quant::registry` dispatch table, so a newly registered format reports here
+with no change to `show`. Float vindexes print no map.
+
 ### `larql rm`
 
 Remove a cached vindex. Cache-only — never downloads.
@@ -401,6 +663,26 @@ larql serve --dir <DIR> [OPTIONS]
 | `--tls-key <PATH>` | TLS private key for HTTPS | — |
 | `--log-level <LEVEL>` | Logging level | info |
 
+`larql serve` execs the `larql-server` binary and forwards the flags
+above. The flags below exist on `larql-server` itself and are not yet
+forwarded by the wrapper — run `larql-server` directly to use them.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--lazy-weights` | Defer model-weight loading until the first inference request instead of loading at startup. Also skips the startup memory pre-flight check | false |
+| `--no-memcheck` | Skip the startup cgroup memory pre-flight check (`memory.max` vs the vindex's estimated resident size + headroom) | false |
+| `--memcheck-headroom-mib <MIB>` | Headroom (MiB) to reserve below `memory.max` for the OS, allocator overhead, and the request-handling working set. Ignored when `--no-memcheck` is set | 512 |
+| `--infer-timeout-secs <N>` | Per-request hard timeout for `/v1/infer` and other inference endpoints. On expiry the handler responds 504; 0 disables | 60 |
+| `--no-docs` | Disable the built-in Swagger UI and `/v1/openapi.json` endpoint | false |
+| `--hnsw` | Use HNSW for gate KNN instead of brute-force matmul. Indexes are built lazily per layer; approximate (recall 80–95% depending on `--hnsw-ef-search`). Wins for high-feature MoE; break-even or net loss for dense ≤ 10K-feature models | false |
+| `--hnsw-ef-search <N>` | HNSW beam width. Higher = better recall, slower search. 50 is the floor; 400 is the practical ceiling | 200 |
+| `--max-q4k-cache-layers <N>` | Cap the number of layers held in the Q4_K/Q6_K FFN dequant cache (0 = unlimited). Only fires on the CPU per-position fallback in walk-ffn | 0 |
+| `--shard-query-tau <TAU>` | Cosine threshold for the gRPC `ShardService.Query` KNN cache. When set, the gRPC server registers a `ShardService` backed by an in-memory cache | — |
+| `--http3-port <PORT>` | Enable an HTTP/3 listener on this port for the h3 shard transport (ADR-0019). Requires building with `--features http3`; coexists with the HTTP/1.1 listener on `--port` | — |
+| `--available-ram <SIZE>` | Mode B: advertise available RAM to the router (no vindex preloaded); the router assigns a shard. Requires `--join` and `--vindex-store` | — |
+| `--vindex-store <PATH>` | Mode B: directory where router-assigned shards are downloaded | — |
+| `--quic-cert-fingerprint <HEX>` | SHA-256 fingerprint of the router's QUIC server cert. Required only when `--join` uses the `quic://` scheme; without it the QUIC client skips certificate verification (LAN / dev only) | — |
+
 **Endpoints:**
 
 | Method | Path | Description |
@@ -415,9 +697,37 @@ larql serve --dir <DIR> [OPTIONS]
 | GET | `/v1/patches` | List active patches |
 | DELETE | `/v1/patches/{name}` | Remove a patch |
 | POST | `/v1/walk-ffn` | Decoupled inference. Two modes — see below. |
+| POST | `/v1/walk-ffn-q8k` | walk-ffn with Q8_K-quantised wire payloads |
+| POST | `/v1/explain-infer` | Predictions with per-layer feature traces |
+| POST | `/v1/insert` | Constellation insert |
+| GET | `/v1/expert/topology` | Expert ownership range for this shard |
+| POST | `/v1/expert/{layer}/{expert_id}` | Single expert forward |
+| POST | `/v1/expert/batch` | Legacy multi-expert batch (one residual per item) |
+| POST | `/v1/experts/layer-batch` | Current MoE wire: one residual + K (expert_id, weight) pairs → router-weighted sum (binary) |
+| POST | `/v1/experts/layer-batch-f16` | layer-batch with f16 wire payloads |
+| POST | `/v1/experts/multi-layer-batch` | N packed layer tasks in one call, run in parallel |
+| POST | `/v1/experts/multi-layer-batch-q8k` | multi-layer-batch with Q8_K wire payloads |
+| POST | `/v1/warmup` | Pre-load inference weights / prefetch mmap pages without a restart |
+| POST | `/v1/embed` | Token-id → embedding lookup (JSON or binary) |
+| GET | `/v1/embed/{token_id}` | Single-token embedding |
+| POST | `/v1/logits` | Residual → top-K tokens from lm_head |
+| GET | `/v1/token/encode` | Tokenize text |
+| GET | `/v1/token/decode` | Decode token ids to text |
+| GET | `/v1/shard/{model_id}/{range}` | Mode B shard handoff: donor streams its on-disk vindex as a tar |
 | WS | `/v1/stream` | WebSocket streaming (layer-by-layer DESCRIBE) |
 | GET | `/v1/health` | Health check (auth exempt) |
-| GET | `/v1/models` | List loaded models |
+| GET | `/v1/runtime` | Server + model + backend + memory + performance snapshot |
+| POST | `/v1/runtime/model` | Load a model into an idle single-model server (single-model topology only; no atomic A→B replacement — `DELETE` first) |
+| DELETE | `/v1/runtime/model` | Unload the bound model (drains in-flight generations, fails closed on timeout; single-model topology only) |
+| GET | `/v1/models` | List loaded models (OpenAI-compatible shape) |
+| POST | `/v1/completions` | OpenAI-compatible text completions (SSE streaming with `stream: true`) |
+| POST | `/v1/chat/completions` | OpenAI-compatible chat completions (SSE streaming with `stream: true`) |
+| POST | `/v1/embeddings` | OpenAI-compatible embeddings (mean-pooled lookup; not contrastively trained) |
+| GET | `/v1/openapi.json` | OpenAPI spec (with `/swagger-ui`; disabled by `--no-docs`) |
+| POST | `/v1/responses` | (landing — OpenAI Responses API workstream) |
+| GET | `/v1/responses/{response_id}` | (landing — OpenAI Responses API workstream) |
+| DELETE | `/v1/responses/{response_id}` | (landing — OpenAI Responses API workstream) |
+| GET | `/v1/models/{model}` | (landing — OpenAI Responses API workstream) |
 
 **`POST /v1/walk-ffn`** has two modes:
 
@@ -920,7 +1230,8 @@ larql dev bfs \
 The following research subcommands exist and respond to `--help` but are
 not documented in detail above. They are stable enough to use but are
 mostly driven by the comments in their args structs and the experiment
-write-ups in `experiments/`.
+write-ups in `chris-experiments/larql_probes` (see
+[crates/larql-demos/README.md](../crates/larql-demos/README.md)).
 
 | Subcommand | One-line summary |
 |---|---|
@@ -967,7 +1278,7 @@ larql extract-index [MODEL] --output <OUTPUT> [OPTIONS]
 | `--f32` | Opt out of f16 on side-channel tensors. Rarely wanted — doubles file sizes. | off (f16) |
 | `--quant <FORMAT>` | Inline-quantise forward-pass weights: `none`, `q4k`, or `kquant` (alias). The k-quant family emits Q4_K/Q6_K Ollama-compatible blocks; implies `--level all` + f16 side-channels. | `none` |
 | `--compact` | Skip `up_weights.bin` + `down_weights.bin`; FFN weights live only in feature-major files. `WalkFfn`-only. | off |
-| `--drop-gate-vectors` | Skip `gate_vectors.bin` entirely; loader rebuilds gate from `interleaved_kquant.bin` (or legacy `interleaved_q4k.bin`) at load. Only with `--quant q4k` / `kquant`. | off |
+| `--drop-gate-vectors` | Skip `gate_vectors.bin` entirely; loader rebuilds gate from `interleaved_kquant.bin` (or legacy `interleaved_kquant.bin`) at load. Only with `--quant q4k` / `kquant`. | off |
 | `--down-q4k` | Quantise FFN down-proj as Q4_K instead of Q6_K. Saves ~1.8 GB on 31B, cuts down-matmul cost ~1.5–1.7× at decode. Introduces ~2.5× more probability-redistribution noise (top-1 + top-5 preserved). Validated by `walk_correctness`, which auto-relaxes its prob-delta gate from 0.02 to 0.035 when it detects Q4_K down. Only with `--quant q4k` / `kquant`. | off |
 | `--from-vectors <PATH>` | Build from already-extracted NDJSON vector files instead of model weights | — |
 | `--down-top-k <N>` | Top-K tokens per feature in down metadata | 10 |
@@ -1026,8 +1337,13 @@ larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --resume
 
 **`--quant q4k` (alias `--quant kquant`) details:**
 
-- Q/K/O + gate/up: Q4_K (148 bytes per 256 values)
-- V + down: Q6_K (210 bytes per 256 values), or Q4_K with `--down-q4k`
+- Q/K/O + gate/up: Q4_K (144 bytes per 256 values = 4.5 bits/weight)
+- V + down: Q6_K (210 bytes per 256 values = 6.5625 bits/weight), or
+  Q4_K with `--down-q4k`
+- 148 bytes was the pre-2026 Q4_K stride and is **stale** — see
+  `LEGACY_BLOCK_Q4_K_STRIDE` in `quant::registry`. `larql diag` flags a
+  vindex still written that way; `larql show` prints the bits/weight a
+  build actually achieved.
 - Writers emit `attn_weights_kquant.bin`, `interleaved_kquant.bin`,
   `lm_head_kquant.bin` (plus matching `*_manifest.json` sidecars).
   Readers also accept the legacy `*_q4k.bin` / `lm_head_q4.bin`
@@ -1123,7 +1439,7 @@ larql convert quantize q4k \
 
 Supported GGUF quantization types for reading: F32, F16, BF16, Q4_0, Q4_1, Q8_0. All tensors are dequantized to f32 during conversion.
 
-**`quantize` family** — see [`docs/specs/quantize-cli-spec.md`](specs/quantize-cli-spec.md) for the full surface (flags, exit codes, output layout, atomic-rename semantics). Both subcommands require the source vindex to carry full model weights (`--level inference` or `--level all`); browse-only sources are rejected with a clear error.
+**`quantize` family** — see [`crates/larql-cli/docs/quantize-spec.md`](../crates/larql-cli/docs/quantize-spec.md) for the full surface (flags, exit codes, output layout, atomic-rename semantics). Both subcommands require the source vindex to carry full model weights (`--level inference` or `--level all`); browse-only sources are rejected with a clear error.
 
 ### `larql hf`
 
@@ -1229,6 +1545,9 @@ larql diag <MODEL> [OPTIONS]
 | `<MODEL>` | Vindex dir, `hf://owner/name`, `owner/name`, or cache shorthand | — |
 | `--probe` | Run a real forward pass and print per-stage timings | off |
 | `--probe-tokens <N>` | Token count for `--probe` (caps at 100 to keep the diagnostic snappy) | 5 |
+| `--block <TENSOR>` | Decode one quantised block of TENSOR and print it, then stop | — |
+| `--block-index <N>` | Which block of `--block`'s tensor to decode | 0 |
+| `--against <VINDEX>` | Float vindex to measure `--block`'s quantisation error against | — |
 
 **Examples:**
 
@@ -1238,6 +1557,11 @@ larql diag gemma3-4b-q4k-v2.vindex
 
 # Static check + 50-token probe with per-stage timing breakdown
 larql diag gemma3-4b-q4k-v2.vindex --probe --probe-tokens 50
+
+# Decode one block and measure its error against the float source
+larql diag gemma3-4b-q4k.vindex \
+  --block layers.0.mlp.up_proj.weight \
+  --against gemma3-4b-f16.vindex
 ```
 
 Two-pass output:
@@ -1245,6 +1569,37 @@ Two-pass output:
    stride validation. Doesn't load the vindex; safe for huge models.
 2. **Loaded** — opens via `open_inference_vindex`, reports which kernels
    would actually fire (lm_head fast path, attention fused/per-proj, etc.).
+
+**`--block` — one block, decoded.** Stride validation says the bytes are the
+right *length*; `--block` says what they decode *to*. It's the tool for a
+vindex that passes every structural check and still produces wrong numbers.
+Decoding routes through `QuantFormatInfo::dequantize_block` — the same
+dispatch table the kernels use — and reads at the manifest's recorded offset,
+so a stale vindex decodes exactly as the engine would read it.
+
+`--block` answers and exits; it does not run the kernel-path report. With
+`--against`, the same weights are read from a float vindex built from the same
+checkpoint and the error is measured directly:
+
+```
+  stride      144 bytes / 256 weights  =  4.5000 bits/weight
+  stride ok   ✓ matches canonical geometry
+
+   original      reconstructed          error
+   ----------------------------------------------
+   +0.015076      +0.014552      -0.000524
+   +0.008667      +0.009891      +0.001224
+   +0.008362      +0.009891      +0.001529
+   ...
+  over all 256 weights in this block:
+    distinct values       99 of 256 weights
+    max error             0.004449
+    rms error             0.001604
+```
+
+Note rows 2 and 3: two originals that differed have collapsed onto one
+reconstructed value. `distinct values` counts that loss across the block —
+a 4-bit format cannot keep more than 16 levels per 32-weight sub-block.
 
 ### `larql parity`
 
@@ -1292,6 +1647,288 @@ larql parity gemma3-4b-q4k.vindex --component lm-head
 # Per-layer residual diff between CPU and Metal across a real prompt
 larql parity gemma4-31b.vindex --component layer --prompt "The capital of France is"
 ```
+
+### `larql moe-locality`
+
+Expert-selection locality over a routing trace. Answers two questions
+that gate whether a disk-resident MoE can be served faster than its
+routed bytes suggest: does speculative decoding amortise the expert bank
+(union of experts across `K` drafted tokens vs `K`), and can a hot cache
+work (LRU hit-rate curve for a resident expert subset)? Both are
+reported against a uniform baseline and a skew-preserving shuffle,
+because those two extrapolate differently to a load-balanced model.
+
+Collect the trace with `LARQL_MOE_ROUTE_TRACE=<path> larql shannon score`.
+
+```
+larql moe-locality <TRACE> [OPTIONS]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `<TRACE>` | JSONL routing trace, as written by `LARQL_MOE_ROUTE_TRACE=<path>` | — |
+| `--num-experts <N>` | Expert count for the uniform baseline. Defaults to the largest expert id in the trace plus one, which under-counts if an expert never fired | from trace |
+| `--blocks <LIST>` | Block sizes for the union curve | 2,4,8,16,32 |
+| `--per-layer-block <N>` | Block size for the per-layer breakdown | 8 |
+| `--seed <N>` | Seed for the skew-preserving shuffle control | 20260730 |
+
+## Factory commands
+
+Vindex Factory tooling — [docs/vindex-factory.md](vindex-factory.md) is
+the full spec; [crates/larql-factory/README.md](../crates/larql-factory/README.md)
+is the crate reference. `recipe estimate` fetches the upstream repo's
+file listing and `config.json` over HTTP; `recipe build` goes further
+and actually runs the pipeline (network + Hub credentials + disk) —
+everything else here is local and read-only. The recipe repo's
+remaining PR checks (upstream existence, licence allowlist, Hub name
+collision) aren't built yet.
+
+### `larql recipe validate`
+
+Structurally validate a recipe file: schema shape, required fields,
+value ranges. Prints every problem found in one pass — not just the
+first — and exits non-zero if any exist.
+
+```
+larql recipe validate <FILE>
+```
+
+**Example:**
+
+```bash
+larql recipe validate gemma-3-4b-it.yaml
+# ✓ gemma-3-4b-it.yaml is structurally valid (gemma-3-4b-it)
+
+larql recipe validate broken-recipe.yaml
+# ✗ broken-recipe.yaml — 3 problem(s):
+#   - spec.source.revision 'main' must be a full 40-character commit SHA, not a branch or short SHA
+#   - spec.outputs[2].preset 'bogus-preset' is not a known preset (full, client, attn, ...)
+#   - spec.budget.max_usd (0) must be greater than 0
+```
+
+### `larql recipe build-id`
+
+Print a recipe's `build_id` — the content hash of the fields that
+determine its produced bytes (`source`, `extractor`, `outputs`).
+Changing `verify`/`publish`/`budget`/`metadata` doesn't change it.
+
+```
+larql recipe build-id <FILE>
+```
+
+**Example:**
+
+```bash
+larql recipe build-id gemma-3-4b-it.yaml
+# 398f1b8e29adecf2ef3838748558ae6b82b292b96ed8ab412725886e4194e30a
+```
+
+### `larql recipe estimate`
+
+Upstream download size, per-output size, an executor recommendation,
+and a cost band (§6.1 step 4) — so a recipe PR's approval is informed.
+The only `recipe` subcommand that touches the network: it fetches the
+upstream repo's file listing and `config.json` from HuggingFace.
+
+```
+larql recipe estimate <FILE>
+```
+
+Model dimensions come from the same architecture-detection path the
+real extractor uses. Per-output byte estimates are a coarse
+order-of-magnitude model, not manifest-exact. The cost band prices the
+recipe's own declared `budget.max_wall_minutes` against
+[docs/dec-funnel-v0.2.md](dec-funnel-v0.2.md) §7's rate basis — it does
+not predict a duration from bytes, since there's no real throughput
+measurement in this codebase to ground that in.
+
+**Example:**
+
+```bash
+larql recipe estimate gemma-3-4b-it.yaml
+# {
+#   "upstream_bytes": 8500000000,
+#   "outputs": [
+#     { "preset": "full", "estimated_bytes": 6200000000 },
+#     { "preset": "client", "estimated_bytes": 1100000000 },
+#     ...
+#   ],
+#   "total_estimated_output_bytes": 10900000000,
+#   "recommended_executor": "leased",
+#   "executor_threshold_gib": 40.0,
+#   "declared_executor": "auto",
+#   "cost_estimate_usd": { "low_usd": 1.31, "high_usd": 2.60 },
+#   "declared_max_usd": 12.0,
+#   "budget_warning": null
+# }
+```
+
+### `larql recipe build`
+
+Run PREFLIGHT through RELEASE (§7): check the scratch directory is
+writable, fetch the recipe's pinned revision, `larql extract`, `larql
+slice` for each declared output, measure what came out, `larql verify`
+(checksum integrity — not the numeric reconstruction/logit-match
+checks §8.1 describes, which need per-architecture tensor knowledge
+this driver doesn't have), `larql hf publish --private` per output,
+then `larql hf visibility --public` once every output has verified
+(§8's "nothing goes public unverified"). Every step self-invokes this
+same `larql` binary as a subprocess.
+
+MIRROR (R2) and REGISTER (chuk-experiments-server) aren't run here —
+nothing in this codebase talks to either, and the spec's own text
+assumes both belong to the rig worker. Pipe the printed `BuildRecord`
+JSON to whatever external harness owns them, the way `dec0-loopback.sh`
+already wraps `dec-bench`'s own JSON output.
+
+```
+larql recipe build <FILE> [--scratch-dir <DIR>]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--scratch-dir <DIR>` | Working directory for the HF cache and extracted/sliced outputs | a fresh temp directory, removed when the build finishes |
+
+Always prints a `BuildRecord` as JSON, whether the build passed or
+failed — a stage failure is data (`"status": "failed"`, which stage,
+its error message), not a crash. Exits non-zero when `"status"` isn't
+`"passed"`.
+
+**Example:**
+
+```bash
+larql recipe build gemma-3-4b-it.yaml
+# {
+#   "build_id": "398f1b8e29adecf2ef3838748558ae6b82b292b96ed8ab412725886e4194e30a",
+#   "recipe_name": "gemma-3-4b-it",
+#   "outputs": [
+#     { "preset": "full", "size_bytes": 6198374400, "repo": "chrishayuk/gemma-3-4b-it-vindex", "released": true },
+#     { "preset": "client", "size_bytes": 1073741824, "repo": "chrishayuk/gemma-3-4b-it-vindex-client", "released": true }
+#   ],
+#   "status": "passed"
+# }
+
+# A stage failure keeps whatever earlier stages completed:
+# {
+#   "build_id": "...",
+#   "recipe_name": "gemma-3-4b-it",
+#   "outputs": [{ "preset": "full", "size_bytes": 6198374400, "repo": null, "released": false }],
+#   "status": "failed",
+#   "stage": "publish",
+#   "message": "larql hf publish failed for chrishayuk/gemma-3-4b-it-vindex: 401 unauthorized"
+# }
+```
+
+### `larql capabilities`
+
+Print this release's capability manifest as JSON: every architecture
+`larql` recognises, its attention mechanism, and its supported quant
+formats. Built from `larql-models`' real architecture registry, not a
+hand-typed list — see [`larql capabilities`'s module
+docs](../crates/larql-factory/src/capabilities/mod.rs) for why that
+matters.
+
+```
+larql capabilities
+```
+
+**Example:**
+
+```bash
+larql capabilities
+# {
+#   "larql_version": "0.2.0",
+#   "architectures": [
+#     { "model_type": "gemma3", "attention_kind": "standard", "quant_formats": ["none", "q4k"] },
+#     { "model_type": "deepseek", "attention_kind": "mla", "quant_formats": ["none"] },
+#     ...
+#   ]
+# }
+```
+
+### `larql card render`
+
+Render a Hub model card from a recipe, its manifest, and a verification
+report: YAML frontmatter, model dims, slice table, `USE "hf://..."`
+snippet with a computed revision tag, verification summary, and the
+inlined recipe for reproduction.
+
+```
+larql card render --recipe <FILE> --manifest <FILE> --verification <FILE> [--slices <FILE>]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--recipe <PATH>` | Recipe YAML file | — |
+| `--manifest <PATH>` | vindex-v1 manifest (`index.json`) | — |
+| `--verification <PATH>` | Verification report JSON (§8's VERIFY-A/B output) | — |
+| `--slices <PATH>` | Slice-summary JSON — array of `{"preset": ..., "size_bytes": ...}` | none (no slice table) |
+
+`build_id` is never passed in — it's derived from the recipe the same
+way `larql recipe build-id` does, so it can't drift from what the
+recipe actually hashes to.
+
+**Example:**
+
+```bash
+larql card render \
+  --recipe gemma-3-4b-it.yaml \
+  --manifest index.json \
+  --verification verification.json \
+  --slices slices.json
+```
+
+### `larql inspect-hf`
+
+Machine-readable architecture inventory of an HF checkpoint directory:
+identity, per-layer attention policy, tensors, and every config key this
+build does not consume. Reads `config.json` and the safetensors shard
+headers only (no tensor data) and prints the inventory as JSON. The
+resulting JSON can be passed to `larql vindex3` verbs in place of the
+checkpoint directory.
+
+```
+larql inspect-hf <PATH> [OPTIONS]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `<PATH>` | HF checkpoint directory (`config.json` + `*.safetensors`) | — |
+| `--output <PATH>` | Write the inventory JSON here instead of stdout | stdout |
+| `--no-tensor-list` | Omit the per-tensor list (keep totals and per-prefix groups) for a compact report on large checkpoints | false |
+
+### `larql vindex3`
+
+VINDEX3 container programme verbs. Each artifact argument is either an
+HF checkpoint directory or a saved `inspect-hf` inventory JSON; multiple
+artifacts are treated together as one model system.
+
+```
+larql vindex3 <SUBCOMMAND> [OPTIONS]
+```
+
+| Subcommand | Description |
+|---|---|
+| `plan <artifacts...>` | Semantic representability plan over HF checkpoint dirs and/or saved `inspect-hf` inventory JSONs. Prints the plan as JSON; exits non-zero when the plan is inadmissible, so scripts can gate on it. |
+| `encode <artifacts...> --output <DIR>` | Encode the system into a self-contained container. Refuses an inadmissible plan; consumes the built graph, never re-interprets the checkpoint. |
+| `inspect <container>` | Reconstruct and check a container solely from its own contents — no source checkpoint, no architecture registry. `--verify` re-hashes every segment; `--execution-complete` additionally requires every component with executable objects to carry the surface those operations read. |
+| `verify <artifacts...> --container <DIR>` | Prove source ≡ encoded: four-authority semantic comparison plus per-representation byte equivalence, both ends re-hashed now. Exits non-zero on any disagreement. |
+| `ops <container>` | Emit the generic operation plan of one component, solely from the container. Operand closure is the gate: every stack tensor must classify into a role a declared op consumes, with the geometry the surface states. Exits non-zero on any closure defect. |
+| `exec <container> --tokens <IDS>` | Execute one component's own program from the container alone. `--dump-layers` writes per-layer hidden states in the `shannon layer-dump` format so `layer-diff` can compare against an upstream trace. |
+
+**`larql vindex3 exec`** flags:
+
+| Flag | Description | Default |
+|---|---|---|
+| `<CONTAINER>` | Container directory | — |
+| `--component <ID>` | Component to execute | target |
+| `--tokens <IDS>` | Comma-separated token ids. Given, never tokenised here: a tokenizer is part of the fixture and only one side may choose it | — |
+| `--backend <B>` | Numerical realisation: `reference` (naive f32), `production` (`larql-compute` kernels), plus Metal arms on macOS with the `gpu` feature (`metal`, `metal-mxfp4`, `metal-nvfp4`, `metal-lowered`, …) — same program, same interpreter, only the arithmetic differs | reference |
+| `--dump-layers <DIR>` | Write per-layer planes + manifest here instead of a summary. Planes are written as each layer completes, so an interrupted run leaves everything it finished | — |
+| `--resume` | Continue an interrupted `--dump-layers` run from its last complete plane. The recorded fixture (tokens, container, engine) must match | false |
+| `--generate <N>` | Greedy-decode N new tokens after the prompt, printing per-step timing and a decode report. Every step re-runs the full forward — the interpreter has no KV cache | — |
+| `--logit-dump <PATH>` | Step the tokens through one position at a time and write every position's logits as `[positions, vocab]` f32 (teacher forcing — what a KL/NLL gate needs; `--generate` cannot supply it) | — |
+| `--profile` | Lowered backends only, requires `--generate`: attribute each decode token's GPU time to its stage classes and print the ledger against the bytes each class reads | false |
 
 ## Graph-file commands
 
@@ -1370,6 +2007,37 @@ larql merge weights.larql.json attention.larql.json -o combined.larql.json
 larql merge weights.larql.json bfs.larql.json -o combined.larql.json --strategy max_confidence
 ```
 
+### `larql filter`
+
+Filter graph edges by confidence, layer, selectivity, relation, or source, and
+write the surviving subgraph to a new file. Predicates combine with AND; the
+repeatable flags accumulate.
+
+```
+larql filter <GRAPH> --output <OUTPUT> [OPTIONS]
+```
+
+| Flag | Description |
+|---|---|
+| `<GRAPH>` | Input graph file (`.larql.json` or `.larql.bin`) |
+| `-o, --output <OUTPUT>` | Output graph file |
+| `--min-confidence <F>` / `--max-confidence <F>` | Confidence band (0.0–1.0) |
+| `--min-layer <N>` / `--max-layer <N>` | Layer band, inclusive, from edge metadata |
+| `--min-selectivity <F>` | Minimum selectivity, from edge metadata |
+| `--min-c-in <F>` / `--min-c-out <F>` | Minimum `c_in` / `c_out` magnitude, from edge metadata |
+| `--relation <REL>` | Include only these relations (repeatable) |
+| `--exclude-relation <REL>` | Exclude these relations (repeatable) |
+| `--source <SRC>` | Include only these source types — `parametric`, `document`, … (repeatable) |
+| `--subject-contains <TEXT>` | Subject must contain this substring |
+| `--object-contains <TEXT>` | Object must contain this substring |
+
+**Examples:**
+
+```bash
+larql filter knowledge.larql.json -o high-conf.larql.json --min-confidence 0.8
+larql filter knowledge.larql.json -o late-layers.larql.json --min-layer 20 --relation capital-of
+```
+
 ## Templates format
 
 Used by `larql bfs`. A JSON array of prompt templates:
@@ -1442,7 +2110,7 @@ rewrite — no re-extract.
 | `expert-server` | MoE | — | — | 14.1 GB | `larql serve --experts START-END` |
 | `full` | — | 1.3 GB | 32 GB | 16 GB | everything |
 
-`expert-server` includes embed, norms, dense FFN (`interleaved_q4k.bin`),
+`expert-server` includes embed, norms, dense FFN (`interleaved_kquant.bin`),
 and the per-layer expert weights (`layers/`). Everything `larql serve` needs
 to boot and serve `POST /v1/expert/batch` calls on a CPU-only machine.
 

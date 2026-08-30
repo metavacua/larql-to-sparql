@@ -161,10 +161,10 @@ Three examples, each demonstrating a different aspect:
 
 ```sh
 # Phase 1: compression ratio and residual MSE
-cargo run -p larql-boundary --example encode_decode
+cargo run -p larql-demos --example encode_decode
 
 # Phase 3: gate decisions for the four Exp 43 boundary patterns
-cargo run -p larql-boundary --example gate_decision
+cargo run -p larql-demos --example gate_decision
 
 # Phase 1+2: why MSE is the wrong metric; top-1/KL/gate pipeline
 cargo run -p larql-boundary --example accuracy

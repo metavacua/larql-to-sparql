@@ -135,6 +135,7 @@ fn make_router(static_shards: &str) -> axum::Router {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: None,
+        openai_responses: Default::default(),
     });
     build_router(state)
 }
@@ -419,6 +420,7 @@ async fn walk_ffn_routes_via_grid_when_grid_state_is_set() {
         rtt_ms: None,
         expert_start: 0,
         expert_end: 0,
+        serves_openai: false,
     });
 
     let client = reqwest::Client::builder()
@@ -433,6 +435,7 @@ async fn walk_ffn_routes_via_grid_when_grid_state_is_set() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: None,
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -492,6 +495,7 @@ async fn walk_ffn_grid_layer_missing_falls_back_to_static_shards() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: None,
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -550,6 +554,7 @@ async fn metrics_endpoint_serves_prometheus_text_with_zero_values() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: None,
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -666,6 +671,7 @@ async fn moe_request_with_no_owner_returns_503() {
             rtt_ms: None,
             expert_start: 0,
             expert_end: 3,
+            serves_openai: false,
         });
     }
     let shards = parse_shards("99-100=http://unused:1").unwrap();
@@ -681,6 +687,7 @@ async fn moe_request_with_no_owner_returns_503() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: None,
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -732,6 +739,7 @@ async fn moe_request_fans_out_to_owning_shards_and_merges() {
             rtt_ms: None,
             expert_start: 0,
             expert_end: 3,
+            serves_openai: false,
         });
         g.register(ServerEntry {
             server_id: "moe-hi".into(),
@@ -749,6 +757,7 @@ async fn moe_request_fans_out_to_owning_shards_and_merges() {
             rtt_ms: None,
             expert_start: 4,
             expert_end: 7,
+            serves_openai: false,
         });
     }
     let shards = parse_shards("99-100=http://unused:1").unwrap();
@@ -764,6 +773,7 @@ async fn moe_request_fans_out_to_owning_shards_and_merges() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: None,
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -813,6 +823,7 @@ async fn walk_ffn_5xx_increments_error_counter() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: None,
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -901,6 +912,7 @@ async fn moe_fanout_dispatches_through_h3_client_when_configured() {
             rtt_ms: None,
             expert_start: 0,
             expert_end: 7,
+            serves_openai: false,
         });
     }
 
@@ -919,6 +931,7 @@ async fn moe_fanout_dispatches_through_h3_client_when_configured() {
         metrics: None,
         h3_client: Some(h3_client),
         hedge_after: None,
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -982,6 +995,7 @@ async fn walk_ffn_returns_503_with_retry_after_when_replicas_saturated() {
         rtt_ms: None,
         expert_start: 0,
         expert_end: 0,
+        serves_openai: false,
     });
     grid.write().set_saturation_ceiling(Some(8));
 
@@ -998,6 +1012,7 @@ async fn walk_ffn_returns_503_with_retry_after_when_replicas_saturated() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: None,
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -1105,6 +1120,7 @@ async fn build_hedge_topology(
         rtt_ms: None,
         expert_start: 0,
         expert_end: 0,
+        serves_openai: false,
     });
     grid.write().register(ServerEntry {
         server_id: "fast-a".into(),
@@ -1122,6 +1138,7 @@ async fn build_hedge_topology(
         rtt_ms: None,
         expert_start: 0,
         expert_end: 0,
+        serves_openai: false,
     });
     // Layer 1 owned by a single fast shard.
     grid.write().register(ServerEntry {
@@ -1140,6 +1157,7 @@ async fn build_hedge_topology(
         rtt_ms: None,
         expert_start: 0,
         expert_end: 0,
+        serves_openai: false,
     });
     (
         slow_addr, slow_calls, fast_addr, fast_calls, b_addr, b_calls, grid,
@@ -1168,6 +1186,7 @@ async fn walk_ffn_hedge_fires_when_primary_is_slow() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: Some(Duration::from_millis(30)),
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -1231,6 +1250,7 @@ async fn walk_ffn_hedge_does_not_fire_on_fast_primary() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: Some(Duration::from_millis(500)),
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 
@@ -1300,6 +1320,7 @@ async fn walk_ffn_no_hedge_when_only_one_replica() {
             rtt_ms: None,
             expert_start: 0,
             expert_end: 0,
+            serves_openai: false,
         });
     }
 
@@ -1316,6 +1337,7 @@ async fn walk_ffn_no_hedge_when_only_one_replica() {
         #[cfg(feature = "http3")]
         h3_client: None,
         hedge_after: Some(Duration::from_millis(20)),
+        openai_responses: Default::default(),
     });
     let app = build_router(state);
 

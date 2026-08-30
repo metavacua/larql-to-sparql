@@ -14,3 +14,4 @@ pub mod fp8;
 pub mod ggml;
 pub mod half;
 pub mod mxfp4;
+pub mod nvfp4;

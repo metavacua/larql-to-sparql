@@ -10,7 +10,6 @@ impl<'a> StreamingContext<'a> {
     /// Stage 5 — assemble + write `index.json` (preliminary; checksums
     /// added later in `finalize`).
     pub(in crate::extract::streaming) fn write_index_json(&mut self) -> Result<(), VindexError> {
-        let cfg = self.arch.config();
         let family = self.arch.family().to_string();
         let layer_infos = std::mem::take(&mut self.layer_infos);
         let config = VindexConfig {
@@ -43,45 +42,24 @@ impl<'a> StreamingContext<'a> {
             dtype: self.dtype,
             quant: self.quant,
             layer_bands: crate::LayerBands::for_family(&family, self.num_layers),
-            model_config: Some(VindexModelConfig {
-                model_type: cfg.model_type.clone(),
-                head_dim: cfg.head_dim,
-                num_q_heads: cfg.num_q_heads,
-                num_kv_heads: cfg.num_kv_heads,
-                rope_base: cfg.rope_base,
-                sliding_window: cfg.sliding_window,
-                moe: if self.is_moe {
-                    Some(crate::MoeConfig {
-                        num_experts: self.n_experts,
-                        top_k: self.arch.num_experts_per_token(),
-                        shared_expert: self.arch.num_shared_experts() > 0,
-                        router_type: self.arch.moe_router_type().to_string(),
-                        moe_intermediate_size: if self.arch.moe_intermediate_size() > 0 {
-                            Some(self.arch.moe_intermediate_size())
-                        } else {
-                            None
-                        },
-                        hybrid: self.arch.is_hybrid_moe(),
-                    })
+            // One mapping, not three. This was a verbatim copy of
+            // `VindexModelConfig::from_arch` differing only in the MoE
+            // branch, and the copies are why `rope_scaling` could be
+            // missed in all of them at once — see the note on
+            // `VindexModelConfig`.
+            model_config: Some({
+                let mut mc = VindexModelConfig::from_arch(&*self.arch);
+                // The extractor's own MoE observation wins: `n_experts`
+                // is what was actually written, which can differ from
+                // what the config declares.
+                if self.is_moe {
+                    if let Some(moe) = mc.moe.as_mut() {
+                        moe.num_experts = self.n_experts;
+                    }
                 } else {
-                    None
-                },
-                // Per-layer geometry (Gemma 4)
-                global_head_dim: cfg.global_head_dim,
-                num_global_kv_heads: cfg.num_global_kv_heads,
-                partial_rotary_factor: cfg.partial_rotary_factor,
-                sliding_window_pattern: cfg.sliding_window_pattern,
-                layer_types: cfg.layer_types.clone(),
-                attention_k_eq_v: cfg.attention_k_eq_v,
-                num_kv_shared_layers: cfg.num_kv_shared_layers,
-                per_layer_embed_dim: cfg.per_layer_embed_dim,
-                rope_local_base: cfg.rope_local_base,
-                query_pre_attn_scalar: cfg.query_pre_attn_scalar,
-                final_logit_softcapping: cfg.final_logit_softcapping,
-                attention_multiplier: cfg.attention_multiplier,
-                residual_multiplier: cfg.residual_multiplier,
-                logits_scaling: cfg.logits_scaling,
-                norm_eps: cfg.norm_eps,
+                    mc.moe = None;
+                }
+                mc
             }),
             fp4: None,
             ffn_layout: None,

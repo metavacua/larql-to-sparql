@@ -1,19 +1,19 @@
 {
-  "policy_note": "Per-file coverage policy. The `included_total_line_min_percent` gate computes total over the included files only — pure-logic modules, route handlers with small bodies, helpers. I/O-bound wrappers (heavy route handlers, gRPC servers, daemon bootstrap, the announce client loop) are excluded because they require a live model and remote shards to exercise: their coverage is intentionally low and tracked separately via the still-existing per-file `total_line_min_percent`. New files under the include set must hit 90% on first commit; existing debt baselines should only ratchet upward. 2026-05-20: investigated a CI-vs-local divergence on `completions.rs` (CI 70.34% vs local 86.85%, identical test outcomes) — root cause was NOT a real generation regression but a coverage artefact. The `completions_*_returns_200` tests asserted `OK || is_server_error()` on `resp.status()` without draining the response body, so axum's lazy `into_response()` serialisation of the buffered handler never ran under llvm-cov instrumentation on Ubuntu (it did run on macOS, hence the divergence). Fixed by draining the body in every success-path completions test (`tests/test_openai_completions_coverage.rs::capture_completion`) and tightening the asserts to strict 200 OK. completions.rs now reports 86.85% consistently across platforms; baseline restored to 86.0. The Linux `synthetic_q4k_vindex` weights are actually finite; no NaN regression existed.",
+  "policy_note": "Per-file coverage policy. The `included_total_line_min_percent` gate computes total over the included files only \u2014 pure-logic modules, route handlers with small bodies, helpers. I/O-bound wrappers (heavy route handlers, gRPC servers, daemon bootstrap, the announce client loop) are excluded because they require a live model and remote shards to exercise: their coverage is intentionally low and tracked separately via the still-existing per-file `total_line_min_percent`. New files under the include set must hit 90% on first commit; existing debt baselines should only ratchet upward. 2026-05-20: investigated a CI-vs-local divergence on `completions.rs` (CI 70.34% vs local 86.85%, identical test outcomes) \u2014 root cause was NOT a real generation regression but a coverage artefact. The `completions_*_returns_200` tests asserted `OK || is_server_error()` on `resp.status()` without draining the response body, so axum's lazy `into_response()` serialisation of the buffered handler never ran under llvm-cov instrumentation on Ubuntu (it did run on macOS, hence the divergence). Fixed by draining the body in every success-path completions test (`tests/test_openai_completions_coverage.rs::capture_completion`) and tightening the asserts to strict 200 OK. completions.rs now reports 86.85% consistently across platforms; baseline restored to 86.0. The Linux `synthetic_q4k_vindex` weights are actually finite; no NaN regression existed. 2026-08-22: bootstrap.rs split into bootstrap/{mod,cli,load,listeners} \u2014 mod.rs (serve daemon) and listeners.rs (H3 socket) inherit the daemon exclusion; cli.rs and tests are pure logic and included; load.rs enters with a 66.0 baseline to ratchet upward. chat.rs split into chat/ and removed from the exclude list \u2014 the whole chat surface (types/handler/stream/tools/v3) is now coverage-gated at the default floor. 2026-08-22: openai chat/responses coverage push \u2014 fixed the SSE test fixture-lifetime bug (fixture dropped before the body was drained, so generation always failed at the lazy weights load and the whole stream pump read as uncovered), extracted the four duplicated per-token callback bodies into token_tap.rs (unit-tested), and added validation/timeout/stop/failed-stream tests. chat/stream.rs (89.4 local) and responses/stream.rs (86.3 local) enter with baselines: their remaining uncovered lines are the V2 per-token emit closures and client-disconnect returns, which the CPU generation arm structurally never invokes (per-token callbacks are a GPU-path affordance \u2014 see generate_streaming_runs_against_synthetic_fixture in larql-inference), plus tool-success emission the synthetic vocab cannot produce (no JSON punctuation tokens, so the constrained mask cannot emit parseable output). Ratchet these upward when a GPU-exercising or JSON-capable fixture lands. completions.rs ratcheted 86.0 -> 88.0 (reads 90.6 local). 2026-08-22 (N0.6-on-V3): fsm.rs ratcheted 85.6 -> 86.5 (reads 87.1 local) \u2014 the emission-time key-discipline fixes added covered branches. 2026-08-22 (/v1/sessions): session.rs became session/{clock,lease,manager,state} and routes/sessions/ landed; all five new files enter at 97-100% with no debt baseline. Included-total 92.7 -> 93.12.",
   "include_globs": [
     "crates/larql-server/src/*.rs",
     "crates/larql-server/src/**/*.rs"
   ],
   "exclude_globs": [
     "crates/larql-server/src/main.rs",
-    "crates/larql-server/src/bootstrap.rs",
+    "crates/larql-server/src/bootstrap/mod.rs",
+    "crates/larql-server/src/bootstrap/listeners.rs",
     "crates/larql-server/src/announce.rs",
     "crates/larql-server/src/grpc.rs",
     "crates/larql-server/src/grpc_expert.rs",
     "crates/larql-server/src/routes/stream.rs",
     "crates/larql-server/src/routes/walk_ffn/core.rs",
     "crates/larql-server/src/routes/walk_ffn/q8k.rs",
-    "crates/larql-server/src/routes/openai/chat.rs",
     "crates/larql-server/src/routes/expert/batch_legacy.rs",
     "crates/larql-server/src/routes/expert/cpu.rs",
     "crates/larql-server/src/routes/expert/layer_batch.rs",
@@ -25,14 +25,17 @@
   "total_line_min_percent": 65.0,
   "included_total_line_min_percent": 90.0,
   "per_file_line_min_percent": {
+    "crates/larql-server/src/bootstrap/load.rs": 66.0,
     "crates/larql-server/src/routes/embed.rs": 86.1,
     "crates/larql-server/src/routes/insert.rs": 76.7,
     "crates/larql-server/src/routes/openai/schema/ast.rs": 80.5,
-    "crates/larql-server/src/routes/openai/schema/fsm.rs": 85.6,
+    "crates/larql-server/src/routes/openai/schema/fsm.rs": 86.5,
     "crates/larql-server/src/routes/openai/schema/tools.rs": 88.2,
     "crates/larql-server/src/routes/topology.rs": 60.6,
-    "crates/larql-server/src/routes/openai/completions.rs": 86.0,
+    "crates/larql-server/src/routes/openai/completions.rs": 88.0,
     "crates/larql-server/src/routes/walk_ffn/handler.rs": 86.0,
-    "crates/larql-server/src/routes/warmup.rs": 84.0
+    "crates/larql-server/src/routes/warmup.rs": 84.0,
+    "crates/larql-server/src/routes/openai/chat/stream.rs": 87.0,
+    "crates/larql-server/src/routes/openai/responses/stream.rs": 84.0
   }
 }

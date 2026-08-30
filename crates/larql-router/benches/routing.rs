@@ -39,6 +39,7 @@ fn make_entry(id: usize, layer_start: u32, layer_end: u32) -> ServerEntry {
         rtt_ms: None,
         expert_start: 0,
         expert_end: 0,
+        serves_openai: false,
     }
 }
 

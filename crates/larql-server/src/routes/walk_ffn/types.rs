@@ -26,8 +26,29 @@ impl Drop for RifGuard {
     }
 }
 
-pub(crate) const BINARY_CT: &str = "application/x-larql-ffn";
-pub(crate) const BATCH_MARKER: u32 = 0xFFFF_FFFF;
+/// Register a compute request against the first loaded model for GT6 drain
+/// and heartbeat visibility: bumps `requests_in_flight` (decremented when
+/// the returned guard drops) and the cumulative `requests_total` that the
+/// grid announce loop diffs into `HeartbeatMsg.req_per_sec`.
+///
+/// Every model-compute handler (walk-ffn, walk-ffn-q8k, all expert
+/// endpoints) must hold one of these for its full duration — a handler
+/// that skips it is invisible to drain and can be reassigned mid-request
+/// (ROADMAP hardening item 13).
+pub(crate) fn track_model_request(state: &crate::state::AppState) -> Option<RifGuard> {
+    state.first_model().map(|m| {
+        use std::sync::atomic::Ordering;
+        m.requests_in_flight.fetch_add(1, Ordering::Relaxed);
+        m.requests_total.fetch_add(1, Ordering::Relaxed);
+        RifGuard(m.requests_in_flight.clone())
+    })
+}
+
+// Wire constants are single-sourced in the shared codec (ROADMAP
+// hardening item 16). The handler now detects the inbound format via
+// `crate::wire::request_wire_format` (f32/f16/i8 Content-Type dispatch),
+// so no CT constant is re-exported here; `BATCH_MARKER` lives at
+// `larql_inference::ffn::remote::BATCH_MARKER`.
 
 #[derive(Deserialize)]
 pub struct WalkFfnRequest {
@@ -64,19 +85,21 @@ pub struct WalkFfnRequest {
 fn default_seq_len() -> usize {
     1
 }
+
+/// Default `top_k` for walk-ffn requests that omit the field.
+///
+/// NOTE: 8092 is suspiciously close to 8192 (2^13) and may be a historic
+/// typo, but it is the value clients have been served with — changing it
+/// changes served behavior, so it is kept as-is.
+const DEFAULT_WALK_FFN_TOP_K: usize = 8092;
+
 fn default_top_k() -> usize {
-    8092
+    DEFAULT_WALK_FFN_TOP_K
 }
 
 // ── Typed output structs (shared by JSON + binary encoders) ──────────────────
-
-pub(crate) struct FfnEntry {
-    pub(crate) layer: usize,
-    pub(crate) output: Vec<f32>,
-}
-
-pub(crate) struct FfnOutput {
-    pub(crate) entries: Vec<FfnEntry>,
-    pub(crate) seq_len: usize,
-    pub(crate) latency_ms: f64,
-}
+//
+// `FfnEntry`/`FfnOutput` moved into the shared codec alongside the
+// encoders that consume them; re-exported to preserve the
+// `super::types::{FfnEntry, FfnOutput}` paths used by `core`/`binary`.
+pub(crate) use larql_inference::ffn::remote::{FfnEntry, FfnOutput};

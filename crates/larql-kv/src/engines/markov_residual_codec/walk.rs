@@ -2,7 +2,7 @@
 //!
 //! Mirrors `markov_residual/q4k.rs` with the cold tier routed through the
 //! codec. Used when the engine is asked to run on a compact (Q4K-walk)
-//! vindex — the dense `BackendFfn` path in [`super::compute`] cannot read
+//! vindex — the dense `BackendFfn` path in [`super::prefill`] cannot read
 //! `--compact` FFN weights. This module delegates FFN to `WalkFfn`
 //! (native Q4K matvec on the vindex's compact gate/up/down bytes) and
 //! passes `Some(index)` to `recompute_kv` so the K/V projections also
@@ -10,12 +10,13 @@
 
 use larql_compute::ComputeBackend;
 use larql_inference::attention::{run_attention_with_kv_backend, SharedKV};
+use larql_inference::forward::ple::precompute_per_layer_inputs;
 use larql_inference::forward::{embed_tokens_pub, run_ffn};
 use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
 use larql_vindex::VectorIndex;
 use ndarray::{s, Array2};
 
-use super::compute::RsPrefillResultCodec;
+use super::prefill::RsPrefillResultCodec;
 use crate::engines::markov_residual::recompute_kv;
 use crate::engines::markov_residual_codec::codec::ColdResidualCodec;
 use crate::engines::markov_residual_codec::store::{EncodedColdLayer, RsStoreCodec};
@@ -32,6 +33,8 @@ pub fn rs_prefill_codec_walk(
     let num_layers = weights.num_layers;
     let seq_len = token_ids.len();
     let mut h = embed_tokens_pub(&weights, token_ids);
+    // Empty on non-PLE archs — `ple_inputs.get(layer)` then yields `None`.
+    let ple_inputs = precompute_per_layer_inputs(&weights, &h, token_ids);
     let mut stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
     let be = Some(backend);
 
@@ -48,8 +51,13 @@ pub fn rs_prefill_codec_walk(
         let (h_post_attn, k, v) = run_attention_with_kv_backend(weights, &h, layer, be, None)
             .expect("attention failed during MarkovResidualCodec Q4K prefill");
         hot_kv_captured.push((k, v));
-        let (h_out, _) = run_ffn(&weights, &h_post_attn, layer, &walk_ffn, false);
-        h = h_out;
+        let (h_post_ffn, _) = run_ffn(&weights, &h_post_attn, layer, &walk_ffn, false);
+        h = crate::engines::apply_ple_and_layer_scalar(
+            &weights,
+            &h_post_ffn,
+            layer,
+            ple_inputs.get(layer),
+        );
     }
 
     let hidden_size = weights.hidden_size;
@@ -120,6 +128,9 @@ pub fn rs_decode_step_codec_walk(
     let embed_us = t_embed
         .map(|t| t.elapsed().as_secs_f64() * 1e6)
         .unwrap_or(0.0);
+    // PLE inputs are per-token — recompute for this single-token decode
+    // step, matching the legacy `kv_decode_step_run` recipe exactly.
+    let ple_inputs = precompute_per_layer_inputs(&weights, &h_new, &[new_token_id]);
     let mut new_stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
 
     let walk_ffn =
@@ -132,80 +143,134 @@ pub fn rs_decode_step_codec_walk(
     let mut ffn_us = 0.0f64;
     let mut new_hot_kvs: Vec<SharedKV> = Vec::with_capacity(num_layers);
 
+    // The cold tier must stay representable in K/V form before the
+    // cached-hot_kv fast path may fire: a post-prefill overflow
+    // invalidates `cold_kv` (lossy codec, see the clip flow below), and
+    // attending the cached hot K/V alone would silently drop the cold
+    // context from every subsequent step. Mirror the dense
+    // `rs_decode_step_codec` semantics for this state — recompute cold
+    // K/V from the codec-decoded residuals at `cold_abs_start` — and
+    // re-seed `cold_kv` so later steps pay a memcpy, not a projection.
+    let mut rs = rs;
+    if rs.cold_kv.is_none() {
+        let reseeded = match &rs.cold_encoded {
+            Some(cold_layers) if cold_layers.first().is_some_and(|l| l.n_positions > 0) => {
+                let t_cold = if timing { Some(Instant::now()) } else { None };
+                let mut cold_kv: Vec<SharedKV> = Vec::with_capacity(num_layers);
+                for (layer, enc) in cold_layers.iter().enumerate() {
+                    let decoded = enc.decode(rs.codec);
+                    cold_kv.push(recompute_kv(
+                        weights,
+                        &decoded,
+                        layer,
+                        rs.cold_abs_start,
+                        backend,
+                        Some(index),
+                    )?);
+                }
+                if let Some(t) = t_cold {
+                    recompute_cold_us += t.elapsed().as_secs_f64() * 1e6;
+                }
+                Some(cold_kv)
+            }
+            _ => None,
+        };
+        if reseeded.is_some() {
+            rs.cold_kv = reseeded;
+        }
+    }
+
     for layer in 0..num_layers {
-        let h_hot = &rs.stored[layer];
-        let s_hot = h_hot.shape()[0];
+        // Logical row counts only: `stored` / `hot_kv` are
+        // doubling-capacity buffers (`hot_len` is the row count, see
+        // RsStoreCodec docs) on the dispatch-prefill fallback path.
+        let s_hot = rs.hot_len;
+        let h_hot = rs.stored[layer].slice(s![..s_hot, ..]);
         let hot_abs_start = abs_position.saturating_sub(s_hot);
-        let c_rows = rs.cold_kv.as_ref().map_or(0, |kv| kv[layer].0.shape()[0]);
+
+        // Number of cold rows in this layer's attention prior — the
+        // offset the post-attention hot_kv capture slices at. Set per
+        // branch (the no-cache branch folds decoded cold rows into the
+        // prior even though `cold_kv` is None).
+        let cold_rows_in_prior;
 
         // Same three-path priority as markov_residual: cached hot_kv
         // (W2 fast path) → cached cold_kv only → no caches.
-        let (k_full, v_full) = if let (Some(hot_kv), maybe_cold) =
-            (rs.hot_kv.as_ref(), rs.cold_kv.as_ref())
-        {
-            let (k_hot, v_hot) = &hot_kv[layer];
-            let pair = if let Some(cold_kv) = maybe_cold {
+        let (k_full, v_full) =
+            if let (Some(hot_kv), maybe_cold) = (rs.hot_kv.as_ref(), rs.cold_kv.as_ref()) {
+                let (k_hot_buf, v_hot_buf) = &hot_kv[layer];
+                let k_hot = k_hot_buf.slice(s![..s_hot, ..]);
+                let v_hot = v_hot_buf.slice(s![..s_hot, ..]);
+                let pair = if let Some(cold_kv) = maybe_cold {
+                    let (k_cold, v_cold) = &cold_kv[layer];
+                    let c = k_cold.shape()[0];
+                    let kv_dim = k_cold.shape()[1];
+                    cold_rows_in_prior = c;
+                    let mut k_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
+                    k_combined.slice_mut(s![..c, ..]).assign(k_cold);
+                    k_combined.slice_mut(s![c.., ..]).assign(&k_hot);
+                    let mut v_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
+                    v_combined.slice_mut(s![..c, ..]).assign(v_cold);
+                    v_combined.slice_mut(s![c.., ..]).assign(&v_hot);
+                    (k_combined, v_combined)
+                } else {
+                    cold_rows_in_prior = 0;
+                    (k_hot.to_owned(), v_hot.to_owned())
+                };
+                pair
+            } else if let Some(cold_kv) = &rs.cold_kv {
                 let (k_cold, v_cold) = &cold_kv[layer];
+                let t_hot = if timing { Some(Instant::now()) } else { None };
+                let h_hot_owned = h_hot.to_owned();
+                let (k_hot, v_hot) = recompute_kv(
+                    weights,
+                    &h_hot_owned,
+                    layer,
+                    hot_abs_start,
+                    backend,
+                    Some(index),
+                )?;
+                if let Some(t) = t_hot {
+                    recompute_hot_us += t.elapsed().as_secs_f64() * 1e6;
+                }
                 let c = k_cold.shape()[0];
                 let kv_dim = k_cold.shape()[1];
+                cold_rows_in_prior = c;
                 let mut k_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
                 k_combined.slice_mut(s![..c, ..]).assign(k_cold);
-                k_combined.slice_mut(s![c.., ..]).assign(k_hot);
+                k_combined.slice_mut(s![c.., ..]).assign(&k_hot);
                 let mut v_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
                 v_combined.slice_mut(s![..c, ..]).assign(v_cold);
-                v_combined.slice_mut(s![c.., ..]).assign(v_hot);
+                v_combined.slice_mut(s![c.., ..]).assign(&v_hot);
                 (k_combined, v_combined)
             } else {
-                (k_hot.clone(), v_hot.clone())
-            };
-            pair
-        } else if let Some(cold_kv) = &rs.cold_kv {
-            let (k_cold, v_cold) = &cold_kv[layer];
-            let t_hot = if timing { Some(Instant::now()) } else { None };
-            let (k_hot, v_hot) =
-                recompute_kv(weights, h_hot, layer, hot_abs_start, backend, Some(index))?;
-            if let Some(t) = t_hot {
-                recompute_hot_us += t.elapsed().as_secs_f64() * 1e6;
-            }
-            let c = k_cold.shape()[0];
-            let kv_dim = k_cold.shape()[1];
-            let mut k_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
-            k_combined.slice_mut(s![..c, ..]).assign(k_cold);
-            k_combined.slice_mut(s![c.., ..]).assign(&k_hot);
-            let mut v_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
-            v_combined.slice_mut(s![..c, ..]).assign(v_cold);
-            v_combined.slice_mut(s![c.., ..]).assign(&v_hot);
-            (k_combined, v_combined)
-        } else {
-            let (h_full, full_abs_start) = match &rs.cold_encoded {
-                Some(cold_layers) if cold_layers[layer].n_positions > 0 => {
-                    let decoded = cold_layers[layer].decode(rs.codec);
-                    let hidden = h_hot.shape()[1];
-                    let mut combined = Array2::<f32>::zeros((decoded.shape()[0] + s_hot, hidden));
-                    combined
-                        .slice_mut(s![..decoded.shape()[0], ..])
-                        .assign(&decoded);
-                    combined
-                        .slice_mut(s![decoded.shape()[0].., ..])
-                        .assign(h_hot);
-                    (combined, rs.cold_abs_start)
+                let (h_full, full_abs_start, s_cold) = match &rs.cold_encoded {
+                    Some(cold_layers) if cold_layers[layer].n_positions > 0 => {
+                        let decoded = cold_layers[layer].decode(rs.codec);
+                        let s_cold = decoded.shape()[0];
+                        let hidden = h_hot.shape()[1];
+                        let mut combined = Array2::<f32>::zeros((s_cold + s_hot, hidden));
+                        combined.slice_mut(s![..s_cold, ..]).assign(&decoded);
+                        combined.slice_mut(s![s_cold.., ..]).assign(&h_hot);
+                        (combined, rs.cold_abs_start, s_cold)
+                    }
+                    _ => (h_hot.to_owned(), hot_abs_start, 0),
+                };
+                cold_rows_in_prior = s_cold;
+                let t_cold = if timing { Some(Instant::now()) } else { None };
+                let pair = recompute_kv(
+                    weights,
+                    &h_full,
+                    layer,
+                    full_abs_start,
+                    backend,
+                    Some(index),
+                )?;
+                if let Some(t) = t_cold {
+                    recompute_cold_us += t.elapsed().as_secs_f64() * 1e6;
                 }
-                _ => (h_hot.clone(), hot_abs_start),
+                pair
             };
-            let t_cold = if timing { Some(Instant::now()) } else { None };
-            let pair = recompute_kv(
-                weights,
-                &h_full,
-                layer,
-                full_abs_start,
-                backend,
-                Some(index),
-            )?;
-            if let Some(t) = t_cold {
-                recompute_cold_us += t.elapsed().as_secs_f64() * 1e6;
-            }
-            pair
-        };
 
         new_stored.push(h_new.clone());
 
@@ -238,14 +303,23 @@ pub fn rs_decode_step_codec_walk(
         }
 
         // Capture new hot_kv slice (= new_kv_full minus cold prefix).
+        // The offset must count the cold rows actually in the prior —
+        // slicing from 0 when the no-cache branch folded decoded cold
+        // rows in would cache cold+hot+new as hot_kv, desyncing it
+        // from `stored`/`hot_len` and making the next
+        // `clip_layer_overflow` keep the oldest (cold) rows while
+        // discarding the newest.
         new_hot_kvs.push((
-            new_kv_full.0.slice(s![c_rows.., ..]).to_owned(),
-            new_kv_full.1.slice(s![c_rows.., ..]).to_owned(),
+            new_kv_full.0.slice(s![cold_rows_in_prior.., ..]).to_owned(),
+            new_kv_full.1.slice(s![cold_rows_in_prior.., ..]).to_owned(),
         ));
 
-        // Native Q4K FFN, then WalkFfn fallback.
+        // Native Q4K FFN, then WalkFfn fallback. Both branches return the
+        // bare post-FFN hidden — `ffn_decode_step_native` is also
+        // `moe_ffn_block_cpu`'s pre-PLE dense slab — so the PLE +
+        // layer_scalar tail applies to either.
         let t_ffn = if timing { Some(Instant::now()) } else { None };
-        let h_out = larql_inference::vindex::ffn_decode_step_native(
+        let h_post_ffn = larql_inference::vindex::ffn_decode_step_native(
             weights.canonical(),
             index,
             backend,
@@ -256,6 +330,12 @@ pub fn rs_decode_step_codec_walk(
             let (h, _) = run_ffn(&weights, &h_post_attn, layer, &walk_ffn, false);
             h
         });
+        let h_out = crate::engines::apply_ple_and_layer_scalar(
+            &weights,
+            &h_post_ffn,
+            layer,
+            ple_inputs.get(layer),
+        );
         if let Some(t) = t_ffn {
             ffn_us += t.elapsed().as_secs_f64() * 1e6;
         }
@@ -279,10 +359,14 @@ pub fn rs_decode_step_codec_walk(
 
     let mut updated_stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
     for (stored, new_row) in rs.stored.iter().zip(new_stored.iter()) {
-        let s_old = stored.shape()[0];
+        // Logical rows only — `stored` may be a capacity-padded buffer
+        // (dispatch-prefill fallback).
+        let s_old = rs.hot_len;
         let hidden_dim = stored.shape()[1];
         let mut combined = Array2::<f32>::zeros((s_old + 1, hidden_dim));
-        combined.slice_mut(s![..s_old, ..]).assign(stored);
+        combined
+            .slice_mut(s![..s_old, ..])
+            .assign(&stored.slice(s![..s_old, ..]));
         combined.slice_mut(s![s_old.., ..]).assign(new_row);
         updated_stored.push(combined);
     }
@@ -585,6 +669,151 @@ mod tests {
         assert!(h.iter().all(|v| v.is_finite()));
         // hot_kv is re-captured on every decode step.
         assert!(rs2.hot_kv.is_some());
+    }
+
+    // ── Cold-tier retention regressions ─────────────────────────────────
+
+    /// Window / prompt sized so the prefill overflows into the encoded
+    /// cold tier (2 positions) and every decode step overflows again.
+    const OVERFLOW_WINDOW: usize = 2;
+    const OVERFLOW_PROMPT: [u32; 4] = [0, 1, 2, 3];
+    const FIRST_DECODE_TOKEN: u32 = 4;
+    /// Hidden-state tolerance between the cached-hot-K/V path and the
+    /// recompute-from-residuals path (same bound as the markov twin's
+    /// W2 parity test).
+    const CACHED_VS_RECOMPUTE_TOL: f32 = 1e-4;
+
+    fn prefill_overflowed(
+        weights: &larql_inference::ModelWeights,
+        index: &larql_vindex::VectorIndex,
+    ) -> RsStoreCodec {
+        rs_prefill_codec_walk(
+            larql_inference::WeightsView::dense(weights),
+            index,
+            &OVERFLOW_PROMPT,
+            Some(OVERFLOW_WINDOW),
+            ColdResidualCodec::Bf16,
+            &CpuBackend,
+        )
+        .store
+    }
+
+    fn decode_tok(
+        weights: &larql_inference::ModelWeights,
+        index: &larql_vindex::VectorIndex,
+        tok: u32,
+        store: RsStoreCodec,
+    ) -> (Array2<f32>, RsStoreCodec) {
+        rs_decode_step_codec_walk(
+            larql_inference::WeightsView::dense(weights),
+            index,
+            tok,
+            store,
+            &CpuBackend,
+            None,
+        )
+        .expect("decode")
+    }
+
+    fn assert_close(a: &Array2<f32>, b: &Array2<f32>, ctx: &str) {
+        for (x, y) in a.iter().zip(b.iter()) {
+            assert!(
+                (x - y).abs() < CACHED_VS_RECOMPUTE_TOL,
+                "{ctx}: cached={x}, recompute={y}"
+            );
+        }
+    }
+
+    #[test]
+    fn decode_walk_reseeds_cold_kv_after_overflow_and_keeps_cold_context() {
+        // After the first post-prefill overflow the lossy codec
+        // invalidates `cold_kv`. The cached-hot_kv fast path must then
+        // re-derive the cold K/V from `cold_encoded` — not attend
+        // hot-only and drop the cold context from every later step.
+        // Pin by value: steps 2 and 3 on the cached path must match the
+        // same steps on a recompute-from-state reference (the branch the
+        // dense `decode_step` path uses for the identical state).
+        let weights = make_test_weights();
+        let index = make_test_vindex(&weights);
+
+        let run = |drop_caches_each_step: bool| -> (Array2<f32>, Array2<f32>, RsStoreCodec) {
+            let store = prefill_overflowed(&weights, &index);
+            // Step 1 runs the natural cached state in both runs →
+            // identical state going into step 2. It overflows once,
+            // setting cold_kv = None with cold_encoded non-empty.
+            let (_, mut rs2) = decode_tok(&weights, &index, FIRST_DECODE_TOKEN, store);
+            assert!(rs2.cold_encoded.is_some());
+            assert!(rs2.cold_kv.is_none(), "overflow must invalidate cold_kv");
+            if drop_caches_each_step {
+                rs2.hot_kv = None;
+            }
+            let (h2, mut rs3) = decode_tok(&weights, &index, FIRST_DECODE_TOKEN + 1, rs2);
+            if drop_caches_each_step {
+                rs3.hot_kv = None;
+                rs3.cold_kv = None;
+            }
+            let (h3, rs4) = decode_tok(&weights, &index, FIRST_DECODE_TOKEN + 2, rs3);
+            (h2, h3, rs4)
+        };
+
+        let (h2_cached, h3_cached, rs_cached) = run(false);
+        let (h2_ref, h3_ref, _) = run(true);
+        assert_close(
+            &h2_cached,
+            &h2_ref,
+            "step 2 dropped the cold tier from attention",
+        );
+        assert_close(
+            &h3_cached,
+            &h3_ref,
+            "step 3 dropped the cold tier from attention",
+        );
+        // Every step here overflows, so the trailing clip re-invalidates
+        // cold_kv; what must hold is that the encoded tier kept growing
+        // and was never dropped from attention.
+        assert_eq!(
+            rs_cached.cold_encoded.as_ref().unwrap()[0].n_positions,
+            OVERFLOW_PROMPT.len() - OVERFLOW_WINDOW + 3,
+            "cold tier must accumulate one evicted row per decode step"
+        );
+    }
+
+    #[test]
+    fn decode_walk_no_cache_step_keeps_hot_kv_capture_aligned() {
+        // Cold rows folded into the attention prior while `cold_kv` is
+        // None: the post-attention hot_kv capture must slice past them.
+        // Caching cold+hot+new as "hot" leaves the next cached step
+        // attending the wrong rows (and the next clip keeping the
+        // oldest, cold rows while discarding the newest). Pin by value:
+        // step 2 cached must match step 2 recomputed. (Historically this
+        // state hit the no-cache branch with a from-0 capture; the fixed
+        // code re-seeds cold_kv first, and the capture offset counts the
+        // cold rows either way.)
+        let weights = make_test_weights();
+        let index = make_test_vindex(&weights);
+
+        let run = |drop_caches_before_step2: bool| -> Array2<f32> {
+            let mut store = prefill_overflowed(&weights, &index);
+            store.hot_kv = None;
+            store.cold_kv = None;
+            // Step 1 runs the same branch in both runs → identical
+            // state going into step 2.
+            let (_, mut rs2) = decode_tok(&weights, &index, FIRST_DECODE_TOKEN, store);
+            if drop_caches_before_step2 {
+                rs2.hot_kv = None;
+                rs2.cold_kv = None;
+            }
+            let (h2, _) = decode_tok(&weights, &index, FIRST_DECODE_TOKEN + 1, rs2);
+            h2
+        };
+
+        let h2_cached = run(false);
+        let h2_ref = run(true);
+        assert_close(
+            &h2_cached,
+            &h2_ref,
+            "hot_kv captured cold rows as hot after the no-cache step",
+        );
     }
 
     #[test]

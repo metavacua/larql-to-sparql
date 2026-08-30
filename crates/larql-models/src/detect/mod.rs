@@ -24,6 +24,9 @@ use crate::architectures::granite::GraniteArch;
 use crate::architectures::llama::LlamaArch;
 use crate::architectures::mistral::MistralArch;
 use crate::architectures::mixtral::MixtralArch;
+use crate::architectures::moss_tts_realtime::{MossTtsRealtimeArch, MOSS_TTS_REALTIME_MODEL_TYPE};
+use crate::architectures::muse_glimmer::MuseGlimmerArch;
+use crate::architectures::olmoe::OlmoeArch;
 use crate::architectures::qwen::QwenArch;
 use crate::architectures::starcoder2::StarCoder2Arch;
 use crate::architectures::tinymodel::TinyModelArch;
@@ -32,11 +35,17 @@ use crate::validation::ConfigValidationError;
 
 mod config_io;
 mod parser;
+pub mod registry;
 
 use config_io::{
-    config_path, read_config_json, require_config_fields, CONFIG_FILE_NAME, CONFIG_KEY_TEXT_CONFIG,
+    config_path, read_config_json, require_config_fields, CONFIG_FILE_NAME,
+    CONFIG_KEY_LANGUAGE_CONFIG, CONFIG_KEY_TEXT_CONFIG,
 };
 use parser::parse_model_config;
+
+pub use registry::{
+    find_architecture, ArchitectureEntry, AttentionKind, ModelTypeMatch, ARCHITECTURE_REGISTRY,
+};
 
 /// Error from model detection/config parsing.
 #[derive(Debug, thiserror::Error)]
@@ -117,14 +126,36 @@ pub fn detect_from_json(config: &serde_json::Value) -> Box<dyn ModelArchitecture
         t if t.starts_with("llama") => Box::new(LlamaArch::from_config(model_config)),
         // Mistral (dense)
         "mistral" => Box::new(MistralArch::from_config(model_config)),
+        // Muse-Glimmer target: config-driven defaults plus the judged
+        // gate/QK-norm semantics. The assistant is deliberately excluded
+        // (weighted QK norms, no gate, unjudged) and stays generic.
+        "muse_glimmer" | "muse_glimmer_text" => {
+            Box::new(MuseGlimmerArch::from_config(model_config))
+        }
         // Mixtral (MoE) — block_sparse_moe pattern
         "mixtral" => Box::new(MixtralArch::from_config(model_config)),
         // GPT-2 (non-gated FFN, LayerNorm, learned positional embeddings)
         "gpt2" => Box::new(Gpt2Arch::from_config(model_config)),
         // GPT-OSS (MoE, MXFP4 packed experts)
         "gpt_oss" => Box::new(GptOssArch::from_config(model_config)),
+        // MOSS-TTS-Realtime — a stock Qwen3 backbone nested under
+        // `language_config`, whose output is a hidden state for a
+        // side-loaded audio depth transformer, never text. The nested
+        // object is a complete Qwen3 config carrying its own
+        // `model_type: "qwen3"`, so it is parsed directly and rebranded;
+        // the flat fallback keeps in-memory test configs terse.
+        t if t == MOSS_TTS_REALTIME_MODEL_TYPE => {
+            let nested = config.get(CONFIG_KEY_LANGUAGE_CONFIG).unwrap_or(config);
+            let mut nested_config = parse_model_config(nested);
+            nested_config.model_type = MOSS_TTS_REALTIME_MODEL_TYPE.to_string();
+            Box::new(MossTtsRealtimeArch::from_config(nested_config))
+        }
         // Qwen family (dense and MoE share same keys)
         t if t.starts_with("qwen") => Box::new(QwenArch::from_config(model_config)),
+        // OLMoE — Qwen3-MoE tensor layout, but sizes experts from
+        // `intermediate_size` (no `moe_intermediate_size` field) and does not
+        // renormalize top-k router probabilities.
+        "olmoe" => Box::new(OlmoeArch::from_config(model_config)),
         // DeepSeek-V4 (MoE + MLA + MXFP4 + HCA attention; new tensor naming)
         "deepseek_v4" => Box::new(DeepSeekV4Arch::from_config(model_config)),
         // DeepSeek V2/V3 family (MoE + MLA, model.* prefixed keys)

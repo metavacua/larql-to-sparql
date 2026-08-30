@@ -63,14 +63,63 @@ pub(super) fn build_arch_json(
     if let Some(v) = model_cfg.per_layer_embed_dim {
         obj.insert("hidden_size_per_layer_input".into(), v.into());
     }
+    if let Some(v) = model_cfg.use_double_wide_mlp {
+        obj.insert("use_double_wide_mlp".into(), v.into());
+    }
+    if let Some(v) = model_cfg.vocab_size_per_layer_input {
+        obj.insert("vocab_size_per_layer_input".into(), v.into());
+    }
     if let Some(v) = model_cfg.rope_local_base {
         obj.insert("rope_local_base_freq".into(), v.into());
+    }
+    if let Some(ref v) = model_cfg.layer_rope_theta {
+        obj.insert(
+            "layer_rope_theta".into(),
+            serde_json::to_value(v).unwrap_or_default(),
+        );
     }
     if let Some(v) = model_cfg.query_pre_attn_scalar {
         obj.insert("query_pre_attn_scalar".into(), v.into());
     }
+    if let Some(v) = model_cfg.qk_scale_factor {
+        obj.insert("qk_scale_factor".into(), v.into());
+    }
+    if let Some(v) = model_cfg.output_multiplier {
+        obj.insert("output_multiplier".into(), v.into());
+    }
+    if let Some(v) = model_cfg.post_norm_eps {
+        obj.insert("post_norm_eps".into(), v.into());
+    }
+    if let Some(v) = model_cfg.attention_bias {
+        obj.insert("attention_bias".into(), v.into());
+    }
+    if let Some(ref v) = model_cfg.hidden_act {
+        obj.insert("hidden_act".into(), v.clone().into());
+    }
+    if let Some(v) = model_cfg.max_position_embeddings {
+        obj.insert("max_position_embeddings".into(), v.into());
+    }
     if let Some(v) = model_cfg.final_logit_softcapping {
         obj.insert("final_logit_softcapping".into(), v.into());
+    }
+    if let Some(v) = model_cfg.attn_logit_softcapping {
+        obj.insert("attn_logit_softcapping".into(), v.into());
+    }
+    if let Some(v) = model_cfg.swiglu_limit {
+        obj.insert("swiglu_limit".into(), v.into());
+    }
+    if let Some(v) = model_cfg.norm_topk_prob {
+        obj.insert("norm_topk_prob".into(), v.into());
+    }
+    if let Some(v) = model_cfg.tie_word_embeddings {
+        obj.insert("tie_word_embeddings".into(), v.into());
+    }
+    // RoPE scaling, re-emitted in the `config.json` shape the parser
+    // reads. Absent from this struct until 2026-08-06, which is why
+    // `gemma-3-4b-it` was served with a position divisor of 1.0 on its
+    // global layers where the checkpoint asks for 8.0.
+    if let Some(ref v) = model_cfg.rope_scaling {
+        obj.insert("rope_scaling".into(), v.clone());
     }
 
     // Granite-family scaling multipliers. Re-emit the same field names
@@ -132,6 +181,78 @@ mod tests {
     use super::*;
     use crate::config::types::QuantFormat;
 
+    /// End-to-end: a Gemma 3 architecture must come back out of a vindex
+    /// round-trip with its global-layer position divisor intact.
+    ///
+    /// This is the assertion that was missing. `gemma-3-4b-it` declares
+    /// `rope_scaling = {"factor": 8.0, "rope_type": "linear"}`, which
+    /// `Gemma3Arch::rope_position_divisor_for_layer` turns into a divisor
+    /// of 8.0 on full-attention layers and 1.0 on sliding ones. Before
+    /// `rope_scaling` was persisted, the reconstructed arch answered 1.0
+    /// everywhere, so the served model rotated global-layer positions
+    /// eight times faster than the checkpoint asks for — on both CPU and
+    /// Metal, which is why the parity suite stayed green.
+    #[test]
+    fn gemma3_global_rope_divisor_survives_the_vindex_round_trip() {
+        let source = larql_models::detect_from_json(&serde_json::json!({
+            "model_type": "gemma3",
+            "text_config": {
+                "model_type": "gemma3_text",
+                "hidden_size": 2560,
+                "num_hidden_layers": 34,
+                "intermediate_size": 10240,
+                "head_dim": 256,
+                "num_attention_heads": 8,
+                "num_key_value_heads": 4,
+                "vocab_size": 262208,
+                "rope_theta": 1_000_000.0,
+                "sliding_window": 1024,
+                "rope_scaling": {"factor": 8.0, "rope_type": "linear"},
+            },
+        }));
+        // Precondition: the source arch really does carry the divisor.
+        // Without this the test could pass on an arch that never had one.
+        assert_eq!(source.rope_position_divisor_for_layer(5), 8.0);
+        assert_eq!(source.rope_position_divisor_for_layer(0), 1.0);
+
+        let model_cfg = VindexModelConfig::from_arch(&*source);
+        let mut config = minimal_config(model_cfg.clone());
+        config.num_layers = 34;
+        config.hidden_size = 2560;
+        config.intermediate_size = 10240;
+        let rebuilt = larql_models::detect_from_json(&build_arch_json(&config, &model_cfg));
+
+        for layer in 0..34 {
+            assert_eq!(
+                rebuilt.rope_position_divisor_for_layer(layer),
+                source.rope_position_divisor_for_layer(layer),
+                "layer {layer} divisor changed across the vindex round-trip"
+            );
+        }
+        // Named explicitly: the global layers are the whole point.
+        assert_eq!(rebuilt.rope_position_divisor_for_layer(5), 8.0);
+    }
+
+    /// A model with no `rope_scaling` must not acquire one. The emitter
+    /// only writes the key when the source had it.
+    #[test]
+    fn absent_rope_scaling_stays_absent_across_the_round_trip() {
+        let source = larql_models::detect_from_json(&serde_json::json!({
+            "model_type": "llama",
+            "hidden_size": 512,
+            "num_hidden_layers": 4,
+            "intermediate_size": 2048,
+            "num_attention_heads": 8,
+            "num_key_value_heads": 8,
+        }));
+        let model_cfg = VindexModelConfig::from_arch(&*source);
+        assert!(model_cfg.rope_scaling.is_none());
+        let json = build_arch_json(&minimal_config(model_cfg.clone()), &model_cfg);
+        assert!(json.get("rope_scaling").is_none());
+        let rebuilt = larql_models::detect_from_json(&json);
+        assert!(rebuilt.config().rope_scaling.is_none());
+    }
+
     fn minimal_model_cfg() -> VindexModelConfig {
         VindexModelConfig {
             model_type: "test_arch".into(),
@@ -149,6 +270,7 @@ mod tests {
             attention_k_eq_v: false,
             num_kv_shared_layers: None,
             per_layer_embed_dim: None,
+            layer_rope_theta: None,
             rope_local_base: None,
             query_pre_attn_scalar: None,
             final_logit_softcapping: None,
@@ -156,6 +278,7 @@ mod tests {
             residual_multiplier: None,
             logits_scaling: None,
             norm_eps: None,
+            ..Default::default()
         }
     }
 
@@ -243,6 +366,53 @@ mod tests {
         assert_eq!(obj["rope_local_base_freq"].as_f64().unwrap(), 10_000.0);
         assert_eq!(obj["query_pre_attn_scalar"].as_f64().unwrap(), 256.0);
         assert_eq!(obj["final_logit_softcapping"].as_f64().unwrap(), 30.0);
+    }
+
+    /// The reconstructed arch must answer the G2b declared scalars — the
+    /// emission path, not just struct persistence.
+    #[test]
+    fn build_arch_json_reconstructs_declared_scalars() {
+        let mut model_cfg = minimal_model_cfg();
+        model_cfg.qk_scale_factor = Some(3.87);
+        model_cfg.output_multiplier = Some(0.196);
+        model_cfg.post_norm_eps = Some(1e-8);
+        model_cfg.attention_bias = Some(false);
+        model_cfg.hidden_act = Some("gelu_pytorch_tanh".to_string());
+        model_cfg.max_position_embeddings = Some(131072);
+        let config = minimal_config(model_cfg.clone());
+
+        let v = build_arch_json(&config, &model_cfg);
+        let arch = larql_models::detect_from_json(&v);
+        assert_eq!(arch.qk_scale_factor(), Some(3.87));
+        assert_eq!(arch.logit_scale(), Some(0.196));
+        assert_eq!(
+            arch.post_norm_eps(),
+            Some(larql_models::config::PostNormEps::Value(1e-8))
+        );
+        assert_eq!(arch.attention_bias(), Some(false));
+        assert_eq!(
+            arch.activation(),
+            larql_models::config::Activation::GeluTanh
+        );
+        assert_eq!(arch.max_position_embeddings(), Some(131072));
+    }
+
+    /// The reconstructed arch must resolve NoPE on the sentinel layers —
+    /// the whole vindex round trip, not just field persistence.
+    #[test]
+    fn build_arch_json_reconstructs_nope_position_policy() {
+        use larql_models::config::PositionPolicy;
+        let mut model_cfg = minimal_model_cfg();
+        model_cfg.layer_rope_theta = Some(vec![10_000.0, 10_000.0, 10_000.0, 0.0]);
+        let config = minimal_config(model_cfg.clone());
+
+        let v = build_arch_json(&config, &model_cfg);
+        let arch = larql_models::detect_from_json(&v);
+        assert_eq!(
+            arch.position_policy_for_layer(0),
+            PositionPolicy::Rope { theta: 10_000.0 }
+        );
+        assert_eq!(arch.position_policy_for_layer(3), PositionPolicy::None);
     }
 
     #[test]
@@ -357,7 +527,7 @@ mod tests {
         // `vindex/kquant_forward/cached.rs`).
         let arch = larql_models::detect_from_json(&v);
         assert_eq!(arch.family(), "granite");
-        assert_eq!(arch.embed_scale(), 12.0);
+        assert_eq!(arch.embed_scale(), Some(12.0));
         assert_eq!(arch.attention_multiplier(), 0.015625);
         assert_eq!(arch.residual_multiplier(), 0.22);
         assert_eq!(arch.logits_scaling(), 10.0);

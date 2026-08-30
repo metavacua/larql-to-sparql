@@ -29,9 +29,19 @@ EXTRACT MODEL "google/gemma-3-4b-it" INTO "gemma3-4b.vindex" WITH INFERENCE;
 
 -- Full (~10 GB f16 / ~18 GB f32, enables COMPILE for recompilation)
 EXTRACT MODEL "google/gemma-3-4b-it" INTO "gemma3-4b.vindex" WITH ALL;
+
+-- Pick the container generation explicitly. Omitted = no preference,
+-- resolved by the extraction-generation policy (docs/vindex-generation-policy.md).
+EXTRACT MODEL "google/gemma-3-4b-it" INTO "gemma3-4b.vindex" FORMAT VINDEX3;
 ```
 
+A `FORMAT VINDEX3` extraction encodes the checkpoint's own bytes into a
+VINDEX3 container (HF checkpoint artifacts only — GGUF sources refuse by
+name rather than transcoding on the way in), carries the tokenizer and
+HF metadata in beside it, and leaves the session bound: no `USE` needed.
+
 CLI equivalent: `larql extract-index google/gemma-3-4b-it -o gemma3-4b.vindex --level inference --f16`
+(add `--generation v3` for a VINDEX3 container).
 
 ### 2. Connect
 
@@ -286,14 +296,60 @@ DESCRIBE "France" ALL LAYERS;   -- All three bands
 
 Bands are model-specific — computed automatically during EXTRACT from known architecture boundaries.
 
+## VINDEX3 Containers
+
+`USE` binds a VINDEX3 container directly — the container's own
+generation marker decides, and the binding holds the executable
+program, never a reconstructed model:
+
+```
+larql> USE "gpt-oss-20b.v3";
+Using: gpt-oss-20b.v3 (VINDEX3, model: gpt-oss-20b, component target, 24 layers, execution closed)
+Supported: SELECT, DESCRIBE, WALK, INFER [TOP n] [GENERATE n], INSERT [MODE KNN], patches, … Tokenizer: present.
+
+larql> STATS;                      -- the container's own authority
+larql> SELECT * FROM FEATURES WHERE layer = 0 LIMIT 8;
+larql> WALK "France" TOP 5;        -- role feature_gate scan
+larql> DESCRIBE "France";
+larql> SHOW LAYERS;                -- per-layer facts off the plan
+larql> INFER "The capital of France is" TOP 5;
+larql> INFER "The capital of France is" GENERATE 16;   -- greedy continuation
+larql> EXPLAIN INFER "x";          -- the executable plan, statically
+larql> TRACE "x";                  -- observe the executor while it runs
+
+larql> INSERT INTO EDGES (entity, relation, target)
+   ..>     VALUES ("France", "capital", "Paris");     -- default MODE KNN
+larql> DESCRIBE "France";          -- the edit is immediately visible
+larql> INFER "The capital of France is" TOP 3;        -- …and overrides top-1
+larql> UPDATE EDGES SET target = "Lyon" WHERE layer = 20 AND feature = 105;
+larql> DELETE FROM EDGES WHERE layer = 20 AND feature = 106;
+larql> MERGE "other-knowledge.vindex";                -- V2 source, V3 target
+larql> SAVE PATCH "france.vlp";    -- persists; the container is untouched
+larql> COMPILE CURRENT INTO VINDEX "gpt-oss-france.v3";  -- bake: clean container
+larql> DIFF "gpt-oss-20b.v3" CURRENT;   -- logical: knowledge edges + feature slots
+larql> DIFF "gpt-oss-20b.v3" "gpt-oss-france.v3" PHYSICAL;  -- segment-level
+larql> COMPACT INTO VINDEX "gpt-oss-min.v3";  -- same meaning, cleaner storage
+```
+
+The container stays immutable on disk: edits live in a knowledge
+overlay addressed by semantic identity, the KNN key is captured from
+the plan's own execution taps, and the `.vlp` patch is the same
+logical format V2 writes — one patch applies to either backend.
+Compose-mode INSERT executes too: the FFN slot lands in the overlay
+and execution observes it through the operand-source seam, running
+V2's full install pipeline (capture, decoy-suppressed refine, balance,
+cross-fact regression) with cross-format parity gated. COMPILE/DIFF/COMPACT still refuse with a message naming the
+supported statements — a capability boundary, not a missing feature
+apology. See the spec's §4.2/§4.4 for the full contract.
+
 ## Statement Reference
 
 | Category | Statements |
 |----------|-----------|
 | Lifecycle | EXTRACT, COMPILE, DIFF, USE |
 | Browse | WALK, DESCRIBE, SELECT, EXPLAIN WALK |
-| Inference | INFER, EXPLAIN INFER |
-| Trace | TRACE (with FOR, DECOMPOSE, LAYERS, POSITIONS, SAVE) |
+| Inference | INFER (with TOP, GENERATE, ROUTE, COMPARE), EXPLAIN INFER |
+| Trace | TRACE (with FOR, DECOMPOSE, LAYERS, POSITIONS, SAVE; plain form on VINDEX3) |
 | Mutation | INSERT, DELETE, UPDATE, MERGE |
 | Patches | BEGIN PATCH, SAVE PATCH, APPLY PATCH, SHOW PATCHES, REMOVE PATCH |
 | Introspection | SHOW RELATIONS/LAYERS/FEATURES/MODELS/PATCHES, STATS |

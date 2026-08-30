@@ -54,6 +54,14 @@ message AnnounceMsg {
   // dense-only clients will send 0/0 and route via the dense path.
   uint32 expert_start = 7;  // inclusive (meaningful only when expert_count > 0)
   uint32 expert_end   = 8;  // inclusive (meaningful only when expert_count > 0)
+  // N0-router — OpenAI-serving capability. True when this server can
+  // serve complete OpenAI requests (/v1/chat/completions, /v1/completions,
+  // /v1/embeddings) by itself: full layer coverage with inference enabled
+  // (not --ffn-only / --embed-only / --no-infer and no layer/expert
+  // filter). The router only proxies OpenAI traffic to servers that set
+  // this. Backward-compatible: old servers send false (proto3 default)
+  // and are never OpenAI-routed.
+  bool serves_openai = 9;
 }
 
 message AvailableMsg {

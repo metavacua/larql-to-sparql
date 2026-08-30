@@ -152,7 +152,7 @@ The comparison literature ([decodesfuture](https://www.decodesfuture.com/article
 | AOT compilation (residual programs) | ✅ | ❌ | ❌ | ❌ |
 | WASM-in-FFN compute primitives | ✅ | ❌ | ❌ | ❌ |
 | Boundary refs (residual codec) | ✅ Phase 1–3 | ❌ | ❌ | ❌ |
-| KV cache engines (MarkovRS, UnlimitedContext, Apollo) | ✅ | ❌ | ❌ | ❌ |
+| KV cache engines (MarkovRS, WindowedCheckpoint, Apollo) | ✅ | ❌ | ❌ | ❌ |
 | Cross-arch dispatch as first-class concern | ✅ (ADR-018) | n/a | n/a | n/a |
 
 ---

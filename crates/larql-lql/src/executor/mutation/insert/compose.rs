@@ -425,11 +425,11 @@ fn compute_layer_median_norms(
 /// |      1 |      0 | no   | single input has no suppressors           |
 /// |      1 |     ≥1 | yes  | project input against decoys              |
 /// |     ≥2 |      * | yes  | peers orthogonalize among themselves      |
-fn should_refine(n_inputs: usize, n_decoys: usize) -> bool {
+pub(super) fn should_refine(n_inputs: usize, n_decoys: usize) -> bool {
     n_inputs >= 2 || (n_inputs >= 1 && n_decoys >= 1)
 }
 
-fn median_or(xs: &mut [f32], default: f32) -> f32 {
+pub(super) fn median_or(xs: &mut [f32], default: f32) -> f32 {
     if xs.is_empty() {
         return default;
     }
@@ -439,7 +439,7 @@ fn median_or(xs: &mut [f32], default: f32) -> f32 {
 
 /// L2-normalise a vector. Returns the input unchanged if its norm is
 /// effectively zero (degenerate case — embedding for an unknown token).
-fn unit_vector(v: &[f32]) -> Vec<f32> {
+pub(super) fn unit_vector(v: &[f32]) -> Vec<f32> {
     let n: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if n < 1e-8 {
         return v.to_vec();

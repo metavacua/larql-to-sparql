@@ -26,10 +26,53 @@ larql> INFER "The capital of France is" TOP 3;
   3. a                    (0.31%)
 ```
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+    - [Serve it over HTTP + gRPC](#serve-it-over-http--grpc)
+    - [Run attention locally, FFN on another machine](#run-attention-locally-ffn-on-another-machine)
+    - [MoE expert sharding — experts on CPU-only remote machines](#moe-expert-sharding--experts-on-cpu-only-remote-machines)
+    - [Publish to HuggingFace — full + slices + collections](#publish-to-huggingface--full--slices--collections)
+    - [Vindex Factory — recipe-driven builds](#vindex-factory--recipe-driven-builds)
+    - [Pull with slice awareness](#pull-with-slice-awareness)
+    - [Query via LQL](#query-via-lql)
+    - [Research / interpretability tools](#research--interpretability-tools)
+- [What is a Vindex?](#what-is-a-vindex)
+- [Architecture](#architecture)
+    - [larql-vindex](#larql-vindex)
+    - [larql-kv](#larql-kv)
+    - [larql-lql](#larql-lql)
+- [LQL Reference](#lql-reference)
+    - [Key Statements](#key-statements)
+- [Patches](#patches)
+- [Vindexfile](#vindexfile)
+- [Model Support](#model-support)
+- [Realtime speech (MOSS-TTS-Realtime)](#realtime-speech-moss-tts-realtime)
+- [Benchmarks](#benchmarks)
+    - [Vindex Operations](#vindex-operations)
+    - [Inference Engine (Gemma 3 4B, Apple Silicon M3 Max)](#inference-engine-gemma-3-4b-apple-silicon-m3-max)
+    - [MoE / grid (Gemma 4 26B A4B, M3 Max)](#moe--grid-gemma-4-26b-a4b-m3-max)
+    - [Pure MoE (GPT-OSS-20B Q6_K, M3 Max)](#pure-moe-gpt-oss-20b-q6_k-m3-max)
+    - [Load-bearing environment flags (serving & measurement)](#load-bearing-environment-flags-serving--measurement)
+    - [Dense remote-FFN (Gemma 4 31B Q4K, M3 Max, localhost)](#dense-remote-ffn-gemma-4-31b-q4k-m3-max-localhost)
+- [Residual Stream Trace](#residual-stream-trace)
+    - [Tiered Context (infinite context without KV cache)](#tiered-context-infinite-context-without-kv-cache)
+- [Mechanistic interpretability surface](#mechanistic-interpretability-surface)
+- [Documentation](#documentation)
+- [Platform Support](#platform-support)
+- [Install](#install)
+- [Building & Testing](#building--testing)
+    - [Cross-engine correctness check](#cross-engine-correctness-check)
+- [License](#license)
+
+---
+
 ## Quick Start
 
 ```bash
-# Build
+# Get the binaries — prebuilt release (see "Install" below for other platforms)
+curl -fsSL https://github.com/chrishayuk/larql/releases/latest/download/larql-x86_64-unknown-linux-gnu.tar.gz | tar xz
+# …or build from source
 cargo build --release
 
 # Pull a pre-built vindex from HuggingFace
@@ -76,7 +119,7 @@ larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --level all
 larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --quant q4k
 
 # Maximum size reduction on Q4K — drop gate_vectors.bin, rebuild from
-# interleaved_q4k.bin at load (~1.6 s cost on 4B, ~12 s on 31B)
+# interleaved_kquant.bin at load (~1.6 s cost on 4B, ~12 s on 31B)
 larql extract google/gemma-3-4b-it -o gemma3-4b.vindex \
   --quant q4k --drop-gate-vectors
 
@@ -103,7 +146,7 @@ larql convert gguf-to-vindex model.gguf -o model.vindex
 larql serve gemma3-4b.vindex --port 8080
 ```
 
-Grid traffic uses **f16 wire format** by default (50% bandwidth vs f32). Opt out with `LARQL_F16_WIRE_DISABLE=1`. Enable i8 symmetric quantised residuals (75% bandwidth, opt-in) with `LARQL_I8_WIRE=1`. Wire format is negotiated per-request via `Accept`/`Content-Type` headers — non-grid clients receive f32 unchanged.
+Grid traffic uses **f16 wire format** by default (50% bandwidth vs f32). Opt out with `LARQL_F16_WIRE_DISABLE=1`. Enable i8 symmetric quantised residuals (75% bandwidth, opt-in) with `LARQL_I8_WIRE=1`. Wire format is negotiated per-request via `Accept`/`Content-Type` headers — and the two directions are independent as of 2026-07-24 (ADR-0025): `Content-Type` declares the inbound residual format (f32/f16/i8 request encodings), `Accept` the return format, so asymmetric pairs like f16-in/i8-return are first-class. Responses can carry an opt-in server-latency trailer (`x-larql-timing: 1`), and `larql dec-bench drift` scores any wire config's bits/char fidelity against an in-run f32 baseline (0.5% gate). Non-grid clients receive f32 unchanged.
 
 **WebSocket streaming** on `WS /v1/stream`:
 ```json
@@ -267,6 +310,37 @@ Flags: `--no-full`, `--slices client,server`, `--collections model,family`,
 `--force-upload`, `--dry-run`. Requires `HF_TOKEN` or
 `~/.huggingface/token`.
 
+### Vindex Factory — recipe-driven builds
+
+[docs/vindex-factory.md](docs/vindex-factory.md) turns the above into a
+reviewable pipeline: a recipe file merged to `main` is a promise that a
+specific vindex exists on the Hub, built from a pinned upstream by a
+pinned `larql`, verified before it went public. Recipe schema,
+`build_id`, structural validation, capability manifest, card generation,
+the size/cost estimate, and the PREFLIGHT→RELEASE build driver are all
+built (`crates/larql-factory`); MIRROR and REGISTER stay external
+(§7 — a rig worker's job, not this binary's).
+
+```bash
+# Structural validation — schema shape, thresholds, no network I/O
+larql recipe validate my-recipe.yaml
+
+# The content hash that decides no-op / verify-only / rebuild
+larql recipe build-id my-recipe.yaml
+
+# Upstream size, per-output size, executor recommendation, cost band
+larql recipe estimate my-recipe.yaml
+
+# Fetch, extract, slice, verify checksums, publish private, release public
+larql recipe build my-recipe.yaml
+
+# Which architectures this larql release recognises, and what each supports
+larql capabilities
+
+# A Hub model card from a recipe + manifest + verification report
+larql card render --recipe my-recipe.yaml --manifest index.json --verification verification.json
+```
+
 ### Pull with slice awareness
 
 `larql pull` mirrors `publish` on the download side: pick a specific
@@ -343,15 +417,45 @@ gemma3-4b.vindex/
   feature_labels.json      # Probe-confirmed labels
 ```
 
+**Container generations.** `index.json`'s `version` is the sole discriminator —
+schemas 1–2 are **VINDEX2** (what `extract` writes, and what every published
+vindex is today), schema 3 is **VINDEX3**, the successor container for sparse
+models. One binary reads both; `larql show` and `larql verify` dispatch on the
+version and describe each generation in its own terms rather than flattening
+one into the other.
+
+**VINDEX3 is executable and servable; `extract` still writes VINDEX2.**
+The `larql vindex3` command family (`plan`, `encode`, `inspect`, `verify`,
+`ops`, `exec` — `larql-cli` `commands/primary/vindex3_cmd/`) plans a model
+system from HF checkpoints, encodes it into a self-contained container,
+proves source ≡ encoded, and executes the container's own program with no
+architecture registry. Whole production models — gpt-oss-20b, Gemma 4
+26B-A4B, Granite 4.1 3B/8B/30B — encode and execute byte-identically to
+their HF sources, and `larql serve` serves a V3 container over
+`/v1/completions` via the V3 runtime (see
+[`docs/vindex3-runtime.md`](docs/vindex3-runtime.md)). What has *not*
+changed: `larql extract` has no VINDEX3 path — `index.json.version` is
+still hardcoded to 2, so everything the extract pipeline below writes, and
+every published vindex today, is VINDEX2. New extractions default to
+VINDEX3 only once the ABI freezes **and** the E0 preservation matrix
+passes (§12.1). See
+[`crates/larql-vindex/docs/vindex3-format-spec.md`](crates/larql-vindex/docs/vindex3-format-spec.md)
+(container ABI) and [`docs/vindex3-format.md`](docs/vindex3-format.md)
+(model-system container spec).
+
 Three extraction levels:
 
 | Level | CLI Flag | LQL Syntax | Size (f16) | Enables |
 |-------|----------|-----------|-----------|---------|
-| Browse | `--level browse` (default) | `EXTRACT MODEL ... INTO ...` | ~3 GB | DESCRIBE, WALK, SELECT |
-| Inference | `--level inference` | `... WITH INFERENCE` | ~6 GB | + INFER |
+| Browse | `--level browse` | `EXTRACT MODEL ... INTO ...` (LQL default) | ~3 GB | DESCRIBE, WALK, SELECT |
+| Inference | `--level inference` (CLI default) | `... WITH INFERENCE` | ~6 GB | + INFER |
 | All | `--level all` | `... WITH ALL` | ~10 GB | + COMPILE |
 
-Add `--f16` to halve file sizes with negligible accuracy loss.
+Defaults differ by surface: `larql extract` defaults to `--level
+inference` (`larql-cli` `extract_index_cmd.rs`), matching the quick
+start above; a bare LQL `EXTRACT MODEL` statement defaults to browse
+(`larql-lql` `parser/lifecycle.rs`). Storage is f16 by default — pass
+`--f32` to opt out (doubles file sizes).
 
 ## Architecture
 
@@ -361,23 +465,42 @@ portable `model-*` crates carry primitives that any neural-model compiler
 
 ```
 # LARQL-specific
-larql-models      Model config, architecture traits, weight loading, quant/dequant
+larql-models          Model config, architecture traits, weight loading, quant/dequant
     ↓
-larql-vindex      Vindex lifecycle: extract, load, query, mutate, patch, save
+larql-vindex          Vindex lifecycle: extract, load, query, mutate, patch, save
     ↓
-larql-core        Graph algorithms, merge, diff
-larql-inference   Forward pass, BLAS-fused attention, Metal GPU (macOS), WalkFfn
+larql-core            Graph algorithms, merge, diff
+larql-compute         Compute backend trait + CPU kernels; GPU backends are siblings
+larql-compute-metal   Metal GPU backend (Apple Silicon, metal-rs + MSL shaders);
+                      non-Mac hosts skip the build entirely
+larql-inference       Forward pass, BLAS-fused attention, WalkFfn, V3 runtime
     ↓
-larql-kv          Pluggable KV-cache engines — 9 implementations, state-policy
-                  classified (canonical vs derivative), W10 mask cascade
+larql-kv              Pluggable KV-cache engines — 10 implementations, state-policy
+                      classified (canonical vs derivative), W10 mask cascade
     ↓
-larql-lql         LQL parser, executor, REPL, USE REMOTE client
+larql-lql             LQL parser, executor, REPL, USE REMOTE client
     ↓
-larql-server      HTTP/gRPC server: serve vindexes over the network
-larql-cli         CLI commands (extract-index, build, serve, repl, convert, hf, verify)
+larql-server          HTTP/gRPC server: serve vindexes over the network
+larql-router          Layer-sharding router for distributed larql-server deployments
+larql-router-protocol gRPC protocol types for the self-assembling grid
+larql-cli             CLI commands (extract-index, build, serve, repl, convert, hf,
+                      verify, vindex3)
+larql-factory         Vindex Factory driver: recipe schema, build_id, capabilities,
+                      card generator, build-stage driver (PREFLIGHT→RELEASE)
+larql-boundary        Confidence-gated BOUNDARY ref codec (final-layer residuals →
+                      contract-bearing protocol objects)
+larql-python          Python bindings (PyO3) for the graph engine and vindex
+larql-demos           Runnable demos of shipped capabilities (all `--example`
+                      demos live here; per-crate benches stay in their crates)
+larql-experts         Nested workspace of WASM virtual experts (wasm32-wasip1
+                      cdylibs, JSON ABI) the engine can dispatch to
 
-# Portable (no LARQL deps; extract to sibling repo later)
+# Portable (no larql-* deps; extract to sibling repo later)
 model-compute         bounded compute: native kernels (default) + wasmtime (opt-in)
+larql-vindex-spec     public vindex on-disk contract: Rust types, JSON Schema,
+                      validation thresholds
+larql-execution       execution-refusal semantics (RefusalKind) shared across the
+                      runtime crates
 ```
 
 The portable crate never imports `larql-*`. Flow is one-way: LARQL consumes
@@ -395,7 +518,7 @@ let index = VectorIndex::load_vindex(&path, &mut cb)?;
 let patched = PatchedVindex::new(index);
 
 // Query
-let hits = patched.gate_knn(layer, &query, 10);  // 0.008ms/layer
+let hits = patched.gate_knn(layer, &query, 10);  // exact BLAS gemv — ~2.6ms/layer at Gemma 3 4B shape (10240×2560)
 let trace = patched.walk(&query, &layers, 10);    // multi-layer scan
 
 // Mutate (patch overlay — base files never modified)
@@ -425,10 +548,11 @@ delta on Metal, which the per-engine bench numbers confirm.
 | `markov-rs` | residual stream | derivative | exact logits under arch contract | **98.0** |
 | `markov-rs-codec` | compressed residuals | derivative | bounded KL | **98.1** |
 | `boundary-per-layer` | per-layer codec residuals | derivative | bounded KL per-layer | **98.7** |
-| `unlimited-context` | KV (within window) + checkpoints | derivative | exact within window | 94.2 |
+| `windowed-checkpoint` | KV (within window) + checkpoints | derivative | exact within window | 94.2 |
 | `turbo-quant` | quantised K/V | canonical (destructive) | bounded KL | 85.0 |
 | `boundary-kv` | K/V + boundary frames | canonical | exact logits | composes `standard` |
 | `apollo` | boundary retrieval store | n/a (retrieval) | task-level | orthogonal |
+| `semantic-promotion` | semantic authorities over a base exact engine | policy wrapper | exact decode via base engine | composes `standard` |
 
 Gemma 3 4B Q4K, Metal, M3 Max, 50 decode tokens, W10 default-on
 (2026-05-21).
@@ -465,7 +589,7 @@ LQL parser and executor. 20+ statement types across 5 categories:
 
 ## LQL Reference
 
-See [docs/specs/lql-spec.md](docs/specs/lql-spec.md) for the full language specification and [docs/lql-guide.md](docs/lql-guide.md) for a quick start guide.
+See [crates/larql-lql/docs/spec.md](crates/larql-lql/docs/spec.md) for the full language specification and [docs/lql-guide.md](docs/lql-guide.md) for a quick start guide.
 
 ### Key Statements
 
@@ -569,17 +693,51 @@ Input formats: **safetensors** (HuggingFace), **GGUF** (llama.cpp, dequantized t
 
 | Family | Models | FFN Type |
 |--------|--------|----------|
-| Gemma | Gemma 2/3/4 (2B-31B) | Gated (GeGLU) |
+| Gemma | Gemma 2/3/4 (2B-31B) | Gated (GeGLU); Gemma 4 26B-A4B is MoE |
 | Llama | Llama 2/3 (7B-405B) | Gated (SiLU) |
 | Mistral | Mistral 7B | Gated (SiLU) |
 | Mixtral | Mixtral 8x7B, 8x22B | MoE (8 experts) |
-| Qwen | Qwen 2/2.5 (0.5B-72B) | Gated (SiLU) |
-| Phi | Phi 2/3 (2.7B-14B) | Gated |
+| Qwen | Qwen 2/2.5 (0.5B-72B) | Gated (SiLU); dense and MoE variants |
+| Granite | Granite 3B/8B/30B (dense + MoE) | Gated (SiLU); MoE variants routed |
+| OLMoE | OLMoE | MoE (Qwen3-MoE layout, experts sized from `intermediate_size`) |
 | DeepSeek | DeepSeek V2/V3 | MoE (shared + routed) |
-| GPT-OSS | GPT-OSS-120B | MoE (128 experts, MXFP4) |
+| DeepSeek-V4 | DeepSeek-V4 | MoE + MLA + MXFP4, HCA attention |
+| GPT-OSS | GPT-OSS-20B/120B | MoE (32/128 experts, MXFP4 → Q6_K lossless) |
 | GPT-2 | GPT-2 (117M-1.5B) | Standard (GELU-tanh, vindex extraction only) |
+| StarCoder2 | StarCoder2 | Standard |
+| Muse-Glimmer | Muse-Glimmer text | Gated; judged gate/QK-norm semantics |
+| BitNet | BitNet b1.58 | Gated (native-ternary inference via the larql-inference ternary path) |
+| TinyModel | TinyModel (research-scale decoder) | Gated |
+| MOSS-TTS-Realtime | 2.3B speech (RVQ audio tokens out) | Gated (SiLU) ×2 + depth transformer — see [Realtime speech](#realtime-speech-moss-tts-realtime) |
 
-Dense and full-precision MoE models support all operations (DESCRIBE, WALK, INFER). MXFP4-quantized MoE models (GPT-OSS) can be extracted and served but DESCRIBE/WALK produce noisy results due to 4-bit weight precision — use INFER for accurate knowledge queries. See [operations spec](docs/specs/vindex-operations-spec.md) for details.
+Detection is `model_type`-driven (`crates/larql-models/src/detect/mod.rs`);
+anything unrecognised — Phi included — falls to `GenericArch`, which works
+for standard Llama-shaped dense models but carries no family-specific
+semantics.
+
+Dense and full-precision MoE models support all operations (DESCRIBE, WALK, INFER). MXFP4-quantized MoE models (GPT-OSS) can be extracted and served but DESCRIBE/WALK produce noisy results due to 4-bit weight precision — use INFER for accurate knowledge queries. See [operations spec](crates/larql-vindex/docs/operations-spec.md) for details.
+
+**GPT-OSS-20B is served end to end (2026-08-10).** `larql run
+gpt-oss-20b-q4k.vindex` generates coherent harmony-format output on CPU
+(~60 ms/token) and on Metal with the identical greedy trajectory — see
+the [Pure MoE benchmark](#pure-moe-gpt-oss-20b-q6_k-m3-max) and
+[`docs/k3-funnel.md`](docs/k3-funnel.md) §4.11. The experts serve from a
+lossless MXFP4→Q6_K transcode; sliding-window + YaRN attention, per-layer
+sinks, and all four projection biases are applied on both backends.
+
+**Native MXFP4 experts are served end to end (2026-08-14).** `larql run
+<vindex> --routed-from <container> --metal` (with `LARQL_GPU_ROUTE=1`)
+composes the Q6_K spine with a VINDEX3 container's native MXFP4 expert
+banks — payloads, paired e8m0 scale streams, layout and format all owned
+by the container, admission complete-or-refuse with tamper-tested
+negative controls. Same machine, same session, paired: Q6_K **68.3
+tok/s**, native MXFP4 **77.2 tok/s** (12.95 ms/token) through the
+GPU-resident route (one command buffer per token, zero route-dependent
+host work).
+
+**GPT-OSS attention sinks (2026-07-29).** GPT-OSS attention uses a learned per-head *sink* logit that competes in the softmax and is then discarded, so attention weights over real positions deliberately sum to less than one. Until 2026-07-29 larql neither extracted nor applied it — along with all four projection biases — so 5 of 11 attention tensors per layer were silently dropped and the forward pass was systematically wrong. Both are now extracted and applied on the CPU and Metal paths, with numerical parity tests against the reference implementation. Details and the measured sink magnitudes are in [`docs/k3-funnel.md`](docs/k3-funnel.md) §4.6.
+
+**Known gap:** `larql shannon score` (and therefore `shannon verify`) uses a dense-only FFN backend, so it cannot score **any** MoE model, GPT-OSS included. Cross-engine bits/char verification is unavailable for MoE architectures until the scorer routes its FFN by architecture — see [`docs/k3-funnel.md`](docs/k3-funnel.md) §4.6.8.
 
 GPT-2 status: GGUF conversion (`larql convert gguf-to-vindex`) lands canonical
 weights — the loader transparently re-orients non-standard FFN layouts, splits
@@ -589,18 +747,77 @@ inference still requires wiring `position_embed` into the residual init and
 the LayerNorm-with-bias / FFN-with-bias paths through the run-time stack;
 extraction-only flows (DESCRIBE, KNN, vindex publish) work today.
 
+## Realtime speech (MOSS-TTS-Realtime)
+
+LARQL executes the generative half of
+[MOSS-TTS-Realtime](https://github.com/OpenMOSS/MOSS-TTS) — text tokens
+in, 16-codebook RVQ audio tokens out — as an ordinary model in the same
+engine, **with per-token parity against the reference implementation**
+(the full greedy 138-frame fixture replays token-exactly; the sampler
+replicates the reference's non-standard top-p literally). The codec
+stays external: LARQL emits audio tokens, `--codec-cmd` turns them into
+a WAV.
+
+```bash
+# Speak, cloning the voice in aru-12.tokens (codec-encoded reference audio)
+larql run <moss-tts-realtime-dir> --speak "Good evening. All systems are normal." \
+  --voice aru-12.tokens --q4 \
+  --codec-cmd 'python moss_codec_cli.py {tokens} {wav}' --play
+```
+
+Measured on M3 Max CPU (Q4_K weights, quiet machine, interleaved runs —
+see `docs/tts-funnel.md` for the full gate log and methodology):
+
+| Metric | Value |
+|---|---|
+| Steady-state generation | ~31 ms/frame p50 vs the 80 ms frame budget (**~1.9× realtime**) |
+| First-turn TTFA | ~1.25 s (prefill-dominated; `<500 ms` gate in progress) |
+| Streaming envelope | 0 ms minimum pre-buffer, zero cold-start underruns |
+| Incremental ≡ batch | token-identical at every text chunking (gated in CI + on-checkpoint) |
+
+The incremental session (`MossSession`) implements the reference's
+push-text protocol — text ids in as they become available, frames out as
+they are earned — so an LLM's token stream and a typed prompt are the
+same input. Honest scope note: these are speech-**token** generation
+numbers; end-to-end audio (incremental codec + PCM ring + device
+output) is tracked separately on the roadmap.
+
+Speech also drove a general engine rule now used across LARQL
+(`ROADMAP.md`, "physical planning"): the same logical operator gets
+different physical plans per execution phase — packed Q4K·Q8K integer
+matvec for single-row decode, dequant-once + BLAS GEMM and batched
+attention for multi-row prefill — selected by measured shape, not
+tensor format. All of it behind the same token-exact parity oracle.
+
 ## Benchmarks
 
 ### Vindex Operations
 
+Criterion (`cargo bench -p larql-vindex --bench vindex_ops`), M3 Max,
+synthetic data. All KNN/walk rows are the **exact brute-force BLAS
+gemv** — the walk hot path never consults HNSW (`enable_hnsw` only
+affects gate-KNN serving consumers such as the browse `walk()` and
+server KNN endpoints; pinned by `gate_walk_ignores_hnsw_toggle`).
+An earlier revision of this table quoted `0.008 ms`/layer and a
+`0.3 ms` 34-layer walk — those came from the reduced 1024×256
+synthetic shape in the pre-2026-04-05 `vindex_bench` example
+("reduced from 10240/2560/34 for bench speed"), not the production
+shape below.
+
 | Operation | Latency |
 |---|---|
-| Gate KNN (per layer) | 0.008ms |
-| Walk (34 layers) | 0.3ms |
-| Feature lookup | <1ns |
-| Save gates (8 MB) | 1.1ms |
-| Load vindex | 8ms |
-| Mutate (meta + gate) | 617ns |
+| Gate KNN, per layer (1024f × 256h synthetic) | 22.7 µs |
+| Gate KNN, per layer (10240f × 2560h — Gemma 3 4B shape) | 2.64 ms |
+| Walk (8L × 1024f × 256h synthetic) | 216 µs |
+| Walk (8L × 10240f × 2560h — Gemma band) | 21.2 ms |
+| Feature meta lookup | ~245 ns |
+| Save gates (8 MB) | 2.0 ms |
+| Load vindex (mmap) | 261 µs |
+| Mutate (meta + gate) | 301 ns |
+
+Full tables (per-shape KNN, Q4/Metal, HNSW-vs-brute, W2 feature-major
+down): [crates/larql-vindex/README.md](crates/larql-vindex/README.md)
+and [crates/larql-vindex/PERFORMANCE.md](crates/larql-vindex/PERFORMANCE.md).
 
 ### Inference Engine (Gemma 3 4B, Apple Silicon M3 Max)
 
@@ -625,6 +842,8 @@ vs ollama gemma3:4b on the same machine: ~103 tok/s steady → **gap 1.17×**, w
 
 **CPU vs llama.cpp** (reconciled 2026-06-02, M3 Max, 8 threads, warm): larql **26.4** (StandardEngine) / 23.5 (legacy `bench --cpu`) vs **llama.cpp `-ngl 0` 43.0** tok/s → **gap ~1.6–1.8×**. The gap is per-core kernel quality — both attention and FFN already run the int8 Q8_K SDOT kernel; closing it is C12 (hand-asm; an opt-in `LARQL_Q4K_ASM=1` v1 lands +~4% isolated). `larql bench --cpu` now reports both the legacy and production-StandardEngine rows; `--ollama-cpu` forces a true CPU ollama baseline (default `--ollama` runs on Metal GPU). The earlier 1.5×/1.9× spread was two measurement confounds (path mismatch + an unwarmed-ollama artifact), not a regression — see `bench/baselines/c10_gemma3-4b_cpu_reconciled.json`.
 
+**Memory-bandwidth roofline** (measured 2026-07-29, M3 Max, AC, quiet — [`docs/diagnoses/memory-bandwidth-roofline.md`](docs/diagnoses/memory-bandwidth-roofline.md)): attainable **read** bandwidth is **127 GB/s on the CPU cluster** (saturating at *two* threads) vs **367 GB/s on the GPU**, against a 400 GB/s SoC spec — so the CPU reaches 31% of the chip's bandwidth and the GPU 92%, a **2.9× structural advantage** that no CPU kernel can close. Against that denominator the production CPU matvec runs at **50–91% of attainable** (the long-quoted "~47 GB/s effective" came from the bench's rayon arm, not the shipping path — the same shape is **98.7 GB/s** through `q4k_q8k_matvec_parallel`), and the Metal kernels at 74–85%. Practical reading: **CPU bandwidth work is essentially finished**; the bandwidth-bound half belongs on the GPU. Probe: `cargo run --release -p larql-compute --example membw_probe` (read its **spread** column before its GB/s column — a contended machine reports nonsense). KV-cache traffic was priced on the same ledger and came out small: the `sliding_window` caps 25 of 30 layers on the 26B, so f16 KV would buy only 3–8% of a token at chat-typical context and cannot explain the long-context decay — it is a client-density lever, not a speed one.
+
 **CPU prefill** (2026-06-22): the per-layer f32 dequant — long the dominant prefill cost (~2.7 s / ~2 tok/s on the 5-token prompt) — is gone. Q/K/V/O **and** gate/up/down now project straight from the Q4_K/Q6_K vindex bytes via amortised `q4k_matmul` / `q6k_matmul` (the Q6_K twin handles the default Q6_K `v_proj` / `down_proj`) with a hand-written aarch64 NEON inner dot. Gemma 3 4B Q4_K CPU prefill: **2746 ms → 233 ms (11.8×)**, closing the gap to llama.cpp `pp5` from ~55× to **~3×**; the NEON `q4k_matmul` at seq=5 beats f32 AMX sgemm while still skipping the dequant. See `bench/baselines/cpu/COMPARISON.md`.
 
 **Cross-arch coverage (2026-05-09)**: Gemma 3, Gemma 4 31B dense, Llama 2 7B, Mistral 7B all dispatch correctly through Metal. Gemma 4 E2B currently falls back to CPU (Per-Layer Embeddings not yet in Metal — ROADMAP D-METAL-PLE). See [crates/larql-compute/docs/architecture-shader-map.md](crates/larql-compute/docs/architecture-shader-map.md) for the per-architecture shader dispatch table.
@@ -643,12 +862,88 @@ Walk is **faster than dense** (517ms vs 535ms). GPU Q4K decode is **23× faster*
 
 | Topology | tok/s | Notes |
 |---|---|---|
-| **Local Metal MoE** | **18.9** | Measured 2026-05-04; MoE experts on CPU NEON. |
-| 1-shard CPU/grid (loopback) | 18.3 | NEON Q4_K matvec on shard server, gRPC fan-in |
+| **Local Metal MoE** | **18.9** → **23.6** | 2026-05-04 → re-baselined 2026-07-23 (KV append-in-place + spin-pool landings) |
+| Remote-FFN loopback (streaming) | 27.8–28.6 | Re-baselined 2026-07-23 (DEC-0 arm M); f32/f16/i8 wire, ~34% of step in FFN round-trips |
+| 1-shard CPU/grid (loopback) | 18.3 | 2026-05-04; NEON Q4_K matvec on shard server, gRPC fan-in |
 | 2-shard CPU/grid (loopback) | 17.3 | Parallel collect + parallel fire (`std::thread::scope` + `rayon::par_iter`) |
 | `LARQL_SKIP_MOE=1` ceiling | 56.8 | Attention + dense FFN only; theoretical max |
 
+**DEC-0 arm M (2026-07-23, `docs/dec-funnel.md` §3)**: the loopback batch curve is measured — expert-tier step time is sub-linear through batch 32 (×1.6–1.8 on batch dispatch), aggregate tier throughput ~1,050 tok/s at B64 (~25× single-stream), movement ratio 1.2–1.9 × 10⁻³. Run records under `bench/dec0/`; system of record is the `dec0-loopback-mac` experiment in the registry.
+
 **Wire format (2026-05-07)**: grid traffic uses f16 by default (50% bandwidth). Set `LARQL_I8_WIRE=1` for i8 symmetric quantisation (75% bandwidth, opt-in). Both are architecture-agnostic — `hidden_size` is read from vindex config at runtime. Per-layer latency is tracked via `HeartbeatMsg.layer_stats` (EMA + p99); the router uses it to route replicated layers to the lowest-latency server. Use `make bench-wire` to measure codec throughput and `make bench-routing` for routing hot-path.
+
+### Pure MoE (GPT-OSS-20B Q6_K, M3 Max)
+
+`larql run gpt-oss-20b-q4k.vindex --metal` — single stream, greedy, short
+context; experts are the lossless MXFP4→Q6_K transcode (6.56 bpw). Metal
+produces the **identical greedy trajectory to CPU** — parity re-verified at
+every rung of this ladder (2026-08-10, `docs/k3-funnel.md` §4.11):
+
+| ms/token | tok/s | Rung |
+|---:|---:|---|
+| 97.8 | 10.2 | staged expert copies — top-4 × ~22 MB × 24 layers ≈ 2.1 GB/token of CPU memcpy |
+| 25.9 | 38.7 | **zero-copy expert regions** — each layer mmap bound once (`newBufferWithBytesNoCopy`), experts addressed as byte offsets |
+| 22.7 | 44.0 | **grouped expert kernels** — all selected experts in one 2-D dispatch (η 0.64→0.90) |
+| 22.6 | — | **fused attention** (no-QK-norm + QKV biases in `attn_fused`): attention GPU 8→3.3 ms, wall unmoved — the sync structure was the term |
+| 16.7 | **59.8** | **merged command buffers** — GPU MoE combine; a layer's experts + the next layer's attention share one CB (one wait/layer) |
+| 14.6 | 68.3 | **GPU-resident routing** (`LARQL_GPU_ROUTE=1`) — router + top-k + expert dispatch as GPU dataflow; **one command buffer per token**, witness counters prove zero route-dependent host work |
+| 13.4 | 74.6 | **native MXFP4 expert banks** (`--routed-from` a VINDEX3 container) — 4.25 bpw experts replace the 6.56 bpw Q6_K transcode; expert reads drop 1 959 → 1 269 MB/token |
+| 12.95 | **77.2** | **vectorised MXFP4 kernel** (`uint4` group loads; arm `a2`, the default) — the three rows above are one paired same-session A/B/A ladder (2026-08-14) |
+
+CPU decode on the same vindex: ~60 ms/token (15-17 tok/s). Comparison
+framing: native-MXFP4 engines (oMLX, ~4.25 bpw experts) report ~83-90 tok/s
+on this class of machine at 1k-4k context. At the time of this ladder
+(2026-08-14) the comparison was **77.2 vs ~83** — a ~0.9 ms/token gap,
+fully attributed (~1.09 ms of lm_head Q4_K matvec at the bandwidth
+ceiling, ~0.5 ms of command-buffer boundary). The VINDEX3 decode path has
+since closed and passed it — see the table below. Kernel-level
+attribution for the MXFP4 rungs: measured grouped-kernel bandwidth
+predicts the expert-read delta within 0.1 ms of the e2e number, so
+nothing is hiding in integration.
+
+### VINDEX3 decode (stage-profiled, M3 Max, 2026-08-20)
+
+`larql vindex3 exec --generate N` through the Metal lowering, with the
+stage-level GPU ledger (`larql-compute-metal` `lowering/profile.rs`,
+commit `d053ac52`). Same greedy ids on every arm; levers priced per stage
+against the byte floor (bytes / 367 GB/s):
+
+| Model | Before (tok/s) | After (tok/s) | Levers |
+|---|---:|---:|---|
+| gpt-oss-20b | 91 | **106** | encode-ahead + NVFP4 QKV/gate-up fusion |
+| Granite 4.1 3B | 97 | **114** | same |
+| Gemma 4 26B-A4B | 62 | **74** | same + `rms_norm_multi3` |
+| Glimmer 30B | 17.8 | **20.1** | same |
+
+V3 meets or beats V2 on every model where both exist (gpt-oss 91-106 vs
+83-93; Gemma 4 26B-A4B 62-74 vs ~19-23.6 on the older MoE path above).
+The residual over the byte floor is roughly constant across
+representations — per-kernel fixed cost, not bytes — which is what the
+per-stage ledger exists to attribute.
+
+### Load-bearing environment flags (serving & measurement)
+
+Every env var is `LARQL_`-prefixed (canonical since 2026-07-22 — the historical
+unprefixed `SKIP_MOE` / `SKIP_OUTER_NORM` / `DECODE_DEBUG` still work as loud
+deprecated aliases). `larql-server` logs the kernel class **and** the decode
+flag state at startup, so no benchmark number is recorded against unlogged
+flag state. The ones that change what a measured number means:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `LARQL_SKIP_MOE=1` | off | Bypass MoE entirely (the ceiling-arm flag above) — local AND grid paths |
+| `LARQL_GPU_ROUTE=1` | off | GPU-resident MoE routing (one CB/token). Off, decode falls back to the legacy CPU-routed path — a healthy-looking run at ~2/3 the speed, so any recorded MoE number must state this flag |
+| `LARQL_MXFP4_ARM=<a\|a2\|b\|c\|d>` | `a2` | MXFP4 grouped-expert kernel arm. `a2` (vectorised split, exact) is the default and demotes itself to `a` per layer bank when payload offsets are not 16-byte aligned — loudly, never silently |
+| `LARQL_Q4K_DIRECT_ATTN` / `_ATTN_INT8` / `_LM_HEAD` / `_DIRECT_FFN` / `_Q4K_ASM` / `_SPIN_POOL` | **on** (`=0` opts out) | CPU decode fast-path stages; A/B against the f32 path |
+| `LARQL_COMPUTE_CONCURRENCY=N` | auto (physical cores) | Expert-server batch compute parallelism (`layer_batch`) — load-bearing for tier throughput |
+| `LARQL_DISABLE_Q8K_WIRE=1` | off | Fall back from the Q8K predispatch wire to f32/f16 |
+| `LARQL_I8_WIRE=1` | off | i8 wire arm (also required server-side for dec-bench's i8 sweep arm) |
+| `LARQL_MOE_TOP_K=N` | arch value | Override MoE top-k on the grid — changes routing, not just speed |
+| `LARQL_SKIP_OUTER_NORM=1` | off | Debug-only outer-norm bypass — corrupts output; never in a recorded run |
+
+Diagnostics (`LARQL_*_TIMING`, `LARQL_MOE_DEBUG`, `LARQL_DECODE_DEBUG`, …) print
+to stderr and do not change results. The full inventory lives in
+`docs/audits/dec-readiness-review-2026-07-22.md` §5.
 
 ### Dense remote-FFN (Gemma 4 31B Q4K, M3 Max, localhost)
 
@@ -771,26 +1066,32 @@ trade is the right one.
 End-to-end walkthrough on synthetic weights (no vindex required):
 
 ```bash
-cargo run --release -p larql-inference --example mech_interp_demo
+cargo run --release -p larql-demos --example mech_interp_demo
 ```
 
-The full surface is documented in `crates/larql-inference/ROADMAP.md` §
+The full surface is documented in [crates/larql-inference/ROADMAP.md](crates/larql-inference/ROADMAP.md) §
 "P0: Mechanistic hooks (lazarus parity)".
 
 ## Documentation
 
 | Doc | Description |
 |---|---|
-| [docs/specs/lql-spec.md](docs/specs/lql-spec.md) | LQL language specification (v0.3) |
-| [docs/specs/vindex-format-spec.md](docs/specs/vindex-format-spec.md) | Vindex file format specification (v0.3, ~98% implemented) |
-| [docs/specs/vindex-operations-spec.md](docs/specs/vindex-operations-spec.md) | Vindex operations, API, patches (~98% implemented) |
-| [docs/specs/vindex-ecosystem-spec.md](docs/specs/vindex-ecosystem-spec.md) | Distributed hosting, HuggingFace, Vindexfile (~85% implemented) |
+| [crates/larql-lql/docs/spec.md](crates/larql-lql/docs/spec.md) | LQL language specification (v0.4) |
+| [crates/larql-vindex/docs/format-spec.md](crates/larql-vindex/docs/format-spec.md) | Vindex file format specification (v0.4, ~98% implemented) |
+| [crates/larql-vindex/docs/vindex3-format-spec.md](crates/larql-vindex/docs/vindex3-format-spec.md) | Vindex3 container ABI (`larql-vindex` side — bytes, sections, admission) |
+| [docs/vindex3-format.md](docs/vindex3-format.md) | Vindex3 model-system container spec — the actively updated spec (plan/encode/verify semantics); the ABI doc above governs the on-disk bytes |
+| [docs/vindex3-runtime.md](docs/vindex3-runtime.md) | Vindex3 runtime stack — `Vindex3Runtime`, `LogitsSession`, the KV seam, and V3 serving over `/v1/completions` |
+| [crates/larql-vindex/docs/operations-spec.md](crates/larql-vindex/docs/operations-spec.md) | Vindex operations, API, patches (~98% implemented) |
+| [crates/larql-vindex/docs/ecosystem-spec.md](crates/larql-vindex/docs/ecosystem-spec.md) | Distributed hosting, HuggingFace, Vindexfile (~85% implemented) |
 | [crates/larql-vindex-spec/SPEC.md](crates/larql-vindex-spec/SPEC.md) | Vindex v1 public contract — manifest schema, sharding rule, validation thresholds, model card tags |
 | [crates/larql-vindex-spec/schema/vindex-v1.schema.json](crates/larql-vindex-spec/schema/vindex-v1.schema.json) | JSON Schema 2020-12 mirror of the v1 manifest |
+| [docs/vindex-factory.md](docs/vindex-factory.md) | Vindex Factory — recipe-driven, verified, remote-executed vindex builds; `larql-factory` crate (recipe schema, `build_id`, validator, capability manifest, card generator, PREFLIGHT→RELEASE build driver) |
+| [docs/model-publishing.md](docs/model-publishing.md) | Republishing models — why the 2026-08 recovery could not use the Vindex Factory, what that cost, the affected-vindex audit rule, and the recipes that need to exist so the next one is `larql recipe build` |
+| [crates/larql-factory/README.md](crates/larql-factory/README.md) | `larql-factory` crate reference — module layout, CLI usage, what's not built yet |
 | [docs/lql-guide.md](docs/lql-guide.md) | LQL quick start guide |
 | [docs/cli.md](docs/cli.md) | CLI reference |
 | [docs/inference-engine.md](docs/inference-engine.md) | Inference engine — BLAS-fused attention, Metal GPU, auto-calibration |
-| [crates/larql-kv/README.md](crates/larql-kv/README.md) | **KV engines** — 9 pluggable implementations, state-policy classified, W10 mask cascade |
+| [crates/larql-kv/README.md](crates/larql-kv/README.md) | **KV engines** — 10 pluggable implementations, state-policy classified, W10 mask cascade |
 | [crates/larql-kv/docs/state-policy.md](crates/larql-kv/docs/state-policy.md) | **State Policy** — `(canonical_state, derivative_state, correctness_contract)` framing; why the K/V slot choice predicts perf |
 | [crates/larql-kv/PERFORMANCE.md](crates/larql-kv/PERFORMANCE.md) | KV engine bench protocol, W10 default-on result (2026-05-21), per-engine perf decomposition |
 | [crates/larql-inference/docs/specs/kv-engine-unification.md](crates/larql-inference/docs/specs/kv-engine-unification.md) | KV engine unification — single `KvEngine` trait dispatch through `larql run` / `walk` / `bench` |
@@ -798,13 +1099,39 @@ The full surface is documented in `crates/larql-inference/ROADMAP.md` §
 | [docs/walk-boundary-sweep.md](docs/walk-boundary-sweep.md) | Walk boundary sweep — correctness proof across all layer boundaries |
 | [docs/residual-trace.md](docs/residual-trace.md) | Residual stream trace — decomposition, storage, tiered context |
 | [docs/mech-interp.md](docs/mech-interp.md) | Mechanistic interp surface — hooks, lens, vocab proj, patching, KV surgery (Rust + Python) |
-| [docs/specs/trace-format-spec.md](docs/specs/trace-format-spec.md) | Trace file format specification (.bin, .bndx, .ctxt) |
+| [crates/larql-inference/docs/trace-format.md](crates/larql-inference/docs/trace-format.md) | Trace file format specification (.bin, .bndx, .ctxt) |
 | [docs/adr/0009-wire-format-evolution.md](docs/adr/0009-wire-format-evolution.md) | Wire format: f16 default, i8 opt-in, Accept/Content-Type negotiation |
 | [docs/adr/0010-quic-grid-transport.md](docs/adr/0010-quic-grid-transport.md) | QUIC transport for grid (planned) |
 | [docs/adr/0011-grid-self-balancing.md](docs/adr/0011-grid-self-balancing.md) | Grid Mode B + dynamic rebalancing (planned) |
 | [docs/adr/0012-grid-benchmarking.md](docs/adr/0012-grid-benchmarking.md) | Grid benchmarking infrastructure — criterion + CLI + CI gate |
 | [docs/diagnoses/shannon-cross-engine-divergence.md](docs/diagnoses/shannon-cross-engine-divergence.md) | Forward-pass correctness diagnostic via `larql shannon verify` — three-engine bits/char comparison against HF/PyTorch and MLX, plus the three bugs it surfaced |
 | [scripts/README_shannon_score.md](scripts/README_shannon_score.md) | Cross-engine Shannon scorers — `larql shannon verify` + standalone scripts for MLX and HF |
+| [docs/audits/dec-readiness-review-2026-07-22.md](docs/audits/dec-readiness-review-2026-07-22.md) | DEC-readiness review of the server/router/remote-FFN data plane ahead of the DEC funnel programme — silent-corruption + security findings, remediation tracked in ROADMAP |
+| [docs/dec-funnel.md](docs/dec-funnel.md) | **DEC funnel** — decoupled attention/weights serving at batch and frontier scale; the experiment ladder, the claims table, and standing rules R0–R10 (numbers that don't travel between conventions) |
+| [docs/k3-funnel.md](docs/k3-funnel.md) | **K3 adapter ladder** — GPT-OSS-20B → Kimi Linear → K3, the three rungs that get a 2.8T hybrid-linear MoE onto the engine |
+| [docs/quant-obs.md](docs/quant-obs.md) | **Quant-Obs** — observer-metric ladder for quantisation sensitivity |
+| [docs/vindex3-experiments.md](docs/vindex3-experiments.md) | Pre-registered VINDEX3 experimental programme (the V2-0..V2-4 gates) |
+| [docs/lyrw-v2.md](docs/lyrw-v2.md) | LYRW v2 — the K3 routed-layer physical-layout gate |
+| [docs/kv-residency-contract.md](docs/kv-residency-contract.md) | The KV residency contract — window vs storage vs residency, disentangled |
+| [docs/kv-attention-scaling.md](docs/kv-attention-scaling.md) | KV attention scaling — measurement schema + run-hygiene rules |
+| [docs/metal-kernel-capabilities.md](docs/metal-kernel-capabilities.md) | Metal kernel capability table (Phase B ground-truth audit) |
+| [docs/ffn/README.md](docs/ffn/README.md) | FFN backend family — WeightFfn, SparseFfn, WalkFfn, distributed sharding |
+| [docs/ffn-cache.md](docs/ffn-cache.md) | FFN activation cache — skip recomputation of repeated feature sets |
+| [docs/multi-modal.md](docs/multi-modal.md) | Multi-modal support — Phase 0–2 shipped, phases 3–6 design-only |
+| [docs/virtual-experts-dispatch.md](docs/virtual-experts-dispatch.md) | Virtual experts — bounded routing into typed, sandboxed WASM compute units |
+| [docs/fleet-routing-extensions.md](docs/fleet-routing-extensions.md) | Fleet routing extensions FR1–FR4 — spec + frozen pre-registrations |
+| [docs/authority-control-plane.md](docs/authority-control-plane.md) | Authority control plane (EXP-26..38) — layer-mechanism branch closed |
+| [docs/dec-funnel-v0.4.md](docs/dec-funnel-v0.4.md) | DEC funnel v0.4.1 — superseded by docs/dec-funnel.md |
+| [docs/dec-funnel-v0.2.md](docs/dec-funnel-v0.2.md) | DEC funnel v0.2 — archived; control plane and gates inherited by reference |
+| [docs/training-free-insert.md](docs/training-free-insert.md) | Training-free knowledge insertion — residual capture + feature writes |
+| [docs/weight-extraction.md](docs/weight-extraction.md) | Weight extraction pipeline — model weights → vindex, no bulk forward passes |
+| [docs/circuit-types.md](docs/circuit-types.md) | Circuit type analysis — gate/down cosine classifies feature roles |
+| [docs/confidence.md](docs/confidence.md) | Confidence scoring for query results |
+| [docs/fhg.md](docs/fhg.md) | FHG — Fourier heuristic graph programme (behavioural, model-agnostic) |
+| [docs/knowledge-pipeline.md](docs/knowledge-pipeline.md) | Stub — placeholder for the knowledge pipeline spec |
+
+The full index, including docs not tabled here, is
+[docs/README.md](docs/README.md).
 
 ## Platform Support
 
@@ -815,6 +1142,34 @@ The full surface is documented in `crates/larql-inference/ROADMAP.md` §
 | Windows arm64 / x86_64 | ✓ | — (CPU fallback) | OpenBLAS |
 
 macOS gets Metal GPU acceleration. Linux and Windows run the same CPU path (BLAS-fused attention + mmap walk FFN). All platforms require OpenBLAS on Linux/Windows — install via your system package manager (`apt install libopenblas-dev`, `vcpkg install openblas`).
+
+## Install
+
+Tagged releases carry prebuilt `larql` + `larql-server` binaries for the three
+platforms CI validates ([ADR-0026](docs/adr/0026-tagged-release-binaries.md)).
+Each archive holds both binaries under a triple-named directory.
+
+| Platform | Asset |
+|---|---|
+| macOS arm64 | `larql-aarch64-apple-darwin.tar.gz` |
+| Linux x86_64 | `larql-x86_64-unknown-linux-gnu.tar.gz` |
+| Windows x86_64 | `larql-x86_64-pc-windows-msvc.zip` |
+
+```bash
+V=v0.2.0   # or use /releases/latest/download/… to track the newest
+curl -fsSL "https://github.com/chrishayuk/larql/releases/download/$V/larql-aarch64-apple-darwin.tar.gz" | tar xz
+./larql-aarch64-apple-darwin/larql --version
+```
+
+These are build artifacts versioned by tag — **not** a crates.io release and no
+API-stability commitment. The crates.io entries under the `larql*` names are
+`0.0.0` placeholders held to prevent squatting; `cargo install larql` will not
+give you a working binary.
+
+Prefer these over a source build on any rented or ephemeral host: a cold
+`cargo build --release` costs 20–40 minutes, and on a GPU-provisioned box that
+is pure CPU work with the GPU idle. The DEC stage drivers enforce this via
+`scripts/lib/larql-binaries.sh`.
 
 ## Building & Testing
 
@@ -838,40 +1193,40 @@ make larql-vindex-bench-test             # cargo test -p larql-vindex --benches
 make larql-vindex-coverage-summary       # aggregate + per-file coverage ratchet
 make larql-vindex-coverage-html          # HTML report plus the same policy gate
 
-# Inference engine examples
-cargo run --release -p larql-inference --example attention_demo    # fused attention demo
-cargo run --release -p larql-inference --example mech_interp_demo  # capture / lens / ablate / steer / patch (synthetic — no vindex)
+# Inference engine examples (demos live in `larql-demos`, benches in `larql-inference`)
+cargo run --release -p larql-demos --example attention_demo        # fused attention demo
+cargo run --release -p larql-demos --example mech_interp_demo      # capture / lens / ablate / steer / patch (synthetic — no vindex)
 cargo run --release -p larql-inference --example bench_attention   # attention benchmarks
-cargo run --release -p larql-inference --example backend_demo --features gpu   # backend demo
+cargo run --release -p larql-demos --example backend_demo --features gpu       # backend demo
 cargo run --release -p larql-inference --example bench_backend --features gpu  # backend benchmarks
 cargo run --release -p larql-inference --example bench_inference   # full inference benchmarks
 
 # Vindex tools (build once, enables mmap walk)
-cargo run --release -p larql-vindex --example convert_gates_f32 -- path/to/vindex   # f16→f32 gate vectors
+cargo run --release -p larql-vindex --example build_convert_gates_f32 -- path/to/vindex   # f16→f32 gate vectors
 cargo run --release -p larql-vindex --example build_down_features -- path/to/vindex  # feature-major down vectors
 cargo run --release -p larql-vindex --example build_up_features -- path/to/vindex    # feature-major up vectors
 
 # Server (walk inference over HTTP)
 cargo run --release -p larql-server -- path/to/vindex --port 8080
-cargo run -p larql-server --example server_demo             # synthetic HTTP surface demo
-cargo run -p larql-server --example embed_demo              # synthetic embed/logits/token demo
+cargo run -p larql-demos --example server_demo              # synthetic HTTP surface demo
+cargo run -p larql-demos --example embed_demo               # synthetic embed/logits/token demo
 cargo run --release -p larql-server --example server_bench  # synthetic server operation benchmark
 cargo run --release -p larql-server --example bench_embed_server -- path/to/vindex
 cargo test -p larql-router                                  # static router + grid route-table checks
 
-# Vindex and LQL demos (synthetic — run in CI)
-cargo run -p larql-vindex --example demo_features                    # vindex feature showcase
-cargo run --release -p larql-vindex --example mmap_demo              # mmap RAM behaviour + scaling table
-cargo run --release -p larql-vindex --example q4k_demo               # streaming Q4_K: size ratio, manifests, dequant round-trip
-cargo run --release -p larql-vindex --example demo_memit_solve       # MEMIT decomposition + MemitStore round-trip
-cargo run -p larql-lql --example parser_demo                         # parser demo (24/24 statements)
-cargo run -p larql-lql --example lql_demo                            # LQL spec compliance (61/61)
-cargo run --release -p larql-lql --example compact_demo              # LSM storage tier walkthrough
+# Vindex and LQL demos (synthetic — run in CI; all demos live in `larql-demos`)
+cargo run -p larql-demos --example demo_features                     # vindex feature showcase
+cargo run --release -p larql-demos --example mmap_demo               # mmap RAM behaviour + scaling table
+cargo run --release -p larql-demos --example q4k_demo                # streaming Q4_K: size ratio, manifests, dequant round-trip
+cargo run --release -p larql-demos --example demo_memit_solve        # MEMIT decomposition + MemitStore round-trip
+cargo run -p larql-demos --example parser_demo                       # parser demo (24/24 statements)
+cargo run -p larql-demos --example lql_demo                          # LQL spec compliance (61/61)
+cargo run --release -p larql-demos --example compact_demo            # LSM storage tier walkthrough
 
 # Model-dependent demos (require real vindex, skip gracefully otherwise)
-cargo run --release -p larql-lql --example compile_demo              # end-to-end COMPILE INTO VINDEX on real Gemma 4B
-cargo run --release -p larql-lql --example refine_demo               # 10-fact INSERT + COMPILE (exp 14 reproduction, 10/10 retrieval)
-cargo run --release -p larql-lql --example trace_demo                # TRACE residual decomposition on real Gemma 4B
+cargo run --release -p larql-demos --example compile_demo            # end-to-end COMPILE INTO VINDEX on real Gemma 4B
+cargo run --release -p larql-demos --example refine_demo             # 10-fact INSERT + COMPILE (exp 14 reproduction, 10/10 retrieval)
+cargo run --release -p larql-demos --example trace_demo              # TRACE residual decomposition on real Gemma 4B
 
 # Criterion benches (use --quick for a fast sweep, omit for full sample sizes)
 cargo bench -p larql-lql    --bench parser               # parse_single × 18 + parse_batch
@@ -883,7 +1238,7 @@ cargo bench -p larql-vindex --bench vindex_scaling       # production-dim KNN (G
 cargo bench -p larql-vindex --bench memit_solve          # ridge decomposition throughput
 cargo bench -p larql-vindex --bench extract_throughput   # streaming extract: f32 vs Q4K write-path
 cargo bench -p larql-vindex --bench q4k_vs_f32           # per-layer attn retrieval: f32 memcpy vs Q4K dequant
-cargo bench -p larql-compute --bench matmul              # CPU/Metal matmul backends
+cargo bench -p larql-compute --bench linalg              # CPU/Metal linalg (matmul) backends
 cargo bench -p larql-inference --bench wire_codec        # f32/f16/i8 encode+decode throughput (MB/s)
 cargo bench -p larql-router --bench routing              # route/heartbeat/rebuild hot-path (ns/op)
 make bench-all                                           # all of the above in one shot

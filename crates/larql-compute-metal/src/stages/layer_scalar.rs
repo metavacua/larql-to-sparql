@@ -91,7 +91,10 @@ mod tests {
         encode(enc, &pipeline, &h_buf, seq_len, hidden, scalar);
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/stages/layer_scalar.rs:94",
+        );
 
         let out_ptr = h_buf.contents() as *const f32;
         let metal_out: Vec<f32> =
@@ -136,7 +139,10 @@ mod tests {
         encode(enc, &pipeline, &h_buf, 1, hidden, 0.0);
         enc.end_encoding();
         cmd.commit();
-        cmd.wait_until_completed();
+        let _ = crate::cb_status::wait_checked(
+            cmd,
+            "crates/larql-compute-metal/src/stages/layer_scalar.rs:139",
+        );
 
         let out_ptr = h_buf.contents() as *const f32;
         let out: Vec<f32> = unsafe { std::slice::from_raw_parts(out_ptr, hidden).to_vec() };

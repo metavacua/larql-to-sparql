@@ -509,6 +509,8 @@ fn make_test_weights() -> larql_inference::ModelWeights {
         skipped_tensors: Vec::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
+        per_layer_ffn_format: Default::default(),
+        per_layer_ffn_arrangement: Default::default(),
         embed,
         lm_head,
         position_embed: None,
@@ -1040,6 +1042,7 @@ fn make_full_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     };
 
     let mut config = VindexConfig {
@@ -1200,6 +1203,8 @@ fn make_large_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         packed_mmaps: HashMap::new(),
         skipped_tensors: Vec::new(),
         packed_byte_ranges: HashMap::new(),
+        per_layer_ffn_format: Default::default(),
+        per_layer_ffn_arrangement: Default::default(),
         embed: embed.clone(),
         lm_head,
         position_embed: None,
@@ -1270,6 +1275,7 @@ fn make_large_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     };
 
     let mut config = VindexConfig {
@@ -1425,6 +1431,7 @@ fn make_moe_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         residual_multiplier: None,
         logits_scaling: None,
         norm_eps: None,
+        ..Default::default()
     };
 
     let mut config = VindexConfig {
@@ -5021,4 +5028,25 @@ fn compact_major_skips_inserts_with_no_relation() {
         "expected the relation-bearing edge to still flow through MEMIT, got: {joined}",
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn browse_on_a_weight_backend_points_at_extraction() {
+    let session = weight_session();
+    let err = match session.browse() {
+        Ok(_) => panic!("weight backend must not browse"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("requires a vindex"), "{err}");
+    assert!(err.contains("EXTRACT"), "{err}");
+}
+
+#[test]
+fn browse_without_any_backend_is_no_backend() {
+    let session = Session::new();
+    let err = match session.browse() {
+        Ok(_) => panic!("empty session must not browse"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("No backend"), "{err}");
 }

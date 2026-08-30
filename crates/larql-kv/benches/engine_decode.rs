@@ -8,14 +8,12 @@
 //! comparator was deprecated in 2026-05-16 — it measured random-vector
 //! encode/decode, not real decode steady-state.)
 //!
-//! Engines covered:
-//! - `standard` (production K/V cache, unbounded)
-//! - `standard:window=4` (sliding-window K/V)
-//! - `no-cache` (full re-forward per step, debug fallback)
-//! - `markov-rs` (residual-stream replacement)
-//! - `unlimited-context` (per-window K/V checkpoints)
-//! - `turbo-quant-4bit` (WHT + Lloyd-Max 4-bit codec)
-//! - `apollo` (boundary-residual injection)
+//! Engines covered: whatever [`EngineKind::bench_specs`] lists. That is
+//! the single source of truth, pinned against the engine roster by
+//! `bench_specs_cover_every_benchable_engine` in the lib tests — so a
+//! new engine cannot land without either a bench arm or a written
+//! reason it can't have one. This list used to be hand-maintained here
+//! and had silently fallen to 7 of 9 engines.
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use larql_inference::cpu_engine_backend;
@@ -23,34 +21,22 @@ use larql_inference::ffn::WeightFfn;
 use larql_inference::test_utils::make_test_weights;
 use larql_kv::EngineKind;
 
+/// Engines to bench, from [`EngineKind::bench_specs`]. The spec string
+/// doubles as the criterion benchmark id.
+///
+/// Apollo is excluded by that list (see `EngineKind::bench_excluded_names`):
+/// with no store attached its `prefill` fails closed with `RetrievalMiss`
+/// before touching the model, so benching it here timed the error return
+/// — ~65 ns against ~16 µs for `standard`, which read as a 250x win.
 fn all_engines() -> Vec<(&'static str, EngineKind)> {
-    vec![
-        ("standard", EngineKind::Standard { window_size: None }),
-        (
-            "standard-window-4",
-            EngineKind::Standard {
-                window_size: Some(4),
-            },
-        ),
-        ("no-cache", EngineKind::NoCache),
-        (
-            "markov-rs",
-            EngineKind::MarkovResidual { window_size: None },
-        ),
-        (
-            "unlimited-context",
-            EngineKind::UnlimitedContext { window_size: 4 },
-        ),
-        ("turbo-quant-4bit", EngineKind::TurboQuant { bits: 4 }),
-        (
-            "apollo",
-            EngineKind::Apollo {
-                injection_layer: 1,
-                inject_coefficient: 8.0,
-                top_k: 4,
-            },
-        ),
-    ]
+    EngineKind::bench_specs()
+        .iter()
+        .map(|spec| {
+            let kind = EngineKind::from_name(spec)
+                .unwrap_or_else(|| panic!("bench spec {spec:?} failed to parse"));
+            (*spec, kind)
+        })
+        .collect()
 }
 
 fn bench_prefill(c: &mut Criterion) {
@@ -63,7 +49,12 @@ fn bench_prefill(c: &mut Criterion) {
         group.bench_function(name, |b| {
             b.iter(|| {
                 let mut engine = kind.clone().build(cpu_engine_backend());
-                let _ = engine.prefill(&weights, &ffn, &prompt);
+                // Unwrap, don't discard: a `let _ =` here would happily
+                // time an engine that bailed out before doing any work
+                // and report the error path as a stellar result.
+                engine
+                    .prefill(&weights, &ffn, &prompt)
+                    .unwrap_or_else(|e| panic!("{name}: prefill failed: {e}"));
             });
         });
     }
@@ -88,11 +79,15 @@ fn bench_decode_step(c: &mut Criterion) {
             b.iter_batched_ref(
                 || {
                     let mut engine = kind.clone().build(cpu_engine_backend());
-                    let _ = engine.prefill(&weights, &ffn, &prompt);
+                    engine
+                        .prefill(&weights, &ffn, &prompt)
+                        .unwrap_or_else(|e| panic!("{name}: prefill failed: {e}"));
                     engine
                 },
                 |engine| {
-                    let _ = engine.decode_step(&weights, &ffn, 1);
+                    engine
+                        .decode_step(&weights, &ffn, 1)
+                        .unwrap_or_else(|e| panic!("{name}: decode_step failed: {e}"));
                 },
                 criterion::BatchSize::SmallInput,
             );
@@ -202,7 +197,8 @@ fn bench_helpers_sync_vs_async(c: &mut Criterion) {
                 None,
                 None,
             )
-            .unwrap();
+            .unwrap()
+            .expect("dispatch produced a result");
         });
     });
 
@@ -216,7 +212,8 @@ fn bench_helpers_sync_vs_async(c: &mut Criterion) {
                 None,
                 None,
             )
-            .unwrap();
+            .unwrap()
+            .expect("dispatch produced a result");
         });
     });
 
@@ -229,7 +226,8 @@ fn bench_helpers_sync_vs_async(c: &mut Criterion) {
             None,
             None,
         )
-        .unwrap();
+        .unwrap()
+        .expect("dispatch produced a result");
         let mut pos = prompt.len();
         b.iter(|| {
             let _ = kv_decode_step_via_dispatch(
@@ -255,7 +253,8 @@ fn bench_helpers_sync_vs_async(c: &mut Criterion) {
             None,
             None,
         )
-        .unwrap();
+        .unwrap()
+        .expect("dispatch produced a result");
         let mut pos = prompt.len();
         b.iter(|| {
             let _ = kv_decode_step_via_dispatch_async(

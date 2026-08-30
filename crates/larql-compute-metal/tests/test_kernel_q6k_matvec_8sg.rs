@@ -108,6 +108,69 @@ fn q6k_matvec_8sg_matches_4sg_bit_equal() {
     }
 }
 
+/// Both TG geometries against an *independent* implementation.
+///
+/// `q6k_matvec_8sg_matches_4sg_bit_equal` above compares the two shaders to
+/// each other, so any defect they **share** keeps it green by construction —
+/// and a nibble-layout error is shared by every Q6_K shader in the tree. That
+/// is not hypothetical: when the CPU side moved to ggml's planar Q6_K layout on
+/// 2026-08-07 and the shaders did not, this file stayed green while both
+/// kernels decoded the wrong elements. Anchoring to `CpuBackend::q6k_matvec`
+/// closes the hole; the bit-equality test above keeps its own, narrower job.
+#[test]
+fn q6k_matvec_both_geometries_match_cpu_reference() {
+    use larql_compute::prelude::*;
+
+    let metal = match MetalBackend::new() {
+        Some(m) => m,
+        None => return,
+    };
+    let cpu = larql_compute::cpu::CpuBackend;
+
+    use larql_compute_metal::shaders::{q6k_matvec as p4, q6k_matvec_8sg as p8};
+    for (n, k) in [(17usize, 256usize), (32, 512), (64, 1024)] {
+        let w_full = synth(n * k, 71);
+        let x = synth(k, 73);
+        let w_q6k = quantize_q6_k(&w_full);
+
+        let expected = cpu.q6k_matvec(&w_q6k, &x, n, k).unwrap();
+        let scale = expected
+            .iter()
+            .map(|v| v.abs())
+            .fold(0.0f32, f32::max)
+            .max(1e-6);
+
+        for (label, state, rows, threads) in [
+            (
+                "4sg",
+                &metal.quant.q6k_matvec_4sg_pipeline.state,
+                p4::ROWS_PER_TG,
+                p4::THREADS_PER_TG,
+            ),
+            (
+                "8sg",
+                &metal.quant.q6k_matvec_8sg_pipeline.state,
+                p8::ROWS_PER_TG,
+                p8::THREADS_PER_TG,
+            ),
+        ] {
+            let got = dispatch_q6k(&metal, state, rows, threads, &w_q6k, &x, n, k);
+            let rel = expected
+                .iter()
+                .zip(&got)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max)
+                / scale;
+            // Both sides dequantise identical values, so the only source of
+            // difference is f32 accumulation order.
+            assert!(
+                rel < 1e-4,
+                "q6k_matvec {label} @ N={n} K={k}: rel err {rel:.5} vs CPU reference"
+            );
+        }
+    }
+}
+
 #[test]
 fn q6k_matvec_8sg_perf_vs_4sg() {
     if std::env::var("LARQL_PERF_SPOT_CHECK").is_err() {

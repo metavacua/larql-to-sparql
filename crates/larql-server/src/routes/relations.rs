@@ -10,6 +10,10 @@ use serde::Deserialize;
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
 
+/// Relation-confidence floor: features whose `c_score` falls below this are
+/// too weakly associated with their top token to list as a relation.
+const MIN_RELATION_C_SCORE: f32 = 0.2;
+
 /// Content-word filter matching the local executor's `is_content_token`.
 fn is_content_token(tok: &str) -> bool {
     let tok = tok.trim();
@@ -179,7 +183,7 @@ fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError>
                 if !is_content_token(tok) {
                     continue;
                 }
-                if meta.c_score < 0.2 {
+                if meta.c_score < MIN_RELATION_C_SCORE {
                     continue;
                 }
                 let key = tok.to_lowercase();

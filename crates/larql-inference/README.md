@@ -83,9 +83,15 @@ LM-head path resolution (which kernel fires per next-token):
 | `residual.rs` | RMS norm, layer norm |
 | `trace/` | Residual stream decomposition and tiered storage |
 | `vindex/` | `open_inference_vindex` (strict loader) + `WalkFfn` (mmap'd FFN) + `q4k_forward/` |
-| `kv_engine.rs` | `KvEngine` trait + `EngineInfo` + `DecodeStageSummary` — abstract dispatch surface shared with `larql-kv` (engine impls live there). `DecodeStageSummary` now includes W10's `avg_state_capture_us` / `avg_state_materialise_us` / `avg_state_append_us` timers. |
-| `kv_dispatch/` (`mod.rs`, `cpu.rs`, `metal.rs`, `helpers.rs`; future: `vulkan.rs`, `cuda.rs`) | `KvDispatch` per-layer-intent trait (sync) + `EngineBackend: ComputeBackend + KvDispatch` umbrella; `CpuBackend` and `MetalBackend` impls; `helpers::kv_prefill_via_dispatch` / `kv_decode_step_via_dispatch` (sync) + `_async` variants drive the per-layer prefill/decode loop. W10 adds `coarse_decode_step_with_state_masked` + `read_kv_row_at` on the trait. Spec: [`compute-backend-redesign.md`](docs/specs/compute-backend-redesign.md). |
-| `async_compute_backend/` (`mod.rs`, `cpu.rs`, `metal.rs`; future: `vulkan.rs`, `cuda.rs`) | `AsyncComputeBackend: ComputeBackend + KvDispatch + Send` sibling trait — deferred-dispatch intent surface with `AttentionHandle` / `ResidualUploadHandle` for one-command-buffer-per-decode-step batching on GPU backends. CPU is a degenerate `Ready*` wrapper (parity reference). Backends live as submodules so adding Vulkan/CUDA is a single new file. Spec: [`async-compute-backend.md`](docs/specs/async-compute-backend.md). |
+| `kv_engine/` | `KvEngine` trait + `EngineInfo` + `DecodeStageSummary` — abstract dispatch surface shared with `larql-kv` (engine impls live there). `DecodeStageSummary` now includes W10's `avg_state_capture_us` / `avg_state_materialise_us` / `avg_state_append_us` timers. |
+| `kv_dispatch/` (`mod.rs`, `cpu.rs`, `helpers.rs`) | `KvDispatch` per-layer-intent trait (sync) + `EngineBackend: ComputeBackend + KvDispatch` umbrella; the `CpuBackend` impl lives here, the `MetalBackend` impl in `larql-compute-metal` (ADR-0022); `helpers::kv_prefill_via_dispatch` / `kv_decode_step_via_dispatch` (sync) + `_async` variants drive the per-layer prefill/decode loop. W10 adds `coarse_decode_step_with_state_masked` + `read_kv_row_at` on the trait. Spec: [`compute-backend-redesign.md`](docs/specs/compute-backend-redesign.md). |
+| `async_compute_backend/` (`mod.rs`, `cpu.rs`) | `AsyncComputeBackend: ComputeBackend + KvDispatch + Send` sibling trait — deferred-dispatch intent surface with `AttentionHandle` / `ResidualUploadHandle` for one-command-buffer-per-decode-step batching on GPU backends. CPU is a degenerate `Ready*` wrapper (parity reference); the Metal backend lives in `larql-compute-metal` (ADR-0022). Spec: [`async-compute-backend.md`](docs/specs/async-compute-backend.md). |
+| `vindex3/` | VINDEX3 inference runtime — the seam where the executable model program meets the generation machinery (VI3-INF) |
+| `ffn_policy/` | FFN backend selection, per-layer routing policy, and live router construction |
+| `speech/` | Speech-model generation drivers — engine-shaped composition for models whose output domain is not text |
+| `ternary/` | BitNet 1.58 native-ternary inference building blocks |
+| `residual_diff/` | Per-layer residual capture + comparison for backend parity testing |
+| `decode_stages.rs` | Opt-in per-stage decode timers (`LARQL_DECODE_STAGES=1`) for splitting remote-MoE decode wall-time |
 | `experts/` | WASM expert dispatcher and registry |
 | `chat/` | Jinja-driven chat templates loaded from vindex |
 | `capture.rs` | Residual-stream vector capture for probing |
@@ -107,11 +113,11 @@ println!("Using: {} ({})", backend.name(), backend.device_info());
 The inference crate builds `FullPipelineLayer` structs (per-layer architecture params + quantized weights) and passes them to `backend.decode_token()` or `backend.prefill_q4()`. All model-specific behavior (norm type, activation, head_dim, RoPE base) is parameterized per-layer — no model-type branching in the compute path.
 
 **CPU path**: BLAS matmul via Apple Accelerate (AMX). Used for attention in `predict_honest`.
-**GPU path** (`--features metal`): Q4_K/Q8 Metal shaders with KV cache. Used for decode and prefill.
+**GPU path** (`--features gpu`): Q4_K/Q8 Metal shaders with KV cache. Used for decode and prefill.
 
 ```bash
 # Build with Metal GPU support
-cargo build --release -p larql-inference --features metal
+cargo build --release -p larql-inference --features gpu
 ```
 
 ## BLAS-Fused Attention
@@ -137,7 +143,7 @@ The mmap'd feature-major layout has better page cache behavior than the safetens
 
 Build the required vindex files:
 ```bash
-cargo run --release -p larql-vindex --example convert_gates_f32 -- path/to/vindex
+cargo run --release -p larql-vindex --example build_convert_gates_f32 -- path/to/vindex
 cargo run --release -p larql-vindex --example build_down_features -- path/to/vindex
 cargo run --release -p larql-vindex --example build_up_features -- path/to/vindex
 ```
@@ -167,21 +173,21 @@ curl -X POST http://localhost:8080/v1/infer \
 
 ```bash
 # Token spacing — standalone, no model. Shows the bug
-# ("thecapitaloffranceisparis") and the fix.
-cargo run --release -p larql-inference --example detok_demo
+# ("thecapitaloffranceisparis") and the fix. Lives in larql-demos.
+cargo run --release -p larql-demos --example detok_demo
 
 # Sampling overhead — standalone benchmark across vocab sizes
 # (32K/128K/256K) and configs (greedy/temp/top-p/top-k).
 cargo run --release -p larql-inference --example bench_sampling
 
-# Sampling, EOS, streaming, chat — model-backed.
-cargo run --release --features metal -p larql-inference \
+# Sampling, EOS, streaming, chat — model-backed, in larql-demos.
+cargo run --release --features gpu -p larql-demos \
   --example sampling_demo  -- --vindex output/gemma3-4b-v2.vindex
-cargo run --release --features metal -p larql-inference \
+cargo run --release --features gpu -p larql-demos \
   --example streaming_demo -- --vindex output/gemma3-4b-v2.vindex --max-tokens 24
-cargo run --release --features metal -p larql-inference \
+cargo run --release --features gpu -p larql-demos \
   --example eos_demo       -- --vindex output/gemma3-4b-v2.vindex --max-tokens 80
-cargo run --release --features metal -p larql-inference \
+cargo run --release --features gpu -p larql-demos \
   --example chat_demo      -- --vindex output/gemma3-4b-v2.vindex --max-context 256
 ```
 
@@ -192,37 +198,29 @@ cargo run --release --features metal -p larql-inference \
 cargo run --release -p larql-inference --example bench_walk_inference -- \
   --model google/gemma-3-4b-it --vindex path/to/vindex
 
-# Walk boundary sweep (correctness proof across all 34 layers)
-cargo run --release -p larql-inference --example walk_boundary_sweep -- \
-  --model google/gemma-3-4b-it --vindex path/to/vindex
-
-# Fused attention demo and benchmark
-cargo run --release -p larql-inference --example attention_demo
+# Fused attention demo (larql-demos) and benchmark
+cargo run --release -p larql-demos --example attention_demo
 cargo run --release -p larql-inference --example bench_attention
 
-# Backend demo and benchmark (CPU vs Metal)
-cargo run --release -p larql-inference --example backend_demo --features metal
-cargo run --release -p larql-inference --example bench_backend --features metal
+# Backend demo (larql-demos) and benchmark (CPU vs Metal)
+cargo run --release -p larql-demos --example backend_demo --features gpu
+cargo run --release -p larql-inference --example bench_backend --features gpu
 
 # Full inference benchmark (needs model weights)
 cargo run --release -p larql-inference --example bench_inference
 
 # End-to-end inference demo (needs model weights)
-cargo run --release -p larql-inference --example inference_demo
+cargo run --release -p larql-demos --example inference_demo
 
 # Clustering and pair matching demos
-cargo run -p larql-inference --example clustering_demo
-cargo run -p larql-inference --example pair_matching_demo
-
-# Per-layer residual diff: CPU prefill vs Metal prefill (end of every layer)
-cargo run --release --features metal -p larql-inference \
-    --example residual_diff -- <vindex> "The capital of France is"
+cargo run -p larql-demos --example clustering_demo
+cargo run -p larql-demos --example pair_matching_demo
 
 # Per-stage L0 bisect: CPU prefill vs Metal KV-cached decode. Locates
 # which sub-stage (norm / Q / K / V / attn / O / FFN) first diverges.
 # Closed the open Gemma 4 31B parity gap (2026-04-25 ship log) by
 # pointing at the FFN block when every attention stage matched at cos=1.0.
-cargo run --release --features metal -p larql-inference \
+cargo run --release --features gpu -p larql-inference \
     --example stage_bisect -- <vindex> "The capital of France is" 0
 ```
 
@@ -230,7 +228,7 @@ cargo run --release --features metal -p larql-inference \
 
 ```bash
 # Convert gate vectors from f16 to f32 (zero-copy mmap)
-cargo run --release -p larql-vindex --example convert_gates_f32 -- path/to/vindex
+cargo run --release -p larql-vindex --example build_convert_gates_f32 -- path/to/vindex
 
 # Build feature-major down vectors (contiguous per-feature layout)
 cargo run --release -p larql-vindex --example build_down_features -- path/to/vindex
@@ -332,7 +330,7 @@ crate's `docs/specs/` directory. Read in this order:
 | [`kv-engine-unification.md`](docs/specs/kv-engine-unification.md) | The `KvEngine` trait surface. §4.4 documents W10's `StateDumpMask` + `read_kv_row_at` widening. |
 | [`zone-engine.md`](docs/specs/zone-engine.md) | **Top-level composer.** Sequences PREDICT / WALK / CACHE zones between choke points. |
 | [`layer-engine.md`](docs/specs/layer-engine.md) v0.4 | Inner per-layer composer for WALK zones (subsumed under ZoneEngine). |
-| [`markov-residual-engine.md`](docs/specs/markov-residual-engine.md), [`markov-residual-codec-engine.md`](docs/specs/markov-residual-codec-engine.md), [`unlimited-context-engine.md`](docs/specs/unlimited-context-engine.md), [`standard-engine.md`](docs/specs/standard-engine.md), [`turbo-quant-engine.md`](docs/specs/turbo-quant-engine.md), [`apollo-engine.md`](docs/specs/apollo-engine.md), [`no-cache-engine.md`](docs/specs/no-cache-engine.md), [`boundary-kv-engine.md`](docs/specs/boundary-kv-engine.md), [`boundary-per-layer-engine.md`](docs/specs/boundary-per-layer-engine.md) | Per-engine contracts; each marks its W10 opt-in path where applicable. |
+| [`markov-residual-engine.md`](docs/specs/markov-residual-engine.md), [`markov-residual-codec-engine.md`](docs/specs/markov-residual-codec-engine.md), [`windowed-checkpoint-engine.md`](docs/specs/windowed-checkpoint-engine.md), [`standard-engine.md`](docs/specs/standard-engine.md), [`turbo-quant-engine.md`](docs/specs/turbo-quant-engine.md), [`apollo-engine.md`](docs/specs/apollo-engine.md), [`no-cache-engine.md`](docs/specs/no-cache-engine.md), [`boundary-kv-engine.md`](docs/specs/boundary-kv-engine.md), [`boundary-per-layer-engine.md`](docs/specs/boundary-per-layer-engine.md) | Per-engine contracts; each marks its W10 opt-in path where applicable. |
 
 ## License
 

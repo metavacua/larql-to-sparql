@@ -1,0 +1,337 @@
+//! The plan must pair a format with a kernel that consumes it, and the
+//! executor's observation must land on the loader's decision.
+
+use super::super::physical::{
+    compact_threshold_bytes, project_matrix, ExecutorProjections, PhysicalProjectionPlan,
+    BF16_BYTES, F32_BYTES,
+};
+use super::super::projector::WeightRows;
+use crate::format::vindex3::opplan::exec::backend::{WeightFormat, WeightSlice};
+use crate::format::vindex3::opplan::exec::gated_delta::DenseProjections;
+use crate::format::vindex3::opplan::exec::quantise::{quantise_for_test, Q8_BLOCK};
+use crate::format::vindex3::opplan::exec::weights::LoadedWeight;
+
+/// Every matrix Qwen3.8-27B decodes through, from the container's own
+/// tensor table: `(name, elements)`.
+///
+/// The whole population rather than a sample, because the claim the
+/// policy makes is about the model's residency — and a residency claim
+/// that skipped a class would be a claim about part of a model.
+///
+/// **All thirteen are stored BF16.** The container reports one encoding
+/// for the decoder stack, so nothing here is separated by what the
+/// checkpoint holds; the two populations below are separated by SIZE
+/// alone. A table that marked the delta gates "not stored bf16" would
+/// pass the same assertions while testing nothing — the gates would be
+/// f32-resident because of the checkpoint, and the threshold could be
+/// any number at all.
+const REAL_MATRICES: &[(&str, usize)] = &[
+    ("mlp.gate_proj", 17408 * 5120),
+    ("mlp.up_proj", 17408 * 5120),
+    ("mlp.down_proj", 5120 * 17408),
+    ("linear_attn.in_proj_qkv", 10240 * 5120),
+    ("linear_attn.in_proj_z", 6144 * 5120),
+    ("linear_attn.out_proj", 5120 * 6144),
+    ("self_attn.q_proj", 12288 * 5120),
+    ("self_attn.o_proj", 5120 * 6144),
+    ("self_attn.k_proj", 1024 * 5120),
+    ("self_attn.v_proj", 1024 * 5120),
+    ("linear_attn.in_proj_a", 48 * 5120),
+    ("linear_attn.in_proj_b", 48 * 5120),
+    ("output_head", 248320 * 5120),
+];
+
+/// The stored encoding of every one of them, per the container index.
+const STORED_BF16: bool = true;
+
+/// A slab in the plan's OWN format, so a mispairing cannot be papered
+/// over by the test choosing the representation the kernel wanted.
+struct Slab {
+    f32s: Vec<f32>,
+    bf16: Vec<u16>,
+    codes: Vec<i8>,
+    scales: Vec<f32>,
+}
+
+fn slab(plan: PhysicalProjectionPlan, elements: usize, in_dim: usize) -> Slab {
+    let mut s = Slab {
+        f32s: Vec::new(),
+        bf16: Vec::new(),
+        codes: Vec::new(),
+        scales: Vec::new(),
+    };
+    match plan.format() {
+        WeightFormat::F32 => s.f32s = vec![0.5f32; elements],
+        WeightFormat::Bf16 => s.bf16 = vec![0x3f00u16; elements],
+        WeightFormat::Q8 => {
+            s.codes = vec![64i8; elements];
+            s.scales = vec![0.01f32; (elements / in_dim) * in_dim.div_ceil(Q8_BLOCK)];
+        }
+        other => panic!("no CPU plan declares {other:?}"),
+    }
+    s
+}
+
+fn rows<'a>(plan: PhysicalProjectionPlan, s: &'a Slab) -> WeightRows<'a> {
+    match plan.format() {
+        WeightFormat::F32 => WeightRows::F32(&s.f32s),
+        WeightFormat::Bf16 => WeightRows::Bf16(&s.bf16),
+        WeightFormat::Q8 => WeightRows::Q8 {
+            codes: &s.codes,
+            scales: &s.scales,
+            block: Q8_BLOCK,
+        },
+        other => panic!("no CPU plan declares {other:?}"),
+    }
+}
+
+/// **The load-bearing invariant.** What the loader made resident is what
+/// the executor observes.
+///
+/// This is the whole reason the plan is one value: if `choose` and
+/// `for_resident` could disagree about a matrix, a BF16-resident weight
+/// could be handed to a kernel expecting f32 — and the failure mode is
+/// not a wrong answer but 100 MB read as garbage.
+#[test]
+fn the_observation_lands_on_the_decision() {
+    for (name, elements) in REAL_MATRICES.iter().copied() {
+        let chosen = PhysicalProjectionPlan::choose(elements, STORED_BF16);
+        // A one-row stand-in: the round trip is about representation, and
+        // allocating 1.3 G elements to prove it would measure the
+        // allocator.
+        let s = slab(chosen, 8, 8);
+        let observed = PhysicalProjectionPlan::for_resident(rows(chosen, &s));
+        assert_eq!(
+            observed, chosen,
+            "`{name}`: the executor observed {observed:?} where the loader chose {chosen:?} — \
+             one matrix, two derivations, and they disagree"
+        );
+    }
+}
+
+/// Each plan's kernel actually consumes each plan's format.
+///
+/// The kernels panic on the wrong representation, so a mispaired variant
+/// fails here loudly rather than at decode on a real container.
+#[test]
+fn every_plan_runs_its_own_format() {
+    let x = vec![1.0f32; Q8_BLOCK];
+    for plan in [
+        PhysicalProjectionPlan::ScalarF32,
+        PhysicalProjectionPlan::BlasF32,
+        PhysicalProjectionPlan::FusedBf16,
+        PhysicalProjectionPlan::FusedQ8,
+    ] {
+        let s = slab(plan, Q8_BLOCK * 2, Q8_BLOCK);
+        let mut out = vec![0.0f32; 2];
+        plan.kernel().project_rows(rows(plan, &s), &x, &mut out);
+        assert!(
+            out.iter().all(|v| v.is_finite() && *v != 0.0),
+            "{plan:?} produced nothing from its own declared format"
+        );
+    }
+}
+
+/// The oracle is chosen by IDENTITY, not by representation.
+///
+/// `for_resident` is total over what a CPU kernel can hold, and f32 has
+/// two kernels: the production `BlasF32` and the reference `ScalarF32`.
+/// It answers `BlasF32`, and that is not an omission — the reference
+/// backend declares its plan because of what it IS, so nothing ever asks
+/// the bytes which of the two it wanted. Asserting the asymmetry here
+/// stops a later reader "fixing" it by making the observation guess.
+#[test]
+fn the_oracle_is_not_reachable_by_observation() {
+    let f = vec![0.5f32; 8];
+    assert_eq!(
+        PhysicalProjectionPlan::for_resident(WeightRows::F32(&f)),
+        PhysicalProjectionPlan::BlasF32
+    );
+    let at = compact_threshold_bytes() / F32_BYTES;
+    for elements in [1, at - 1, at, at * 64] {
+        for stored in [false, true] {
+            assert_ne!(
+                PhysicalProjectionPlan::choose(elements, stored),
+                PhysicalProjectionPlan::ScalarF32,
+                "the policy must never route production through the oracle"
+            );
+        }
+    }
+}
+
+/// An f32 checkpoint never reaches the compact kernel, however large.
+///
+/// The alternative would be to narrow at load to hit the threshold, which
+/// would ROUND — the policy would be quantising a model while reporting a
+/// residency win.
+#[test]
+fn a_checkpoint_without_stored_bf16_stays_f32() {
+    let huge = 1_000 * compact_threshold_bytes() / F32_BYTES;
+    assert_eq!(
+        PhysicalProjectionPlan::choose(huge, false),
+        PhysicalProjectionPlan::BlasF32
+    );
+    assert_eq!(
+        PhysicalProjectionPlan::choose(huge, true),
+        PhysicalProjectionPlan::FusedQ8
+    );
+}
+
+/// **The real model's THREE populations.**
+///
+/// One boundary per format, each the point where the ALTERNATIVE's image
+/// stops fitting cache — the f32 image for bf16, the bf16 image for Q8.
+/// Qwen3.8 puts real matrices on every side of both, so a policy that
+/// answered uniformly would be wrong three different ways.
+#[test]
+fn the_real_model_splits_into_three_populations() {
+    let plan_of = |elements| PhysicalProjectionPlan::choose(elements, STORED_BF16);
+    let named = |want| {
+        REAL_MATRICES
+            .iter()
+            .filter(|(_, e)| plan_of(*e) == want)
+            .map(|(n, _)| *n)
+            .collect::<Vec<_>>()
+    };
+    let q8 = named(PhysicalProjectionPlan::FusedQ8);
+    let bf16 = named(PhysicalProjectionPlan::FusedBf16);
+    let blas = named(PhysicalProjectionPlan::BlasF32);
+
+    // The measured crossovers, not a restatement of the rule: `1024 x
+    // 5120` runs 0.81x through Q8 because its bf16 image is 10.5 MB and
+    // already L2-resident, and `48 x 5120` runs 3.8x faster through BLAS
+    // for the same reason one format further up.
+    assert_eq!(
+        bf16,
+        vec!["self_attn.k_proj", "self_attn.v_proj"],
+        "the streaming/cache-resident boundary moved"
+    );
+    assert_eq!(
+        blas,
+        vec!["linear_attn.in_proj_a", "linear_attn.in_proj_b"],
+        "the tiny delta gates must stay f32"
+    );
+    assert_eq!(
+        q8.len(),
+        REAL_MATRICES.len() - bf16.len() - blas.len(),
+        "every matrix must land in exactly one population: {q8:?}"
+    );
+    assert!(q8.contains(&"output_head"));
+    assert!(q8.contains(&"mlp.gate_proj"));
+}
+
+/// Each boundary is bracketed on both sides, at its own alternative's
+/// byte width.
+#[test]
+fn both_boundaries_are_bracketed() {
+    let l2 = compact_threshold_bytes();
+    let f32_edge = l2 / F32_BYTES;
+    let bf16_edge = l2 / BF16_BYTES;
+    assert_eq!(
+        PhysicalProjectionPlan::choose(f32_edge - 1, true),
+        PhysicalProjectionPlan::BlasF32,
+        "below the f32 boundary the widened image still fits cache"
+    );
+    assert_eq!(
+        PhysicalProjectionPlan::choose(f32_edge, true),
+        PhysicalProjectionPlan::FusedBf16
+    );
+    assert_eq!(
+        PhysicalProjectionPlan::choose(bf16_edge - 1, true),
+        PhysicalProjectionPlan::FusedBf16,
+        "below the bf16 boundary there is no traffic left for Q8 to halve, and its extra \
+         unpacking is pure cost"
+    );
+    assert_eq!(
+        PhysicalProjectionPlan::choose(bf16_edge, true),
+        PhysicalProjectionPlan::FusedQ8
+    );
+}
+
+/// A projection runs through the executor under its own plan, whichever
+/// representation it is resident as, and every representation agrees on
+/// the answer to within what its own format costs.
+///
+/// bf16 must agree with f32 to summation order, because bf16 widens
+/// exactly. Q8 must NOT: it is a lossy format and an assertion that it
+/// matched to 1e-5 would either be testing nothing or be about to fail on
+/// a checkpoint with wider blocks. Its tolerance is stated as what
+/// symmetric int8 costs.
+#[test]
+fn every_representation_projects_to_its_own_accuracy() {
+    const OUT: usize = 24;
+    const IN: usize = Q8_BLOCK * 2;
+    let f: Vec<f32> = (0..OUT * IN)
+        .map(|i| {
+            let v = (i as f32 * 0.013).sin();
+            f32::from_bits(v.to_bits() & 0xffff_0000)
+        })
+        .collect();
+    let b: Vec<u16> = f.iter().map(|v| (v.to_bits() >> 16) as u16).collect();
+    let x: Vec<f32> = (0..IN).map(|i| (i as f32 * 0.07).cos()).collect();
+
+    let widened = project_matrix(&WeightSlice::F32(&f), &x, OUT, IN).unwrap();
+    let compact = project_matrix(&WeightSlice::Bf16(&b), &x, OUT, IN).unwrap();
+    let gated = ExecutorProjections.project(WeightRows::Bf16(&b), &x, OUT);
+    assert_eq!(
+        compact, gated,
+        "the delta seam and the plan seam must agree exactly"
+    );
+
+    let rel = |a: &[f32], want: &[f32]| {
+        let (mut num, mut den) = (0.0f64, 0.0f64);
+        for (p, q) in a.iter().zip(want) {
+            num += (*p as f64 - *q as f64).powi(2);
+            den += (*q as f64).powi(2);
+        }
+        (num / den.max(f64::MIN_POSITIVE)).sqrt()
+    };
+    assert!(rel(&compact, &widened) < 1e-5, "bf16 widens exactly");
+
+    let LoadedWeight::Q8 { codes, scales } = quantise_for_test(&f, IN) else {
+        panic!("the quantiser returns q8");
+    };
+    let q8 = project_matrix(
+        &WeightSlice::Q8 {
+            codes: &codes,
+            scales: &scales,
+            block: Q8_BLOCK,
+        },
+        &x,
+        OUT,
+        IN,
+    )
+    .unwrap();
+    // Derived, not fitted. Uniform quantisation error is `step/sqrt(12)`
+    // with `step = peak/127`; against weights whose RMS is roughly
+    // `peak/2` that is `2 / (127 * sqrt(12))` = 4.5e-3, and a dot of
+    // random-sign terms preserves the ratio because numerator and
+    // denominator both grow as sqrt(N). 1.5e-2 is that with 3x headroom
+    // for a block whose peak sits well above its typical weight — still
+    // orders of magnitude tighter than a broken kernel would manage.
+    assert!(
+        rel(&q8, &widened) < 1.5e-2,
+        "q8 moved {:.2e}, which is more than symmetric int8 costs",
+        rel(&q8, &widened)
+    );
+}
+
+/// A representation no CPU kernel runs refuses, and names itself.
+#[test]
+fn a_device_only_representation_refuses_by_name() {
+    let err = project_matrix(&WeightSlice::F16(&[0u8; 64]), &[1.0f32; 4], 4, 4)
+        .expect_err("no CPU kernel consumes f16")
+        .to_string();
+    assert!(err.contains("f16"), "{err}");
+}
+
+/// The threshold is a real cache size, whatever machine reads it.
+#[test]
+fn the_threshold_is_a_plausible_cache_size() {
+    let bytes = compact_threshold_bytes();
+    assert!(
+        (1 << 20..=1 << 30).contains(&bytes),
+        "{bytes} is not a plausible L2 size — a threshold this far out would put every matrix \
+         on one side"
+    );
+}

@@ -35,7 +35,7 @@ GPU→CPU bridge.
   and [`KvDispatch::coarse_decode_step_with_state_masked`](src/kv_dispatch/mod.rs).
 - `KvDispatch::read_kv_row_at` — on-demand readback of a single
   position's K/V from the backend's kv cache. Used by engines (e.g.
-  `UnlimitedContextEngine.close_window`) that dropped their CPU
+  `WindowedCheckpointEngine.close_window`) that dropped their CPU
   shadow.
 
 Default impls preserve `Full` behaviour everywhere; backends without
@@ -228,7 +228,7 @@ outputs of `ridge_decomposition_solve` are f32 for caller convenience; the
 solve is f64 internally.
 
 Bench: `cargo bench -p larql-compute --bench linalg`
-Demo:  `cargo run --release -p larql-compute --example demo_ridge_solve`
+Demo:  `cargo run --release -p larql-demos --example demo_ridge_solve`
 
 > The MEMIT-flavoured wrapper (`memit_solve` returning `MemitSolveResult`
 > with per-fact reconstruction quality) lives in `larql-vindex` next to
@@ -353,21 +353,21 @@ Eleven examples in three groups — see [`examples/README.md`](examples/README.m
 
 ```bash
 # Demos (teach the API)
-cargo run --release --features gpu -p larql-compute --example demo_basic
-cargo run --release --features gpu -p larql-compute --example demo_architecture
-cargo run --release --features gpu -p larql-compute --example demo_ridge_solve
+cargo run --release --features gpu -p larql-demos --example demo_basic
+cargo run --release --features gpu -p larql-demos --example demo_architecture
+cargo run --release --features gpu -p larql-demos --example demo_ridge_solve
 
 # Compares (full-pipeline benchmarks — distinct from kernel-level criterion suite)
-cargo run --release --features gpu -p larql-compute --example compare_decode      # Q4_K decode latency
-cargo run --release --features gpu -p larql-compute --example compare_formats     # Q4_KF vs Q4_K vs Q8
-cargo run --release --features gpu -p larql-compute --example compare_generation  # End-to-end tok/s
-cargo run --release --features gpu -p larql-compute --example compare_pipeline    # Q4_K fused vs Q8 fused
-cargo run --release --features gpu -p larql-compute --example compare_ollama      # Head-to-head vs Ollama
+cargo run --release --features gpu -p larql-compute-metal --example compare_decode      # Q4_K decode latency
+cargo run --release --features gpu -p larql-compute-metal --example compare_formats     # Q4_KF vs Q4_K vs Q8
+cargo run --release --features gpu -p larql-compute-metal --example compare_generation  # End-to-end tok/s
+cargo run --release --features gpu -p larql-compute-metal --example compare_pipeline    # Q4_K fused vs Q8 fused
+cargo run --release --features gpu -p larql-compute-metal --example compare_ollama      # Head-to-head vs Ollama
 
 # Diagnostic
-cargo run --release --features gpu -p larql-compute --example diag_decode_pipeline
-cargo run --release --features gpu -p larql-compute --example diag_profile_kernels
-cargo run --release --features gpu -p larql-compute --example diag_shader_bench
+cargo run --release --features gpu -p larql-compute-metal --example diag_decode_pipeline
+cargo run --release --features gpu -p larql-compute-metal --example diag_profile_kernels
+cargo run --release --features gpu -p larql-compute-metal --example diag_shader_bench
 ```
 
 The headline tok/s vs Ollama uses the CLI's `bench` subcommand against a real vindex:
@@ -388,7 +388,7 @@ Three Criterion benches — see [`benches/README.md`](benches/README.md):
 
 ```bash
 make bench-compute   # quant_matvec Criterion bench with Metal
-cargo bench -p larql-compute --bench matmul
+cargo bench -p larql-compute-metal --bench matmul
 cargo bench -p larql-compute --bench linalg
 ```
 

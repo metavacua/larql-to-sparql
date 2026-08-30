@@ -77,10 +77,8 @@ impl Session {
         let weights = larql_vindex::load_model_weights(path, &mut cb)
             .map_err(|e| LqlError::exec("failed to load weights", e))?;
 
-        let encoding = tokenizer
-            .encode(prompt.as_str(), true)
-            .map_err(|e| LqlError::exec("tokenize error", e))?;
-        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+        let token_ids =
+            crate::executor::query::encode_vindex_prompt(config, &tokenizer, prompt.as_str())?;
 
         // Capture through the BASE index (no patch overlay), with
         // UNLIMITED top_k to match what INFER does at query time.
@@ -96,7 +94,7 @@ impl Session {
         // 2. UNLIMITED top_k: the INFER path in `query.rs` uses
         //    `new_unlimited_with_trace`, so the L26 residual at
         //    inference time is built from a full-power baseline (all
-        //    16384 features fire). If we captured at top_k=8092 — a
+        //    10240 features fire). If we captured at top_k=8092 — a
         //    half-power baseline — the captured residual would differ
         //    from the inference residual in magnitude even when the
         //    direction matches. We'd engineer gates against half-power
@@ -170,10 +168,11 @@ impl Session {
 
             let mut captured = Vec::with_capacity(decoy_prompts.len());
             for decoy_prompt in &decoy_prompts {
-                let enc = tokenizer
-                    .encode(decoy_prompt.as_str(), true)
-                    .map_err(|e| LqlError::exec("tokenize decoy", e))?;
-                let ids: Vec<u32> = enc.get_ids().to_vec();
+                let ids = crate::executor::query::encode_vindex_prompt(
+                    config,
+                    &tokenizer,
+                    decoy_prompt.as_str(),
+                )?;
                 // Also unlimited top_k here so decoy residuals match
                 // the full-power baseline INFER will produce.
                 let ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(

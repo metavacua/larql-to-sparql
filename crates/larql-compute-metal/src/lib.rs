@@ -59,6 +59,11 @@ pub mod backend;
 pub mod buffers;
 #[cfg(target_os = "macos")]
 pub mod calibration;
+
+/// Command-buffer completion status (#229 instrumentation).
+#[cfg(target_os = "macos")]
+pub mod cb_status;
+
 #[cfg(target_os = "macos")]
 pub mod decode;
 #[cfg(target_os = "macos")]
@@ -68,9 +73,16 @@ pub mod kernels;
 #[cfg(target_os = "macos")]
 pub mod kv_dispatch_impl;
 #[cfg(target_os = "macos")]
+pub mod kv_residency_contract;
+#[cfg(target_os = "macos")]
+pub mod lowering;
+#[cfg(target_os = "macos")]
 pub mod ops;
 #[cfg(target_os = "macos")]
 pub mod options;
+/// Router-id bounds guard for the descriptor gather (#229).
+#[cfg(target_os = "macos")]
+pub mod route_guard;
 #[cfg(target_os = "macos")]
 pub mod shaders;
 #[cfg(target_os = "macos")]
@@ -85,9 +97,17 @@ mod direct_ops;
 #[cfg(target_os = "macos")]
 mod f32_ops;
 #[cfg(target_os = "macos")]
+pub mod moe_descriptor;
+#[cfg(target_os = "macos")]
 mod moe_dispatch;
 #[cfg(target_os = "macos")]
+mod moe_gpu_route;
+#[cfg(target_os = "macos")]
+mod moe_zero_copy;
+#[cfg(target_os = "macos")]
 mod pipeline;
+#[cfg(target_os = "macos")]
+pub mod route_witness;
 
 // ───── Curated public surface ─────
 

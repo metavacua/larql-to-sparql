@@ -1,0 +1,704 @@
+# Per-target automated fix pipeline for larql-cli (proof of concept).
+#
+# Deliverable is the raw data itself, per target: what compiles, what
+# `cargo clippy --fix` changes on its own (no human judgment), and what's
+# still flagged after that (the residual -- exactly the set of concerns
+# that needs a real decision, which is where splitting target-specific
+# code into cleanly separated modules actually starts). This workflow
+# does not classify, summarize, or render any of that.
+#
+# `cargo tree`/`check`/`fix`/residual `clippy` all print straight to the
+# step's own stdout/stderr -- no `tee`-to-a-file. GitHub Actions already
+# captures every step's full output verbatim (confirmed directly: pulling
+# a job's raw log via the API showed complete -vv output, file:line
+# included), so teeing the same content into a tracked-tree file was
+# pure indirection -- and it's what caused `cargo fix` to see a dirty
+# working directory and refuse to run, twice, before this was found. The
+# job log is the raw data for those four; `fix.patch` (the one thing
+# that doesn't already exist in any command's stdout -- a clean,
+# directly `git apply`-able diff, versus the log merely showing that
+# files changed) is the only uploaded artifact. Reading and acting on
+# any of this happens outside the workflow.
+#
+# No hand-edited `#[cfg(...)]` blocks anywhere in this pipeline, and the
+# workflow never writes to a source file itself -- every change to the
+# tree comes from `cargo clippy --fix`, captured as `fix.patch`, not
+# applied or committed here.
+#
+# Deliberately not answered here: whether cfg-selected code is *correct*
+# on a given target (endianness, BLAS numerics, GPU hardware presence).
+# That needs real tests, not this pipeline.
+#
+# `cargo check`/`clippy` don't link, but a dependency's build script
+# (`ring`, a real dependency via larql-vindex's rustls-tls reqwest
+# usage) can still shell out to a C compiler during `cargo check`
+# itself. Where a real, standard, already-confirmed-available compiler
+# package exists for a target (e.g. `gcc-aarch64-linux-gnu` on
+# ubuntu-latest), it's installed -- not installing it wouldn't test
+# larql-cli's code, it would just test this workflow's own refusal to
+# run one apt-get command, which is uninformative in exactly the way a
+# CI-configuration error is. Where no such package/cross-rs image/
+# native runner exists anywhere (sparcv9-sun-solaris did not, on any
+# GitHub-hosted runner -- confirmed by repeated real runs, not
+# assumed), the target is omitted from the matrix entirely rather than
+# kept as a permanently, unfixably red row.
+#
+# The 7 riscv*-unknown-none-elf targets that were briefly added here
+# were removed again, confirmed redundant by a real completed 220-job
+# run, not assumed: every one of them hit the identical "can't find
+# crate for `std`" wall on step A itself, before any lint_scope/
+# broken_code/features variation could possibly matter -- larql-cli is
+# an ordinary std-using binary, not `#![no_std]`-annotated, so plain
+# `cargo check`/`clippy` against a `no_std`-only target can never
+# produce differentiated signal here regardless of how many axes this
+# matrix crosses it with. The actually-informative version of that
+# probe -- the three-stage approach (host-side std/alloc/core --fix,
+# inject `#![no_std]`+`extern crate alloc`, then `-Zbuild-std=core,alloc`
+# against the real target) this repo's own `nvptx64-nvidia-cuda`
+# experiment pioneered -- now lives in its own dedicated workflow,
+# `experiment-riscv-nostd-fix.yml`, covering all 13 riscv*-none-elf
+# targets (not just the 7 with a prebuilt stable rustup component,
+# since `-Zbuild-std` doesn't need one) on nightly. That workflow
+# already produced real, differentiated, ISA-specific findings this
+# plain matrix never could -- e.g. a `portable-atomic`-based
+# dependency's missing-atomics fallback fires only on `riscv32i` (no
+# `A` extension) and is absent on `riscv32imac`/`riscv64gc` (which have
+# it) -- confirming the redundancy here isn't a guess.
+#
+# `features` is a third matrix axis (`with-gpu` / `without-gpu`), not
+# just `--all-features` everywhere: larql-cli's only optional feature
+# is `gpu`, and it's already `default = ["gpu"]` -- so `--all-features`
+# and default-features are identical here, and neither one, alone,
+# probes what changes when `gpu` is off. chrishayuk/larql#169
+# documents real, different error counts under `--no-default-features`
+# (mostly `large_enum_variant`/`dead_code` on metal-only paths) --
+# feature-conditional reachability is one of the two axes (alongside
+# target) this whole project cares about, so it gets its own tier
+# rather than being collapsed into a single always-on choice.
+#
+# `--examples` is added to every cargo invocation below for the same
+# reason `--tests` already was: it's real, uninspected compilable
+# surface, not a hypothetical one. #169 itself names a concrete,
+# already-known instance -- `convert_moe_to_per_layer` "excluded from
+# CI due to an API break, which hides its clippy errors" -- so this
+# isn't speculative scope, it's a disclosed gap with a known example
+# behind it. No `--benches`: larql-cli has no bench targets to select.
+#
+# `--workspace` replaces `-p larql-cli` in steps B and C (not A, where
+# `-p larql-cli` already transitively compiles every workspace
+# sibling as a dependency, so a hard compile error there already
+# surfaces): `--no-deps` scopes clippy's LINTING to workspace members
+# only, but `-p larql-cli` was scoping it further, to larql-cli alone
+# -- a genuinely target-specific correctness lint living in
+# `larql-vindex` or `larql-compute` was invisible as a *lint* finding
+# even though a hard error in the same code would not have been. This
+# expansion is only sound now because the `#314` workspace-membership
+# trim already happened -- before that fix, `--workspace` would have
+# reintroduced exactly the feature-unification contamination `#314`
+# removed (larql-server/larql-python/etc. polluting the build). `A.`
+# also now checks `--workspace`, for the same reason: a sibling
+# crate's own standalone tests/examples (not part of larql-cli's
+# dependency chain, e.g. larql-vindex's own `#[cfg(test)]` code) were
+# never reached by `-p larql-cli` at all, `--workspace` closes that.
+#
+# No job in this workflow is a required check; every probe step uses
+# `continue-on-error: true` so a failure on one step (or one target)
+# never prevents the remaining steps/targets from still running and
+# still producing their own raw data.
+#
+# Lint policy is "allow nothing": every lint clippy ships allow-by-default
+# (`clippy::cargo`, `clippy::nursery`, `clippy::pedantic`, plus rustc's own
+# allow-by-default lints) is promoted to at least `warn` via explicit `-W`,
+# so the probe's diagnostic surface isn't silently narrowed by defaults.
+# `clippy::restriction` is excluded from every lint_scope tier below:
+# it contains multiple lint pairs that demand literally opposite things
+# for the same construct, verified directly against the actual installed
+# clippy (0.1.98, matching this workflow's rustc 1.98.0) rather than
+# assumed:
+#   - `pub_with_shorthand` / `pub_without_shorthand` -- one disallows
+#     `pub(loc)`, the other disallows `pub(in loc)`.
+#   - `semicolon_inside_block` / `semicolon_outside_block` -- one wants
+#     `unsafe { foo(); }`, the other wants `unsafe { foo() };`.
+#   - `separated_literal_suffix` / `unseparated_literal_suffix` -- one
+#     flags `1_u32` (wants `1u32`), the other flags `1u32` (wants
+#     `1_u32`).
+#   - `mod_module_files` / `self_named_module_files` -- clippy's own
+#     source (`module_style.rs`) states one *forbids* `mod.rs`
+#     entirely, the other *requires* it; designed as alternative
+#     policies, not a joint one.
+#   - `implicit_return` / `needless_return` -- opposite requirements
+#     for a function's final expression, and the more consequential
+#     pair of the five: `needless_return` is warn-by-default (part of
+#     `clippy::all`, already active in every tier below), so enabling
+#     `clippy::restriction` wouldn't just add a second opt-in
+#     conflicting lint, it would collide with something already on.
+#   - `inline_asm_x86_att_syntax` / `inline_asm_x86_intel_syntax` -- a
+#     sixth pair, same structure as the rest: the first's own
+#     description reads "prefer Intel x86 assembly syntax," the
+#     second's "prefer AT&T x86 assembly syntax" -- each demands the
+#     syntax the other forbids.
+# Enabling the group wholesale is unsatisfiable under `-D warnings` for
+# any of these constructs, not just noisy.
+#
+# Also noted, not a two-way contradiction but the same "pick at most
+# one" shape three-wide: `big_endian_bytes` / `little_endian_bytes` /
+# `host_endian_bytes` each individually forbid one specific
+# `to_*_bytes` method; enabling all three together leaves no legal way
+# to do explicit endian conversion via any of them. Not excluded for
+# this reason alone (unlike the pairs above, no single pair of them is
+# separately unsatisfiable -- enabling any one or two together is
+# fine), but worth recording alongside the pairs since it's the same
+# underlying pattern.
+#
+# Three `clippy::restriction` members are carved back out and added
+# explicitly to every `lint_scope` tier below, despite the group
+# exclusion above: `std_instead_of_core`, `std_instead_of_alloc`,
+# `alloc_instead_of_core`. These aren't part of any contradictory pair
+# -- they're a consistent, complementary hierarchy (always prefer the
+# narrowest available crate) -- so excluding the whole group took them
+# down as collateral, not by intent. They matter for a reason none of
+# clippy's other groups capture: whether code uses `std::` where
+# `core`/`alloc` would suffice is a *portability* fact, not a style
+# preference -- `std` is unavailable on genuinely restrictive targets
+# (`no_std`-only ones; confirmed in this repo's own history,
+# `nvptx64-nvidia-cuda`'s `-Zbuild-std=std` fails outright, no
+# `Os::Cuda` branch in libstd), so passing this trio is a precondition
+# for code to even compile there, not an opinion about how it's
+# written. That's a third axis orthogonal to the `functional`/`perf`
+# effectiveness-efficiency ladder below, not a rung on it, so it's
+# added to all three tiers uniformly rather than folded into one.
+#
+# `-vv` and `RUST_BACKTRACE=full` are set throughout: a compile failure
+# here is often a dependency's build script (e.g. `ring`, via rustls)
+# unable to find a C compiler for the target, not a code-level error, and
+# the difference is only visible with build-script output unabbreviated.
+# `cargo tree --target <T>` is captured per target because the dependency
+# graph itself is target-conditioned (`[target.'cfg(...)'.dependencies]`)
+# -- the same crate can pull in a different, or no, C dependency
+# depending on the target, and that's part of the raw data too.
+#
+# `os` per target is just whichever GitHub-hosted runner is closest to
+# native for that target family (ubuntu for linux, macos for darwin,
+# windows for windows) -- not a claim that the target is "supported" on
+# that runner, only where `rustup target add` and a plain `cargo check`
+# get attempted.
+#
+# `lint_scope` x `broken_code` is a second, orthogonal matrix axis,
+# crossed with every target, so the same code can be compared across
+# fix strategies rather than just across targets. The three
+# `lint_scope` tiers are cumulative subsets of clippy's own default
+# lint groups (`functional` subset `perf` subset `allow-nothing`):
+#   - `functional`: clippy::correctness (deny by default) +
+#     clippy::suspicious (warn by default) only -- lints that flag
+#     code that is already wrong, not code that merely could be
+#     written differently.
+#   - `perf`: functional, plus clippy::perf -- still behavior-
+#     preserving by definition, but its suggested rewrites are often
+#     API substitutions (e.g. build a Vec via `with_capacity` instead
+#     of `push`-in-a-loop), carrying the same kind of mechanical-fix
+#     risk as style lints rather than correctness lints, hence its own
+#     tier instead of being folded into `functional`.
+#   - `allow-nothing`: the existing, unchanged full policy (every
+#     allow-by-default group except `clippy::restriction`).
+# The reason to separate these: every "clippy --fix produced code that
+# doesn't compile" case found so far traced to a pedantic/nursery-tier
+# suggestion (`chunks_exact_to_as_chunks`, `missing_const_for_fn` +
+# `cast_lossless` combining unsafely, an incomplete `wildcard_imports`
+# rewrite) -- never to a correctness or suspicious lint. Mixing style-
+# lint auto-fixes into the "residual" signal conflates two different
+# findings ("there's a real unfixed bug" vs. "clippy broke the build
+# trying to rename a cast") into one number. `broken_code` isolates a
+# second, independent question per tier: does allowing `--fix` to
+# apply changes that might not compile actually change the outcome at
+# this lint scope, or only at the wider ones?
+#
+# Triggered on `pull_request`, path-scoped to this file, not
+# `workflow_dispatch`: a newly-added workflow can't be dispatched via
+# the API/UI until it exists on the repo's default branch, and this
+# branch is never getting merged there. Path-scoping to the file
+# itself means pushing a change to this workflow is what re-runs it --
+# not every unrelated commit on the branch. Not a required gate.
+
+name: target-matrix-decidability
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/target-matrix-decidability.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe (${{ matrix.target }}, ${{ matrix.features }}, ${{ matrix.lint_scope }}, broken_code=${{ matrix.broken_code }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      RUST_BACKTRACE: full
+    defaults:
+      run:
+        # windows-latest's default `run:` shell is pwsh, not bash -- the
+        # `2>&1 | tee ...` steps below are bash syntax (no `tee` on pwsh
+        # by default, different redirection semantics). Forcing bash
+        # here keeps every step identical across all three runner OSes.
+        shell: bash
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-pc-windows-msvc
+          - aarch64-apple-darwin
+          - aarch64-unknown-linux-gnu
+        lint_scope: [functional, perf, allow-nothing, maximal, control]
+        broken_code: [true, false]
+        features: [with-gpu, without-gpu]
+        include:
+          # Merged into every combination matching `target`, regardless
+          # of lint_scope/broken_code -- standard GitHub Actions matrix
+          # semantics for a partial-key include entry, not a custom
+          # mechanism.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          # Merged into every combination matching `lint_scope`,
+          # regardless of target/broken_code, by the same mechanism.
+          - lint_scope: functional
+            lint_flags: >-
+              -A clippy::style -A clippy::complexity -A clippy::perf
+              -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
+              -W clippy::alloc_instead_of_core
+          - lint_scope: perf
+            lint_flags: >-
+              -A clippy::style -A clippy::complexity
+              -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
+              -W clippy::alloc_instead_of_core
+          - lint_scope: allow-nothing
+            lint_flags: >-
+              -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+              -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
+              -W clippy::alloc_instead_of_core
+          # `allow-nothing`, plus every remaining `clippy::restriction`
+          # member that doesn't force a choice between mutually
+          # exclusive options -- the 7 contradictory pairs (14 lints:
+          # pub_with/without_shorthand, semicolon_inside/outside_block,
+          # separated/unseparated_literal_suffix, mod_module_files/
+          # self_named_module_files, implicit_return (its partner,
+          # needless_return, isn't in `restriction`),
+          # inline_asm_x86_att/intel_syntax, get_unwrap/indexing_slicing)
+          # and the endianness triple (big/little/host_endian_bytes,
+          # not a two-way contradiction but the same "pick at most one"
+          # shape three-wide) are the only members left out. Whether
+          # `--fix` produces something useful for the other 112 isn't
+          # decided here by guessing which ones would be "too noisy" --
+          # that's exactly the discretion this workflow exists to
+          # replace with a real answer. Enabling all of them and
+          # observing the actual --fix/residual output is what actually
+          # answers it, mechanically, per this project's own standard.
+          - lint_scope: maximal
+            lint_flags: >-
+              -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+              -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc
+              -W clippy::alloc_instead_of_core
+              -W clippy::allow_attributes -W clippy::allow_attributes_without_reason
+              -W clippy::arbitrary_source_item_ordering -W clippy::arithmetic_side_effects
+              -W clippy::as_conversions -W clippy::as_pointer_underscore
+              -W clippy::assertions_on_result_states -W clippy::as_underscore
+              -W clippy::cfg_not_test -W clippy::clone_on_ref_ptr -W clippy::cognitive_complexity
+              -W clippy::create_dir -W clippy::dbg_macro -W clippy::decimal_literal_representation
+              -W clippy::default_numeric_fallback -W clippy::default_union_representation
+              -W clippy::deref_by_slicing -W clippy::disallowed_script_idents
+              -W clippy::doc_include_without_cfg -W clippy::doc_paragraphs_missing_punctuation
+              -W clippy::else_if_without_else -W clippy::empty_drop
+              -W clippy::empty_enum_variants_with_brackets -W clippy::empty_structs_with_brackets
+              -W clippy::error_impl_error -W clippy::exhaustive_enums -W clippy::exhaustive_structs
+              -W clippy::exit -W clippy::expect_used -W clippy::field_scoped_visibility_modifiers
+              -W clippy::filetype_is_file -W clippy::float_arithmetic -W clippy::float_cmp_const
+              -W clippy::fn_to_numeric_cast_any -W clippy::if_then_some_else_none
+              -W clippy::impl_trait_in_params -W clippy::infinite_loop -W clippy::inline_modules
+              -W clippy::inline_trait_bounds -W clippy::integer_division
+              -W clippy::integer_division_remainder_used -W clippy::iter_over_hash_type
+              -W clippy::large_include_file -W clippy::let_underscore_must_use
+              -W clippy::let_underscore_untyped -W clippy::lossy_float_literal
+              -W clippy::map_err_ignore -W clippy::map_with_unused_argument_over_ranges
+              -W clippy::mem_forget -W clippy::min_ident_chars -W clippy::missing_assert_message
+              -W clippy::missing_asserts_for_indexing -W clippy::missing_docs_in_private_items
+              -W clippy::missing_inline_in_public_items -W clippy::missing_trait_methods
+              -W clippy::mixed_read_write_in_expression -W clippy::module_name_repetitions
+              -W clippy::modulo_arithmetic -W clippy::multiple_inherent_impl
+              -W clippy::multiple_unsafe_ops_per_block -W clippy::mutex_atomic
+              -W clippy::mutex_integer -W clippy::needless_raw_strings -W clippy::non_ascii_literal
+              -W clippy::non_zero_suggestions -W clippy::panic -W clippy::panic_in_result_fn
+              -W clippy::partial_pub_fields -W clippy::pathbuf_init_then_push
+              -W clippy::pattern_type_mismatch -W clippy::pointer_format -W clippy::precedence_bits
+              -W clippy::print_stderr -W clippy::print_stdout -W clippy::pub_use
+              -W clippy::question_mark_used -W clippy::rc_buffer -W clippy::rc_mutex
+              -W clippy::redundant_test_prefix -W clippy::redundant_type_annotations
+              -W clippy::ref_patterns -W clippy::renamed_function_params
+              -W clippy::rest_pat_in_fully_bound_structs -W clippy::return_and_then
+              -W clippy::same_name_method -W clippy::shadow_reuse -W clippy::shadow_same
+              -W clippy::shadow_unrelated -W clippy::single_call_fn
+              -W clippy::single_char_lifetime_names -W clippy::string_add
+              -W clippy::string_lit_chars_any -W clippy::string_slice -W clippy::str_to_string
+              -W clippy::suspicious_xor_used_as_pow -W clippy::tests_outside_test_module
+              -W clippy::todo -W clippy::try_err -W clippy::undocumented_unsafe_blocks
+              -W clippy::unimplemented -W clippy::unnecessary_safety_comment
+              -W clippy::unnecessary_safety_doc -W clippy::unnecessary_self_imports
+              -W clippy::unneeded_field_pattern -W clippy::unreachable
+              -W clippy::unused_result_ok -W clippy::unused_trait_names
+              -W clippy::unwrap_in_result -W clippy::unwrap_used -W clippy::use_debug
+              -W clippy::verbose_file_reads -W clippy::wildcard_enum_match_arm
+          # Experimental control, not a curated tier: the naive,
+          # unfiltered `-W clippy::restriction` -- the whole group,
+          # contradictory pairs and the endianness triple included,
+          # exactly what the exclusion reasoning above says should
+          # collide, no-op, or fail. That reasoning has been wrong
+          # about `--fix`/`-D warnings` behavior before this session
+          # (confirmed empirically: `--broken-code` doesn't relax which
+          # suggestions apply, it disables cargo's own verify-and-
+          # revert loop -- a materially different mechanism than
+          # first assumed), so the exclusion argument gets the same
+          # treatment as everything else here: run it and observe,
+          # don't take the reasoning as self-certifying. `maximal`
+          # stays the curated tier; this is the deliberately naive
+          # baseline run through the identical --fix/residual/
+          # broken_code machinery, to see what actually happens rather
+          # than what the argument above predicts.
+          - lint_scope: control
+            lint_flags: >-
+              -W clippy::all -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+              -W clippy::restriction
+          # Merged into every combination matching `features`,
+          # regardless of target/lint_scope/broken_code.
+          - features: with-gpu
+            feature_flags: '--all-features'
+          - features: without-gpu
+            feature_flags: '--no-default-features'
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # All 20 lint_scope x broken_code x features combinations for a
+      # given target compile the identical external dependency tree --
+      # only the final `-p`/`--workspace` clippy invocation on larql-cli
+      # itself differs between them, per this file's own steps below.
+      # A real, purpose-built action for exactly this (not a hand-rolled
+      # cache script), scoped per-target since aarch64/x86_64/windows/
+      # macos dependency artifacts aren't interchangeable: `shared-key`
+      # makes every one of the 20 combinations for a target read/write
+      # the same cache entry rather than each rebuilding the same tree
+      # from scratch. Real payoff is cross-run, not intra-run (these 20
+      # legs run concurrently, so the first push after adding this won't
+      # see much benefit) -- but this branch alone has pushed well over
+      # a dozen workflow-only iterations this session, each re-triggering
+      # the full matrix from a cold cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: probe-${{ matrix.target }}
+
+      # This is the general fix for the whole class of bug, not a
+      # patch for one instance of it: `dtolnay/rust-toolchain`'s own
+      # `targets:` input always installs into a toolchain slot named
+      # after its own `toolchain:`/`@ref` value (e.g. "stable-<host>"),
+      # independent of whatever toolchain a repo's own override (a
+      # rust-toolchain.toml, or any future mechanism) actually selects
+      # as ACTIVE -- confirmed against a real run's raw job log, where
+      # the target landed in "stable-<host>" while "1.98.0-<host>" was
+      # the toolchain actually in use, so cargo/rustc never saw it.
+      # `rustup target add` with no --toolchain flag always resolves
+      # and targets whichever toolchain is ACTUALLY active (respecting
+      # any override, present or future, whatever it's named) --
+      # confirmed by direct reproduction. No continue-on-error: if this
+      # fails, it's a genuine toolchain/workspace misconfiguration, not
+      # a compilability finding about the target, and it must fail
+      # loudly and distinctly from the probe steps below rather than
+      # silently produce misleading "does not compile" data (exactly
+      # what happened before this was found: E0463 "can't find crate
+      # for core" looked like a real compile failure and was actually
+      # this).
+      - name: Add target to the ACTUALLY active toolchain
+        run: rustup target add ${{ matrix.target }}
+
+      # `ring` (a real dependency of larql-cli's tree, via larql-vindex's
+      # rustls-tls reqwest usage) needs a C compiler for whatever target
+      # it's built for. Installing a real, standard, already-confirmed
+      # cross-gcc package where one exists isn't "unnecessary
+      # infrastructure" -- it's the difference between testing
+      # larql-cli's actual code on this target versus testing nothing
+      # but this workflow's own choice not to run one apt-get command.
+      # `gcc-aarch64-linux-gnu` is confirmed installable on the real
+      # ubuntu-latest image (verified directly via
+      # probe-runner-packages.yml's `apt-get install --dry-run`, not
+      # assumed). No equivalent package/cross-rs image/native runner
+      # exists anywhere for sparcv9-sun-solaris -- that target's
+      # compile failure stays real, unfixable information, not
+      # something to route around.
+      - name: Install gcc/g++-aarch64-linux-gnu (real, standard, confirmed-available)
+        # No CARGO_TARGET_*_LINKER needed: `cargo check`/`clippy` never
+        # reach the linking stage. Only a dependency's build script (via
+        # cc-rs, at build-script-execution time, which runs regardless
+        # of check vs. build) needs the compiler binary on PATH -- and
+        # the error messages already named the exact binaries these
+        # packages provide: `ring` needed "aarch64-linux-gnu-gcc"
+        # (this step's original scope); confirmed via a real run,
+        # `esaxx-rs`'s C++ build needs "aarch64-linux-gnu-g++" too --
+        # a distinct package (g++-aarch64-linux-gnu), not covered by
+        # the C one.
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      # A deeper, genuinely different layer of the same category,
+      # confirmed via a real run once ring's blocker was cleared:
+      # openssl-sys (reqwest's Linux native-tls path) needs a real
+      # OpenSSL for the target, discoverable via cross pkg-config.
+      # `libssl-dev:arm64` + Debian/Ubuntu multiarch is the standard OS
+      # mechanism for this, not bespoke infrastructure -- the same
+      # apt-get-based approach as the gcc package above, just one more
+      # architecture added to dpkg first.
+      - name: Install libssl-dev for arm64 (real, standard, multiarch)
+        # First attempt failed with real evidence, not a guess:
+        # `dpkg --add-architecture arm64` alone isn't enough on
+        # ubuntu-latest -- its default sources only have
+        # archive.ubuntu.com/security.ubuntu.com, which are amd64-only.
+        # arm64 packages live on the separate ports.ubuntu.com mirror
+        # (standard, well-documented Ubuntu infrastructure, not
+        # anything specific to this workflow).
+        #
+        # Second attempt also failed with real evidence: restricting
+        # the legacy /etc/apt/sources.list to [arch=amd64] didn't stop
+        # apt querying security.ubuntu.com for arm64. ubuntu-latest is
+        # 24.04 ("noble"), which ships its default sources in the
+        # newer DEB822 format at /etc/apt/sources.list.d/ubuntu.sources
+        # instead -- the legacy file is unused there. ubuntu.sources
+        # has separate stanzas (archive mirror for main/updates/
+        # backports, a distinct one for security.ubuntu.com); each
+        # needs its own `Architectures: amd64` field, the standard
+        # DEB822 way to scope a source, added after every `Types: deb`
+        # line.
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo sed -i -E 's/^deb(-src)? http/deb\1 [arch=amd64] http/' /etc/apt/sources.list
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          echo "=== sources.list ==="; cat /etc/apt/sources.list
+          echo "=== ubuntu.sources (post-edit, if present) ==="; cat /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || echo "(absent)"
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe restricted multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-updates main universe restricted multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-security main universe restricted multiverse" \
+            | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev:arm64 pkg-config
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+          # Real evidence, not a guess: an unscoped PKG_CONFIG_PATH also
+          # leaked into openblas-src's build script (which compiles for
+          # the HOST during cross-compilation, not the target), making
+          # it link the host binary against arm64 OpenSSL objects.
+          # pkg-config's own docs specify the fix: PKG_CONFIG_PATH (and
+          # _LIBDIR/_SYSROOT_DIR) can be scoped to one target triple via
+          # a `_<target-with-underscores>` suffix, so it's absent for
+          # the host-native build-script compilation. ALLOW_CROSS isn't
+          # scopeable this way, but that's fine -- it's only consulted
+          # when cargo's own TARGET differs from HOST for that specific
+          # compilation unit, which is never true for a build script.
+          echo "PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
+
+      # larql-router-protocol's own build.rs already documents this
+      # exact requirement (`#[cfg(windows)] fn set_protoc()` is a
+      # no-op, relying on protoc being on PATH), and larql-cli.yml
+      # already carries the real, working fix for it -- this step is
+      # that same fix, not a new one. Without it, the whole workspace
+      # build fails at larql-router-protocol before any lint runs,
+      # and because A/B/C below are all continue-on-error, that
+      # failure was being silently swallowed into a green "pass" with
+      # an empty fix.patch, on every past run of this workflow.
+      - name: Install protoc (Windows)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
+      # Fixed for real, once, at the source (root Cargo.toml), not here:
+      # cargo resolves features for a shared dependency as the union of
+      # every `[workspace].members` crate's request for it, not just
+      # `-p larql-cli`'s own, so larql-server/larql-python/larql-router/
+      # larql-demos/model-compute -- none of which larql-cli depends on
+      # -- used to influence every larql-cli build regardless of what
+      # larql-cli's own Cargo.toml asked for. Filed upstream as
+      # chrishayuk/larql#314 (this branch cares about one binary,
+      # larql-cli, so it made the permanent workspace-membership change
+      # locally rather than wait); independently documented on this
+      # fork's experiment/cuda-nvptx-lint-build branch, commit 7c00c1df.
+      #
+      # This is deliberately a real, reviewed commit to the workspace
+      # manifest, not something this workflow computes or rewrites at
+      # runtime. An earlier version tried the runtime-rewrite approach
+      # and was reverted: deciding which crates belong in a trimmed
+      # workspace has no tool with `--fix`'s actual guarantee (rustc's
+      # own MachineApplicable classification) behind it -- confirmed by
+      # research, not assumed (the Cargo book's own guidance is that
+      # `-p` doesn't isolate you and the fix is a genuinely different
+      # workspace boundary; cargo-hack tests feature powersets to
+      # detect leakage, it doesn't avoid it; cargo-hackerman forces
+      # unification consistency, the opposite goal). A hand-rolled
+      # script making that decision unattended on every run doesn't
+      # meet that bar; a human, informed by `cargo tree`'s real output,
+      # deciding it once and committing the result does.
+
+      - name: cargo tree (this target's actual dependency graph)
+        # No tee to a file: GitHub Actions already captures every step's
+        # full stdout/stderr verbatim (confirmed directly -- pulling this
+        # exact job's raw log via the API showed the complete -vv output,
+        # file:line included, with nothing missing). Teeing the same
+        # content into a tracked-tree file was pure indirection, and it's
+        # what caused the dirty-tree bug (twice) that blocked `--fix` from
+        # ever running. The job log is the raw data; nothing else is
+        # needed for tree/check/fix/residual output.
+        run: cargo tree --target ${{ matrix.target }} ${{ matrix.feature_flags }} -e normal,build,dev -vv
+
+      # "Allow nothing" applies here too, not just to the clippy-based
+      # steps below: `cargo check` never runs clippy-driver, so the
+      # `-W clippy::*` flags in `lint_flags` are meaningless to it --
+      # the equivalent for plain rustc is its own allow-by-default
+      # lints (`missing_docs`, `unsafe_code`, `unreachable_pub`, etc),
+      # which `cargo check` otherwise leaves silently narrowed by
+      # defaults exactly like clippy's would be. This list is the
+      # complete set of rustc's own allow-by-default lints, extracted
+      # directly from the actual installed rustc/clippy (1.98.0/0.1.98,
+      # matching this workflow's toolchain) via `-W help`, not
+      # hand-assembled from memory -- and re-verified against that same
+      # toolchain a second time: the first extraction included 8 names
+      # (`deprecated_llvm_intrinsic`, `implicit_provenance_casts`,
+      # `multiple_supertrait_upcastable`, `must_not_suspend`,
+      # `non_exhaustive_omitted_patterns`,
+      # `resolving_to_items_shadowing_supertrait_items`,
+      # `shadowing_supertrait_items`, `unqualified_local_imports`) that
+      # `-W help` lists but stable rustc doesn't actually recognize
+      # ("unknown lint" warnings, harmless but sloppy) -- removed,
+      # leaving only the 52 that a real `cargo check` accepts cleanly.
+      # `-D warnings` (verified empirically,
+      # not assumed: `RUSTFLAGS="-D warnings" cargo check`, both with a
+      # dependency crate's own pre-existing warning and with a
+      # workspace path-sibling's own violation) denies exactly the
+      # crate(s) actually being checked -- cargo's `--cap-lints warn`
+      # protects real external (crates.io) dependencies regardless, but
+      # does NOT shield workspace path-dependency siblings, which
+      # `--workspace` treats as primary targets, not dependencies.
+      # Scoped to this step's own `env:`, not the job's, so it doesn't
+      # also apply to steps B/C's `cargo clippy` invocations below,
+      # which already have their own, clippy-specific "allow nothing"
+      # policy via `lint_flags`.
+      - name: A. cargo check
+        continue-on-error: true
+        env:
+          RUSTFLAGS: >-
+            -W absolute-paths-not-starting-with-crate -W ambiguous-negative-literals
+            -W closure-returning-async-block -W dead-code-pub-in-binary -W deprecated-in-future
+            -W deprecated-safe-2024 -W deref-into-dyn-supertrait
+            -W edition-2024-expr-fragment-specifier -W elided-lifetimes-in-paths
+            -W explicit-outlives-requirements -W ffi-unwind-calls -W if-let-rescope
+            -W impl-trait-overcaptures -W impl-trait-redundant-captures
+            -W keyword-idents-2018 -W keyword-idents-2024 -W let-underscore-drop -W linker-info
+            -W macro-use-extern-crate -W meta-variable-misuse -W missing-copy-implementations
+            -W missing-debug-implementations -W missing-docs -W missing-unsafe-on-extern
+            -W non-ascii-idents -W redundant-imports -W redundant-lifetimes
+            -W rust-2021-incompatible-closure-captures
+            -W rust-2021-incompatible-or-patterns -W rust-2021-prefixes-incompatible-syntax
+            -W rust-2021-prelude-collisions -W rust-2024-guarded-string-incompatible-syntax
+            -W rust-2024-incompatible-pat -W rust-2024-prelude-collisions
+            -W single-use-lifetimes -W tail-expr-drop-order -W trivial-casts -W trivial-numeric-casts
+            -W unit-bindings -W unnameable-types -W unreachable-pub
+            -W unsafe-attr-outside-unsafe -W unsafe-code -W unstable-features
+            -W unused-crate-dependencies -W unused-extern-crates -W unused-import-braces
+            -W unused-lifetimes -W unused-macro-rules -W unused-qualifications -W unused-results
+            -W variant-size-differences -D warnings
+        run: cargo check --workspace --bins --tests --examples --target ${{ matrix.target }} ${{ matrix.feature_flags }} -vv
+
+      # Same bug class as finding 1, from a source that can't be
+      # eliminated: `cargo check`/`cargo tree` are real, standard tool
+      # behavior, not anything this workflow writes, and without
+      # --locked they can legitimately rewrite Cargo.lock in place
+      # during ordinary resolution (a new platform-specific entry for
+      # this target, a semver-compatible registry update since the
+      # committed lockfile was generated). Confirmed against a real
+      # run's raw job log: `* Cargo.lock (dirty)` was the sole reported
+      # file, on a target whose own worktree Cargo.lock is otherwise
+      # clean and untouched by any step here. --fix's own precondition
+      # then correctly refuses. Committing it (local only, discarded
+      # when the job ends, never pushed) is the same fix as finding 1
+      # for the same reason: whatever changed the tree before --fix
+      # runs must not be the reason --fix can't run.
+      - name: Commit any Cargo.lock drift from cargo's own resolution (local only, never pushed)
+        run: |
+          git config user.email "target-matrix-decidability@localhost"
+          git config user.name "target-matrix-decidability"
+          if [ -n "$(git status --porcelain -- Cargo.lock)" ]; then
+            git add Cargo.lock
+            git commit -q -m "ephemeral: cargo's own Cargo.lock resolution for this target"
+          fi
+
+      - name: B. clippy --fix (${{ matrix.lint_scope }}, broken_code=${{ matrix.broken_code }})
+        continue-on-error: true
+        run: >
+          cargo clippy --fix ${{ matrix.broken_code == true && '--broken-code' || '' }}
+          --workspace --bins --tests --examples --target ${{ matrix.target }}
+          ${{ matrix.feature_flags }} --no-deps -vv
+          -- ${{ matrix.lint_flags }}
+
+      - name: B. capture the actual fix diff
+        # This is the one thing worth uploading: `git diff` produces
+        # content that doesn't exist in any command's stdout (the log
+        # shows THAT files changed, not a clean, directly `git apply`-able
+        # diff). Written after the fix step, so it can't affect that
+        # step's own dirty-tree precondition.
+        #
+        # Scoped to crates/ only, not a bare `git diff`: --fix never
+        # touches anything outside the source tree, but Cargo.lock can
+        # legitimately drift on its own (e.g. a routine resolver update)
+        # for reasons unrelated to what --fix did -- scoping keeps
+        # fix.patch a clean per-target signal regardless.
+        run: git diff -- crates/ > fix.patch
+
+      # `clippy --fix`'s MachineApplicable guarantee is about the
+      # suggestion compiling, not about matching rustfmt's own style --
+      # a fix.patch that leaves code fmt-dirty is real, unrecorded
+      # signal this workflow was otherwise silent on. Checked against
+      # the post-fix tree (after B, before C), same continue-on-error
+      # pattern as A/B/C: a formatting delta is data about this specific
+      # lint_scope/target/broken_code combination, not a reason to stop
+      # the remaining steps from running.
+      - name: B2. cargo fmt --check (state after --fix)
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+
+      - name: C. residual clippy (${{ matrix.lint_scope }}, deny warnings)
+        continue-on-error: true
+        run: >
+          cargo clippy --workspace --bins --tests --examples --target ${{ matrix.target }}
+          ${{ matrix.feature_flags }} --no-deps -vv
+          -- ${{ matrix.lint_flags }} -D warnings
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fix-patch-${{ matrix.target }}-${{ matrix.features }}-${{ matrix.lint_scope }}-broken-${{ matrix.broken_code }}
+          path: fix.patch
+          retention-days: 14
+          if-no-files-found: warn

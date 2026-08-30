@@ -210,7 +210,7 @@ cargo test -p larql-inference --test test_experts
 # End-to-end demo: loads all experts, prints WASM file sizes and live linear
 # memory pages, runs 68 structured calls, benchmarks WASM vs native on one op,
 # and shows the sandbox containing a division-by-zero.
-cargo run -p larql-inference --example experts_demo --release
+cargo run -p larql-demos --example experts_demo --release
 ```
 
 ## Design notes

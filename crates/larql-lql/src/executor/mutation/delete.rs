@@ -1,8 +1,14 @@
-//! `DELETE FROM EDGES WHERE ...` — remove features via the patch overlay.
+//! `DELETE FROM EDGES WHERE ...` — tombstone features via the session
+//! overlay (V2's `PatchedVindex`, V3's `KnowledgeOverlay`).
+//!
+//! One logical operation, written once: candidates resolve through the
+//! knowledge seam, the tombstone lands in whichever overlay the
+//! binding holds, and the same `PatchOp::Delete` is recorded — so a
+//! saved patch replays identically on either backend.
 
 use crate::ast::Condition;
 use crate::error::LqlError;
-use crate::executor::Session;
+use crate::executor::{Backend, Session};
 
 use super::{relation_filter_matches, WhereFilters};
 
@@ -14,10 +20,10 @@ impl Session {
         let filters = WhereFilters::from_conditions(conditions);
 
         // Collect candidates with a readonly borrow before mutating the
-        // patch overlay, so relation predicates cannot be dropped silently.
+        // overlay, so relation predicates cannot be dropped silently.
         let deletes = {
-            let (_path, _config, patched) = self.require_vindex()?;
-            let candidates = filters.resolve_candidates(patched.base());
+            let ctx = self.browse()?;
+            let candidates = filters.resolve_candidates(&ctx.source);
 
             let mut matches = Vec::new();
             for (layer, feature) in candidates {
@@ -37,11 +43,18 @@ impl Session {
             return Ok(vec!["  (no matching features found)".into()]);
         }
 
-        {
-            let (_path, _config, patched) = self.require_patched_mut()?;
-            for &(layer, feature) in &deletes {
-                patched.delete_feature(layer, feature);
+        match &mut self.backend {
+            Backend::Vindex { patched, .. } => {
+                for &(layer, feature) in &deletes {
+                    patched.delete_feature(layer, feature);
+                }
             }
+            Backend::Vindex3 { overlay, .. } => {
+                for &(layer, feature) in &deletes {
+                    overlay.delete_feature(layer, feature);
+                }
+            }
+            _ => unreachable!("browse() refused every other backend above"),
         }
 
         // Record to patch session

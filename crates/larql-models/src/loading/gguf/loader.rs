@@ -93,8 +93,15 @@ impl GgufFile {
         let mut vectors = HashMap::new();
         let mut raw_bytes: HashMap<String, Vec<u8>> = HashMap::new();
 
+        let arch = self
+            .metadata
+            .get(GGUF_GENERAL_ARCHITECTURE)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
         for info in &self.tensor_infos {
-            let key = normalize_gguf_key(&info.name);
+            let key = normalize_gguf_key_for_arch(&info.name, &arch);
             if skip_key(&key) {
                 continue;
             }
@@ -292,6 +299,81 @@ impl GgufFile {
             config[HF_VOCAB_SIZE] = serde_json::json!(vocab_size);
         }
 
+        // ── Gemma 4 per-layer attention geometry ────────────────────────────
+        // Gemma 4 GGUFs describe heterogeneous attention (sliding layers vs
+        // global layers) with per-layer arrays and `*_swa` twin keys; the
+        // flat mapping above collapses them to one number and drops the
+        // rest. Re-emit the flat HF-style keys the safetensors detect path
+        // reads (`detect/parser.rs`) so the reconstructed arch can route
+        // per layer. Without these, gemma-4 models whose global layers have
+        // no attn_v tensor (12B, 31B: `attention_k_eq_v`) index past the
+        // end of the V collection at inference time.
+        if arch == "gemma4" {
+            // head_count_kv is a per-layer array (e.g. 8 on sliding layers,
+            // 1 on global layers for the 12B). Layer 0 is always sliding;
+            // the first differing value is the global-layer count.
+            if let Some(GgufValue::Array(arr)) = self
+                .metadata
+                .get(&format!("{prefix}{GGUF_ATTENTION_HEAD_COUNT_KV}"))
+            {
+                let vals: Vec<u32> = arr.iter().filter_map(|x| x.as_u32()).collect();
+                if let Some(&sliding) = vals.first() {
+                    config[HF_NUM_KEY_VALUE_HEADS] = serde_json::json!(sliding);
+                    if let Some(&global) = vals.iter().find(|&&v| v != sliding) {
+                        config["num_global_key_value_heads"] = serde_json::json!(global);
+                    }
+                }
+            }
+            // key_length is the global-layer head width; key_length_swa the
+            // sliding-layer width (the base head_dim the arch expects).
+            let key_len = get_arch_u32(GGUF_ATTENTION_KEY_LENGTH);
+            let key_len_swa = get_arch_u32("attention.key_length_swa");
+            if key_len_swa > 0 {
+                config[HF_HEAD_DIM] = serde_json::json!(key_len_swa);
+            }
+            if key_len > 0 && key_len != key_len_swa {
+                config["global_head_dim"] = serde_json::json!(key_len);
+                // Global layers rotate a quarter of their head dims —
+                // constant across every Gemma 4 HF config (12B/26B/31B);
+                // the GGUF carries no equivalent key.
+                config["partial_rotary_factor"] = serde_json::json!(0.25);
+            }
+            // Dual RoPE bases: `rope.freq_base` is the global-layer clock
+            // (already emitted as rope_theta above), `rope.freq_base_swa`
+            // the sliding-layer one.
+            if let Some(swa) = get_arch_f64("rope.freq_base_swa") {
+                config["rope_local_base_freq"] = serde_json::json!(swa);
+            }
+            if let Some(sw) = get_arch_u32_opt("attention.sliding_window").filter(|&v| v > 0) {
+                config["sliding_window"] = serde_json::json!(sw);
+            }
+            // Layers with no attn_v tensor reuse K as V (`attention_k_eq_v`
+            // in the HF config). The GGUF metadata has no flag for this;
+            // detect it from the tensor inventory, as llama.cpp does.
+            let n_blocks = get_arch_u32(GGUF_BLOCK_COUNT) as usize;
+            let n_v = self
+                .tensor_infos
+                .iter()
+                .filter(|t| t.name().ends_with(".attn_v.weight"))
+                .count();
+            if n_blocks > 0 && n_v > 0 && n_v < n_blocks {
+                config["attention_k_eq_v"] = serde_json::json!(true);
+            }
+            // Final-logit softcap: logits = cap * tanh(logits / cap).
+            // Monotonic (never changes the argmax) but shapes the softmax
+            // distribution, so probabilities drift without it.
+            if let Some(cap) = get_arch_f64("final_logit_softcapping") {
+                config["final_logit_softcapping"] = serde_json::json!(cap);
+            }
+        }
+
+        // RMSNorm epsilon — llama.cpp emits it for every RMSNorm family
+        // under the arch prefix. Absent → detect_from_json falls back to
+        // its default.
+        if let Some(eps) = get_arch_f64("attention.layer_norm_rms_epsilon") {
+            config["rms_norm_eps"] = serde_json::json!(eps);
+        }
+
         // ── MLA fields (DeepSeek-V2/V3 family, e.g. Kimi K2) ─────────────────
         // The HF config exposes `q_lora_rank` / `kv_lora_rank` /
         // `qk_nope_head_dim` / `qk_rope_head_dim` / `v_head_dim`. llama.cpp
@@ -448,6 +530,8 @@ pub(crate) fn load_gguf_filtered_with_validation_and_keep(
         skipped_tensors: Vec::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
+        per_layer_ffn_format: Default::default(),
+        per_layer_ffn_arrangement: Default::default(),
         embed,
         lm_head,
         position_embed,
@@ -509,9 +593,29 @@ pub fn normalize_gguf_key(name: &str) -> String {
         .fold(name.to_string(), |acc, (from, to)| acc.replace(from, to))
 }
 
+/// As [`normalize_gguf_key`], but arch-aware: gemma 2/3/4 GGUFs use a
+/// four-norm layer layout (attn_norm / post_attention_norm / ffn_norm /
+/// post_ffw_norm) plus QK-norms and, on Gemma 4, a per-layer output
+/// scalar. The generic table maps `ffn_norm.` to the llama-style
+/// post-attention slot — actively wrong for gemma — and drops the rest
+/// on the floor, so gemma-specific replacements run first. Gemma 1 has
+/// the llama two-norm layout and stays on the generic path.
+pub fn normalize_gguf_key_for_arch(name: &str, arch: &str) -> String {
+    let gemma_layout = matches!(arch, "gemma2" | "gemma3") || arch.starts_with("gemma4");
+    let name = if gemma_layout {
+        GGUF_TO_HF_KEY_REPLACEMENTS_GEMMA
+            .iter()
+            .fold(name.to_string(), |acc, (from, to)| acc.replace(from, to))
+    } else {
+        name.to_string()
+    };
+    GGUF_TO_HF_KEY_REPLACEMENTS
+        .iter()
+        .fold(name, |acc, (from, to)| acc.replace(from, to))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::constants::*;
     use super::super::types::ShardInfo;
     use super::*;
 
@@ -530,6 +634,50 @@ mod tests {
             "embed_tokens.weight"
         );
         assert_eq!(normalize_gguf_key("output.weight"), "lm_head.weight");
+    }
+
+    #[test]
+    fn test_normalize_gguf_key_gemma_layout() {
+        assert_eq!(
+            normalize_gguf_key_for_arch("blk.0.attn_q_norm.weight", "gemma4"),
+            "layers.0.self_attn.q_norm.weight"
+        );
+        assert_eq!(
+            normalize_gguf_key_for_arch("blk.0.attn_k_norm.weight", "gemma4_unified"),
+            "layers.0.self_attn.k_norm.weight"
+        );
+        assert_eq!(
+            normalize_gguf_key_for_arch("blk.0.post_attention_norm.weight", "gemma2"),
+            "layers.0.post_attention_layernorm.weight"
+        );
+        // gemma's ffn_norm is the PRE-feedforward norm...
+        assert_eq!(
+            normalize_gguf_key_for_arch("blk.3.ffn_norm.weight", "gemma3"),
+            "layers.3.pre_feedforward_layernorm.weight"
+        );
+        // ...while llama's ffn_norm keeps the generic post-attention mapping.
+        assert_eq!(
+            normalize_gguf_key_for_arch("blk.3.ffn_norm.weight", "llama"),
+            "layers.3.post_attention_layernorm.weight"
+        );
+        // Gemma 1 is llama-layout too.
+        assert_eq!(
+            normalize_gguf_key_for_arch("blk.3.ffn_norm.weight", "gemma"),
+            "layers.3.post_attention_layernorm.weight"
+        );
+        assert_eq!(
+            normalize_gguf_key_for_arch("blk.47.post_ffw_norm.weight", "gemma4"),
+            "layers.47.post_feedforward_layernorm.weight"
+        );
+        assert_eq!(
+            normalize_gguf_key_for_arch("blk.5.layer_output_scale.weight", "gemma4"),
+            "layers.5.layer_scalar"
+        );
+        // Mapped projections are untouched by the gemma pre-pass.
+        assert_eq!(
+            normalize_gguf_key_for_arch("blk.0.attn_q.weight", "gemma4"),
+            "layers.0.self_attn.q_proj.weight"
+        );
     }
 
     #[test]

@@ -21,7 +21,7 @@ pub(super) fn log_decode_entry(
     inter: usize,
     layers: &[FullPipelineLayer],
 ) {
-    if !options::env_flag(options::ENV_DECODE_DEBUG) || call_n >= 3 {
+    if !options::decode_debug_enabled() || call_n >= 3 {
         return;
     }
     let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();
@@ -282,3 +282,73 @@ impl ResidualDump {
         }
     }
 }
+
+/// Per-decode-call dump: every layer's K cache, the call's final hidden,
+/// and the input embedding, keyed by call index.
+///
+/// Answers "which call and which layer first diverges from CPU". No-op
+/// unless [`options::ENV_PERCALL_LAYER_DUMP_DIR`] names a directory.
+pub(super) fn dump_percall_layers(
+    kv_cache: &crate::ops::kv_cache::KVCache,
+    h_buf: &metal::Buffer,
+    x: &[f32],
+    hidden: usize,
+    call_n: usize,
+) {
+    let Some(dir) = options::env_value(options::ENV_PERCALL_LAYER_DUMP_DIR) else {
+        return;
+    };
+    for (idx, kv_layer) in kv_cache.layers.iter().enumerate() {
+        if kv_layer.current_len == 0 {
+            continue;
+        }
+        let total = kv_layer.current_len * kv_layer.num_kv_heads * kv_layer.head_dim;
+        let k_floats = crate::buffers::read_buffer_f32(&kv_layer.k_cache, total);
+        write_f32(
+            &format!("{dir}/metal_call{call_n:03}_L{idx:02}_K.f32"),
+            &k_floats,
+        );
+    }
+    // h_buf is the layer-output residual fed into the next decode.
+    let h_floats = crate::buffers::read_buffer_f32(h_buf, hidden);
+    write_f32(
+        &format!("{dir}/metal_call{call_n:03}_h_final.f32"),
+        &h_floats,
+    );
+    // x is this call's input embed — compared against the CPU batched-prefill
+    // embed at the same position.
+    write_f32(&format!("{dir}/metal_call{call_n:03}_x_input.f32"), x);
+}
+
+/// End-of-call K/V cache dump for byte-level comparison against the CPU
+/// path's `k_rope` / `v_final` on the same prompt.
+///
+/// Overwritten every call — last call wins. No-op unless
+/// [`options::ENV_KV_CACHE_DUMP_DIR`] names a directory.
+pub(super) fn dump_kv_caches(kv_cache: &crate::ops::kv_cache::KVCache) {
+    let Some(dir) = options::env_value(options::ENV_KV_CACHE_DUMP_DIR) else {
+        return;
+    };
+    for (idx, kv_layer) in kv_cache.layers.iter().enumerate() {
+        if kv_layer.current_len == 0 {
+            continue;
+        }
+        let total = kv_layer.current_len * kv_layer.num_kv_heads * kv_layer.head_dim;
+        let k = crate::buffers::read_buffer_f32(&kv_layer.k_cache, total);
+        let v = crate::buffers::read_buffer_f32(&kv_layer.v_cache, total);
+        write_f32(&format!("{dir}/metal_L{idx:02}_K_cache.f32"), &k);
+        write_f32(&format!("{dir}/metal_L{idx:02}_V_cache.f32"), &v);
+    }
+}
+
+/// Write f32s as little-endian bytes. Dump failures are diagnostics, not
+/// decode failures, so they are reported and swallowed.
+fn write_f32(path: &str, values: &[f32]) {
+    let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+    if let Err(e) = std::fs::write(path, &bytes) {
+        eprintln!("[decode-dump] failed to write {path}: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests;
