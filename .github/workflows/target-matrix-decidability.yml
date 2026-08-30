@@ -392,7 +392,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       # All 20 lint_scope x broken_code x features combinations for a
       # given target compile the identical external dependency tree --
@@ -676,6 +676,18 @@ jobs:
         # for reasons unrelated to what --fix did -- scoping keeps
         # fix.patch a clean per-target signal regardless.
         run: git diff -- crates/ > fix.patch
+
+      # `clippy --fix`'s MachineApplicable guarantee is about the
+      # suggestion compiling, not about matching rustfmt's own style --
+      # a fix.patch that leaves code fmt-dirty is real, unrecorded
+      # signal this workflow was otherwise silent on. Checked against
+      # the post-fix tree (after B, before C), same continue-on-error
+      # pattern as A/B/C: a formatting delta is data about this specific
+      # lint_scope/target/broken_code combination, not a reason to stop
+      # the remaining steps from running.
+      - name: B2. cargo fmt --check (state after --fix)
+        continue-on-error: true
+        run: cargo fmt --all -- --check
 
       - name: C. residual clippy (${{ matrix.lint_scope }}, deny warnings)
         continue-on-error: true
