@@ -112,6 +112,7 @@ pub fn run_attention_block_gpu(
         seq_len,
         capture_attention,
         softcap,
+        None,
     );
 
     let mut attn_projected = dot_proj_gpu(&attn_out, w_o, backend);
@@ -293,6 +294,7 @@ pub fn run_attention_with_kv_backend(
         seq_len,
         false,
         arch.attn_logit_softcapping(),
+        None,
     );
     let mut o = if let Some(attn) = attn_q4k {
         crate::ffn::weight::quant_proj(attn[3].0, attn[3].1, &attn_out, in_dim, q_dim, seq_len)

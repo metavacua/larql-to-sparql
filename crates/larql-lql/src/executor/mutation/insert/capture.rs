@@ -96,7 +96,7 @@ impl Session {
         // 2. UNLIMITED top_k: the INFER path in `query.rs` uses
         //    `new_unlimited_with_trace`, so the L26 residual at
         //    inference time is built from a full-power baseline (all
-        //    16384 features fire). If we captured at top_k=8092 — a
+        //    10240 features fire). If we captured at top_k=8092 — a
         //    half-power baseline — the captured residual would differ
         //    from the inference residual in magnitude even when the
         //    direction matches. We'd engineer gates against half-power

@@ -1,7 +1,7 @@
 use larql_compute::cpu::ops::q4k_q8k_dot::{
     q4k_q8k_gate_up_into, q4k_q8k_matvec_into, quantize_x_to_q8k, Q8KActivation,
 };
-use larql_vindex::VectorIndex;
+use larql_vindex::{VectorIndex, FFN_DOWN, FFN_GATE, FFN_UP};
 use ndarray::Array2;
 
 use super::dequant::dequantize_matrix;
@@ -29,7 +29,7 @@ pub fn kquant_ffn_forward_layer(
             )
         });
 
-    let gate = if let Some(arc) = index.kquant_ffn_layer_once(layer, 0) {
+    let gate = if let Some(arc) = index.kquant_ffn_layer_once(layer, FFN_GATE) {
         let w_gate =
             ndarray::ArrayView2::from_shape((intermediate, hidden), &arc[..intermediate * hidden])
                 .expect("gate cache shape");
@@ -38,7 +38,7 @@ pub fn kquant_ffn_forward_layer(
         let w_gate = dequantize_matrix(ffn[0].0, ffn[0].1, intermediate, hidden);
         dot_proj(x, &w_gate)
     };
-    let up = if let Some(arc) = index.kquant_ffn_layer_once(layer, 1) {
+    let up = if let Some(arc) = index.kquant_ffn_layer_once(layer, FFN_UP) {
         let w_up =
             ndarray::ArrayView2::from_shape((intermediate, hidden), &arc[..intermediate * hidden])
                 .expect("up cache shape");
@@ -47,35 +47,33 @@ pub fn kquant_ffn_forward_layer(
         let w_up = dequantize_matrix(ffn[1].0, ffn[1].1, intermediate, hidden);
         dot_proj(x, &w_up)
     };
-    let activation = match arch.activation() {
-        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu => {
-            gelu_tanh_gate_up(&gate, &up)
-        }
-        _ => silu_gate_up(&gate, &up),
+    let activation = if arch.activation().uses_gelu_tanh_gate_up() {
+        gelu_tanh_gate_up(&gate, &up)
+    } else {
+        silu_gate_up(&gate, &up)
     };
     // Down projection: use LRU dequant cache (component=2 stores feature-major = w_down^T).
     let n = intermediate * hidden;
-    if let Some(arc) = index.kquant_ffn_layer_once(layer, 2) {
+    if let Some(arc) = index.kquant_ffn_layer_once(layer, FFN_DOWN) {
         let w_down_t = ndarray::ArrayView2::from_shape((intermediate, hidden), &arc[..n])
             .expect("down cache shape");
         activation.dot(&w_down_t)
     } else {
-        let inter_padded = intermediate.div_ceil(larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS)
-            * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
-        let w_down = if inter_padded != intermediate {
-            let w = dequantize_matrix(ffn[2].0, ffn[2].1, hidden, inter_padded);
-            w.slice(ndarray::s![.., ..intermediate]).to_owned()
-        } else {
-            dequantize_matrix(ffn[2].0, ffn[2].1, hidden, intermediate)
-        };
+        // `dequantize_matrix` strips the writer's per-row super-block
+        // padding internally — logical dims only.
+        let w_down = dequantize_matrix(ffn[2].0, ffn[2].1, hidden, intermediate);
         dot_proj(&activation, &w_down)
     }
 }
 
 /// Q4_K × Q8_K variant: accepts a pre-quantised Q8_K activation vector
 /// (already RMS-normed by the client) and skips the dequant of gate/up by
-/// using the NEON/AVX2 `q4k_q8k_gate_up_into` kernel.  Down projection
-/// still goes through the f32 dequant path (no Q6K×Q8K kernel yet).
+/// using the `q4k_q8k_gate_up_into` kernel (NEON/hand-asm on aarch64;
+/// scalar-only on x86_64 today — see `q4k_q8k_gate_up_into`'s doc comment).
+/// Down projection takes the matching Q4_K×Q8_K matvec kernel only when the
+/// down slab's own format tag is `"Q4_K"`; any other format (a non-Q4_K
+/// down slab, e.g. from a model with a different quant mix) falls back to
+/// the f32 dequant path, which consults the tag correctly.
 ///
 /// `h_q8k.qs.len()` must equal `hidden` (= `x.ncols()`), which is a
 /// multiple of 256 (Q8_K block size).
@@ -119,42 +117,39 @@ pub fn kquant_ffn_forward_layer_q8k(
     let gate = Array2::from_shape_vec((1, intermediate), gate_flat).expect("gate shape");
     let up = Array2::from_shape_vec((1, intermediate), up_flat).expect("up shape");
 
-    let activation = match arch.activation() {
-        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu => {
-            gelu_tanh_gate_up(&gate, &up)
-        }
-        _ => silu_gate_up(&gate, &up),
+    let activation = if arch.activation().uses_gelu_tanh_gate_up() {
+        gelu_tanh_gate_up(&gate, &up)
+    } else {
+        silu_gate_up(&gate, &up)
     };
 
     // Down projection: Q4K×Q8K NEON — quantise the f32 activation once,
     // then call the NEON matvec directly on the mmap Q4K bytes.
     // No dequant, no large f32 allocation, no BLAS thread-pool collision.
-    // Guard: intermediate must be Q8K-block-aligned (multiple of the
-    // Q4_K/Q8_K super-block size).
-    // For non-aligned sizes (rare, non-production) fall back to OnceLock cache.
-    if intermediate.is_multiple_of(crate::ffn::Q4K_Q8K_SUPERBLOCK_ELEMS) {
+    // Guard: down's own format tag must be "Q4_K" (this kernel reads the
+    // Q4_K block layout only — feeding it Q6_K/Q5_K/… bytes decodes silent
+    // garbage, see docs/audits/dec-readiness-review-2026-07-22.md §1d) AND
+    // intermediate must be Q8K-block-aligned (multiple of the Q4_K/Q8_K
+    // super-block size). Either condition failing falls back to the
+    // format-aware dequant path below.
+    if ffn[2].1 == "Q4_K" && intermediate.is_multiple_of(crate::ffn::Q4K_Q8K_SUPERBLOCK_ELEMS) {
         let activation_flat = activation.as_slice().expect("activation contiguous");
         let act_q8k = quantize_x_to_q8k(activation_flat);
         let mut out = vec![0.0f32; hidden];
         q4k_q8k_matvec_into(&mut out, &act_q8k, ffn[2].0, hidden, intermediate);
         Array2::from_shape_vec((1, hidden), out).expect("down output shape")
     } else {
-        // Fallback: OnceLock cache + ndarray dot for non-256-aligned intermediate.
+        // Fallback: OnceLock cache + ndarray dot; consults `ffn[2].1` via
+        // `dequantize_matrix`, so any down format is handled correctly.
         let n = intermediate * hidden;
-        if let Some(arc) = index.kquant_ffn_layer_once(layer, 2) {
+        if let Some(arc) = index.kquant_ffn_layer_once(layer, FFN_DOWN) {
             let w_down_t = ndarray::ArrayView2::from_shape((intermediate, hidden), &arc[..n])
                 .expect("down cache shape");
             activation.dot(&w_down_t)
         } else {
-            let inter_padded = intermediate
-                .div_ceil(larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS)
-                * larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
-            let w_down = if inter_padded != intermediate {
-                let w = dequantize_matrix(ffn[2].0, ffn[2].1, hidden, inter_padded);
-                w.slice(ndarray::s![.., ..intermediate]).to_owned()
-            } else {
-                dequantize_matrix(ffn[2].0, ffn[2].1, hidden, intermediate)
-            };
+            // `dequantize_matrix` strips the writer's per-row super-block
+            // padding internally — logical dims only.
+            let w_down = dequantize_matrix(ffn[2].0, ffn[2].1, hidden, intermediate);
             dot_proj(&activation, &w_down)
         }
     }

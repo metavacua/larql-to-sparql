@@ -1,8 +1,9 @@
 {
-  "policy_note": "CLI is a binary crate with most code under `commands/` doing CLI parsing, dispatch, or I/O against live models/servers. This policy is scoped to the `bench/` subtree: pure helpers are gated at the 90% default; I/O-wrapper runtime files (`*_runtime.rs`) and the top-level orchestrator (`run.rs`) are excluded because they're thin glue around `larql_inference` / `larql_compute` / `LayerShardedBackend` / `RemoteMoeBackend` calls that need live shards and real model weights to exercise. The split keeps every byte of testable post-processing logic under the gate. Baseline measured 2026-05-15.",
+  "policy_note": "CLI is a binary crate with most code under `commands/` doing CLI parsing, dispatch, or I/O against live models/servers. This policy is scoped to the `bench/` and `dec_bench/` subtrees: pure helpers are gated at the 90% default; I/O-wrapper runtime files (`*_runtime.rs`) and the top-level orchestrators (`run.rs`, `mod.rs`, `args.rs`) are excluded because they're thin glue around `larql_inference` / `larql_compute` / `LayerShardedBackend` / `RemoteMoeBackend` / `reqwest` calls that need live shards and real model weights to exercise. The split keeps every byte of testable post-processing logic under the gate. Baseline measured 2026-05-15; dec_bench added 2026-07-22.",
   "include_globs": [
     "crates/larql-cli/src/commands/primary/bench/*.rs",
-    "crates/larql-cli/src/commands/primary/bench/**/*.rs"
+    "crates/larql-cli/src/commands/primary/bench/**/*.rs",
+    "crates/larql-cli/src/commands/primary/dec_bench/*.rs"
   ],
   "exclude_globs": [
     "crates/larql-cli/src/commands/primary/bench/run.rs",
@@ -10,7 +11,13 @@
     "crates/larql-cli/src/commands/primary/bench/grid_lan_runtime.rs",
     "crates/larql-cli/src/commands/primary/bench/local_runtime.rs",
     "crates/larql-cli/src/commands/primary/bench/remote_ffn_runtime.rs",
-    "crates/larql-cli/src/commands/primary/bench/remote_moe_runtime.rs"
+    "crates/larql-cli/src/commands/primary/bench/remote_moe_runtime.rs",
+    "crates/larql-cli/src/commands/primary/bench/local_moe_runtime.rs",
+    "crates/larql-cli/src/commands/primary/dec_bench/mod.rs",
+    "crates/larql-cli/src/commands/primary/dec_bench/args.rs",
+    "crates/larql-cli/src/commands/primary/dec_bench/capture_runtime.rs",
+    "crates/larql-cli/src/commands/primary/dec_bench/drift_runtime.rs",
+    "crates/larql-cli/src/commands/primary/dec_bench/replay_runtime.rs"
   ],
   "default_line_min_percent": 90.0,
   "total_line_min_percent": 7.0,

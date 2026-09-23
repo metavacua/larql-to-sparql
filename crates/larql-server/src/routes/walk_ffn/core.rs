@@ -81,17 +81,6 @@ pub(crate) fn run_full_output_core(
                         self.arch, self.index, layer, x,
                     )
                 }
-                fn forward_with_activation(
-                    &self,
-                    layer: usize,
-                    x: &larql_vindex::ndarray::Array2<f32>,
-                ) -> (
-                    larql_vindex::ndarray::Array2<f32>,
-                    larql_vindex::ndarray::Array2<f32>,
-                ) {
-                    let o = self.forward(layer, x);
-                    (o.clone(), o)
-                }
                 fn name(&self) -> &str {
                     "q4k-proxy"
                 }

@@ -60,6 +60,7 @@ fn decode_token_with_decode_debug_env_first_call_executes_log_body() {
     let norm_w: Vec<f32> = (0..HIDDEN).map(|i| 1.0 + (i as f32 * 0.001)).collect();
 
     let layer = FullPipelineLayer {
+        attn_sinks: None,
         wq: QuantWeight {
             data: &wq,
             scales: None,

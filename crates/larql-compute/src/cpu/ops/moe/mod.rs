@@ -14,7 +14,8 @@
 mod cache;
 mod expert;
 mod forward;
-mod math;
+pub mod latent_mask;
+pub mod math;
 mod within_expert;
 
 pub use crate::cpu::ops::q4k_q8k_dot::{quantize_x_to_q8k, Q8KActivation};
@@ -23,6 +24,7 @@ pub use expert::{
     run_single_expert_q4k_q8k_into, run_single_expert_with_norm, ExpertScratch,
 };
 pub use forward::cpu_moe_forward;
+pub use math::{matmul_vec as moe_score_experts, softmax as moe_softmax};
 pub use within_expert::{
     is_active as within_expert_active, set_current_layer, set_routing, ExpertFeatureSelector,
     WithinExpertRouting,

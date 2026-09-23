@@ -19,6 +19,16 @@
 
 name: shannon-verify
 
+# Least-privilege token: this workflow only needs to read the repo.
+permissions:
+  contents: read
+
+# One live run per workflow per ref; superseded pull_request runs are
+# cancelled (pushes to main / tags / manual dispatches never are).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
@@ -60,10 +70,10 @@ jobs:
       LARQL_VERIFY_THRESHOLD: '0.5'
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache cargo deps
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -74,7 +84,7 @@ jobs:
             ${{ runner.os }}-cargo-shannon-
 
       - name: Cache HF model snapshot
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface/hub
           key: ${{ runner.os }}-hf-smollm2-135m
@@ -88,7 +98,7 @@ jobs:
         run: cargo build --release -p larql-cli
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 

@@ -47,7 +47,7 @@ Discarding it loses the conversation. The known kinds:
 | Tokens (raw input ids) | `NoCacheEngine` |
 | Residual streams | `MarkovResidualEngine` |
 | Boundary residuals | `Apollo`, `BoundaryKvEngine` checkpoint frames |
-| KV tensors | `StandardEngine`, `UnlimitedContextEngine` (within window) |
+| KV tensors | `StandardEngine`, `WindowedCheckpointEngine` (within window) |
 | Compressed residual packets | `MarkovResidualCodecEngine` (cold tier), `BoundaryPerLayerEngine` |
 
 This list is *open*. New canonical kinds may appear (e.g. a
@@ -73,15 +73,23 @@ changing its output distribution*.
 ### 2.3 Correctness contract
 
 The promise the engine makes about its output relative to a named
-reference. Five kinds today; the list is intentionally short.
+reference. Six kinds today; the list is intentionally short.
 
 | Contract | Promise | Example |
 |---|---|---|
 | `exact_logits` | bit-identical logits to a named reference (almost always `StandardEngine`) | `StandardEngine`, `NoCacheEngine`, `MarkovResidualEngine` (under arch preconditions) |
 | `bounded_KL(ε)` | next-token KL ≤ ε on a calibration corpus, with ε stated | `MarkovResidualCodecEngine` (bf16 cold tier) |
+| `codec_bounded_state` | bounded per-row distortion of the canonical state (stated per codec, e.g. round-trip cosine floor); output divergence (KL, hidden cosine) is empirically observed, not bounded | `TurboQuantEngine` (WHT + Lloyd-Max K/V codec) |
 | `greedy_equivalent` | argmax matches reference; full distribution may drift | candidate for FP4 / aggressive-quant engines |
 | `confidence_gated(τ)` | conforms to one of the stricter contracts when reference top-1 margin ≥ τ; may diverge below | candidate for retrieval-with-fallback engines |
 | `task_level_retrieval` | top-K matches reference on a labelled task; no token-level claim | `Apollo` (constellation-store hit path) |
+
+`codec_bounded_state` is deliberately distinct from `bounded_KL`:
+`bounded_KL` is earned through output-side calibration (an ε
+measured on a corpus), while `codec_bounded_state` bounds only the
+*state-side* distortion each row suffers on the way into the cache.
+An engine may not borrow `bounded_KL` on the strength of a per-row
+cosine figure.
 
 Contract kinds are an enum, not free text. If a new engine needs
 a new contract kind, that's a spec-extension PR — not an engine
@@ -119,8 +127,9 @@ Operational consequences:
   state (you can't reconstruct the pre-compression values), so the
   codec round-trip error is part of the contract, not part of a
   derivative-cache approximation. The contract is therefore
-  `bounded_KL` (or stricter, with measurement) — never
-  `exact_logits`.
+  `codec_bounded_state` (a per-row round-trip cosine floor; output
+  KL observed, not bounded) — never `exact_logits`, and not
+  `bounded_KL` unless someone actually calibrates an ε.
 
 The compression-safety insight that motivated this framing: **PCA-90
 boundary-spacing inversion**. Refreshing compressed residual state
@@ -148,7 +157,7 @@ hot path; the engine simply doesn't shadow it.
 |---|---|---|---:|
 | `MarkovResidualEngine` | residual stream | `hot_kv`; (`rs.stored` too when `window=None`) | 106.8 (None) |
 | `MarkovResidualCodecEngine` | codec residuals | same | 98.5 (None) |
-| `UnlimitedContextEngine` | KV within window | `current_window_kv` (CPU shadow of the Metal cache) | 92.8 (HOnly) |
+| `WindowedCheckpointEngine` | KV within window | `current_window_kv` (CPU shadow of the Metal cache) | 92.8 (HOnly) |
 | `TurboQuantEngine` | compressed K/V (destructive) | nothing — K/V IS canonical | — |
 | `StandardEngine` | KV tensors | n/a — backend-managed already | (reference, ~100) |
 
@@ -204,7 +213,7 @@ Each accessor's purpose:
   contract is conditional on architecture, a static fact.
 - **`memory_accounting`** — `hot_bytes()` + `cold_bytes()` split,
   attributed to canonical vs derivative. Required to surface
-  things like the `UnlimitedContextEngine` window-shadow
+  things like the `WindowedCheckpointEngine` window-shadow
   double-count (engine carries 15.7 MB shadow at window=256 while
   the backend keeps the full K/V — both should appear).
 - **`execution_requirements`** — what does the engine *need* from
@@ -226,8 +235,8 @@ The engines in `larql-kv` today, classified under the triple:
 | `MarkovResidualCodecEngine` | codec-encoded residuals | hot KV | `bounded_KL(ε)` — ε stated per codec |
 | `BoundaryKvEngine` | KV tensors + chunk frames | — | `exact_logits` |
 | `BoundaryPerLayerEngine` | per-layer codec policy over residuals | hot KV | `bounded_KL(ε_l)` per-layer; calibrated |
-| `UnlimitedContextEngine` | KV tensors (within window) + per-window checkpoints + token archive | — | `exact_logits` within window |
-| `TurboQuantEngine` | quantised KV (in-place) | — | `bounded_KL` — codec round-trip ≥ cos 0.991 on real distributions |
+| `WindowedCheckpointEngine` | KV tensors (within window) + per-window checkpoints + token archive | — | `exact_logits` within window |
+| `TurboQuantEngine` | quantised KV (in-place) | — | `codec_bounded_state` — per-row round-trip cos ≈ 0.9954 at 4-bit (Gaussian simulation, 2026-07-30); output KL observed, not bounded |
 | `Apollo` | boundary retrieval / residual injection store | — | `task_level_retrieval` |
 
 Some entries look surprising:
@@ -352,3 +361,67 @@ test catches it.
   the engines for grid deployment without changing their contracts.
 
 [`SlabRole`]: ../../larql-compute/src/state_handle.rs
+
+---
+
+## Refusal, and what a failed decode leaves behind (2026-08-02)
+
+A `StatePolicy` describes what an engine's state *is*. This section describes
+what it is after a step that did not finish — which turned out to be a separate
+question, and one the `Option<T>` era could not even ask.
+
+### Three outcomes, never two
+
+The dispatch helpers return `DispatchOutcome<T> = Result<Option<T>, BoxRefusal>`:
+
+```text
+Ok(Some(_))   the dispatch produced a complete result
+Ok(None)      nothing to do, or the backend declined this shape
+Err(refusal)  a routed operation was required and did not execute
+```
+
+`Ok(None)` means exactly what the old bare `None` meant, so a declining backend
+still becomes `EngineError::BackendFailure`. `Err` is new: it says the layer is
+*incomplete*, so a strict route can refuse the token instead of returning the
+dense half of a layer whose experts never ran.
+
+### A decode step is transactional
+
+Attention appends the new token's K/V before the FFN gets the chance to refuse,
+so a step that fails has already mutated the cache. `StandardEngine` therefore
+snapshots per-layer lengths and rewinds on **any** failure — refusal or
+declining backend, since both leave the same half-applied step.
+
+The rewind primitive is `KvDispatch::truncate_kv`, the inverse of an append.
+It is not `clip_kv`: that one keeps the *tail* to enforce a sliding window,
+this keeps the *head* to undo one. Its default returns `false` rather than
+panicking, because "this backend cannot rewind" is a state to handle.
+
+Windowed caches are the case worth understanding. A step that reaches the
+window evicts its oldest row to make room, and that row is gone — but the row
+*count* is unchanged, so length cannot detect it. `rewind_is_sound` therefore
+asks whether every layer had room before the step began, not whether the count
+came back.
+
+Where the rewind cannot be trusted, the engine says so rather than pretending:
+`EngineError::StateInvalidated` wraps the original cause, later decode steps
+refuse with `InvariantViolation`, and a successful `prefill` clears it — the
+cache is replaced outright, so re-prefilling is the documented way back.
+
+### Two questions a caller must not conflate
+
+`is_recoverable()` used to answer "could this operation succeed?" while callers
+read it as "can I retry?". Those diverge exactly where it hurts: a `Residency`
+refusal that invalidated the cache is recoverable in the first sense and
+catastrophic in the second — fix the residency, re-drive the same engine, and
+the token is appended twice.
+
+```text
+operation_is_recoverable()   could this operation ever succeed elsewhere?
+engine_state_is_retryable()  is this engine instance still usable?
+is_recoverable()             both — what a sweep may actually act on
+```
+
+`ScoreOutcome` mirrors the distinction rather than flattening it: a
+`BindingDefect` is not a coverage deficit, and a dead engine is not a gap in a
+run.

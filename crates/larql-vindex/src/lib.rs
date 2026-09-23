@@ -36,6 +36,7 @@ pub mod index;
 pub mod kv_index_impl;
 pub mod patch;
 pub mod quant;
+pub mod runtime;
 pub mod trie;
 pub mod walker;
 // Back-compat alias — the top-level lifecycle dir was renamed
@@ -66,11 +67,14 @@ pub use error::VindexError;
 // Index
 pub use index::core::{
     FeatureMeta, FfnRowAccess, Fp4FfnAccess, GateIndex, GateLookup, IndexLoadCallbacks,
-    NativeFfnAccess, PatchOverrides, QuantizedFfnAccess, SilentLoadCallbacks, StorageBucket,
-    VectorIndex, WalkHit, WalkTrace,
+    NativeFfnAccess, OverrideSlot, PatchOverrides, QuantizedFfnAccess, SilentLoadCallbacks,
+    StorageBucket, VectorIndex, WalkHit, WalkTrace,
 };
 pub use index::residency::{LayerState, ResidencyManager};
 pub use index::router::{RouteResult, RouterIndex};
+// FFN component indices for `ffn_row_*` / `kquant_ffn_layer*` calls —
+// compile-time pinned equal to `larql_compute`'s in `kv_index_impl.rs`.
+pub use index::storage::ffn_store::{FFN_COMPONENTS_PER_LAYER, FFN_DOWN, FFN_GATE, FFN_UP};
 
 // Describe
 pub use describe::{DescribeEdge, LabelSource};
@@ -92,7 +96,8 @@ pub use format::huggingface::{
     dataset_repo_exists, download_hf_weights, ensure_collection, fetch_collection_items,
     is_hf_path, publish_vindex, publish_vindex_with_opts, repo_exists,
     resolve_hf_model_with_progress, resolve_hf_vindex, resolve_hf_vindex_with_progress,
-    CollectionItem, DownloadProgress, PublishCallbacks, PublishOptions, SilentPublishCallbacks,
+    set_repo_visibility, CollectionItem, DownloadProgress, PublishCallbacks, PublishOptions,
+    SilentPublishCallbacks,
 };
 pub use format::weights::{
     load_model_weights, load_model_weights_kquant, load_model_weights_kquant_shard,

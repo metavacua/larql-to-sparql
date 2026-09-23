@@ -27,7 +27,6 @@ const MXFP4_DOWN_BLOCKS: &str = "down_proj_blocks";
 const MXFP4_DOWN_SCALES: &str = "down_proj_scales";
 const MXFP4_ROUTER_WEIGHT: &str = "router.weight";
 
-const BLOCK_SPARSE_EXPERTS_PREFIX: &str = "block_sparse_moe.experts";
 const BLOCK_SPARSE_ROUTER_WEIGHT: &str = "block_sparse_moe.gate.weight";
 const MIXTRAL_GATE_PROJ: &str = "w1";
 const MIXTRAL_DOWN_PROJ: &str = "w2";
@@ -574,8 +573,20 @@ fn load_mxfp4_expert_tensors(
     Ok(())
 }
 
+/// Key for one dequantised MXFP4 expert projection.
+///
+/// `layer_prefix` here comes from splitting a packed tensor name at `.mlp.`,
+/// so it has no trailing separator; the shared builder expects one, the way
+/// [`ModelArchitecture::layer_prefix`](crate::ModelArchitecture::layer_prefix)
+/// supplies it. The convention itself lives in
+/// [`crate::tensor_keys::mxfp4_dequantised`] so the architecture that
+/// advertises these keys and the loader that writes them cannot drift.
 fn mxfp4_expert_key(layer_prefix: &str, expert_id: usize, projection: &str) -> String {
-    format!("{layer_prefix}.{BLOCK_SPARSE_EXPERTS_PREFIX}.{expert_id}.{projection}.weight")
+    crate::tensor_keys::mxfp4_dequantised::projection(
+        &format!("{layer_prefix}."),
+        expert_id,
+        projection,
+    )
 }
 
 /// Per-expert MXFP4 dequantization (DeepSeek-V4 family).

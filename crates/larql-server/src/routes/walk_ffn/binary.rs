@@ -1,237 +1,71 @@
-//! Binary + JSON codec for the walk-ffn wire protocol.
+//! Binary + JSON codec shim for the walk-ffn wire protocol.
 //!
-//! - [`decode_binary_request`] parses the packed `application/x-larql-ffn`
-//!   body (single-layer or batch via `BATCH_MARKER`) into a
-//!   [`WalkFfnRequest`].
-//! - [`encode_binary_output`] / [`encode_binary_output_f16`] /
-//!   [`encode_binary_output_i8`] encode the [`FfnOutput`] back out;
-//!   the three variants are negotiated by `Accept` header per ADR-0009.
-//! - [`encode_json_full_output`] is the JSON-shape equivalent used
-//!   when the request came in as JSON.
+//! The actual frame codec is single-sourced in
+//! `larql_inference::ffn::remote::codec` (ROADMAP hardening item 16 —
+//! same discipline as the q8k and MoE wires): encoders, decoders, length
+//! guards, and the content-type/marker constants all live there. This
+//! module only
+//! - re-exports the response encoders the handler dispatches on, and
+//! - wraps the shared request decoder into the server's
+//!   [`WalkFfnRequest`] / [`ServerError`] types.
+//!
+//! The `#[cfg(test)]` block below is the server-side regression suite for
+//! the shared implementation (truncation, alloc-bomb, and shape guards
+//! must keep rejecting through this path).
 
 use crate::error::ServerError;
 
-use super::types::{FfnOutput, WalkFfnRequest, BATCH_MARKER};
+use super::types::WalkFfnRequest;
 
-/// Decode a binary-format request body into a [`WalkFfnRequest`].
-pub(crate) fn decode_binary_request(body: &[u8]) -> Result<WalkFfnRequest, ServerError> {
-    if body.len() < 16 {
-        return Err(ServerError::BadRequest(
-            "binary: body too short (need ≥ 16 bytes)".into(),
-        ));
-    }
+pub(crate) use larql_inference::ffn::remote::{
+    encode_binary_output, encode_binary_output_f16, encode_binary_output_i8,
+    encode_json_full_output,
+};
 
-    let first = u32::from_le_bytes(body[0..4].try_into().unwrap());
-
-    let (layer, layers, header_end) = if first == BATCH_MARKER {
-        if body.len() < 8 {
-            return Err(ServerError::BadRequest(
-                "binary batch: truncated num_layers".into(),
-            ));
-        }
-        let n = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
-        let layers_end = 8 + n * 4;
-        if body.len() < layers_end {
-            return Err(ServerError::BadRequest(format!(
-                "binary batch: body too short for {n} layer indices"
-            )));
-        }
-        let layers: Vec<usize> = (0..n)
-            .map(|i| u32::from_le_bytes(body[8 + i * 4..12 + i * 4].try_into().unwrap()) as usize)
-            .collect();
-        (None, Some(layers), layers_end)
-    } else {
-        (Some(first as usize), None, 4)
-    };
-
-    if body.len() < header_end + 12 {
-        return Err(ServerError::BadRequest(
-            "binary: truncated fixed header (seq_len/flags/top_k)".into(),
-        ));
-    }
-    let seq_len = u32::from_le_bytes(body[header_end..header_end + 4].try_into().unwrap()) as usize;
-    let flags = u32::from_le_bytes(body[header_end + 4..header_end + 8].try_into().unwrap());
-    let top_k =
-        u32::from_le_bytes(body[header_end + 8..header_end + 12].try_into().unwrap()) as usize;
-    let full_output = (flags & 1) != 0;
-
-    let residual_bytes = &body[header_end + 12..];
-    if !residual_bytes.len().is_multiple_of(4) {
-        return Err(ServerError::BadRequest(
-            "binary: residual byte length is not a multiple of 4".into(),
-        ));
-    }
-    let residual: Vec<f32> = residual_bytes
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
-
+/// Decode a binary-format request body whose residual payload is in
+/// `format` (inbound `Content-Type` dispatch — the request and response
+/// directions are negotiated independently, DEC funnel §3 DEC-1A).
+///
+/// Thin wrapper over the shared
+/// [`larql_inference::ffn::remote::decode_binary_request_as`]: maps the
+/// codec's string error into [`ServerError::BadRequest`] and fills the
+/// JSON-only `moe_layer` field (the binary wire has no MoE-layer flag).
+pub(crate) fn decode_request(
+    format: larql_inference::ffn::remote::WireFormat,
+    body: &[u8],
+) -> Result<WalkFfnRequest, ServerError> {
+    let d = larql_inference::ffn::remote::decode_binary_request_as(format, body)
+        .map_err(ServerError::BadRequest)?;
     Ok(WalkFfnRequest {
-        layer,
-        layers,
-        residual,
-        seq_len,
-        top_k,
-        full_output,
+        layer: d.layer,
+        layers: d.layers,
+        residual: d.residual,
+        seq_len: d.seq_len,
+        top_k: d.top_k,
+        full_output: d.full_output,
         moe_layer: false,
     })
 }
 
-/// Encode an [`FfnOutput`] as the binary response format.
-pub(crate) fn encode_binary_output(out: &FfnOutput) -> Vec<u8> {
-    if out.entries.len() == 1 {
-        let entry = &out.entries[0];
-        let mut buf = Vec::with_capacity(12 + entry.output.len() * 4);
-        buf.extend_from_slice(&(entry.layer as u32).to_le_bytes());
-        buf.extend_from_slice(&(out.seq_len as u32).to_le_bytes());
-        buf.extend_from_slice(&(out.latency_ms as f32).to_le_bytes());
-        for &v in &entry.output {
-            buf.extend_from_slice(&v.to_le_bytes());
-        }
-        buf
-    } else {
-        let num = out.entries.len();
-        let mut buf = Vec::with_capacity(12 + num * 12);
-        buf.extend_from_slice(&BATCH_MARKER.to_le_bytes());
-        buf.extend_from_slice(&(num as u32).to_le_bytes());
-        buf.extend_from_slice(&(out.latency_ms as f32).to_le_bytes());
-        for entry in &out.entries {
-            buf.extend_from_slice(&(entry.layer as u32).to_le_bytes());
-            buf.extend_from_slice(&(out.seq_len as u32).to_le_bytes());
-            buf.extend_from_slice(&(entry.output.len() as u32).to_le_bytes());
-            for &v in &entry.output {
-                buf.extend_from_slice(&v.to_le_bytes());
-            }
-        }
-        buf
-    }
-}
-
-/// Encode an [`FfnOutput`] using f16 values for the residual/output arrays.
-///
-/// Wire layout: identical to the f32 format except every float in the output
-/// arrays is a `u16` LE (IEEE 754 half-precision). Header fields (layer,
-/// seq_len, latency_ms) remain f32/u32 LE. See ADR-0009.
-pub(crate) fn encode_binary_output_f16(out: &FfnOutput) -> Vec<u8> {
-    use half::f16;
-    if out.entries.len() == 1 {
-        let entry = &out.entries[0];
-        let mut buf = Vec::with_capacity(12 + entry.output.len() * 2);
-        buf.extend_from_slice(&(entry.layer as u32).to_le_bytes());
-        buf.extend_from_slice(&(out.seq_len as u32).to_le_bytes());
-        buf.extend_from_slice(&(out.latency_ms as f32).to_le_bytes());
-        for &v in &entry.output {
-            buf.extend_from_slice(&f16::from_f32(v).to_le_bytes());
-        }
-        buf
-    } else {
-        let num = out.entries.len();
-        let total_floats: usize = out.entries.iter().map(|e| e.output.len()).sum();
-        let mut buf = Vec::with_capacity(12 + num * 12 + total_floats * 2);
-        buf.extend_from_slice(&BATCH_MARKER.to_le_bytes());
-        buf.extend_from_slice(&(num as u32).to_le_bytes());
-        buf.extend_from_slice(&(out.latency_ms as f32).to_le_bytes());
-        for entry in &out.entries {
-            buf.extend_from_slice(&(entry.layer as u32).to_le_bytes());
-            buf.extend_from_slice(&(out.seq_len as u32).to_le_bytes());
-            buf.extend_from_slice(&(entry.output.len() as u32).to_le_bytes());
-            for &v in &entry.output {
-                buf.extend_from_slice(&f16::from_f32(v).to_le_bytes());
-            }
-        }
-        buf
-    }
-}
-
-/// Encode an [`FfnOutput`] using i8 symmetric quantisation (ADR-0009).
-///
-/// Per position: `[scale f32 LE][zero_point f32 LE][data i8[hidden_size]]`.
-/// `scale = max(|x|) / 127.0`, `zero_point = 0.0` (symmetric).
-/// Header fields (layer, seq_len, latency_ms) remain f32/u32 LE.
-pub(crate) fn encode_binary_output_i8(out: &FfnOutput) -> Vec<u8> {
-    fn quantise_position(vals: &[f32], buf: &mut Vec<u8>) {
-        let max_abs = vals.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
-        let scale = if max_abs > 0.0 { max_abs / 127.0 } else { 1.0 };
-        buf.extend_from_slice(&scale.to_le_bytes());
-        buf.extend_from_slice(&0.0f32.to_le_bytes()); // zero_point = 0
-        for &v in vals {
-            let q = (v / scale).clamp(-127.0, 127.0).round() as i8;
-            buf.push(q as u8);
-        }
-    }
-
-    if out.entries.len() == 1 {
-        let entry = &out.entries[0];
-        let seq = out.seq_len.max(1);
-        let hidden = entry.output.len() / seq;
-        let mut buf = Vec::with_capacity(12 + seq * (8 + hidden));
-        buf.extend_from_slice(&(entry.layer as u32).to_le_bytes());
-        buf.extend_from_slice(&(out.seq_len as u32).to_le_bytes());
-        buf.extend_from_slice(&(out.latency_ms as f32).to_le_bytes());
-        for pos in 0..seq {
-            quantise_position(&entry.output[pos * hidden..(pos + 1) * hidden], &mut buf);
-        }
-        buf
-    } else {
-        let num = out.entries.len();
-        let mut buf = Vec::with_capacity(12 + num * 16);
-        buf.extend_from_slice(&BATCH_MARKER.to_le_bytes());
-        buf.extend_from_slice(&(num as u32).to_le_bytes());
-        buf.extend_from_slice(&(out.latency_ms as f32).to_le_bytes());
-        for entry in &out.entries {
-            let seq = out.seq_len.max(1);
-            let hidden = entry.output.len() / seq;
-            buf.extend_from_slice(&(entry.layer as u32).to_le_bytes());
-            buf.extend_from_slice(&(out.seq_len as u32).to_le_bytes());
-            buf.extend_from_slice(&(entry.output.len() as u32).to_le_bytes());
-            for pos in 0..seq {
-                quantise_position(&entry.output[pos * hidden..(pos + 1) * hidden], &mut buf);
-            }
-        }
-        buf
-    }
-}
-
-/// Encode an [`FfnOutput`] as the existing JSON response format (unchanged wire
-/// contract for JSON clients).
-pub(crate) fn encode_json_full_output(out: &FfnOutput) -> serde_json::Value {
-    let latency_rounded = (out.latency_ms * 10.0).round() / 10.0;
-    if out.entries.len() == 1 {
-        let e = &out.entries[0];
-        serde_json::json!({
-            "layer": e.layer,
-            "output": e.output,
-            "seq_len": out.seq_len,
-            "latency_ms": latency_rounded,
-        })
-    } else {
-        let results: Vec<serde_json::Value> = out
-            .entries
-            .iter()
-            .map(|e| {
-                serde_json::json!({
-                    "layer": e.layer,
-                    "output": e.output,
-                    "seq_len": out.seq_len,
-                })
-            })
-            .collect();
-        serde_json::json!({
-            "results": results,
-            "seq_len": out.seq_len,
-            "latency_ms": latency_rounded,
-        })
-    }
+/// f32-only twin of [`decode_request`] — the pre-asymmetric call shape,
+/// kept for the regression suite below (production dispatches by
+/// Content-Type through [`decode_request`]).
+#[cfg(test)]
+pub(crate) fn decode_binary_request(body: &[u8]) -> Result<WalkFfnRequest, ServerError> {
+    decode_request(larql_inference::ffn::remote::WireFormat::F32, body)
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Tests — covers decode + every encoder variant
+// Tests — server-side regression suite for the shared codec (decode guards +
+// every encoder variant, exercised through the shim exactly as the handler
+// uses them)
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(test)]
 mod tests {
     use super::super::types::{FfnEntry, FfnOutput};
     use super::*;
+    use larql_inference::ffn::remote::BATCH_MARKER;
 
     // ── decode_binary_request ─────────────────────────────────────────────────
 
@@ -284,6 +118,7 @@ mod tests {
         assert_eq!(req.seq_len, 1);
         assert_eq!(req.top_k, 8);
         assert!(req.full_output);
+        assert!(!req.moe_layer);
         assert_eq!(req.residual, vec![1.0, 2.0, 3.0, 4.0]);
     }
 
@@ -322,6 +157,39 @@ mod tests {
         buf.extend_from_slice(&0u32.to_le_bytes()); // only 1
         buf.extend_from_slice(&[0u8; 4]);
         assert!(decode_binary_request(&buf).is_err());
+    }
+
+    #[test]
+    fn decode_binary_batch_reject_impossible_layer_count() {
+        // Alloc-bomb guard: a claimed u32::MAX layer list must be rejected
+        // by the length check before any allocation happens.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&BATCH_MARKER.to_le_bytes());
+        buf.extend_from_slice(&u32::MAX.to_le_bytes());
+        buf.extend_from_slice(&[0u8; 12]);
+        assert!(decode_binary_request(&buf).is_err());
+    }
+
+    #[test]
+    fn decode_request_dispatches_f16_and_i8_inbound_bodies() {
+        use larql_inference::ffn::remote::{encode_binary_request_as, WireFormat};
+        // Values exactly representable in both compressed formats (f16-exact
+        // fractions; i8 fixed-point with scale 0.5) so equality is exact.
+        let residual = vec![63.5f32, -32.0, 0.5, -63.5];
+        for fmt in [WireFormat::F16, WireFormat::I8] {
+            let body = encode_binary_request_as(fmt, Some(3), None, &residual, 1, true, 0);
+            let req = decode_request(fmt, &body).unwrap();
+            assert_eq!(req.layer, Some(3));
+            assert_eq!(req.seq_len, 1);
+            assert!(req.full_output);
+            assert!(!req.moe_layer);
+            assert_eq!(req.residual, residual, "{fmt:?}");
+        }
+        // Truncated compressed bodies reject through the same shim path.
+        let mut body =
+            encode_binary_request_as(WireFormat::F16, Some(3), None, &residual, 1, true, 0);
+        body.push(0u8); // odd f16 payload
+        assert!(decode_request(WireFormat::F16, &body).is_err());
     }
 
     #[test]

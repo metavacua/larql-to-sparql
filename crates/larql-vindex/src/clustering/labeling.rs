@@ -8,6 +8,23 @@ use ndarray::Array1;
 use std::collections::HashMap;
 
 use super::categories::{category_words, is_stop_word};
+use super::entity_patterns::{entity_pattern_classes, EntityPatternClass};
+
+/// Minimum mean cosine similarity between a cluster's member embeddings
+/// and a category-word embedding for the category to label the cluster.
+/// Below this the category match is considered noise and labeling falls
+/// through to entity-pattern / TF-IDF labels.
+pub const MIN_CATEGORY_SIMILARITY: f32 = 0.25;
+
+/// Fraction of a cluster's member tokens that must fall inside one
+/// entity-pattern class (or match the morphological rule) for that
+/// label to be assigned. Majority rule: 50%, rounded up.
+pub const PATTERN_MATCH_FRACTION: f64 = 0.5;
+
+/// Maximum token length for the morphological (suffix/prefix) rule in
+/// [`detect_entity_pattern`]: short all-alphabetic fragments like
+/// "ing" / "tion" are treated as morphological units.
+const MORPHOLOGICAL_MAX_LEN: usize = 4;
 
 /// TF-IDF labeling: find distinctive tokens per cluster.
 pub fn auto_label_clusters(
@@ -158,7 +175,7 @@ pub fn auto_label_clusters_from_embeddings(
             }
         }
 
-        if best_sim >= 0.25 {
+        if best_sim >= MIN_CATEGORY_SIMILARITY {
             labels.push(best_word);
         } else if let Some(members) = top_lists.get(c) {
             // Fallback: check if members match known entity patterns
@@ -183,169 +200,48 @@ pub fn auto_label_clusters_from_embeddings(
 }
 
 /// Detect entity patterns from cluster member tokens.
-/// If 60%+ of members match a known pattern, return the pattern label.
+///
+/// If at least [`PATTERN_MATCH_FRACTION`] of members fall inside one
+/// entity-pattern class (word lists loaded from
+/// `data/entity_patterns.json` — see [`super::entity_patterns`]), that
+/// class labels the cluster. Classes are checked in file order (e.g.
+/// "language" before "country": many words are both). A structural
+/// morphological rule (short all-alphabetic fragments) runs after the
+/// vocabulary classes.
 pub fn detect_entity_pattern(members: &[String]) -> Option<String> {
+    detect_entity_pattern_with(entity_pattern_classes(), members)
+}
+
+/// [`detect_entity_pattern`] against an explicit class list — the
+/// data-file-free version for callers/tests that supply their own
+/// vocabulary.
+pub fn detect_entity_pattern_with(
+    classes: &[EntityPatternClass],
+    members: &[String],
+) -> Option<String> {
     if members.is_empty() {
         return None;
     }
 
-    static COUNTRIES: &[&str] = &[
-        "australia",
-        "china",
-        "chinese",
-        "japan",
-        "japanese",
-        "germany",
-        "german",
-        "france",
-        "french",
-        "italy",
-        "italian",
-        "spain",
-        "spanish",
-        "russia",
-        "russian",
-        "brazil",
-        "brazil",
-        "india",
-        "indian",
-        "canada",
-        "canadian",
-        "mexico",
-        "mexican",
-        "britain",
-        "british",
-        "korea",
-        "korean",
-        "turkey",
-        "turkish",
-        "poland",
-        "polish",
-        "sweden",
-        "swedish",
-        "norway",
-        "norwegian",
-        "portugal",
-        "portuguese",
-        "netherlands",
-        "dutch",
-        "greece",
-        "greek",
-        "egypt",
-        "egyptian",
-        "argentina",
-        "iran",
-        "iranian",
-        "thailand",
-        "thai",
-        "vietnam",
-        "vietnamese",
-        "indonesia",
-        "indonesian",
-        "malaysia",
-        "malaysian",
-        "philippines",
-        "filipino",
-    ];
-
-    static LANGUAGES: &[&str] = &[
-        "english",
-        "french",
-        "german",
-        "spanish",
-        "italian",
-        "portuguese",
-        "russian",
-        "chinese",
-        "japanese",
-        "korean",
-        "arabic",
-        "hindi",
-        "bengali",
-        "turkish",
-        "dutch",
-        "polish",
-        "swedish",
-        "norwegian",
-        "danish",
-        "finnish",
-        "greek",
-        "czech",
-        "romanian",
-        "hungarian",
-        "thai",
-        "vietnamese",
-        "indonesian",
-        "malay",
-        "tagalog",
-        "swahili",
-        "hebrew",
-        "persian",
-        "urdu",
-    ];
-
-    static MONTHS: &[&str] = &[
-        "january",
-        "february",
-        "march",
-        "april",
-        "may",
-        "june",
-        "july",
-        "august",
-        "september",
-        "october",
-        "november",
-        "december",
-    ];
-
-    static NUMBERS: &[&str] = &[
-        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "first",
-        "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
-    ];
-
     let lower_members: Vec<String> = members.iter().map(|m| m.to_lowercase()).collect();
     let n = lower_members.len();
-    let threshold = (n as f64 * 0.5).ceil() as usize; // 50% match
+    let threshold = (n as f64 * PATTERN_MATCH_FRACTION).ceil() as usize;
 
-    // Check languages BEFORE countries — many language names overlap
-    // (french, german, spanish are both language and country-related)
-    let lang_hits = lower_members
-        .iter()
-        .filter(|m| LANGUAGES.contains(&m.as_str()))
-        .count();
-    if lang_hits >= threshold {
-        return Some("language".into());
+    for class in classes {
+        let hits = lower_members
+            .iter()
+            .filter(|m| class.members.iter().any(|w| w == *m))
+            .count();
+        if hits >= threshold {
+            return Some(class.label.clone());
+        }
     }
 
-    let country_hits = lower_members
-        .iter()
-        .filter(|m| COUNTRIES.contains(&m.as_str()))
-        .count();
-    if country_hits >= threshold {
-        return Some("country".into());
-    }
-
-    let month_hits = lower_members
-        .iter()
-        .filter(|m| MONTHS.contains(&m.as_str()))
-        .count();
-    if month_hits >= threshold {
-        return Some("month".into());
-    }
-
-    let num_hits = lower_members
-        .iter()
-        .filter(|m| NUMBERS.contains(&m.as_str()))
-        .count();
-    if num_hits >= threshold {
-        return Some("number".into());
-    }
-
-    // Morphological: if most members are short suffixes/prefixes
+    // Morphological: structural, not vocabulary — most members are
+    // short suffix/prefix fragments.
     let suffix_hits = lower_members
         .iter()
-        .filter(|m| m.len() <= 4 && m.chars().all(|c| c.is_ascii_alphabetic()))
+        .filter(|m| m.len() <= MORPHOLOGICAL_MAX_LEN && m.chars().all(|c| c.is_ascii_alphabetic()))
         .count();
     if suffix_hits >= threshold {
         return Some("morphological".into());
@@ -511,5 +407,135 @@ mod tests {
     #[test]
     fn detect_empty_members() {
         assert_eq!(detect_entity_pattern(&[]), None);
+    }
+
+    #[test]
+    fn named_thresholds_hold_reviewed_values() {
+        // Pinned by the 2026-07-30 review hygiene item: the doc claimed
+        // "60%+" while the code used 0.5 — resolved in favour of the
+        // code (majority rule). The similarity floor was a bare 0.25.
+        assert_eq!(PATTERN_MATCH_FRACTION, 0.5);
+        assert_eq!(MIN_CATEGORY_SIMILARITY, 0.25);
+    }
+
+    fn fruit_class() -> Vec<EntityPatternClass> {
+        vec![EntityPatternClass {
+            label: "fruit".into(),
+            members: vec!["apple".into(), "banana".into()],
+        }]
+    }
+
+    #[test]
+    fn pattern_threshold_fires_at_exact_majority() {
+        // 2 of 4 members match = exactly PATTERN_MATCH_FRACTION.
+        let members: Vec<String> = ["apple", "banana", "zzzzzzzz", "yyyyyyyy"]
+            .map(String::from)
+            .into();
+        assert_eq!(
+            detect_entity_pattern_with(&fruit_class(), &members),
+            Some("fruit".into())
+        );
+    }
+
+    #[test]
+    fn pattern_threshold_declines_below_majority() {
+        // 1 of 4 members = 25% < PATTERN_MATCH_FRACTION; the misses are
+        // long/alphabetic-only so the morphological rule stays quiet too.
+        let members: Vec<String> = ["apple", "zzzzzzzz", "yyyyyyyy", "xxxxxxxx"]
+            .map(String::from)
+            .into();
+        assert_eq!(detect_entity_pattern_with(&fruit_class(), &members), None);
+    }
+
+    #[test]
+    fn earlier_class_wins_when_both_match() {
+        let classes = vec![
+            EntityPatternClass {
+                label: "first".into(),
+                members: vec!["shared".into()],
+            },
+            EntityPatternClass {
+                label: "second".into(),
+                members: vec!["shared".into()],
+            },
+        ];
+        let members = vec!["shared".to_string()];
+        assert_eq!(
+            detect_entity_pattern_with(&classes, &members),
+            Some("first".into())
+        );
+    }
+
+    /// Minimal WordLevel tokenizer: `words` get ids 3.. (ids 0-2 are
+    /// skipped by `encode_token_with_tokenizer` as BOS/EOS-like).
+    fn word_level_tokenizer(words: &[&str]) -> tokenizers::Tokenizer {
+        let mut entries = vec![
+            "\"[UNK]\": 0".to_string(),
+            "\"[PAD1]\": 1".to_string(),
+            "\"[PAD2]\": 2".to_string(),
+        ];
+        for (i, w) in words.iter().enumerate() {
+            entries.push(format!("\"{w}\": {}", i + 3));
+        }
+        let vocab = entries.join(", ");
+        let json = format!(
+            r#"{{
+                "version": "1.0",
+                "model": {{"type": "WordLevel", "vocab": {{{vocab}}}, "unk_token": "[UNK]"}},
+                "pre_tokenizer": {{"type": "Whitespace"}},
+                "added_tokens": []
+            }}"#
+        );
+        tokenizers::Tokenizer::from_bytes(json.as_bytes()).unwrap()
+    }
+
+    /// Embedding fixture for the similarity-floor tests: only "country"
+    /// (a category word), "paris" and "berlin" are in-vocab; member
+    /// rows are aligned with or orthogonal to the category row.
+    fn similarity_fixture(aligned: bool) -> String {
+        let tokenizer = word_level_tokenizer(&["country", "paris", "berlin"]);
+        let hidden = 4;
+        let mut embed = ndarray::Array2::<f32>::zeros((6, hidden));
+        embed[[3, 0]] = 1.0; // "country" → e_x
+        let member_axis = if aligned { 0 } else { 1 };
+        embed[[4, member_axis]] = 1.0; // "paris"
+        embed[[5, member_axis]] = 1.0; // "berlin"
+
+        let centres = ndarray::Array2::<f32>::zeros((1, hidden));
+        let assignments = vec![0usize, 0];
+        let top_tokens = vec!["paris|berlin".to_string(), "paris|berlin".to_string()];
+        let (labels, _) = auto_label_clusters_from_embeddings(
+            &centres,
+            &embed,
+            &tokenizer,
+            &assignments,
+            &top_tokens,
+            1,
+        );
+        labels[0].clone()
+    }
+
+    #[test]
+    fn category_label_used_when_similarity_clears_floor() {
+        // Members' embeddings equal the "country" category embedding →
+        // mean cosine 1.0 ≥ MIN_CATEGORY_SIMILARITY → a category label
+        // (the best-scoring encodable category word contains "country").
+        let label = similarity_fixture(true);
+        assert!(
+            label.contains("country"),
+            "expected a country category label, got {label:?}"
+        );
+    }
+
+    #[test]
+    fn category_label_declined_below_similarity_floor() {
+        // Members orthogonal to every encodable category word → best
+        // mean cosine 0.0 < MIN_CATEGORY_SIMILARITY → falls through to
+        // the TF-IDF label built from the member tokens.
+        let label = similarity_fixture(false);
+        assert!(
+            label.contains("paris") || label.contains("berlin"),
+            "expected the TF-IDF member label, got {label:?}"
+        );
     }
 }

@@ -66,10 +66,18 @@ pub const ENV_DISABLE_Q4K_DIRECT: &str = "LARQL_DISABLE_Q4K_DIRECT";
 pub const ENV_Q4K_DIRECT: &str = "LARQL_Q4K_DIRECT";
 /// Max entries in the dequantised MoE expert cache.
 pub const ENV_MOE_CACHE_ENTRIES: &str = "LARQL_MOE_CACHE_ENTRIES";
-/// MoE bypass toggle (diagnostic).
+/// MoE bypass toggle (diagnostic). The DEC-0 "SKIP_MOE ceiling" anchor
+/// arm is measured with this flag — one canonical name protects it.
 pub const ENV_SKIP_MOE: &str = "LARQL_SKIP_MOE";
+/// Legacy unprefixed alias for [`ENV_SKIP_MOE`] (the grid path's historical
+/// name) — honoured with a one-time warning via [`skip_moe_enabled`].
+pub const ENV_SKIP_MOE_LEGACY: &str = "SKIP_MOE";
 /// MoE route/debug output toggle.
 pub const ENV_MOE_DEBUG: &str = "LARQL_MOE_DEBUG";
+/// Path for the per-token expert-routing trace written by the reference MoE
+/// backend. Value-carrying and opt-in: unset or empty means no trace.
+/// See `larql-compute/src/ffn/expert_weight/trace.rs`.
+pub const ENV_MOE_ROUTE_TRACE: &str = "LARQL_MOE_ROUTE_TRACE";
 /// Enable Metal MoE dispatch timing.
 pub const ENV_METAL_MOE_TIMING: &str = "LARQL_MOE_TIMING";
 /// Select the 8-simdgroup Q4_K matvec kernel; set to a false value to opt out.
@@ -113,7 +121,11 @@ pub const ENV_FUSED_DOWN: &str = "LARQL_FUSED_DOWN";
 /// Print the Q4_K quant-matvec dispatch route.
 pub const ENV_DBG_QM: &str = "LARQL_DBG_QM";
 /// One-line summary for the first few Metal decode calls.
-pub const ENV_DECODE_DEBUG: &str = "DECODE_DEBUG";
+pub const ENV_DECODE_DEBUG: &str = "LARQL_DECODE_DEBUG";
+/// Legacy unprefixed alias for [`ENV_DECODE_DEBUG`] — honoured with a
+/// one-time warning via [`decode_debug_enabled`]. Unprefixed names can
+/// collide with a rented host's ambient env (dec-readiness review §3e).
+pub const ENV_DECODE_DEBUG_LEGACY: &str = "DECODE_DEBUG";
 /// Dump per-layer residuals to a binary file.
 pub const ENV_DUMP_RESIDUALS: &str = "LARQL_DUMP_RESIDUALS";
 /// Stop Metal decode at this layer and dump intermediate buffers.
@@ -133,7 +145,10 @@ pub const ENV_GPU_TIMING: &str = "LARQL_GPU_TIMING";
 /// Request paired commit/wait decode stage profiling.
 pub const ENV_PROFILE_SPLIT: &str = "LARQL_PROFILE_SPLIT";
 /// Debug-only outer norm bypass in Metal MoE combine.
-pub const ENV_SKIP_OUTER_NORM: &str = "SKIP_OUTER_NORM";
+pub const ENV_SKIP_OUTER_NORM: &str = "LARQL_SKIP_OUTER_NORM";
+/// Legacy unprefixed alias for [`ENV_SKIP_OUTER_NORM`] — honoured with a
+/// one-time warning via [`skip_outer_norm_enabled`].
+pub const ENV_SKIP_OUTER_NORM_LEGACY: &str = "SKIP_OUTER_NORM";
 
 // ── CPU decode fast path — default ON, opt out with `=0` ─────────────────────
 //
@@ -324,6 +339,39 @@ pub fn spin_pool_enabled() -> bool {
     fast_path_override(ENV_SPIN_POOL).unwrap_or(decode_options().spin_pool)
 }
 
+/// One-line summary of every env toggle that changes numerical output or
+/// decode-path selection — the flag-state twin of
+/// `q4k_q8k_dot::kernel_class_summary()`. Logged once at server startup
+/// (and quotable in DEC run records) so no measured number is ever
+/// recorded against unlogged flag state (dec-readiness review §3e / run-
+/// record hygiene). Bypass flags that CORRUPT a production number
+/// (`skip_moe`, `skip_outer_norm`) are only mentioned when set, in
+/// upper case, so they stand out in a log grep.
+pub fn decode_options_summary() -> String {
+    let opts = decode_options();
+    let on_off = |b: bool| if b { "on" } else { "off" };
+    let mut s = format!(
+        "q4k_direct_attn={} q4k_attn_int8={} q4k_lm_head={} q4k_direct_ffn={} q4k_asm={} spin_pool={} moe_q4k_direct={}",
+        on_off(opts.q4k_direct_attn),
+        on_off(opts.q4k_attn_int8),
+        on_off(opts.q4k_lm_head),
+        on_off(opts.q4k_direct_ffn),
+        on_off(opts.q4k_asm),
+        on_off(opts.spin_pool),
+        // MoE expert dispatch kernel path: direct Q4K×Q8K matvec (default)
+        // vs BLAS on cached f32 dequant — a silently different
+        // byte-movement regime if left unlogged (dec-readiness review).
+        on_off(!env_flag(ENV_DISABLE_Q4K_DIRECT)),
+    );
+    if skip_moe_enabled() {
+        s.push_str(" SKIP_MOE=ON");
+    }
+    if skip_outer_norm_enabled() {
+        s.push_str(" SKIP_OUTER_NORM=ON");
+    }
+    s
+}
+
 // Helpers below are `pub` (not `pub(crate)`) because sibling backend
 // crates (`larql-compute-metal`, future `larql-compute-vulkan`, …)
 // share the same env-toggle vocabulary defined above.  Keeping the
@@ -372,12 +420,53 @@ pub fn env_not_zero_or_default(name: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
+/// Presence check on a canonical env name with a deprecated unprefixed
+/// alias: the canonical name wins; the alias still works but logs a
+/// one-time warning (unprefixed names can collide with a rented host's
+/// ambient env — dec-readiness review §3e).
+fn env_flag_with_loud_legacy(
+    canonical: &'static str,
+    legacy: &'static str,
+    warned: &'static std::sync::Once,
+) -> bool {
+    if env_flag(canonical) {
+        return true;
+    }
+    if env_flag(legacy) {
+        warned.call_once(|| {
+            eprintln!(
+                "[larql] WARNING: env var `{legacy}` is a deprecated alias — \
+                 use `{canonical}` (unprefixed names can collide with ambient host env)"
+            );
+        });
+        return true;
+    }
+    false
+}
+
 pub(crate) fn moe_debug_enabled() -> bool {
     env_flag(ENV_MOE_DEBUG)
 }
 
-pub(crate) fn skip_moe_enabled() -> bool {
-    env_flag(ENV_SKIP_MOE)
+/// MoE bypass (the DEC-0 ceiling arm's flag): `LARQL_SKIP_MOE`, with the
+/// grid path's historical `SKIP_MOE` as a loud deprecated alias.
+pub fn skip_moe_enabled() -> bool {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    env_flag_with_loud_legacy(ENV_SKIP_MOE, ENV_SKIP_MOE_LEGACY, &WARNED)
+}
+
+/// Metal decode-call debug summary: `LARQL_DECODE_DEBUG`, with unprefixed
+/// `DECODE_DEBUG` as a loud deprecated alias.
+pub fn decode_debug_enabled() -> bool {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    env_flag_with_loud_legacy(ENV_DECODE_DEBUG, ENV_DECODE_DEBUG_LEGACY, &WARNED)
+}
+
+/// Debug-only outer-norm bypass: `LARQL_SKIP_OUTER_NORM`, with unprefixed
+/// `SKIP_OUTER_NORM` as a loud deprecated alias.
+pub fn skip_outer_norm_enabled() -> bool {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    env_flag_with_loud_legacy(ENV_SKIP_OUTER_NORM, ENV_SKIP_OUTER_NORM_LEGACY, &WARNED)
 }
 
 pub fn split_profile_requested() -> bool {
@@ -483,6 +572,33 @@ mod tests {
     #[test]
     fn namespaced_toggle_helpers_read_their_flag() {
         with_env(ENV_SKIP_MOE, Some("1"), || assert!(skip_moe_enabled()));
+    }
+
+    /// The historical unprefixed names still work as loud deprecated
+    /// aliases, and the canonical prefixed name is authoritative
+    /// (dec-readiness review §3e — the DEC-0 ceiling-arm flag must mean
+    /// the same thing on the local and grid paths).
+    #[test]
+    fn unprefixed_legacy_aliases_still_enable_their_flags() {
+        with_env(ENV_SKIP_MOE_LEGACY, Some("1"), || {
+            assert!(skip_moe_enabled(), "legacy SKIP_MOE alias must work");
+        });
+        with_env(ENV_DECODE_DEBUG_LEGACY, Some("1"), || {
+            assert!(
+                decode_debug_enabled(),
+                "legacy DECODE_DEBUG alias must work"
+            );
+        });
+        with_env(ENV_SKIP_OUTER_NORM_LEGACY, Some("1"), || {
+            assert!(
+                skip_outer_norm_enabled(),
+                "legacy SKIP_OUTER_NORM alias must work"
+            );
+        });
+        // Unset everywhere → off.
+        assert!(!skip_moe_enabled());
+        assert!(!decode_debug_enabled());
+        assert!(!skip_outer_norm_enabled());
         with_env(ENV_MOE_DEBUG, Some("1"), || assert!(moe_debug_enabled()));
         with_env(ENV_PROFILE_SPLIT, Some("1"), || {
             assert!(split_profile_requested())
@@ -508,5 +624,42 @@ mod tests {
                 assert!(moe_debug_enabled());
             },
         );
+    }
+    /// The startup flag-state line names every fast-path stage, and the
+    /// number-corrupting bypasses only appear (upper-case) when set.
+    #[test]
+    fn decode_options_summary_names_every_stage_and_flags_bypasses() {
+        let s = decode_options_summary();
+        for key in [
+            "q4k_direct_attn=",
+            "q4k_attn_int8=",
+            "q4k_lm_head=",
+            "q4k_direct_ffn=",
+            "q4k_asm=",
+            "spin_pool=",
+            "moe_q4k_direct=",
+        ] {
+            assert!(s.contains(key), "{s}");
+        }
+        assert!(!s.contains("SKIP_MOE"), "bypass shown while unset: {s}");
+        with_env(ENV_SKIP_MOE, Some("1"), || {
+            assert!(decode_options_summary().contains("SKIP_MOE=ON"));
+        });
+        // MoE kernel-path toggle: default (unset) is the direct Q4K path;
+        // LARQL_DISABLE_Q4K_DIRECT flips the summary to off.
+        with_env(ENV_DISABLE_Q4K_DIRECT, None, || {
+            assert!(
+                decode_options_summary().contains("moe_q4k_direct=on"),
+                "{}",
+                decode_options_summary()
+            );
+        });
+        with_env(ENV_DISABLE_Q4K_DIRECT, Some("1"), || {
+            assert!(
+                decode_options_summary().contains("moe_q4k_direct=off"),
+                "{}",
+                decode_options_summary()
+            );
+        });
     }
 }

@@ -53,9 +53,21 @@ const OFFSET_ENTRY_BYTES: usize = OFFSET_FIELDS_PER_ENTRY * U64_FIELD_BYTES;
 const BF16_BYTES: usize = std::mem::size_of::<u16>();
 
 /// One quantized entry: gate+up bytes and down bytes, both in the same format.
+///
+/// `Debug` prints byte counts rather than payloads — an expert is tens of MB,
+/// and a failing assertion that dumps it is unreadable.
 pub struct LayerEntry {
     pub gate_up: Vec<u8>, // Q4_K [2*inter, hidden]
     pub down: Vec<u8>,    // Q6_K [hidden, inter_padded]  (same format as gate_up)
+}
+
+impl std::fmt::Debug for LayerEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayerEntry")
+            .field("gate_up_bytes", &self.gate_up.len())
+            .field("down_bytes", &self.down.len())
+            .finish()
+    }
 }
 
 pub type LayerWeightOffsets = Vec<(usize, usize, usize, usize)>;
@@ -176,10 +188,20 @@ pub fn pad_cols_to_256(data: &[f32], out_rows: usize, in_cols: usize) -> (Vec<f3
     (v, padded)
 }
 
-/// Build quantized entries for a dense FFN layer from f32 gate/up/down tensors.
+/// Build one quantized entry from separate f32 gate/up/down tensors.
+///
+/// Serves both a dense FFN layer (one entry) and a per-expert MoE model's
+/// individual expert (`experts.{id}.w1/w2/w3`) — the two cases are the same
+/// assembly, and the output is byte-identical to what [`quantize_moe_entries`]
+/// produces from packed input because the consumer is the same.
 ///
 /// `gate_f32`: [inter, hidden], `up_f32`: [inter, hidden], `down_f32`: [hidden, inter].
-/// All entries in the output use `format` uniformly.
+///
+/// `gate_up` is written **gate rows first, then up rows** — concatenated, not
+/// interleaved. `cpu/ops/moe/expert` splits the buffer at `inter * hidden`, so
+/// reversing the order silently swaps the two halves of every GLU: no crash,
+/// no size change, wrong numbers. The shape checks below exist for the same
+/// reason — a mis-shaped input would otherwise quantise happily.
 pub fn quantize_dense_entry(
     gate_f32: &[f32],
     up_f32: &[f32],
@@ -188,7 +210,23 @@ pub fn quantize_dense_entry(
     hidden: usize,
     format: LayerWeightFormat,
 ) -> Result<LayerEntry, VindexError> {
-    // gate+up interleaved: [gate rows, up rows] = [2*inter, hidden]
+    let expected_gate_up = inter * hidden;
+    if gate_f32.len() != expected_gate_up || up_f32.len() != expected_gate_up {
+        return Err(VindexError::Parse(format!(
+            "gate/up must each be [{inter}, {hidden}] = {expected_gate_up} elements; \
+             got gate {} and up {}",
+            gate_f32.len(),
+            up_f32.len()
+        )));
+    }
+    if down_f32.len() != hidden * inter {
+        return Err(VindexError::Parse(format!(
+            "down must be [{hidden}, {inter}] = {} elements; got {}",
+            hidden * inter,
+            down_f32.len()
+        )));
+    }
+
     let mut gate_up_f32 = Vec::with_capacity(2 * inter * hidden);
     gate_up_f32.extend_from_slice(gate_f32);
     gate_up_f32.extend_from_slice(up_f32);
@@ -246,7 +284,16 @@ pub fn parse_layer_weights_header(data: &[u8]) -> Option<LayerWeightsHeader> {
     if magic != MAGIC {
         return None;
     }
-    // format_version at [4..8] — currently ignored, forward-compatible
+    // A newer `format_version` may change the offset-table stride. Parsing it
+    // with this version's stride would not bounds-fail — it would yield offsets
+    // that are still inside the file, and hand the caller a plausible byte range
+    // from the wrong place. Refuse instead: the one production caller
+    // (`format/weights/load/q4k.rs`) treats `None` as "skip this layer", so an
+    // unreadable file degrades to a clean miss rather than to wrong weights.
+    let version = u32::from_le_bytes(data[4..8].try_into().ok()?);
+    if version > FORMAT_VERSION {
+        return None;
+    }
     let quant_raw = u32::from_le_bytes(data[8..12].try_into().ok()?);
     let format = match quant_raw {
         0 => LayerWeightFormat::F32,

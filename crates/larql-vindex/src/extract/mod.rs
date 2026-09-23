@@ -8,6 +8,7 @@ pub mod build_helpers;
 pub mod callbacks;
 pub mod checkpoint;
 pub mod constants;
+pub mod coverage;
 pub mod metadata;
 pub mod moe_svd;
 pub mod stage_labels;

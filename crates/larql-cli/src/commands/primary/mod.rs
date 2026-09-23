@@ -7,12 +7,17 @@
 pub mod accuracy_cmd;
 pub mod bench;
 pub mod cache;
+pub mod capabilities_cmd;
+pub mod card_cmd;
+pub mod dec_bench;
 pub mod diag_cmd;
+pub mod k3_ledger;
 pub mod link_cmd;
 pub mod list_cmd;
 pub mod model_cmd;
 pub mod publish_cmd;
 pub mod pull_cmd;
+pub mod recipe_cmd;
 pub mod rm_cmd;
 pub mod run_cmd;
 pub mod run_cmd_image;

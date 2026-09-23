@@ -40,10 +40,7 @@ impl<'a> WalkFfn<'a> {
         let w_up = dequant(ffn[1].0, ffn[1].1, intermediate, hidden);
         let w_down = dequant(ffn[2].0, ffn[2].1, hidden, intermediate);
 
-        let use_gelu = matches!(
-            arch.activation(),
-            larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
-        );
+        let use_gelu = arch.activation().uses_gelu_tanh_gate_up();
         let gate = crate::forward::dot_proj(x, &w_gate);
         let up = crate::forward::dot_proj(x, &w_up);
         let activation = if use_gelu {

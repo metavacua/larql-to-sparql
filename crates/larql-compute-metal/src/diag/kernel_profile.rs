@@ -240,7 +240,11 @@ pub fn profile_all(n_layers: usize, warmup: usize, iters: usize) -> Vec<KernelRe
             let weights: Vec<_> = (0..cold_n)
                 .map(|i| {
                     let w = quantize_q6_k(&synth_f32(n * k, 0.1 + i as f32 * 0.05));
-                    metal.bufs().get_bytes(&w)
+                    // uncached: `w` is a temporary and dies here. The cache
+                    // keys on (ptr, len), so successive same-size temporaries
+                    // reuse one address and the whole rotation collapses to a
+                    // single buffer — measured, 8 -> 1.
+                    metal.bufs().uncached_bytes(&w)
                 })
                 .collect();
             let mut times: Vec<f64> = Vec::with_capacity(iters);
@@ -369,13 +373,21 @@ pub fn profile_all(n_layers: usize, warmup: usize, iters: usize) -> Vec<KernelRe
             let weights_g: Vec<_> = (0..cold_n)
                 .map(|i| {
                     let w = quantize_q4_k(&synth_f32(n * k, 0.2 + i as f32 * 0.07));
-                    metal.bufs().get_bytes(&w)
+                    // uncached: `w` is a temporary and dies here. The cache
+                    // keys on (ptr, len), so successive same-size temporaries
+                    // reuse one address and the whole rotation collapses to a
+                    // single buffer — measured, 8 -> 1.
+                    metal.bufs().uncached_bytes(&w)
                 })
                 .collect();
             let weights_u: Vec<_> = (0..cold_n)
                 .map(|i| {
                     let w = quantize_q4_k(&synth_f32(n * k, 0.3 + i as f32 * 0.11));
-                    metal.bufs().get_bytes(&w)
+                    // uncached: `w` is a temporary and dies here. The cache
+                    // keys on (ptr, len), so successive same-size temporaries
+                    // reuse one address and the whole rotation collapses to a
+                    // single buffer — measured, 8 -> 1.
+                    metal.bufs().uncached_bytes(&w)
                 })
                 .collect();
 
@@ -816,4 +828,310 @@ mod tests {
             && r.isolated_ms.is_finite()
             && r.batched_gbs.is_finite()));
     }
+
+    #[test]
+    fn measure_batched_discards_warmup_and_reports_per_layer_time() {
+        // Pure timing arithmetic, no GPU: the returned figure must be per
+        // LAYER, not per iteration, and the warmup passes must not be folded
+        // into the mean. Getting either wrong is what undercounted
+        // q6k_matvec by 4x in 2026-04-28.
+        let calls = std::cell::Cell::new(0usize);
+        let ms = measure_batched(2, 3, 4, &mut || calls.set(calls.get() + 1));
+        assert_eq!(calls.get(), (2 + 3) * 4, "warmup passes still invoke f");
+        assert!(ms.is_finite() && ms >= 0.0);
+
+        // A no-op body divided by n_layers stays below any plausible per-call
+        // cost; this pins the division rather than just finiteness.
+        assert!(ms < 1.0, "per-layer time {ms} implausible for a no-op");
+    }
+
+    /// Drive the shape census at minimum params. It shares `profile_all`'s
+    /// cold-rotating protocol, so this exercises the census-specific cell
+    /// construction and the per-shape eta arithmetic on real Metal.
+    #[test]
+    fn profile_shape_census_smoke_fills_every_cell() {
+        if crate::MetalBackend::new().is_none() {
+            return;
+        }
+        let cells = profile_shape_census(1, 0, 1);
+        assert!(!cells.is_empty());
+        for c in &cells {
+            assert!(!c.kernel.is_empty() && !c.shape.is_empty());
+            assert!(c.cold_gbs.is_finite() && c.cold_gbs > 0.0, "{c:?}");
+            // eta is cold_gbs against the roofline, so it must track it.
+            assert!(c.eta.is_finite() && c.eta > 0.0, "{c:?}");
+            assert!(c.packed_mb > 0.0 && c.cold_ms > 0.0, "{c:?}");
+        }
+    }
+
+    /// The grouped-vs-ungrouped comparison is the measurement the K3a eta
+    /// claim rests on, so its driver needs to be exercised rather than only
+    /// run by hand from the bench example.
+    #[test]
+    fn profile_grouped_experts_smoke_returns_both_arms() {
+        if crate::MetalBackend::new().is_none() {
+            return;
+        }
+        // Small but shape-legal: K a multiple of 256, N not a multiple of the
+        // tile so the row-remainder path runs too.
+        let (ungrouped, grouped) = profile_grouped_experts(260, 512, 2, 1, 0, 1);
+        assert!(ungrouped.is_finite() && ungrouped > 0.0, "{ungrouped}");
+        assert!(grouped.is_finite() && grouped > 0.0, "{grouped}");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Shape census — is a low eta a property of the KERNEL or of the SHAPE?
+// ─────────────────────────────────────────────────────────────────────────
+
+/// One (kernel, shape) cell of the census.
+#[derive(Debug, Clone)]
+pub struct ShapeCell {
+    pub kernel: &'static str,
+    pub shape: &'static str,
+    pub n: usize,
+    pub k: usize,
+    pub packed_mb: f64,
+    pub cold_ms: f64,
+    pub cold_gbs: f64,
+    pub eta: f64,
+}
+
+/// Cross kernel against shape so the two explanations for a low eta separate.
+///
+/// The composed ledger assigns `q4k_matvec`'s 0.59 to K3's attention class, but
+/// that figure was measured on a *Gemma* shape in *Q4K*, while a transcoded
+/// image would run *Q6K* on a *K3* shape. Two hypotheses follow, and they imply
+/// opposite plans:
+///
+/// - **Kernel-borne**: the inefficiency belongs to `q4k_matvec`. Transcoding to
+///   Q6K sidesteps it, and the attention class inherits the better eta.
+/// - **Shape-borne**: it belongs to the `[12288, 7168]` geometry — long
+///   reduction, wide output, single vector. Then Q6K inherits it too, the
+///   transcode ceiling stands, and every future attention kernel must be
+///   designed against it.
+///
+/// Running both kernels over both shape families answers it directly. Gemma
+/// rows are anchors: they must reproduce the banked 0.59 / 0.85, or the harness
+/// is not comparable to the figures the ledger already cites.
+///
+/// Cold-rotating throughout — 8 distinct weight buffers per cell, batched
+/// `n_layers` to one command buffer, matching `profile_all`'s protocol exactly.
+pub fn profile_shape_census(n_layers: usize, warmup: usize, iters: usize) -> Vec<ShapeCell> {
+    use crate::MetalBackend;
+    use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
+    use metal::MTLSize;
+
+    let metal = MetalBackend::new().expect("Metal backend required");
+    const SB: usize = 256;
+    const Q4K_SB: usize = 144;
+    const Q6K_SB: usize = 210;
+    const ROOFLINE_GB_S: f64 = 367.0;
+
+    // (label, N = output rows, K = reduction)
+    let shapes: [(&'static str, usize, usize); 6] = [
+        ("gemma down  2560x10240", 2560, 10240),
+        ("gemma Wo    2560x8192", 2560, 8192),
+        ("K3 KDA attn 12288x7168", 12288, 7168),
+        ("K3 shared exp 6144x7168", 6144, 7168),
+        ("K3 latent up 7168x3584", 7168, 3584),
+        ("K3 expert w2 3584x3072", 3584, 3072),
+    ];
+
+    let mut out = Vec::new();
+    println!(
+        "{:<24} {:<6} {:>9} {:>9} {:>9} {:>6}",
+        "shape", "kernel", "packed MB", "cold ms", "cold GB/s", "eta"
+    );
+    println!("{}", "-".repeat(70));
+
+    for (label, n, k) in shapes {
+        for kernel in ["q4k", "q6k"] {
+            let (sb_bytes, handle) = match kernel {
+                "q4k" => (Q4K_SB, &metal.quant.q4k_matvec_pipeline),
+                _ => (Q6K_SB, &metal.quant.q6k_matvec_pipeline),
+            };
+            let mb = (n * (k / SB * sb_bytes)) as f64 / 1e6;
+            let x = synth_f32(k, 0.5);
+            let xb = metal.bufs().transient_from_f32(&x);
+            let ob = metal.bufs().output((n * 4) as u64);
+            let n_tgs = (n as u64).div_ceil(handle.rows_per_tg);
+            let n_val = n as u32;
+            let k_val = k as u32;
+
+            // 8 distinct weight buffers: the working set must exceed L2 so the
+            // number is DRAM bandwidth, not cache.
+            let cold_n = n_layers.min(8);
+            let weights: Vec<_> = (0..cold_n)
+                .map(|i| {
+                    let f = synth_f32(n * k, 0.1 + i as f32 * 0.05);
+                    let q = if kernel == "q4k" {
+                        quantize_q4_k(&f)
+                    } else {
+                        quantize_q6_k(&f)
+                    };
+                    // See the note above: a temporary must not go through the
+                    // address-keyed cache, or the rotation is not a rotation.
+                    metal.bufs().uncached_bytes(&q)
+                })
+                .collect();
+
+            let mut times: Vec<f64> = Vec::with_capacity(iters);
+            for i in 0..warmup + iters {
+                let t = std::time::Instant::now();
+                let cmd = metal.queue().new_command_buffer();
+                let enc = cmd.new_compute_command_encoder();
+                for layer in 0..n_layers {
+                    enc.set_compute_pipeline_state(&handle.state);
+                    enc.set_buffer(0, Some(&weights[layer % cold_n]), 0);
+                    enc.set_buffer(1, Some(&xb), 0);
+                    enc.set_buffer(2, Some(&ob), 0);
+                    enc.set_bytes(3, 4, &n_val as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(4, 4, &k_val as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(n_tgs, 1, 1),
+                        MTLSize::new(handle.threads_per_tg, 1, 1),
+                    );
+                }
+                enc.end_encoding();
+                cmd.commit();
+                cmd.wait_until_completed();
+                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                if i >= warmup {
+                    times.push(ms / n_layers as f64);
+                }
+            }
+            let cold_ms = mean(&times);
+            let cold_gbs = mb / cold_ms;
+            let eta = cold_gbs / ROOFLINE_GB_S;
+            println!("{label:<24} {kernel:<6} {mb:>9.1} {cold_ms:>9.3} {cold_gbs:>9.1} {eta:>6.2}");
+            out.push(ShapeCell {
+                kernel: if kernel == "q4k" { "q4k" } else { "q6k" },
+                shape: label,
+                n,
+                k,
+                packed_mb: mb,
+                cold_ms,
+                cold_gbs,
+                eta,
+            });
+        }
+    }
+    out
+}
+
+/// Grouped vs ungrouped routed-expert dispatch, both under the SAME batched
+/// protocol, so the comparison isolates occupancy from commit amortisation.
+///
+/// A naive bench commits once per expert in the ungrouped arm and once total in
+/// the grouped arm; the resulting ratio then mixes the scheduling gain with the
+/// removal of 15 commit+waits. Batching both arms into one command buffer
+/// removes that confound, and matches how `profile_shape_census` measured the
+/// 0.64 this experiment is trying to explain.
+///
+/// Returns `(ungrouped_gbs, grouped_gbs)`, both counting the same expert bytes.
+pub fn profile_grouped_experts(
+    n: usize,
+    k: usize,
+    top_k: usize,
+    batch: usize,
+    warmup: usize,
+    iters: usize,
+) -> (f64, f64) {
+    use crate::MetalBackend;
+    use larql_compute::cpu::ops::q4_common::quantize_q6_k;
+    use metal::MTLSize;
+
+    let metal = MetalBackend::new().expect("Metal backend required");
+
+    let mut bank: Vec<u8> = Vec::new();
+    let mut offsets: Vec<u32> = Vec::new();
+    let mut per_expert = 0usize;
+    for e in 0..top_k {
+        let q = quantize_q6_k(&synth_f32(n * k, 0.1 + e as f32 * 0.03));
+        per_expert = q.len();
+        offsets.push(bank.len() as u32);
+        bank.extend_from_slice(&q);
+    }
+    let total_mb = (per_expert * top_k) as f64 / 1e6;
+    let x = synth_f32(k, 0.5);
+
+    let wb = metal.bufs().get_bytes(&bank);
+    let off_bytes: Vec<u8> = offsets.iter().flat_map(|o| o.to_ne_bytes()).collect();
+    let offb = metal.bufs().get_bytes(&off_bytes);
+    let xb = metal.bufs().transient_from_f32(&x);
+    let out_single = metal.bufs().output((n * 4) as u64);
+    let out_group = metal.bufs().output((top_k * n * 4) as u64);
+    let n_val = n as u32;
+    let k_val = k as u32;
+
+    let solo = &metal.quant.q6k_matvec_pipeline;
+    let grp = &metal.quant.q6k_grouped_experts_pipeline;
+    let tiles_solo = (n as u64).div_ceil(solo.rows_per_tg);
+    let tiles_grp = (n as u64).div_ceil(grp.rows_per_tg);
+
+    let ungrouped_ms = {
+        let mut times = Vec::new();
+        for i in 0..warmup + iters {
+            let t = std::time::Instant::now();
+            let cmd = metal.queue().new_command_buffer();
+            let enc = cmd.new_compute_command_encoder();
+            for _ in 0..batch {
+                for &off in &offsets {
+                    enc.set_compute_pipeline_state(&solo.state);
+                    enc.set_buffer(0, Some(&wb), off as u64);
+                    enc.set_buffer(1, Some(&xb), 0);
+                    enc.set_buffer(2, Some(&out_single), 0);
+                    enc.set_bytes(3, 4, &n_val as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(4, 4, &k_val as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(tiles_solo, 1, 1),
+                        MTLSize::new(solo.threads_per_tg, 1, 1),
+                    );
+                }
+            }
+            enc.end_encoding();
+            cmd.commit();
+            cmd.wait_until_completed();
+            let ms = t.elapsed().as_secs_f64() * 1000.0;
+            if i >= warmup {
+                times.push(ms / batch as f64);
+            }
+        }
+        mean(&times)
+    };
+
+    let grouped_ms = {
+        let mut times = Vec::new();
+        for i in 0..warmup + iters {
+            let t = std::time::Instant::now();
+            let cmd = metal.queue().new_command_buffer();
+            let enc = cmd.new_compute_command_encoder();
+            for _ in 0..batch {
+                enc.set_compute_pipeline_state(&grp.state);
+                enc.set_buffer(0, Some(&wb), 0);
+                enc.set_buffer(1, Some(&offb), 0);
+                enc.set_buffer(2, Some(&xb), 0);
+                enc.set_buffer(3, Some(&out_group), 0);
+                enc.set_bytes(4, 4, &n_val as *const u32 as *const std::ffi::c_void);
+                enc.set_bytes(5, 4, &k_val as *const u32 as *const std::ffi::c_void);
+                let x_stride: u32 = 0; // shared-input regime for this bench
+                enc.set_bytes(6, 4, &x_stride as *const u32 as *const std::ffi::c_void);
+                enc.dispatch_thread_groups(
+                    MTLSize::new(tiles_grp, top_k as u64, 1),
+                    MTLSize::new(grp.threads_per_tg, 1, 1),
+                );
+            }
+            enc.end_encoding();
+            cmd.commit();
+            cmd.wait_until_completed();
+            let ms = t.elapsed().as_secs_f64() * 1000.0;
+            if i >= warmup {
+                times.push(ms / batch as f64);
+            }
+        }
+        mean(&times)
+    };
+
+    (total_mb / ungrouped_ms, total_mb / grouped_ms)
 }

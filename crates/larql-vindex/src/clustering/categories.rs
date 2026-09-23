@@ -1,347 +1,139 @@
-//! Category vocabulary for cluster labeling.
+//! Category vocabulary and stop words for cluster labeling.
 //!
-//! Loads from `data/wikidata_categories.json` (Wikidata property labels).
-//! Falls back to a built-in core set if the file is not found.
+//! Both vocabularies are DATA, not code: they load from JSON files
+//! resolved through [`super::data_files`] (env-var dir → workspace
+//! `data/`; never cwd-relative). A minimal built-in core set is kept
+//! only as a loud fallback — if the file cannot be found or parsed a
+//! `warning:` line goes to stderr and labeling quality degrades
+//! visibly rather than silently.
 //!
-//! To regenerate: `python3 scripts/fetch_wikidata_properties.py`
+//! To regenerate the category file:
+//! `python3 knowledge/scripts/fetch_wikidata_properties.py`
 
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::OnceLock;
 
-/// Load category words from the Wikidata categories file, or fall back to built-in.
+use super::data_files::{load_word_list, resolve_data_file, warn_builtin_fallback};
+
+/// Filename of the category vocabulary (Wikidata property labels).
+pub const CATEGORIES_FILE: &str = "wikidata_categories.json";
+
+/// Filename of the stop-word list used by TF-IDF labeling.
+pub const STOP_WORDS_FILE: &str = "stop_words.json";
+
+/// Load category words from the resolved data file, or fall back
+/// (loudly) to the minimal built-in core set.
 pub fn category_words() -> Vec<String> {
-    // Try loading from file (relative to cwd or workspace root)
-    for path in &[
-        "data/wikidata_categories.json",
-        "../data/wikidata_categories.json",
-        "../../data/wikidata_categories.json",
-    ] {
-        if let Ok(text) = std::fs::read_to_string(path) {
-            if let Ok(cats) = serde_json::from_str::<Vec<String>>(&text) {
-                if !cats.is_empty() {
-                    return cats;
-                }
-            }
+    match resolve_data_file(CATEGORIES_FILE) {
+        Some(path) => category_words_from(&path),
+        None => {
+            warn_builtin_fallback(CATEGORIES_FILE, "not found in search chain");
+            builtin_categories()
         }
     }
-
-    // Fall back to built-in core set
-    builtin_categories()
 }
 
-/// Load categories from a specific path.
+/// Load categories from an explicit (config-provided) path. Falls back
+/// (loudly) to the built-in core set if the file cannot be loaded.
 pub fn category_words_from(path: &Path) -> Vec<String> {
-    if let Ok(text) = std::fs::read_to_string(path) {
-        if let Ok(cats) = serde_json::from_str::<Vec<String>>(&text) {
-            if !cats.is_empty() {
-                return cats;
-            }
+    match load_word_list(path) {
+        Ok(words) => words,
+        Err(reason) => {
+            warn_builtin_fallback(CATEGORIES_FILE, &reason);
+            builtin_categories()
         }
     }
-    builtin_categories()
 }
 
-/// Built-in core categories (used when wikidata file is not available).
+/// Minimal built-in category core set — a fallback, not the vocabulary.
+/// The real set is `data/wikidata_categories.json` (~800 Wikidata
+/// property labels).
 fn builtin_categories() -> Vec<String> {
-    vec![
+    [
         "country",
-        "nation",
         "city",
         "place",
-        "location",
-        "region",
-        "continent",
         "language",
         "nationality",
         "person",
-        "people",
         "animal",
         "plant",
-        "organism",
         "company",
         "organization",
-        "institution",
-        "brand",
         "product",
         "capital",
         "currency",
-        "population",
         "leader",
-        "president",
-        "founder",
-        "birthplace",
         "occupation",
-        "profession",
         "genre",
-        "category",
         "science",
-        "biology",
-        "chemistry",
-        "physics",
-        "mathematics",
-        "medicine",
         "technology",
-        "computer",
-        "software",
-        "internet",
-        "digital",
         "music",
         "literature",
-        "poetry",
         "film",
         "sport",
-        "education",
         "politics",
-        "government",
-        "military",
         "religion",
-        "philosophy",
         "food",
-        "cooking",
-        "ingredient",
-        "agriculture",
         "art",
-        "culture",
         "history",
-        "geography",
-        "economics",
-        "business",
-        "law",
-        "health",
-        "environment",
-        "weather",
-        "nature",
-        "color",
-        "shape",
-        "size",
-        "measurement",
-        "quantity",
         "number",
         "time",
-        "date",
         "month",
-        "year",
-        "period",
-        "duration",
-        "age",
-        "direction",
-        "position",
-        "distance",
-        "speed",
-        "weight",
-        "action",
-        "movement",
-        "creation",
-        "destruction",
-        "communication",
-        "transport",
-        "trade",
-        "production",
-        "construction",
-        "concept",
-        "quality",
-        "property",
-        "relation",
-        "state",
-        "condition",
+        "color",
         "emotion",
-        "behavior",
-        "process",
-        "event",
-        "structure",
-        "system",
-        "method",
-        "theory",
-        "principle",
-        "material",
-        "substance",
-        "chemical",
-        "mineral",
-        "metal",
-        "liquid",
-        "family",
-        "group",
-        "community",
-        "society",
-        "role",
-        "title",
-        "code",
-        "markup",
-        "syntax",
-        "format",
-        "encoding",
-        "protocol",
-        "function",
-        "variable",
-        "type",
-        "class",
-        "pattern",
-        "suffix",
-        "prefix",
-        "plural",
-        "tense",
-        "conjugation",
-        "translation",
-        "foreign",
-        "multilingual",
     ]
     .into_iter()
-    .map(|s| s.to_string())
+    .map(str::to_string)
     .collect()
 }
 
-/// Common stop words to exclude from cluster labeling.
+/// Is `tok` a stop word (excluded from cluster labels)?
+///
+/// The list loads once per process from [`STOP_WORDS_FILE`] via the
+/// data-file search chain; on failure it falls back (loudly) to the
+/// minimal built-in list.
 pub fn is_stop_word(tok: &str) -> bool {
-    matches!(
-        tok,
-        "the"
-            | "and"
-            | "for"
-            | "but"
-            | "not"
-            | "you"
-            | "all"
-            | "can"
-            | "her"
-            | "was"
-            | "one"
-            | "our"
-            | "out"
-            | "are"
-            | "has"
-            | "his"
-            | "how"
-            | "its"
-            | "may"
-            | "new"
-            | "now"
-            | "old"
-            | "see"
-            | "way"
-            | "who"
-            | "did"
-            | "get"
-            | "let"
-            | "say"
-            | "she"
-            | "too"
-            | "use"
-            | "from"
-            | "have"
-            | "been"
-            | "will"
-            | "with"
-            | "this"
-            | "that"
-            | "they"
-            | "were"
-            | "some"
-            | "them"
-            | "than"
-            | "when"
-            | "what"
-            | "your"
-            | "each"
-            | "make"
-            | "like"
-            | "just"
-            | "over"
-            | "such"
-            | "take"
-            | "also"
-            | "into"
-            | "only"
-            | "very"
-            | "more"
-            | "does"
-            | "most"
-            | "about"
-            | "which"
-            | "their"
-            | "would"
-            | "there"
-            | "could"
-            | "other"
-            | "after"
-            | "being"
-            | "where"
-            | "these"
-            | "those"
-            | "first"
-            | "should"
-            | "because"
-            | "through"
-            | "before"
-            | "between"
-            | "during"
-            | "while"
-            | "under"
-            | "still"
-            | "then"
-            | "here"
-            | "both"
-            | "never"
-            | "every"
-            | "much"
-            | "well"
-            | "same"
-            | "further"
-            | "again"
-            | "off"
-            | "always"
-            | "might"
-            | "often"
-            | "know"
-            | "need"
-            | "even"
-            | "really"
-            | "back"
-            | "must"
-            | "another"
-            | "without"
-            | "along"
-            | "until"
-            | "anything"
-            | "something"
-            | "nothing"
-            | "everything"
-            | "however"
-            | "already"
-            | "though"
-            | "either"
-            | "rather"
-            | "instead"
-            | "within"
-            | "right"
-            | "used"
-            | "using"
-            | "since"
-            | "down"
-            | "many"
-            | "long"
-            | "upon"
-            | "whether"
-            | "among"
-            | "later"
-            | "different"
-            | "possible"
-            | "given"
-            | "including"
-            | "called"
-            | "known"
-            | "based"
-            | "several"
-            | "become"
-            | "certain"
-            | "general"
-            | "together"
-            | "following"
-            | "number"
-            | "part"
-            | "found"
-            | "small"
-            | "large"
-            | "great"
-    )
+    static SET: OnceLock<HashSet<String>> = OnceLock::new();
+    SET.get_or_init(|| {
+        let words = match resolve_data_file(STOP_WORDS_FILE) {
+            Some(path) => stop_words_from(&path),
+            None => {
+                warn_builtin_fallback(STOP_WORDS_FILE, "not found in search chain");
+                builtin_stop_words()
+            }
+        };
+        words.into_iter().collect()
+    })
+    .contains(tok)
+}
+
+/// Load the stop-word list from an explicit path. Falls back (loudly)
+/// to the built-in list if the file cannot be loaded. Uncached — the
+/// process-wide cache lives in [`is_stop_word`].
+pub fn stop_words_from(path: &Path) -> Vec<String> {
+    match load_word_list(path) {
+        Ok(words) => words,
+        Err(reason) => {
+            warn_builtin_fallback(STOP_WORDS_FILE, &reason);
+            builtin_stop_words()
+        }
+    }
+}
+
+/// Minimal built-in stop-word fallback. The real list is
+/// `data/stop_words.json` (~150 words).
+fn builtin_stop_words() -> Vec<String> {
+    [
+        "the", "and", "for", "but", "not", "you", "all", "can", "was", "are", "has", "his", "her",
+        "its", "from", "have", "been", "will", "with", "this", "that", "they", "were", "some",
+        "them", "than", "when", "what", "your", "which", "their", "would", "there", "could",
+        "other", "about", "because", "through", "however",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 #[cfg(test)]
@@ -349,22 +141,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn category_words_not_empty() {
+    fn category_words_load_from_data_file() {
+        // The workspace checkout carries data/wikidata_categories.json
+        // (~800 entries) — the resolved vocabulary must be the file, not
+        // the ~32-entry builtin fallback.
         let words = category_words();
-        assert!(!words.is_empty());
-        assert!(words.len() >= 50); // at least the builtin set
+        assert!(
+            words.len() > builtin_categories().len() * 2,
+            "expected the data-file vocabulary, got {} words (builtin-sized)",
+            words.len()
+        );
     }
 
     #[test]
     fn category_words_contains_key_terms() {
         let words = category_words();
-        // These should be in either the Wikidata file or the builtin fallback
         for term in &["country", "language", "food", "music"] {
             assert!(
                 words.iter().any(|w| w == term || w.contains(term)),
                 "missing category: {term}"
             );
         }
+    }
+
+    #[test]
+    fn category_words_from_explicit_path_wins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("cats.json");
+        std::fs::write(&path, "[\"custom-only-category\"]").unwrap();
+        assert_eq!(category_words_from(&path), vec!["custom-only-category"]);
+    }
+
+    #[test]
+    fn category_words_from_missing_path_falls_back_to_builtin() {
+        let words = category_words_from(Path::new("/nonexistent/path.json"));
+        assert_eq!(words, builtin_categories());
+        assert!(!words.is_empty());
+    }
+
+    #[test]
+    fn category_words_from_invalid_json_falls_back_to_builtin() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("bad.json");
+        std::fs::write(&path, "not json{").unwrap();
+        assert_eq!(category_words_from(&path), builtin_categories());
     }
 
     #[test]
@@ -385,9 +205,25 @@ mod tests {
     }
 
     #[test]
-    fn category_words_from_path_fallback() {
-        // Non-existent path should fall back to builtin
-        let words = category_words_from(std::path::Path::new("/nonexistent/path.json"));
-        assert!(!words.is_empty());
+    fn stop_words_from_explicit_path_wins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("sw.json");
+        std::fs::write(&path, "[\"zzz\"]").unwrap();
+        assert_eq!(stop_words_from(&path), vec!["zzz"]);
+    }
+
+    #[test]
+    fn stop_words_from_missing_path_falls_back_to_builtin() {
+        let words = stop_words_from(Path::new("/nonexistent/sw.json"));
+        assert_eq!(words, builtin_stop_words());
+    }
+
+    #[test]
+    fn data_file_stop_word_list_is_the_full_set() {
+        // is_stop_word resolves the ~150-word data file, which includes
+        // words absent from the minimal builtin fallback.
+        let builtin = builtin_stop_words();
+        assert!(!builtin.contains(&"following".to_string()));
+        assert!(is_stop_word("following"));
     }
 }

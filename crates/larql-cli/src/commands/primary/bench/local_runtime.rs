@@ -55,21 +55,8 @@ pub(super) fn run_larql(
         larql_inference::encode_prompt(&tokenizer, &*weights.arch, &wrapped_prompt)
             .map_err(|e| format!("tokenize: {e}"))?;
 
-    let backend: Box<dyn larql_compute::ComputeBackend> = if metal {
-        #[cfg(all(feature = "gpu", target_os = "macos"))]
-        {
-            let b = larql_compute_metal::MetalBackend::new().ok_or(
-                "Metal backend unavailable — rebuild with `--features gpu` on an M-series Mac",
-            )?;
-            Box::new(b)
-        }
-        #[cfg(not(all(feature = "gpu", target_os = "macos")))]
-        {
-            return Err("Metal backend requires the `gpu` feature on macOS".into());
-        }
-    } else {
-        Box::new(larql_compute::CpuBackend)
-    };
+    let backend: Box<dyn larql_compute::ComputeBackend> =
+        crate::backend_select::backend_for_metal_flag(metal)?;
 
     let cached_layers = CachedLayerGraph::from_residuals(Vec::new());
 

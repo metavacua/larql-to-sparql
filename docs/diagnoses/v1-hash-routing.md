@@ -1,7 +1,7 @@
 # V1 — Hash routing across all layers (aim-validation, KU4)
 
 **Status:** COMPLETE on three dense archs (Gemma 3 4B, Llama 2 7B, Mistral 7B) — unanimous falsification. MoE (26B) deferred (see scope note).
-**Harness:** `crates/larql-inference/examples/walk_ffn_v1_hash_routing.rs`
+**Harness:** `chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_v1_hash_routing.rs`
 **Artifacts:** `bench/aim-validation/v1_<model>.json`
 **Date:** 2026-05-31
 

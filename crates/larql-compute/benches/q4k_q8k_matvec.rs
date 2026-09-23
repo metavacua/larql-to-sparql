@@ -421,12 +421,68 @@ fn bench_mt_shapes(c: &mut Criterion) {
     group.finish();
 }
 
+/// Achieved effective bandwidth through the **production** parallel entry
+/// point, at the same shapes as `bench_mt_shapes`.
+///
+/// Why this arm exists: `bench_mt_shapes` hand-rolls `par_chunks_mut(32)` over
+/// **rayon**, which is what production ran when the standing "larql extracts
+/// ~47 GB/s vs llama.cpp ~70" figure was recorded (C12, 2026-06-12). Production
+/// no longer runs that: `q4k_q8k_matvec_parallel` routes through the
+/// spin-barrier pool, default-on since 2026-06-13, which was worth +28% e2e
+/// precisely because it removed the rayon fork-join tax these arms still pay.
+/// So the rayon arms measure a path nothing executes any more, and the 47 GB/s
+/// number derived from them has been quoted ever since as though it described
+/// the shipping stack.
+///
+/// Running both at identical shapes turns that into a measured delta instead of
+/// an assumption, and makes the achieved figure directly comparable to the
+/// attainable ceiling from `examples/membw_probe.rs` (~127 GB/s read on M3 Max).
+///
+/// `LARQL_SPIN_POOL=0` flips this arm back to rayon for a same-binary A/B —
+/// spell it inline before the command, never via a shell variable
+/// (`project_spin_barrier_pool`: `env $FLAGS` does not word-split under zsh and
+/// silently drops all but the first flag).
+#[cfg(target_arch = "aarch64")]
+fn bench_mt_production(c: &mut Criterion) {
+    use larql_compute::cpu::ops::q4k_q8k_dot::q4k_q8k_matvec_parallel;
+
+    let cases: &[(&str, usize, usize)] = &[
+        ("kv_proj_2048x2816", 2048, 2816),
+        ("q_proj_4096x2816", 4096, 2816),
+        ("o_proj_2816x4096", 2816, 4096),
+        ("dense_gu_2112x2816", 2112, 2816),
+        ("big_65536x2816", 65536, 2816),
+    ];
+
+    let mut group = c.benchmark_group("q8k_mt_production");
+    group.sample_size(30);
+
+    for &(label, rows, cols) in cases {
+        let w_q4 = quantize_q4_k(&synth(rows * cols, 0.3));
+        let x = synth(cols, 1.1);
+        let q8: Q8KActivation = quantize_x_to_q8k(&x);
+        let bytes_per_row = (cols / ELEMS_PER_BLOCK) * BLOCK_BYTES;
+        let mut out = vec![0.0f32; rows];
+
+        group.throughput(Throughput::Bytes((rows * bytes_per_row) as u64));
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                q4k_q8k_matvec_parallel(&mut out, &q8, &w_q4, rows, cols, "Q4_K");
+                std::hint::black_box(out[0]);
+            });
+        });
+    }
+
+    group.finish();
+}
+
 #[cfg(target_arch = "aarch64")]
 criterion_group!(
     benches,
     bench_q4k_q8k,
     bench_sb_decomposition,
-    bench_mt_shapes
+    bench_mt_shapes,
+    bench_mt_production
 );
 #[cfg(not(target_arch = "aarch64"))]
 criterion_group!(benches, bench_q4k_q8k);

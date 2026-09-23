@@ -1,7 +1,7 @@
-use crate::ffn::moe_remote::runtime::{
-    ENV_MOE_NO_SPLIT, ENV_MOE_TIMING, ENV_MOE_TOP_K, ENV_SKIP_MOE,
-};
+use crate::ffn::moe_remote::runtime::{ENV_MOE_NO_SPLIT, ENV_MOE_TIMING, ENV_MOE_TOP_K};
 use crate::layer_graph::generate::policy::TokenSelectionPolicy;
+#[cfg(test)]
+use larql_compute::options::ENV_SKIP_MOE;
 
 #[derive(Clone, Debug)]
 pub(super) struct GridRuntimeConfig {
@@ -19,10 +19,12 @@ impl GridRuntimeConfig {
         // races concurrent `getenv` on the decode path → SIGSEGV). Behaviour is
         // identical: `env_usize` = `var().ok().and_then(parse)`, `env_flag` =
         // `var().is_ok()` (presence-as-truth, any value incl. empty).
-        use larql_compute::options::{env_flag, env_usize};
+        use larql_compute::options::{env_flag, env_usize, skip_moe_enabled};
         Self {
             moe_top_k_override: env_usize(ENV_MOE_TOP_K),
-            skip_moe: env_flag(ENV_SKIP_MOE),
+            // Canonical LARQL_SKIP_MOE with the historical unprefixed
+            // SKIP_MOE as a loud deprecated alias (dec-readiness §3e).
+            skip_moe: skip_moe_enabled(),
             timing_enabled: env_flag(ENV_MOE_TIMING),
             split_disabled: env_flag(ENV_MOE_NO_SPLIT),
             token_policy: TokenSelectionPolicy::from_env(),

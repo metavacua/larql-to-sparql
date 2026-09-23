@@ -229,10 +229,7 @@ fn guided_walk_ffn(
     };
 
     let is_gated = arch.ffn_type() == larql_models::FfnType::Gated;
-    let use_gelu = matches!(
-        arch.activation(),
-        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
-    );
+    let use_gelu = arch.activation().uses_gelu_tanh_gate_up();
 
     // Gate scores: one batch call, then index into universe features only.
     // This is still a matmul for gate, but up/down are per-feature only.

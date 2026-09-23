@@ -248,7 +248,7 @@ Two cheap probes (real production functions, synthetic same-size f32 weights →
 faithful bandwidth, no model load; `CpuBackend`, the no-`--metal` path the 28%
 was measured on). These are the #24-trap guard — run *before* building the path.
 
-### Gate 1 — projection-vs-GQA split (`examples/attn_proj_vs_gqa_split.rs`)
+### Gate 1 — projection-vs-GQA split (`chris-experiments/larql_probes/examples/q4k_attention/attn_proj_vs_gqa_split.rs`)
 
 How much of the attention block is the Q4K-accelerable projections vs the
 unaccelerated f32 GQA, across a cached_len sweep at 26B dims. **Projection cost
@@ -271,7 +271,7 @@ With the sliding-window cap, projections stay ≥64% out to 4K and ~50% at 8K (t
 no-cap upper bound on GQA crosses over earlier, ~2.4K). The GQA residual is small
 at working context and is the only part Q4K-direct can't touch.
 
-### Gate 2 — f32 BLAS vs Q4K-direct on the projection (`examples/attn_proj_f32_vs_q4k.rs`)
+### Gate 2 — f32 BLAS vs Q4K-direct on the projection (`chris-experiments/larql_probes/examples/q4k_attention/attn_proj_f32_vs_q4k.rs`)
 
 The decisive question: does `q4k_matvec` actually beat Apple AMX/Accelerate f32
 sgemm, or does AMX throughput eat the 7× bandwidth cut? Per-projection, same
@@ -508,7 +508,7 @@ against the **real** decode denominator, not the synthetic 28%.
     within noise — both measured, not inferred.)
   - **Prefill twin — GATED then FALSIFIED.** At 907 ctx prefill attention is 6288 ms
     of a 14739 ms TTFT (~43% of prefill), which *looked* like the better lever. But
-    the prefill-shape Gate-2 (`examples/attn_prefill_f32_vs_q4k.rs`, seq_len=907)
+    the prefill-shape Gate-2 (`chris-experiments/larql_probes/examples/q4k_attention/attn_prefill_f32_vs_q4k.rs`, seq_len=907)
     kills it: repeated per-position `q4k_matvec` (the only CPU path — **no
     `q4k_matmul`**) is **~20× SLOWER** than one f32 BLAS sgemm (sliding block 25.9
     vs 569 ms, 0.05×; global 42 vs 789 ms). Deeper reason: at prefill the projection

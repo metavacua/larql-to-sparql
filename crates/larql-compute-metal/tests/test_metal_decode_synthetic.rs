@@ -77,6 +77,7 @@ fn build_synth_layer<'a>(
     norm_w: &'a [f32],
 ) -> FullPipelineLayer<'a> {
     FullPipelineLayer {
+        attn_sinks: None,
         wq: QuantWeight {
             data: wq_data,
             scales: None,
@@ -367,6 +368,7 @@ fn decode_token_gemma3_style_post_norms_smoke() {
     // post_attn_norm + pre_ffn_norm + post_ffn_norm = the Gemma 3/4
     // four-norm-per-layer pattern.
     let layer = FullPipelineLayer {
+        attn_sinks: None,
         wq: QuantWeight {
             data: &wq_data,
             scales: None,
@@ -577,6 +579,7 @@ fn decode_token_qkv_fused_opt_in_smoke() {
     // condition that gates the fused path. has_post_norms is false here
     // (a non-Gemma layer that still hits the normed QKV opt-in).
     let layer = FullPipelineLayer {
+        attn_sinks: None,
         wq: QuantWeight {
             data: &wq_data,
             scales: None,

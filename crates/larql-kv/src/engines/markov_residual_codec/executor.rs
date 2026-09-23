@@ -38,12 +38,24 @@ impl MarkovResidualCodecEngine {
         let seq_len = token_ids.len();
         let hidden_size = weights.hidden_size;
         let mut h = embed_tokens_pub(weights, token_ids);
+        // Empty on non-PLE archs — `ple_inputs.get(layer)` then yields `None`.
+        let ple_inputs =
+            larql_inference::forward::ple::precompute_per_layer_inputs(weights, &h, token_ids);
         let mut stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
 
         for layer in 0..num_layers {
             stored.push(h.clone());
             let (h_out, _kv) = executor.run_prefill_layer(view, layer, &h, ffn)?;
-            h = h_out;
+            // `LayerExecutor::run_*_layer` returns attention + bare FFN only
+            // (`LocalWalkExecutor`, the sole production impl, ends at
+            // `run_ffn`); the PLE + layer_scalar tail is the driving loop's
+            // responsibility, mirroring the legacy `kv_prefill_run` sequence.
+            h = crate::engines::apply_ple_and_layer_scalar(
+                weights,
+                &h_out,
+                layer,
+                ple_inputs.get(layer),
+            );
         }
 
         let mut rs = RsStoreCodec {
@@ -113,17 +125,34 @@ impl MarkovResidualCodecEngine {
         let num_layers = weights.num_layers;
         let abs_position = rs.next_position;
         let mut h_new = embed_tokens_pub(weights, &[token_id]);
+        // PLE inputs are per-token — recompute for this single-token decode
+        // step, matching the legacy `kv_decode_step_run` recipe exactly.
+        let ple_inputs = larql_inference::forward::ple::precompute_per_layer_inputs(
+            weights,
+            &h_new,
+            &[token_id],
+        );
         let mut new_stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
 
         for layer in 0..num_layers {
-            let h_hot = &rs.stored[layer];
-            let s_hot = h_hot.shape()[0];
+            // Logical row count only — `stored` may be a
+            // capacity-padded buffer (`hot_len` is the row count, see
+            // RsStoreCodec docs).
+            let s_hot = rs.hot_len;
+            let h_hot = rs.stored[layer].slice(s![..s_hot, ..]);
             let hot_abs_start = abs_position.saturating_sub(s_hot);
 
             let prior_kv: SharedKV = if let Some(cold_kv) = &rs.cold_kv {
                 let (k_cold, v_cold) = &cold_kv[layer];
-                let (k_hot, v_hot) =
-                    recompute_kv(view, h_hot, layer, hot_abs_start, backend, Some(index))?;
+                let h_hot_owned = h_hot.to_owned();
+                let (k_hot, v_hot) = recompute_kv(
+                    view,
+                    &h_hot_owned,
+                    layer,
+                    hot_abs_start,
+                    backend,
+                    Some(index),
+                )?;
                 let c = k_cold.shape()[0];
                 let kv_dim = k_cold.shape()[1];
                 let mut k_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
@@ -145,10 +174,10 @@ impl MarkovResidualCodecEngine {
                             .assign(&decoded);
                         combined
                             .slice_mut(s![decoded.shape()[0].., ..])
-                            .assign(h_hot);
+                            .assign(&h_hot);
                         (combined, rs.cold_abs_start)
                     }
-                    _ => (h_hot.clone(), hot_abs_start),
+                    _ => (h_hot.to_owned(), hot_abs_start),
                 };
                 recompute_kv(view, &h_full, layer, full_abs_start, backend, Some(index))?
             };
@@ -156,16 +185,25 @@ impl MarkovResidualCodecEngine {
             new_stored.push(h_new.clone());
             let (h_out, _new_kv) =
                 executor.run_decode_layer(view, layer, &h_new, &prior_kv, abs_position, ffn)?;
-            h_new = h_out;
+            // Executor returns bare post-FFN hidden; PLE + layer_scalar tail
+            // is the driving loop's responsibility (see prefill loop above).
+            h_new = crate::engines::apply_ple_and_layer_scalar(
+                weights,
+                &h_out,
+                layer,
+                ple_inputs.get(layer),
+            );
         }
 
         // Append new row + clip overflow into encoded cold tier.
         let mut updated_stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
         for (stored, new_row) in rs.stored.iter().zip(new_stored.iter()) {
-            let s_old = stored.shape()[0];
+            let s_old = rs.hot_len;
             let hidden_dim = stored.shape()[1];
             let mut combined = Array2::<f32>::zeros((s_old + 1, hidden_dim));
-            combined.slice_mut(s![..s_old, ..]).assign(stored);
+            combined
+                .slice_mut(s![..s_old, ..])
+                .assign(&stored.slice(s![..s_old, ..]));
             combined.slice_mut(s![s_old.., ..]).assign(new_row);
             updated_stored.push(combined);
         }
@@ -175,7 +213,13 @@ impl MarkovResidualCodecEngine {
             stored: updated_stored,
             cold_encoded: rs.cold_encoded,
             cold_kv: rs.cold_kv,
-            hot_kv: rs.hot_kv,
+            // Store invariant: when `hot_kv = Some`, kv[l] and stored[l]
+            // agree on their first `hot_len` rows. This path discards
+            // `run_decode_layer`'s returned K/V, so a carried-over cache
+            // would be one row short of the new `hot_len` — stale reads
+            // on the next walk step, or an out-of-bounds clip below.
+            // Drop it; the next step recomputes from `stored`.
+            hot_kv: None,
             cold_abs_start: rs.cold_abs_start,
             next_position: abs_position + 1,
             max_window: rs.max_window,

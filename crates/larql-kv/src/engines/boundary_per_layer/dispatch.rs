@@ -35,6 +35,11 @@ use crate::engines::w10_enabled as w10_env_on;
 /// `(last_hidden, new_store, kv_handle)` on success; `None` when the
 /// backend / vindex lacks the required support (caller falls back to
 /// `walk::run_prefill`).
+///
+/// `dequant_scratch` is the engine-owned f32 scratch: the cold-tier K/V
+/// recompute on prefill overflow resolves attention weights through it
+/// (real Q4K models carry no dense f32 attention tensors — see
+/// [`cold_tier_recompute_view`]).
 pub(super) fn try_prefill_via_dispatch(
     weights: &ModelWeights,
     backend: &dyn EngineBackend,
@@ -42,6 +47,7 @@ pub(super) fn try_prefill_via_dispatch(
     window_size: Option<usize>,
     index: &larql_inference::larql_vindex::VectorIndex,
     token_ids: &[u32],
+    dequant_scratch: &mut larql_inference::DequantScratch,
 ) -> Option<(Array2<f32>, RsStorePerLayer, KvHandle)> {
     if !larql_inference::vindex::supports_cached_decode(weights)
         || !larql_inference::vindex::supports_direct_matvec_decode(weights, index)
@@ -97,21 +103,20 @@ pub(super) fn try_prefill_via_dispatch(
             overflow_per_layer.push(rs.clip_layer_overflow(layer));
         }
         if overflow_per_layer.first().map_or(0, |c| c.shape()[0]) > 0 {
+            // Cold-tier recompute needs resolvable attention weights; on
+            // real Q4K models only the vindex carries them, so dequantise
+            // into the engine scratch and thread `index` — mirroring the
+            // dense-walk fallback path in `engine::prefill_quant`. A
+            // recompute failure aborts the dispatch route (return None →
+            // engine falls back to the dense walk) instead of panicking.
+            let view = cold_tier_recompute_view(dequant_scratch, weights, index);
             let mut encoded_layers: Vec<PerLayerEncodedColdLayer> = Vec::with_capacity(num_layers);
             let mut cold_kv: Vec<larql_inference::attention::SharedKV> =
                 Vec::with_capacity(num_layers);
             for (layer, overflow) in overflow_per_layer.iter().enumerate() {
                 let codec = policy.codec_for(layer);
                 let decoded_overflow = roundtrip(overflow, codec);
-                let (k, v) = recompute_kv(
-                    larql_inference::WeightsView::dense(weights),
-                    &decoded_overflow,
-                    layer,
-                    0,
-                    backend,
-                    None,
-                )
-                .expect("cold K/V pre-computation failed");
+                let (k, v) = recompute_kv(view, &decoded_overflow, layer, 0, backend, Some(index))?;
                 cold_kv.push((k, v));
                 let mut enc = PerLayerEncodedColdLayer::empty(codec, weights.hidden_size);
                 enc.append(overflow);
@@ -125,19 +130,45 @@ pub(super) fn try_prefill_via_dispatch(
     Some((hidden, rs, handle))
 }
 
+/// Build the `WeightsView` the cold-tier K/V recompute resolves attention
+/// weights through: Q4K attention tensors dequantised into the engine
+/// scratch (idempotent), overlaid on canonical `weights`. `WeightsView::
+/// dense` is NOT sufficient here — real Q4K models have no dense f32
+/// attention tensors, so the dense view made `recompute_kv` fail (panic
+/// at prefill, silent cold_kv desync at decode) on exactly the models the
+/// dispatch path exists for.
+fn cold_tier_recompute_view<'a>(
+    dequant_scratch: &'a mut larql_inference::DequantScratch,
+    weights: &'a ModelWeights,
+    index: &larql_inference::larql_vindex::VectorIndex,
+) -> larql_inference::WeightsView<'a> {
+    larql_inference::vindex::dequant::ensure_attn_tensors_dequantised(
+        dequant_scratch,
+        weights,
+        index,
+    );
+    larql_inference::WeightsView::with_scratch(weights, dequant_scratch)
+}
+
 /// One decode step through the W1-GPU dispatch path. Mutates the
-/// supplied `KvHandle` in place (backend appends K/V) and returns the
-/// updated store. `None` signals a state-dump failure — caller should
-/// clear its `kv_handle` and fall back to the dense walk.
+/// supplied `KvHandle` in place (backend appends K/V) and the store in
+/// place. `None` signals a state-dump failure — caller should clear its
+/// `kv_handle` and fall back to the dense walk.
+///
+/// Failure invariant: the fallible backend call happens BEFORE any store
+/// mutation, so on a `None` return `rs` is untouched — the engine keeps
+/// the store and the documented dense-walk fallback stays reachable.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn decode_step_via_dispatch(
     weights: &ModelWeights,
     backend: &dyn EngineBackend,
     policy: &BoundaryLayerPolicy,
     handle: &mut KvHandle,
-    mut rs: RsStorePerLayer,
+    rs: &mut RsStorePerLayer,
     index: &larql_inference::larql_vindex::VectorIndex,
     token_id: u32,
-) -> Option<(Array2<f32>, RsStorePerLayer)> {
+    dequant_scratch: &mut larql_inference::DequantScratch,
+) -> Option<Array2<f32>> {
     let num_layers = weights.num_layers;
     let mut state = PerLayerDecodeState::with_capacity(num_layers);
     let abs_position = rs.next_position;
@@ -190,7 +221,7 @@ pub(super) fn decode_step_via_dispatch(
     // Cold-tier eviction + cold_kv extension. Under None mask there's
     // no stored to evict from; skip.
     if matches!(mask, larql_compute::StateDumpMask::None) {
-        return Some((hidden, rs));
+        return Some(hidden);
     }
     let mut overflow_per_layer: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
     for layer in 0..num_layers {
@@ -217,16 +248,26 @@ pub(super) fn decode_step_via_dispatch(
                 rs.cold_encoded = Some(layers);
             }
         }
-        extend_cold_kv_with_overflow(
-            larql_inference::WeightsView::dense(weights),
+        // Same scratch-backed view as the prefill overflow path: dense
+        // resolution fails on real Q4K models (no dense attn tensors).
+        let view = cold_tier_recompute_view(dequant_scratch, weights, index);
+        if extend_cold_kv_with_overflow(
+            view,
             backend,
             policy,
-            &mut rs,
+            rs,
             &overflow_per_layer,
             cold_abs_pos,
-        );
+        )
+        .is_none()
+        {
+            // Per-layer K/V recompute failed: the helper dropped `cold_kv`
+            // wholesale (atomicity — no layer desync possible), so the next
+            // decode step rebuilds cold K/V from `cold_encoded`.
+            debug_assert!(rs.cold_kv.is_none(), "failed extend must drop cold_kv");
+        }
     }
-    Some((hidden, rs))
+    Some(hidden)
 }
 
 #[cfg(test)]
@@ -278,6 +319,7 @@ mod tests {
             Some(4),
             &empty_index,
             &[0u32, 1],
+            &mut larql_inference::DequantScratch::new(),
         )
         .is_none());
     }
@@ -295,6 +337,7 @@ mod tests {
             Some(4),
             &index,
             &[0u32, 1, 2],
+            &mut larql_inference::DequantScratch::new(),
         )
         .expect("prefill via dispatch");
         assert_eq!(h.shape(), &[1, weights.hidden_size]);
@@ -319,6 +362,7 @@ mod tests {
             None,
             &index,
             &[0u32, 1, 2],
+            &mut larql_inference::DequantScratch::new(),
         )
         .expect("prefill via dispatch (windowless)");
         // W10 + window=None: drop_stored_shadow is true → empty stored
@@ -335,24 +379,27 @@ mod tests {
         let weights = make_test_q4k_weights();
         let index = make_test_q4k_vindex(&weights);
         let backend = cpu_engine_backend();
-        let (_h, rs, mut handle) = try_prefill_via_dispatch(
+        let mut scratch = larql_inference::DequantScratch::new();
+        let (_h, mut rs, mut handle) = try_prefill_via_dispatch(
             &weights,
             backend.as_ref(),
             &bf16_policy(),
             Some(4),
             &index,
             &[0u32, 1],
+            &mut scratch,
         )
         .expect("prefill");
         let rows_before = rs.stored[0].shape()[0];
-        let (h, rs) = decode_step_via_dispatch(
+        let h = decode_step_via_dispatch(
             &weights,
             backend.as_ref(),
             &bf16_policy(),
             &mut handle,
-            rs,
+            &mut rs,
             &index,
             2,
+            &mut scratch,
         )
         .expect("decode");
         assert_eq!(h.shape(), &[1, weights.hidden_size]);
@@ -367,23 +414,26 @@ mod tests {
         let weights = make_test_q4k_weights();
         let index = make_test_q4k_vindex(&weights);
         let backend = cpu_engine_backend();
-        let (_h, rs, mut handle) = try_prefill_via_dispatch(
+        let mut scratch = larql_inference::DequantScratch::new();
+        let (_h, mut rs, mut handle) = try_prefill_via_dispatch(
             &weights,
             backend.as_ref(),
             &bf16_policy(),
             None,
             &index,
             &[0u32, 1],
+            &mut scratch,
         )
         .expect("prefill (windowless)");
-        let (_h, rs) = decode_step_via_dispatch(
+        decode_step_via_dispatch(
             &weights,
             backend.as_ref(),
             &bf16_policy(),
             &mut handle,
-            rs,
+            &mut rs,
             &index,
             2,
+            &mut scratch,
         )
         .expect("decode (None mask)");
         // None mask: stored stays empty, but next_position still advances.
@@ -394,6 +444,73 @@ mod tests {
     }
 
     #[test]
+    fn cold_tier_recompute_survives_missing_dense_attn_tensors() {
+        // Production Q4K models carry NO dense f32 attention tensors — only
+        // the vindex's Q4K bytes. The cold-tier K/V recompute must therefore
+        // resolve attention weights via the dequant scratch / Q4K-direct
+        // route, not via `WeightsView::dense` (which panicked pre-fix).
+        clear_w10_override();
+        let mut weights = make_test_q4k_weights();
+        let index = make_test_q4k_vindex(&weights); // built before stripping
+        let attn_keys: Vec<String> = (0..weights.num_layers)
+            .flat_map(|l| {
+                [
+                    weights.arch.attn_q_key(l),
+                    weights.arch.attn_k_key(l),
+                    weights.arch.attn_v_key(l),
+                    weights.arch.attn_o_key(l),
+                ]
+            })
+            .collect();
+        for k in attn_keys {
+            weights.tensors.remove(&k);
+        }
+        let backend = cpu_engine_backend();
+        let mut scratch = larql_inference::DequantScratch::new();
+        // window=2 + 3-token prompt → prefill-time overflow → cold K/V
+        // recompute fires during try_prefill_via_dispatch.
+        let (h, mut rs, mut handle) = try_prefill_via_dispatch(
+            &weights,
+            backend.as_ref(),
+            &bf16_policy(),
+            Some(2),
+            &index,
+            &[0u32, 1, 2],
+            &mut scratch,
+        )
+        .expect("prefill via dispatch must survive without dense attn tensors");
+        assert_eq!(h.shape(), &[1, weights.hidden_size]);
+        let cold_kv = rs.cold_kv.as_ref().expect("prefill overflow → cold_kv");
+        for (k, v) in cold_kv {
+            assert_eq!(k.shape()[0], 1, "1 overflow row per layer");
+            assert_eq!(v.shape()[0], 1);
+        }
+        // Decode-time overflow: the decode-path cold K/V extension must also
+        // survive (pre-fix it failed silently, desyncing cold_kv).
+        decode_step_via_dispatch(
+            &weights,
+            backend.as_ref(),
+            &bf16_policy(),
+            &mut handle,
+            &mut rs,
+            &index,
+            3,
+            &mut scratch,
+        )
+        .expect("decode via dispatch");
+        let cold_kv = rs.cold_kv.as_ref().expect("decode overflow keeps cold_kv");
+        let n_cold = rs.cold_encoded.as_ref().unwrap()[0].n_positions;
+        for (k, v) in cold_kv {
+            assert_eq!(
+                k.shape()[0],
+                n_cold,
+                "cold_kv rows must track cold_encoded positions"
+            );
+            assert_eq!(v.shape()[0], n_cold);
+        }
+    }
+
+    #[test]
     fn decode_step_via_dispatch_overflow_extends_cold_tier() {
         clear_w10_override();
         let weights = make_test_q4k_weights();
@@ -401,24 +518,27 @@ mod tests {
         let backend = cpu_engine_backend();
         // window=2: after prefilling 2 tokens, one decode crosses the
         // window and the dispatch eviction path runs.
-        let (_h, rs, mut handle) = try_prefill_via_dispatch(
+        let mut scratch = larql_inference::DequantScratch::new();
+        let (_h, mut rs, mut handle) = try_prefill_via_dispatch(
             &weights,
             backend.as_ref(),
             &bf16_policy(),
             Some(2),
             &index,
             &[0u32, 1],
+            &mut scratch,
         )
         .expect("prefill");
         assert!(rs.cold_encoded.is_none(), "no overflow at prefill");
-        let (_h, rs) = decode_step_via_dispatch(
+        decode_step_via_dispatch(
             &weights,
             backend.as_ref(),
             &bf16_policy(),
             &mut handle,
-            rs,
+            &mut rs,
             &index,
             2,
+            &mut scratch,
         )
         .expect("decode");
         assert!(
@@ -427,17 +547,25 @@ mod tests {
         );
         // Subsequent decode should extend an existing cold_encoded
         // (Some(layers) branch of the match).
-        let (_h, rs) = decode_step_via_dispatch(
+        decode_step_via_dispatch(
             &weights,
             backend.as_ref(),
             &bf16_policy(),
             &mut handle,
-            rs,
+            &mut rs,
             &index,
             3,
+            &mut scratch,
         )
         .expect("decode 2");
-        assert!(rs.cold_encoded.is_some());
-        assert!(rs.cold_encoded.as_ref().unwrap()[0].n_positions >= 2);
+        let n_cold = rs.cold_encoded.as_ref().unwrap()[0].n_positions;
+        assert!(n_cold >= 2);
+        // cold_kv must track cold_encoded row-for-row on every layer
+        // (atomic extend contract).
+        let cold_kv = rs.cold_kv.as_ref().expect("overflow keeps cold_kv");
+        for (k, v) in cold_kv {
+            assert_eq!(k.shape()[0], n_cold, "cold K rows must match cold_encoded");
+            assert_eq!(v.shape()[0], n_cold, "cold V rows must match cold_encoded");
+        }
     }
 }

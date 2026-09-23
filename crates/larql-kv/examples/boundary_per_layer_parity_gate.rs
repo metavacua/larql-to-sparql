@@ -81,7 +81,7 @@ fn parse_args() -> Args {
     let argv: Vec<String> = std::env::args().collect();
     let mut a = Args {
         vindex: PathBuf::new(),
-        model: "google/gemma-3-4b-it".into(),
+        model: String::new(),
         prompt: "The capital of France is".into(),
         tokens: 50,
         cpu: false,
@@ -120,7 +120,28 @@ fn parse_args() -> Args {
         );
         std::process::exit(2);
     }
+    a.model = resolve_model_id(a.model, &a.vindex);
     a
+}
+
+/// The model id to use when `--model` was not given.
+///
+/// Asked of the artifact rather than defaulted to a constant. A hardcoded
+/// default silently disagrees with whatever vindex the user actually passed,
+/// and the disagreement surfaces far away — the wrong tokenizer yields
+/// plausible token ids and the first honest error arrives inside a dequant
+/// parser complaining about byte counts.
+fn resolve_model_id(model: String, vindex: &std::path::Path) -> String {
+    if !model.is_empty() {
+        return model;
+    }
+    larql_vindex::format::model_id_at(vindex).unwrap_or_else(|| {
+        eprintln!(
+            "{} records no model id in index.json — pass --model <id>",
+            vindex.display()
+        );
+        std::process::exit(2);
+    })
 }
 
 fn argmax(logits: &[f32]) -> u32 {

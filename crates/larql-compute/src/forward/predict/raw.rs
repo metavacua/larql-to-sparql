@@ -73,7 +73,7 @@ pub fn forward_raw_logits(
 /// position-0 token before layer 0.
 ///
 /// Mirrors the Python `prefill_to_layer(initial_residual=...)` API used by
-/// `UnlimitedContextEngine`/Apollo. The prefix flows through every layer
+/// `WindowedCheckpointEngine`/Apollo. The prefix flows through every layer
 /// along with the query tokens and participates in attention at each
 /// position — it's *not* a per-layer K/V injection, it's a residual
 /// prepend.

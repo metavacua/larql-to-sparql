@@ -33,15 +33,20 @@ use crate::index::core::VectorIndex;
 /// — in that order. Used everywhere the FFN manifest is indexed
 /// (`layer * FFN_COMPONENTS_PER_LAYER + component`) and as the inner
 /// array length on per-layer caches.
-pub(crate) const FFN_COMPONENTS_PER_LAYER: usize = 3;
+pub const FFN_COMPONENTS_PER_LAYER: usize = 3;
+
+/// Component index for `gate` inside per-layer FFN manifests / caches.
+pub const FFN_GATE: usize = 0;
+
+/// Component index for `up` inside per-layer FFN manifests / caches.
+pub const FFN_UP: usize = 1;
 
 /// Component index for `down` inside per-layer FFN manifests / caches.
 /// Special-cased throughout the codebase because down is stored
 /// row-major `[hidden, intermediate]` (the native
 /// `nn.Linear(intermediate, hidden)` orientation) and needs a transpose
-/// to become feature-major like `gate` (component `0`) / `up`
-/// (component `1`).
-pub(crate) const FFN_DOWN: usize = 2;
+/// to become feature-major like [`FFN_GATE`] / [`FFN_UP`].
+pub const FFN_DOWN: usize = 2;
 
 type KquantFfnOnceSlot = std::sync::OnceLock<Option<Arc<Vec<f32>>>>;
 type KquantFfnOnceLayer = [KquantFfnOnceSlot; FFN_COMPONENTS_PER_LAYER];
@@ -53,6 +58,7 @@ mod interleaved;
 mod interleaved_kquant;
 mod interleaved_q4;
 mod kquant_cache;
+mod kquant_decode;
 mod up;
 
 // ── FfnStore composed-substore ─────────────────────────────────────────

@@ -131,14 +131,14 @@ pub fn run(args: AttnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
     for _ in 0..iters {
         let _ = larql_inference::attention::gqa_attention_with_weights(
-            &q_rope, &k_rope, &v_full, num_q, head_dim, reps, scale, seq_len, false, None,
+            &q_rope, &k_rope, &v_full, num_q, head_dim, reps, scale, seq_len, false, None, None,
         );
     }
     let attn_core_us = start.elapsed().as_micros() as f64 / iters as f64;
 
     // 6. Output projection: (seq, q_dim) @ (q_dim, hidden) → (seq, hidden)
     let (attn_out, _) = larql_inference::attention::gqa_attention_with_weights(
-        &q_rope, &k_rope, &v_full, num_q, head_dim, reps, scale, seq_len, false, None,
+        &q_rope, &k_rope, &v_full, num_q, head_dim, reps, scale, seq_len, false, None, None,
     );
     let start = Instant::now();
     for _ in 0..iters {

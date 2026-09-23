@@ -236,7 +236,7 @@ impl<'a> LayerFfnRouter<'a> {
 ```
 
 Existing callers (`larql-cli/src/commands/extraction/walk_cmd.rs:868`
-and `larql-inference/examples/walk_boundary_sweep.rs:205`) own the
+and `larql-inference/chris-experiments/larql_probes/examples/misc/walk_boundary_sweep.rs:205`) own the
 concrete backend instances as local values and pass references:
 
 ```rust
@@ -469,7 +469,7 @@ design and the implementation in the same pass.
 - `larql-inference/src/ffn/mod.rs:46` — existing `LayerFfnRouter`
   shape that §3 is reasoning against.
 - `larql-cli/src/commands/extraction/walk_cmd.rs:868` and
-  `larql-inference/examples/walk_boundary_sweep.rs:205` — existing
+  `larql-inference/chris-experiments/larql_probes/examples/misc/walk_boundary_sweep.rs:205` — existing
   call sites that exemplify the "caller-owns-backends" pattern
   `build_router` is collapsing.
 - [`docs/state-policy.md`](./state-policy.md) — the

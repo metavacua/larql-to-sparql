@@ -48,3 +48,10 @@ pub(super) fn append_row(buf: &mut Array2<f32>, row: &Array2<f32>, len: usize) {
     }
     buf.slice_mut(s![len..len + 1, ..]).assign(row);
 }
+
+/// The final row of a `[rows, hidden]` block, as its own `[1, hidden]` array
+/// — what a prefill or decode step reports as "the" hidden state.
+pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
+    let last = h.shape()[0] - 1;
+    h.slice(s![last..=last, ..]).to_owned()
+}

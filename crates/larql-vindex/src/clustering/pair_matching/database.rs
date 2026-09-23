@@ -147,50 +147,62 @@ pub struct ReferenceDatabases {
     pub wordnet: Option<RelationDatabase>,
 }
 
-/// Load all available reference databases from the data directory.
+/// Filename of the Wikidata (subject, object) triples database.
+pub const WIKIDATA_TRIPLES_FILE: &str = "wikidata_triples.json";
+/// Filename of the WordNet relations database.
+pub const WORDNET_RELATIONS_FILE: &str = "wordnet_relations.json";
+
+/// Load all available reference databases.
+///
+/// Files are resolved through the [`crate::clustering::data_files`]
+/// search chain (`LARQL_DATA_DIR` → workspace `data/`; never
+/// cwd-relative). Both databases are optional enrichment — absence is a
+/// normal configuration and yields `None`, which downstream labeling
+/// reports as "0/K clusters labeled" rather than failing.
 pub fn load_reference_databases() -> ReferenceDatabases {
-    let mut result = ReferenceDatabases {
-        wikidata: None,
-        wordnet: None,
+    load_reference_databases_with(crate::clustering::data_files::resolve_data_file)
+}
+
+/// Pure-seam version of [`load_reference_databases`]: the filename →
+/// path resolver is passed in rather than read from the workspace tree,
+/// mirroring the `resolve_data_file_with_env` pattern in
+/// [`crate::clustering::data_files`].
+///
+/// The reference databases are multi-megabyte generated artifacts and
+/// are NOT carried in the checkout (`data/` is gitignored), so a test
+/// that asserted their presence passed only on a developer machine and
+/// failed in CI. Driving the composition through this seam covers the
+/// same wiring — resolver → loader → `ReferenceDatabases` — from a
+/// fixture directory instead.
+pub(crate) fn load_reference_databases_with(
+    resolve: impl Fn(&str) -> Option<std::path::PathBuf>,
+) -> ReferenceDatabases {
+    let load = |filename: &str,
+                loader: fn(&Path) -> Option<RelationDatabase>,
+                name: &str|
+     -> Option<RelationDatabase> {
+        let path = resolve(filename)?;
+        let db = loader(&path)?;
+        eprintln!(
+            "  Loaded {name}: {} relations, {} pairs",
+            db.num_relations(),
+            db.num_pairs()
+        );
+        Some(db)
     };
 
-    for base in &["data", "../data", "../../data"] {
-        let base = Path::new(base);
-
-        if result.wikidata.is_none() {
-            let wikidata_path = base.join("wikidata_triples.json");
-            if wikidata_path.exists() {
-                if let Some(db) = RelationDatabase::load_wikidata(&wikidata_path) {
-                    eprintln!(
-                        "  Loaded Wikidata: {} relations, {} pairs",
-                        db.num_relations(),
-                        db.num_pairs()
-                    );
-                    result.wikidata = Some(db);
-                }
-            }
-        }
-
-        if result.wordnet.is_none() {
-            let wordnet_path = base.join("wordnet_relations.json");
-            if wordnet_path.exists() {
-                if let Some(db) = RelationDatabase::load_wordnet(&wordnet_path) {
-                    eprintln!(
-                        "  Loaded WordNet: {} relations, {} pairs",
-                        db.num_relations(),
-                        db.num_pairs()
-                    );
-                    result.wordnet = Some(db);
-                }
-            }
-        }
-
-        if result.wikidata.is_some() && result.wordnet.is_some() {
-            break;
-        }
+    ReferenceDatabases {
+        wikidata: load(
+            WIKIDATA_TRIPLES_FILE,
+            RelationDatabase::load_wikidata,
+            "Wikidata",
+        ),
+        wordnet: load(
+            WORDNET_RELATIONS_FILE,
+            RelationDatabase::load_wordnet,
+            "WordNet",
+        ),
     }
-
-    result
 }
 
 #[cfg(test)]
@@ -386,10 +398,48 @@ mod tests {
         assert!(RelationDatabase::load_wordnet(&path).is_none());
     }
 
-    // Note: `load_reference_databases` walks `./data/`, `../data/`,
-    // `../../data/` relative to cwd. Testing it would require
-    // mutating cwd which breaks parallel test isolation. The two
-    // loaders it dispatches to (`load_wikidata`, `load_wordnet`)
-    // are individually tested above; the wrapper itself is exercised
-    // implicitly when downstream callers invoke it from the binary.
+    /// Resolver over a fixture directory, standing in for the workspace
+    /// `data/` chain. Returns `None` for absent files exactly as
+    /// `resolve_data_file` does.
+    fn dir_resolver(dir: &Path) -> impl Fn(&str) -> Option<std::path::PathBuf> + '_ {
+        move |filename: &str| {
+            let p = dir.join(filename);
+            p.is_file().then_some(p)
+        }
+    }
+
+    #[test]
+    fn load_reference_databases_wires_resolver_to_both_loaders() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_triples(
+            tmp.path(),
+            WIKIDATA_TRIPLES_FILE,
+            r#"{"capital_of": {"pairs": [["paris", "france"]]}}"#,
+        );
+        write_triples(
+            tmp.path(),
+            WORDNET_RELATIONS_FILE,
+            r#"{"synonym": {"pairs": [["fast", "quick"], ["smart", "clever"]]}}"#,
+        );
+
+        let dbs = load_reference_databases_with(dir_resolver(tmp.path()));
+        let wikidata = dbs.wikidata.expect("wikidata fixture resolves");
+        let wordnet = dbs.wordnet.expect("wordnet fixture resolves");
+        assert_eq!(wikidata.num_pairs(), 1);
+        assert_eq!(wordnet.num_pairs(), 2);
+        // Each filename must reach its OWN loader — swapping them would
+        // still parse, so assert on content, not just counts.
+        assert!(wikidata.lookup("paris", "france").contains(&"capital_of"));
+        assert!(wordnet.lookup("fast", "quick").contains(&"synonym"));
+    }
+
+    #[test]
+    fn absent_reference_databases_are_none_not_a_failure() {
+        // Absence is a normal configuration: the checkout does not carry
+        // these generated artifacts, so CI exercises exactly this path.
+        let tmp = tempfile::tempdir().unwrap();
+        let dbs = load_reference_databases_with(dir_resolver(tmp.path()));
+        assert!(dbs.wikidata.is_none());
+        assert!(dbs.wordnet.is_none());
+    }
 }

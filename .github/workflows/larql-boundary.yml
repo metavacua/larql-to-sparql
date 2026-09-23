@@ -8,6 +8,16 @@
 
 name: larql-boundary
 
+# Least-privilege token: this workflow only needs to read the repo.
+permissions:
+  contents: read
+
+# One live run per workflow per ref; superseded pull_request runs are
+# cancelled (pushes to main / tags / manual dispatches never are).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
@@ -37,15 +47,24 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
+      # protoc on PATH satisfies the `cfg(not(windows))` skip in
+      # `larql-router-protocol`'s build.rs — pulled in transitively when
+      # this job builds workspace crates that touch the gRPC surface.
+      # Same idiom as larql-cli.yml / larql-vindex.yml.
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y --no-progress
+
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -72,8 +91,8 @@ jobs:
 
       - name: Run examples
         run: |
-          cargo run -p larql-boundary --example encode_decode
-          cargo run -p larql-boundary --example gate_decision
+          cargo run -p larql-demos --example encode_decode
+          cargo run -p larql-demos --example gate_decision
 
   coverage:
     name: coverage · ubuntu
@@ -81,7 +100,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable

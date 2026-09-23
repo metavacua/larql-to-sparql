@@ -112,6 +112,7 @@ fn main() {
         let q4k_layers: Vec<larql_compute::FullPipelineLayer> = layers_data
             .iter()
             .map(|ld| larql_compute::FullPipelineLayer {
+                attn_sinks: None,
                 wq: larql_compute::QuantWeight {
                     data: &ld.wq_q4k,
                     scales: None,

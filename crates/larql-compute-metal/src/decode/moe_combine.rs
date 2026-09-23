@@ -43,7 +43,7 @@ pub(super) fn apply_outer_combine(
     // Diagnostic bypass: leave `new_h` as `h_post_attn + _1(dense) + _2(moe)`
     // without outer norm OR layer_scalar — useful for isolating whether
     // this combine step is the broken piece.
-    if larql_compute::options::env_flag(larql_compute::options::ENV_SKIP_OUTER_NORM) {
+    if larql_compute::options::skip_outer_norm_enabled() {
         return;
     }
 
@@ -115,6 +115,7 @@ mod tests {
             format: QuantFormat::Q4_K,
         };
         FullPipelineLayer {
+            attn_sinks: None,
             wq: empty_q4,
             wk: empty_q4,
             wv: empty_q4,
@@ -176,15 +177,15 @@ mod tests {
         let new_h = m.bufs.transient_from_f32(&new_h_data);
         let h_post = m.bufs.transient_from_f32(&h_post_attn_data);
 
-        let saved = std::env::var_os("SKIP_OUTER_NORM");
+        let saved = std::env::var_os("LARQL_SKIP_OUTER_NORM");
         unsafe {
-            std::env::set_var("SKIP_OUTER_NORM", "1");
+            std::env::set_var("LARQL_SKIP_OUTER_NORM", "1");
         }
         apply_outer_combine(&layer, &new_h, &h_post, hidden);
         unsafe {
             match saved {
-                Some(v) => std::env::set_var("SKIP_OUTER_NORM", v),
-                None => std::env::remove_var("SKIP_OUTER_NORM"),
+                Some(v) => std::env::set_var("LARQL_SKIP_OUTER_NORM", v),
+                None => std::env::remove_var("LARQL_SKIP_OUTER_NORM"),
             }
         }
 

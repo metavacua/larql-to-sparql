@@ -112,9 +112,12 @@ pub fn apply(metadata: &mut BoundaryMetadata, config: &BoundaryGateConfig) -> Bo
 
     // Hard reject: codec moved the argmax, or sender didn't check.
     // Agree is the only non-reject state; Disagrees and NotChecked both fail.
+    // Fragility is still evaluated: it is a property of the raw model state,
+    // independent of the codec, and Track A threshold fitting counts exactly
+    // this rejected population — stamping `false` here would undercount it.
     let agreement_fails = !matches!(metadata.boundary_agreement, BoundaryAgreement::Agrees);
     if config.require_compressed_agreement && agreement_fails {
-        metadata.boundary_fragile = false;
+        metadata.boundary_fragile = is_fragile(metadata, config);
         return to_fallback(config);
     }
 
@@ -203,6 +206,31 @@ mod tests {
         let decision = apply(&mut m, &config);
         assert!(m.boundary_fragile, "expected boundary_fragile = true");
         assert_eq!(decision, BoundaryDecision::UseBf16);
+    }
+
+    #[test]
+    fn hard_reject_populates_boundary_fragile_for_telemetry() {
+        // Track A threshold fitting counts fragile boundaries; the hard-reject
+        // path must evaluate fragility like every other path, not stamp false.
+        let mut config = live();
+        config.min_log_prob_margin = 2.0;
+        // Disagrees → hard reject; margin below threshold → position IS fragile.
+        let mut m = meta(0.5, 0.9, BoundaryAgreement::Disagrees);
+        let decision = apply(&mut m, &config);
+        assert_eq!(decision, BoundaryDecision::UseBf16);
+        assert!(
+            m.boundary_fragile,
+            "hard-reject path must still evaluate fragility for telemetry"
+        );
+    }
+
+    #[test]
+    fn hard_reject_confident_boundary_is_not_fragile() {
+        // Companion: hard reject with a confident margin stays non-fragile.
+        let config = live();
+        let mut m = meta(5.0, 0.9, BoundaryAgreement::Disagrees);
+        assert_eq!(apply(&mut m, &config), BoundaryDecision::UseBf16);
+        assert!(!m.boundary_fragile);
     }
 
     #[test]

@@ -5,7 +5,9 @@
 //! here; sub-trait impls are in their own files.
 
 mod decode;
+pub mod grouped_experts;
 mod matmul;
+pub mod mxfp4;
 mod quant_matvec;
 
 use super::*;

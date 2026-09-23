@@ -70,6 +70,7 @@ fn main() {
     };
 
     let layer = FullPipelineLayer {
+        attn_sinks: None,
         wq: QuantWeight {
             data: &wq_data,
             scales: None,
@@ -243,6 +244,7 @@ fn main() {
     println!("\n--- Test 4: decode_token with norm_offset=1.0 ---");
     {
         let layer4 = FullPipelineLayer {
+            attn_sinks: None,
             wq: QuantWeight {
                 data: &wq_data,
                 scales: None,
@@ -338,6 +340,7 @@ fn main() {
     println!("\n--- Test 5: decode_token with activation=GeluTanh ---");
     {
         let layer5 = FullPipelineLayer {
+            attn_sinks: None,
             wq: QuantWeight {
                 data: &wq_data,
                 scales: None,

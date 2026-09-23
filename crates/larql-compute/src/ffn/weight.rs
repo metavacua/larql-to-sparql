@@ -4,7 +4,7 @@
 use crate::{dot_proj_gpu, ComputeBackend};
 use ndarray::Array2;
 
-use super::{gelu_tanh, gelu_tanh_gate_up, sigmoid, silu_gate_up, FfnBackend};
+use super::{gelu_tanh, gelu_tanh_gate_up, sigmoid, silu_gate_up, FfnActivations, FfnBackend};
 use crate::forward::add_bias;
 use larql_models::{ModelWeights, WeightsView};
 
@@ -21,12 +21,9 @@ pub(crate) fn quant_matmul(
     cols: usize,
     seq: usize,
 ) -> Option<Array2<f32>> {
+    let kernel = crate::QuantFormat::from_registry_tag(fmt).and_then(|f| f.route().quant_matmul)?;
     let mut out = vec![0.0f32; seq * rows];
-    match fmt {
-        "Q4_K" => crate::cpu::ops::q4_common::q4k_matmul_into(&mut out, x, bytes, rows, cols, seq),
-        "Q6_K" => crate::cpu::ops::q4_common::q6k_matmul_into(&mut out, x, bytes, rows, cols, seq),
-        _ => return None,
-    }
+    kernel(&mut out, x, bytes, rows, cols, seq);
     Some(Array2::from_shape_vec((seq, rows), out).expect("quant_matmul output shape [seq, rows]"))
 }
 
@@ -69,8 +66,9 @@ impl<'a> FfnBackend for WeightFfn<'a> {
         dense_ffn_forward(WeightsView::dense(self.weights), layer, x).0
     }
 
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
-        dense_ffn_forward(WeightsView::dense(self.weights), layer, x)
+    fn forward_observed(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, FfnActivations) {
+        let (out, act) = dense_ffn_forward(WeightsView::dense(self.weights), layer, x);
+        (out, FfnActivations::Dense(act))
     }
 
     fn name(&self) -> &str {
@@ -92,8 +90,9 @@ impl FfnBackend for ViewFfn<'_> {
         dense_ffn_forward(self.view, layer, x).0
     }
 
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
-        dense_ffn_forward(self.view, layer, x)
+    fn forward_observed(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, FfnActivations) {
+        let (out, act) = dense_ffn_forward(self.view, layer, x);
+        (out, FfnActivations::Dense(act))
     }
 
     fn name(&self) -> &str {
@@ -120,13 +119,14 @@ impl<'a, 'b> FfnBackend for BackendFfn<'a, 'b> {
         .0
     }
 
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
-        dense_ffn_forward_backend(
+    fn forward_observed(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, FfnActivations) {
+        let (out, act) = dense_ffn_forward_backend(
             WeightsView::dense(self.weights),
             layer,
             x,
             Some(self.backend),
-        )
+        );
+        (out, FfnActivations::Dense(act))
     }
 
     fn name(&self) -> &str {
@@ -154,14 +154,15 @@ pub struct Q4kMatmulFfn<'a> {
 }
 
 impl Q4kMatmulFfn<'_> {
-    /// Bytes per 256-element super-block for a quant format.
+    /// Bytes per 256-element super-block for a quant format with a
+    /// direct matmul kernel (the formats [`quant_matmul`] serves).
     #[inline]
     fn block_bytes(fmt: &str) -> usize {
-        match fmt {
-            "Q4_K" => 144,
-            "Q6_K" => 210,
-            other => panic!("Q4kMatmulFfn: unsupported FFN quant format {other}"),
-        }
+        crate::QuantFormat::from_registry_tag(fmt)
+            .filter(|f| f.route().quant_matmul.is_some())
+            .and_then(|f| f.packed_block_layout())
+            .map(|(_, block_bytes)| block_bytes)
+            .unwrap_or_else(|| panic!("Q4kMatmulFfn: unsupported FFN quant format {fmt}"))
     }
 
     /// gate/up projection: `x[seq, in_dim] -> [seq, out_rows]`, where `in_dim`
@@ -220,12 +221,11 @@ impl Q4kMatmulFfn<'_> {
     }
 }
 
-impl FfnBackend for Q4kMatmulFfn<'_> {
-    fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
-        self.forward_with_activation(layer, x).0
-    }
-
-    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
+impl Q4kMatmulFfn<'_> {
+    /// Shared forward body: the pre-down activation is an intrinsic
+    /// intermediate here (the down projection consumes it), so both
+    /// trait entry points route through this at identical cost.
+    fn forward_full(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         let arch = &*self.weights.arch;
         let seq = x.nrows();
         let hidden = x.ncols();
@@ -241,9 +241,10 @@ impl FfnBackend for Q4kMatmulFfn<'_> {
         let activation = if arch.ffn_type() == larql_models::FfnType::Gated {
             let gate = Self::project(gate_bytes, gate_fmt, x, intermediate, hidden, seq);
             let up = Self::project(up_bytes, up_fmt, x, intermediate, hidden, seq);
-            match arch.activation() {
-                larql_models::Activation::GeluTanh => gelu_tanh_gate_up(&gate, &up),
-                _ => silu_gate_up(&gate, &up),
+            if arch.activation().uses_gelu_tanh_gate_up() {
+                gelu_tanh_gate_up(&gate, &up)
+            } else {
+                silu_gate_up(&gate, &up)
             }
         } else {
             let mut projected = Self::project(up_bytes, up_fmt, x, intermediate, hidden, seq);
@@ -253,11 +254,10 @@ impl FfnBackend for Q4kMatmulFfn<'_> {
             {
                 add_bias(&mut projected, bias);
             }
-            match arch.activation() {
-                larql_models::Activation::GeluTanh | larql_models::Activation::Gelu => {
-                    projected.mapv(gelu_tanh)
-                }
-                _ => projected.mapv(|v| v * sigmoid(v)),
+            if arch.activation().uses_gelu_tanh_gate_up() {
+                projected.mapv(gelu_tanh)
+            } else {
+                projected.mapv(|v| v * sigmoid(v))
             }
         };
 
@@ -271,6 +271,17 @@ impl FfnBackend for Q4kMatmulFfn<'_> {
         }
 
         (out, activation)
+    }
+}
+
+impl FfnBackend for Q4kMatmulFfn<'_> {
+    fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
+        self.forward_full(layer, x).0
+    }
+
+    fn forward_observed(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, FfnActivations) {
+        let (out, act) = self.forward_full(layer, x);
+        (out, FfnActivations::Dense(act))
     }
 
     fn name(&self) -> &str {
@@ -290,13 +301,8 @@ impl FfnBackend for NullFfn {
         x.clone()
     }
 
-    fn forward_with_activation(
-        &self,
-        _layer: usize,
-        x: &Array2<f32>,
-    ) -> (Array2<f32>, Array2<f32>) {
-        (x.clone(), x.clone())
-    }
+    // `forward_observed` keeps the trait default (Absent): a pass-through
+    // stub computes no activations, and it must not fabricate any.
 
     fn name(&self) -> &str {
         "null"
@@ -343,9 +349,10 @@ pub fn dense_ffn_forward_backend(
             .unwrap_or_else(|| panic!("{compact_hint} (key: {})", arch.ffn_gate_key(layer)));
         let gate = dot_proj_gpu(x, w_gate, backend);
         let up = dot_proj_gpu(x, w_up, backend);
-        match arch.activation() {
-            larql_models::Activation::GeluTanh => gelu_tanh_gate_up(&gate, &up),
-            _ => silu_gate_up(&gate, &up),
+        if arch.activation().uses_gelu_tanh_gate_up() {
+            gelu_tanh_gate_up(&gate, &up)
+        } else {
+            silu_gate_up(&gate, &up)
         }
     } else {
         let mut projected = dot_proj_gpu(x, w_up, backend);
@@ -355,11 +362,10 @@ pub fn dense_ffn_forward_backend(
         {
             add_bias(&mut projected, bias);
         }
-        match arch.activation() {
-            larql_models::Activation::GeluTanh | larql_models::Activation::Gelu => {
-                projected.mapv(gelu_tanh)
-            }
-            _ => projected.mapv(|v| v * sigmoid(v)),
+        if arch.activation().uses_gelu_tanh_gate_up() {
+            projected.mapv(gelu_tanh)
+        } else {
+            projected.mapv(|v| v * sigmoid(v))
         }
     };
 
@@ -478,20 +484,21 @@ mod tests {
     }
 
     #[test]
-    fn weight_ffn_forward_with_activation_returns_both_arrays() {
+    fn weight_ffn_forward_observed_reports_dense_activation() {
         use super::FfnBackend;
         let weights = make_test_weights();
         let ffn = WeightFfn { weights: &weights };
         let input = x(3, weights.hidden_size);
-        let (out, act) = ffn.forward_with_activation(0, &input);
+        let (out, obs) = ffn.forward_observed(0, &input);
         assert_eq!(out.shape(), &[3, weights.hidden_size]);
+        let act = obs.into_dense().expect("dense path observes densely");
         assert_eq!(act.shape(), &[3, weights.intermediate_size]);
         assert!(out.iter().all(|v| v.is_finite()));
         assert!(act.iter().all(|v| v.is_finite()));
     }
 
     #[test]
-    fn backend_ffn_forward_with_activation_returns_both_arrays() {
+    fn backend_ffn_forward_observed_reports_dense_activation() {
         use super::FfnBackend;
         let weights = make_test_weights();
         let ffn = BackendFfn {
@@ -499,9 +506,40 @@ mod tests {
             backend: &crate::CpuBackend,
         };
         let input = x(2, weights.hidden_size);
-        let (out, act) = ffn.forward_with_activation(0, &input);
+        let (out, obs) = ffn.forward_observed(0, &input);
         assert_eq!(out.shape(), &[2, weights.hidden_size]);
+        let act = obs.into_dense().expect("dense path observes densely");
         assert_eq!(act.shape(), &[2, weights.intermediate_size]);
+    }
+
+    #[test]
+    fn view_ffn_forward_and_observed_match_weight_ffn() {
+        use super::FfnBackend;
+        let weights = make_test_weights();
+        let view = ViewFfn {
+            view: WeightsView::dense(&weights),
+        };
+        let dense = WeightFfn { weights: &weights };
+        let input = x(2, weights.hidden_size);
+        assert_eq!(view.name(), "view");
+        assert_eq!(view.forward(0, &input), dense.forward(0, &input));
+        let (out_v, obs_v) = view.forward_observed(0, &input);
+        let (out_d, obs_d) = dense.forward_observed(0, &input);
+        assert_eq!(out_v, out_d, "a dense view resolves the same tensors");
+        assert_eq!(obs_v, obs_d, "and observes the same dense activation");
+    }
+
+    #[test]
+    fn null_ffn_forward_observed_is_absent_not_fabricated() {
+        use super::FfnBackend;
+        let input = x(2, 4);
+        let (out, obs) = NullFfn.forward_observed(0, &input);
+        assert_eq!(out, input, "NullFfn passes the residual through");
+        assert!(
+            obs.is_absent(),
+            "a pass-through stub must not fabricate activations"
+        );
+        assert_eq!(NullFfn.name(), "null");
     }
 
     #[test]
@@ -627,7 +665,13 @@ mod tests {
             weights: &weights,
             index: &index,
         };
-        let (got_out, got_act) = ffn.forward_with_activation(0, &input);
+        assert_eq!(ffn.name(), "q4k-matmul");
+        let (got_out, got_obs) = ffn.forward_observed(0, &input);
+        let got_act = got_obs
+            .into_dense()
+            .expect("q4k-direct is a dense path — observation must be Dense");
+        // `forward` shares `forward_full` — identical output, no observation.
+        assert_eq!(ffn.forward(0, &input), got_out);
 
         let max_out: f32 = ref_out
             .iter()

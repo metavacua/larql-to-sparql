@@ -20,12 +20,15 @@
 use axum::http::header;
 use axum::http::HeaderMap;
 
+// Content-type strings are single-sourced in the shared codec
+// (`larql_inference::ffn::remote::codec`, ROADMAP hardening item 16);
+// the historical `FFN_*` names are kept as re-exports.
 /// f32 binary content-type (existing).
-pub const FFN_CT: &str = "application/x-larql-ffn";
+pub use larql_inference::ffn::remote::BINARY_CT as FFN_CT;
 /// f16 binary content-type (ADR-0009).
-pub const FFN_F16_CT: &str = "application/x-larql-ffn-f16";
+pub use larql_inference::ffn::remote::F16_CT as FFN_F16_CT;
 /// i8 symmetric binary content-type (ADR-0009).
-pub const FFN_I8_CT: &str = "application/x-larql-ffn-i8";
+pub use larql_inference::ffn::remote::I8_CT as FFN_I8_CT;
 
 /// Select the best response content-type given the client's `Accept` header.
 ///
@@ -42,6 +45,21 @@ pub fn preferred_response_ct(accept: Option<&str>) -> &'static str {
         return FFN_F16_CT;
     }
     FFN_CT
+}
+
+/// Detect the INBOUND wire format of a walk-ffn request from its
+/// `Content-Type` header (asymmetric direction codecs, DEC funnel §3
+/// DEC-1A). `None` means "not a binary walk-ffn body" — the JSON path.
+///
+/// Delegates to the shared codec's ordered matcher: the suffixed f16/i8
+/// types are checked before f32 because `application/x-larql-ffn` is a
+/// substring of both — a bare `has_content_type(…, FFN_CT)` check would
+/// silently misread a compressed request body as f32.
+pub fn request_wire_format(
+    headers: &HeaderMap,
+) -> Option<larql_inference::ffn::remote::WireFormat> {
+    let ct = headers.get(header::CONTENT_TYPE)?.to_str().ok()?;
+    larql_inference::ffn::remote::WireFormat::from_content_type(ct)
 }
 
 /// Returns `true` when the `Content-Type` header on `headers` contains the
@@ -120,5 +138,23 @@ mod tests {
         let h = hm_accept("application/x-larql-ffn-f16");
         assert_eq!(accept_header(&h), Some("application/x-larql-ffn-f16"));
         assert_eq!(accept_header(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn request_wire_format_orders_suffixed_types_before_f32() {
+        use larql_inference::ffn::remote::WireFormat;
+        // f16/i8 CTs contain the f32 CT as a substring — the detection must
+        // return the compressed format, never F32.
+        assert_eq!(request_wire_format(&hm(FFN_F16_CT)), Some(WireFormat::F16));
+        assert_eq!(request_wire_format(&hm(FFN_I8_CT)), Some(WireFormat::I8));
+        assert_eq!(request_wire_format(&hm(FFN_CT)), Some(WireFormat::F32));
+        // Parameterised type still matches.
+        assert_eq!(
+            request_wire_format(&hm("application/x-larql-ffn-i8; v=2")),
+            Some(WireFormat::I8)
+        );
+        // JSON and missing header → None (the JSON path).
+        assert_eq!(request_wire_format(&hm("application/json")), None);
+        assert_eq!(request_wire_format(&HeaderMap::new()), None);
     }
 }

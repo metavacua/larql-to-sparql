@@ -446,6 +446,7 @@ fn decode_token_q4k_moe_with_real_moe_layer_drives_gpu_dispatch() {
     };
 
     let layer = FullPipelineLayer {
+        attn_sinks: None,
         wq: QuantWeight {
             data: &wq,
             scales: None,

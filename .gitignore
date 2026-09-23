@@ -1,6 +1,10 @@
 # Rust
 target/
-coverage/
+# Anchored to the repo root: the generated llvm-cov report directory. An
+# unanchored `coverage/` matches ANY directory of that name at any depth,
+# which silently excluded `crates/larql-vindex/src/extract/coverage/` —
+# a source module — from `git add`. Keep the leading slash.
+/coverage/
 **/*.rs.bk
 .cargo/
 
@@ -56,3 +60,14 @@ experiments/
 vindexes/
 .pids/
 docs/replay/
+
+# DEC-0 loadgen outputs (bench/dec0/prompts.txt stays tracked)
+bench/dec0/residuals-*/
+bench/dec0/*.log
+bench/dec0/*.jsonl
+bench/dec0/anchor_*.json
+bench/dec0/dec0_*.json
+
+# quant-obs calibration captures — regenerable via `larql dec-bench capture`
+bench/quant-obs/residuals-*/
+bench/quant-obs/*.log

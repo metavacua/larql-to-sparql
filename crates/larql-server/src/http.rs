@@ -2,7 +2,9 @@
 
 pub const API_PREFIX: &str = "/v1";
 pub const HEALTH_PATH: &str = "/v1/health";
-pub const BINARY_FFN_CONTENT_TYPE: &str = "application/x-larql-ffn";
+// Single-sourced in the shared walk-ffn codec (ROADMAP hardening item 16);
+// re-exported under the historical name used by embed routes and tests.
+pub use larql_inference::ffn::remote::BINARY_CT as BINARY_FFN_CONTENT_TYPE;
 pub const JSON_CONTENT_TYPE: &str = "application/json";
 pub const BEARER_PREFIX: &str = "Bearer ";
 

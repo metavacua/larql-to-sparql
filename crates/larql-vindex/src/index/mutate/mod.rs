@@ -5,6 +5,8 @@
 //! sibling `loaders` module.
 
 pub mod loaders;
+#[cfg(test)]
+mod tests;
 
 use std::io::{BufWriter, Write};
 use std::path::Path;

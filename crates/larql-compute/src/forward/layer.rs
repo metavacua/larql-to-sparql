@@ -93,9 +93,14 @@ pub fn run_ffn(
     };
     dump_f32("ffn_norm_out", &h_ffn);
 
+    // Observation is opt-in: the uncaptured arm runs the hot `forward`,
+    // which never allocates an activation buffer. The captured arm
+    // densifies whatever the executed path honestly observed; an Absent
+    // observation (cache hit, remote, unobserving backend) yields `None`
+    // rather than fabricated zeros.
     let (ffn_out, activation) = if capture_activation {
-        let (out, act) = ffn.forward_with_activation(layer, &h_ffn);
-        (out, Some(act))
+        let (out, obs) = ffn.forward_observed(layer, &h_ffn);
+        (out, obs.into_dense())
     } else {
         (ffn.forward(layer, &h_ffn), None)
     };
@@ -295,14 +300,17 @@ mod tests {
             // residual) can be exercised in isolation.
             x.clone()
         }
-        fn forward_with_activation(
+        fn forward_observed(
             &self,
             layer: usize,
             x: &Array2<f32>,
-        ) -> (Array2<f32>, Array2<f32>) {
+        ) -> (Array2<f32>, crate::ffn::FfnActivations) {
             (
                 self.forward(layer, x),
-                Array2::zeros((x.shape()[0], self.weights.intermediate_size)),
+                crate::ffn::FfnActivations::Dense(Array2::zeros((
+                    x.shape()[0],
+                    self.weights.intermediate_size,
+                ))),
             )
         }
         fn name(&self) -> &str {

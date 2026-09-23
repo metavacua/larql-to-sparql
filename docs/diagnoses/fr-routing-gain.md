@@ -1,6 +1,6 @@
 # FR routing — the end-to-end gain (and the two-tier caveat), quantified
 
-**Date:** 2026-06-07. **Status:** ran (`crates/larql-inference/examples/fr_routing_gain.rs`). Gemma-3-4B Q4K vindex, 20 novel facts installed at L26, three query slices, all three router modes on the **same** forward passes. Answers "does the FR work give a new gain?"
+**Date:** 2026-06-07. **Status:** ran (`chris-experiments/larql_probes/examples/fleet_routing/fr_routing_gain.rs`). Gemma-3-4B Q4K vindex, 20 novel facts installed at L26, three query slices, all three router modes on the **same** forward passes. Answers "does the FR work give a new gain?"
 
 ## Headline
 
@@ -36,4 +36,4 @@
 
 The FR work delivers a **decisive correctness gain** — it converts KNN fact-injection from "corrupts 100% of unrelated queries at 20 facts" to "100% distractor-safe" — at **no throughput cost**. It is not a tok/s gain and was never going to be; the override is a sidecar. The measurement also sharpened the FR2 guidance: two-tier fallback is an opt-in alias resolver, not a safe default.
 
-**Artifacts:** `crates/larql-inference/examples/fr_routing_gain.rs`.
+**Artifacts:** `chris-experiments/larql_probes/examples/fleet_routing/fr_routing_gain.rs`.

@@ -53,6 +53,12 @@ impl BoundaryKvEngineConfig {
     }
 }
 
+/// Separator between the configured `sequence_id` and the generation
+/// counter in [`BoundaryKvEngine::current_sequence_id`]. Re-prefilled
+/// engines emit into `<sequence_id>#g<N>` so a new generation's frames
+/// never collide with (or interleave into) an earlier chain.
+const GENERATION_SEQUENCE_SEPARATOR: &str = "#g";
+
 /// `BoundaryKvEngine` — production-equivalent in-session decode, with frame
 /// emission at chunk boundaries.
 pub struct BoundaryKvEngine {
@@ -60,6 +66,9 @@ pub struct BoundaryKvEngine {
     config: BoundaryKvEngineConfig,
     archive: Arc<dyn BoundaryArchive>,
     abs_position: usize,
+    /// 0 for the first prompt; incremented on every re-prefill of a used
+    /// engine. Selects the archive chain via [`Self::current_sequence_id`].
+    generation: u64,
 }
 
 impl BoundaryKvEngine {
@@ -84,6 +93,7 @@ impl BoundaryKvEngine {
             config,
             archive: Arc::new(InMemoryArchive::new()),
             abs_position: 0,
+            generation: 0,
         }
     }
 
@@ -100,6 +110,7 @@ impl BoundaryKvEngine {
             config,
             archive,
             abs_position: 0,
+            generation: 0,
         }
     }
 
@@ -129,6 +140,32 @@ impl BoundaryKvEngine {
         self.abs_position > 0 && self.abs_position % self.chunk_tokens() == 0
     }
 
+    /// The archive chain id frames are currently emitted under.
+    ///
+    /// Generation 0 (the first prompt) uses the configured `sequence_id`
+    /// verbatim; every re-prefill of a used engine starts a fresh chain
+    /// (`<sequence_id>#g<N>`). Invariant: frames from two generations never
+    /// share a chain — `load_chain` sorts by `token_end`, so mixing
+    /// generations would interleave frames and collide `boundary_id`s.
+    pub fn current_sequence_id(&self) -> String {
+        if self.generation == 0 {
+            self.config.sequence_id.clone()
+        } else {
+            format!(
+                "{}{}{}",
+                self.config.sequence_id, GENERATION_SEQUENCE_SEPARATOR, self.generation
+            )
+        }
+    }
+
+    /// Mark the start of a prefill. A prefill on a used engine
+    /// (`abs_position > 0`) begins a new generation → new archive chain.
+    fn begin_generation(&mut self) {
+        if self.abs_position > 0 {
+            self.generation += 1;
+        }
+    }
+
     /// Build + archive a frame from the most recent hidden state. No-ops if
     /// the position is not a chunk boundary or the hidden is empty.
     fn maybe_emit_frame(
@@ -146,10 +183,72 @@ impl BoundaryKvEngine {
             weights,
             hidden,
             &self.config,
+            &self.current_sequence_id(),
             self.token_start_of_current_chunk(),
             self.abs_position as u64,
         );
         self.archive.append(frame)
+    }
+
+    /// Prefill through `inner_prefill`, emitting a frame for EVERY chunk
+    /// boundary crossed by the prompt (spec §6.1) — interior boundaries
+    /// included, not only a prompt length that happens to be an exact
+    /// multiple of `chunk_tokens`.
+    ///
+    /// `StandardEngine::prefill` returns only the final hidden row and
+    /// resets its KV state on every call, so interior residuals cannot be
+    /// captured from a single call. Instead each boundary-aligned PREFIX is
+    /// prefilled through the same inner engine first (each call replaces
+    /// the previous state), and the FINAL call is the untouched single-shot
+    /// prefill over the whole prompt. Invariants:
+    ///
+    /// - The returned hidden and the inner KV state are bit-identical to an
+    ///   engine that captured no frames (§2.1) — the last `inner_prefill`
+    ///   call is exactly the pre-existing single-shot path.
+    /// - Each interior frame's residual is exactly `Standard`'s
+    ///   last-position hidden for that prefix (same engine, same backend).
+    ///
+    /// Cost: a prompt spanning B interior boundaries pays B extra prefix
+    /// prefills; prompts within one chunk pay nothing.
+    fn prefill_chunked<F>(
+        &mut self,
+        weights: &ModelWeights,
+        token_ids: &[u32],
+        mut inner_prefill: F,
+    ) -> Result<Array2<f32>, EngineError>
+    where
+        F: FnMut(&mut StandardEngine, &[u32]) -> Result<Array2<f32>, EngineError>,
+    {
+        if token_ids.is_empty() {
+            return Err(EngineError::EmptyPrompt);
+        }
+        self.begin_generation();
+        let n = token_ids.len();
+        let chunk = self.chunk_tokens();
+        // Interior boundaries: positive multiples of `chunk` strictly inside
+        // the prompt. A boundary at exactly `n` is emitted by the final
+        // full-prompt prefill below.
+        let mut boundary = chunk;
+        while boundary < n {
+            let hidden = inner_prefill(&mut self.inner, &token_ids[..boundary])?;
+            self.abs_position = boundary;
+            // Failed emit propagates as engine failure per §8.2 — a frame
+            // must never be silently dropped from the resume chain.
+            if self.maybe_emit_frame(weights, &hidden).is_err() {
+                return Err(EngineError::BackendFailure {
+                    details: "boundary frame emit failed".into(),
+                });
+            }
+            boundary += chunk;
+        }
+        let hidden = inner_prefill(&mut self.inner, token_ids)?;
+        self.abs_position = n;
+        if self.maybe_emit_frame(weights, &hidden).is_err() {
+            return Err(EngineError::BackendFailure {
+                details: "boundary frame emit failed".into(),
+            });
+        }
+        Ok(hidden)
     }
 }
 
@@ -186,19 +285,9 @@ impl KvEngine for BoundaryKvEngine {
         ffn: &dyn FfnBackend,
         token_ids: &[u32],
     ) -> Result<Array2<f32>, EngineError> {
-        if token_ids.is_empty() {
-            return Err(EngineError::EmptyPrompt);
-        }
-        let hidden = self.inner.prefill(weights, ffn, token_ids)?;
-        self.abs_position = token_ids.len();
-        // Best-effort emit; archive errors propagate as engine-decode
-        // failure per §8.2: a failed emit must not be silently dropped.
-        if self.maybe_emit_frame(weights, &hidden).is_err() {
-            return Err(EngineError::BackendFailure {
-                details: "boundary frame emit failed".into(),
-            });
-        }
-        Ok(hidden)
+        self.prefill_chunked(weights, token_ids, |inner, toks| {
+            inner.prefill(weights, ffn, toks)
+        })
     }
 
     fn decode_step(
@@ -227,19 +316,9 @@ impl KvEngine for BoundaryKvEngine {
         index: &larql_inference::larql_vindex::VectorIndex,
         token_ids: &[u32],
     ) -> Result<Array2<f32>, EngineError> {
-        if token_ids.is_empty() {
-            return Err(EngineError::EmptyPrompt);
-        }
-        let hidden = self
-            .inner
-            .prefill_resident(weights, ffn, index, token_ids)?;
-        self.abs_position = token_ids.len();
-        if self.maybe_emit_frame(weights, &hidden).is_err() {
-            return Err(EngineError::BackendFailure {
-                details: "boundary frame emit failed".into(),
-            });
-        }
-        Ok(hidden)
+        self.prefill_chunked(weights, token_ids, |inner, toks| {
+            inner.prefill_resident(weights, ffn, index, toks)
+        })
     }
 
     /// Resident-path decode: forwards to the inner `StandardEngine`'s
@@ -283,19 +362,9 @@ impl KvEngine for BoundaryKvEngine {
         token_ids: &[u32],
         backend: &dyn larql_compute::ComputeBackend,
     ) -> Result<Array2<f32>, EngineError> {
-        if token_ids.is_empty() {
-            return Err(EngineError::EmptyPrompt);
-        }
-        let hidden = self
-            .inner
-            .prefill_quant(weights, ffn, index, token_ids, backend)?;
-        self.abs_position = token_ids.len();
-        if self.maybe_emit_frame(weights, &hidden).is_err() {
-            return Err(EngineError::BackendFailure {
-                details: "boundary frame emit failed".into(),
-            });
-        }
-        Ok(hidden)
+        self.prefill_chunked(weights, token_ids, |inner, toks| {
+            inner.prefill_quant(weights, ffn, index, toks, backend)
+        })
     }
 
     fn decode_step_quant(
@@ -619,7 +688,7 @@ mod tests {
         let weights = make_test_weights();
         let hidden = Array2::<f32>::ones((1, weights.hidden_size));
         let cfg = config("seq", 4);
-        let f = build_frame(&weights, &hidden, &cfg, 0, 4);
+        let f = build_frame(&weights, &hidden, &cfg, "seq", 0, 4);
         assert_eq!(f.token_start, 0);
         assert_eq!(f.token_end, 4);
         assert_eq!(f.hidden_size as usize, weights.hidden_size);
@@ -644,7 +713,7 @@ mod tests {
             require_compressed_agreement: true,
             fallback_policy: FallbackPolicy::Bf16Boundary,
         };
-        let f = build_frame(&weights, &hidden, &cfg, 0, 4);
+        let f = build_frame(&weights, &hidden, &cfg, "seq", 0, 4);
         // Margin is 0 on uniform input → gate falls back to bf16. We assert
         // that the path is reachable (not that it compresses) — the codec
         // selection follows the gate, not the caller.
@@ -671,7 +740,7 @@ mod tests {
             require_compressed_agreement: true,
             fallback_policy: FallbackPolicy::RejectIfUnsafe,
         };
-        let f = build_frame(&weights, &hidden, &cfg, 0, 4);
+        let f = build_frame(&weights, &hidden, &cfg, "seq", 0, 4);
         assert_eq!(f.compression_scheme, BoundaryCompression::None);
         assert_eq!(f.contract_level, BoundaryContract::Unknown);
         assert!(f.payload.is_empty());
@@ -690,7 +759,7 @@ mod tests {
             require_compressed_agreement: true,
             fallback_policy: FallbackPolicy::ColdReplay,
         };
-        let f = build_frame(&weights, &hidden, &cfg, 0, 4);
+        let f = build_frame(&weights, &hidden, &cfg, "seq", 0, 4);
         assert_eq!(f.contract_level, BoundaryContract::Unknown);
         assert!(f.payload.is_empty());
     }
@@ -798,7 +867,7 @@ mod tests {
     // forward to the inner `StandardEngine` (threading `index` → Q4K-direct) and
     // emit a boundary frame identically to the plain path. The `make_test_q4k_*`
     // fixtures carry Q4K attn slices, so the CPU dequant fallback runs (the same
-    // fixtures `resident_identity_tests` and `unlimited_context`'s quant tests
+    // fixtures `resident_identity_tests` and `windowed_checkpoint`'s quant tests
     // use). chunk_tokens=2 + a 2-token prefill lands on a boundary, exercising
     // the frame-emit branch on each.
 
@@ -846,6 +915,129 @@ mod tests {
             .expect("decode_step_quant");
         assert!(h2.iter().all(|v| v.is_finite()));
         assert_eq!(eng.abs_position(), 3);
+    }
+
+    // ── Spec §6.1: a frame per boundary crossed during prefill ──────────────
+
+    #[test]
+    fn prefill_emits_frame_per_interior_boundary() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        // chunk_tokens=2, 5-token prompt → interior boundaries at 2 and 4;
+        // position 5 is not a boundary. Spec §6.1: "if any chunk boundaries
+        // are crossed during prefill, emit a frame per boundary".
+        let mut eng = BoundaryKvEngine::new(config("seq", 2));
+        eng.prefill(&weights, &ffn, &[0u32, 1, 2, 3, 4]).unwrap();
+        let chain = eng.archive().load_chain("seq").unwrap();
+        let spans: Vec<(u64, u64)> = chain.iter().map(|f| (f.token_start, f.token_end)).collect();
+        assert_eq!(
+            spans,
+            vec![(0, 2), (2, 4)],
+            "one frame per interior boundary with correct token_start/token_end"
+        );
+    }
+
+    #[test]
+    fn chunked_prefill_state_matches_single_shot_standard() {
+        // The interior-boundary capture must not perturb the in-session
+        // contract (§2.1): hidden output and KV state after a multi-chunk
+        // prefill are bit-identical to a single-shot Standard prefill.
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let prompt = [0u32, 1, 2, 3, 4];
+        let mut boundary = BoundaryKvEngine::new(config("seq", 2));
+        let mut standard = StandardEngine::new(None);
+        let h_b = boundary.prefill(&weights, &ffn, &prompt).unwrap();
+        let h_s = standard.prefill(&weights, &ffn, &prompt).unwrap();
+        assert_eq!(h_b, h_s, "prefill hidden must stay bit-identical");
+        assert_eq!(
+            boundary.memory_bytes(),
+            standard.memory_bytes(),
+            "KV cache size must match single-shot prefill"
+        );
+        // KV-state equality evidence: the next decode step attends over the
+        // whole prefill KV, so bit-equality implies the caches match.
+        let d_b = boundary.decode_step(&weights, &ffn, 5).unwrap();
+        let d_s = standard.decode_step(&weights, &ffn, 5).unwrap();
+        assert_eq!(
+            d_b, d_s,
+            "first decode after prefill must stay bit-identical"
+        );
+    }
+
+    #[test]
+    fn interior_frame_payload_matches_standard_prefix_residual() {
+        // Value check on the interior frame: the boundary-2 frame carries the
+        // bf16-encoded last-position residual of a Standard prefill over
+        // prompt[..2] (calibration-mode gate → bf16 payload).
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let prompt = [0u32, 1, 2, 3, 4];
+        let mut eng = BoundaryKvEngine::new(config("seq", 2));
+        eng.prefill(&weights, &ffn, &prompt).unwrap();
+        let chain = eng.archive().load_chain("seq").unwrap();
+        let mut standard = StandardEngine::new(None);
+        let h2 = standard.prefill(&weights, &ffn, &prompt[..2]).unwrap();
+        let expected = larql_boundary::codec::bf16::encode(&h2.row(0).to_vec());
+        assert_eq!(
+            chain[0].payload, expected,
+            "interior frame must carry the chunk's last-position residual"
+        );
+    }
+
+    // ── Engine reuse: re-prefill must not extend the previous chain ─────────
+
+    #[test]
+    fn re_prefill_does_not_interleave_frames_into_old_chain() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let mut eng = BoundaryKvEngine::new(config("seq", 2));
+        eng.prefill(&weights, &ffn, &[0u32, 1]).unwrap(); // boundary @2
+        eng.decode_step(&weights, &ffn, 2).unwrap();
+        eng.decode_step(&weights, &ffn, 3).unwrap(); // boundary @4
+                                                     // Engine reuse: a second prefill starts a new generation. Its frames
+                                                     // must not land in (and collide with) the first generation's chain.
+        eng.prefill(&weights, &ffn, &[0u32, 1]).unwrap(); // boundary @2 again
+        let chain = eng.archive().load_chain("seq").unwrap();
+        let ends: Vec<u64> = chain.iter().map(|f| f.token_end).collect();
+        assert_eq!(
+            ends,
+            vec![2, 4],
+            "old chain must not receive frames from a new generation"
+        );
+        assert_eq!(
+            eng.archive().total_frames(),
+            Some(3),
+            "the new generation's frame must still be archived"
+        );
+        // The re-prefill's frame lands in a fresh chain under the
+        // generation-suffixed sequence id, with its own boundary_id space.
+        let new_id = eng.current_sequence_id();
+        assert_ne!(new_id, "seq");
+        let new_chain = eng.archive().load_chain(&new_id).unwrap();
+        assert_eq!(new_chain.len(), 1);
+        assert_eq!(new_chain[0].token_end, 2);
+        assert_eq!(new_chain[0].boundary_id, format!("{new_id}:2"));
+    }
+
+    // ── build_frame 0-row guard ─────────────────────────────────────────────
+
+    #[test]
+    fn build_frame_zero_row_hidden_does_not_underflow() {
+        // `build_frame` is pub(super) and called directly by tests; it must
+        // guard the 0-row case itself instead of relying on the engine's
+        // `maybe_emit_frame` pre-check.
+        let weights = make_test_weights();
+        let hidden = Array2::<f32>::zeros((0, weights.hidden_size));
+        let cfg = config("seq", 4);
+        let f = build_frame(&weights, &hidden, &cfg, "seq", 0, 4);
+        assert!(
+            f.payload.is_empty(),
+            "no residual exists for a 0-row hidden"
+        );
+        assert_eq!(f.contract_level, BoundaryContract::Unknown);
+        assert_eq!(f.hidden_size, 0);
+        assert_eq!(f.boundary_agreement, BoundaryAgreement::NotChecked);
     }
 
     #[test]

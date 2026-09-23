@@ -7,7 +7,13 @@
 //! Per-layer override resolution (env vars vs arch defaults) lives in
 //! [`crate::forward_overrides`]; this module consumes those helpers.
 
-use crate::forward_overrides::{effective_rope_base_for_layer, layer_forced_global};
+use crate::forward_overrides::effective_rope_base_for_layer;
+
+/// Wire value the kernel's attention spec uses for "no sliding window —
+/// attend the whole context". Named because it sits in the same field as
+/// a real window width, where a bare `0` reads as an empty window.
+const NO_ATTENTION_WINDOW: usize = 0;
+
 use crate::{
     FullPipelineLayer, MoeLayerWeights, MoeRoutingPolicy, MoeWeightLayout, QuantFormat, QuantWeight,
 };
@@ -58,19 +64,25 @@ pub fn build_arch_params<'a>(
     } else {
         (layer_hd as f64 * rotary_frac) as usize
     };
-    let force_global = layer_forced_global(layer);
-    let sw = if !force_global && arch.is_sliding_window_layer(layer) {
-        arch.sliding_window_size().unwrap_or(0)
-    } else {
-        0
-    };
+    // Resolved through the shared rule so the Metal spec and the CPU
+    // attention path cannot answer this differently. `0` is the wire
+    // sentinel for "attend everything" in the kernel's spec struct, which
+    // is what `None` means here.
+    let sw = crate::forward_overrides::effective_attention_window_for_layer(arch, layer)
+        .unwrap_or(NO_ATTENTION_WINDOW);
     let layer_scalar = arch
         .layer_scalar_key(layer)
         .and_then(|k| weights.vectors.get(&k))
         .and_then(|v| v.first().copied())
         .unwrap_or(0.0);
 
+    let attn_sinks = arch
+        .attn_sinks_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice());
+
     FullPipelineLayer {
+        attn_sinks,
         wq,
         wk,
         wv,
@@ -137,8 +149,18 @@ pub fn build_arch_params<'a>(
         sliding_window: sw,
         has_v_norm: arch.has_v_norm(),
         layer_scalar,
-        input_norm_bias: None,
-        post_attn_norm_bias: None,
+        // LayerNorm `β`. `None` for RMSNorm architectures, which have no
+        // bias term. These were hardcoded `None` until 2026-07-31, so every
+        // vindex-backed and Metal path silently dropped the shift for GPT-2
+        // and StarCoder2 even though the `layer_norm` shader implements it.
+        input_norm_bias: arch
+            .input_layernorm_bias_key(layer)
+            .and_then(|k| weights.vectors.get(&k))
+            .map(|v| v.as_slice()),
+        post_attn_norm_bias: arch
+            .post_attention_layernorm_bias_key(layer)
+            .and_then(|k| weights.vectors.get(&k))
+            .map(|v| v.as_slice()),
         q_norm_weight: arch
             .attn_q_norm_key(layer)
             .and_then(|k| weights.vectors.get(&k))
@@ -191,7 +213,10 @@ pub fn build_moe_weights<'a>(
     arch: &dyn larql_models::ModelArchitecture,
     layer: usize,
 ) -> Option<MoeLayerWeights<'a>> {
-    if !arch.is_hybrid_moe() {
+    // Pure MoE (GraniteMoE, OLMoE) builds identically to hybrid — the expert
+    // store, router and per-expert byte tables are the same. Hybrid differs
+    // only in having a parallel dense slab, which lives outside this struct.
+    if !(arch.is_moe() || arch.is_hybrid_moe()) {
         return None;
     }
     let router_key = arch.moe_router_key(layer)?;

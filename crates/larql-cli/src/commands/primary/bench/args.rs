@@ -53,9 +53,9 @@ pub struct BenchArgs {
     ///   no-cache                              — full re-forward per step (O(N²)); debug
     ///   markov-rs[:window=N]                  — residual-stream replacement
     ///   markov-rs-codec[:window=N]            — markov-rs with bf16 cold tier (2× cold saving)
-    ///   unlimited-context:window=N            — per-window K/V checkpoints
+    ///   windowed-checkpoint:window=N            — per-window K/V checkpoints
     ///   turbo-quant[:bits=3|4]                — WHT + Lloyd-Max codec; experimental
-    ///   apollo:layer=N,coef=F,top_k=K         — boundary-residual injection; experimental
+    ///   apollo:layer=N,coef=F,top_k=K,bos=B   — boundary-residual injection; experimental
     ///   boundary-kv:chunk_tokens=N,sequence_id=S  — Standard + larql-boundary frame emission
     ///
     /// List separator: `;` (preferred) or `,` (legacy). Use `;` when any engine
@@ -149,7 +149,7 @@ pub struct BenchArgs {
     /// is safe to set globally.
     ///
     /// Note: as of the 2026-05-17 bypass-removal cut, every per-layer
-    /// engine (`markov-rs`, `markov-rs-codec`, `unlimited-context`,
+    /// engine (`markov-rs`, `markov-rs-codec`, `windowed-checkpoint`,
     /// `turbo-quant`, `apollo`, `boundary-per-layer`) always runs its
     /// own state-policy code regardless of this flag. The fused fast
     /// path is exclusive to `standard` / `boundary-kv`. This flag now

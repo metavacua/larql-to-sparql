@@ -7,7 +7,8 @@
 /// First word of a binary request body. When equal to `BATCH_MARKER`, the
 /// header is `marker(4) + n(4) + n × layer_id(4)`. Otherwise it's a
 /// single-layer request and the first word *is* the layer id.
-pub const BATCH_MARKER: u32 = 0xFFFF_FFFF;
+/// Single-sourced in the shared walk-ffn codec (ROADMAP hardening item 16).
+pub use larql_inference::ffn::remote::BATCH_MARKER;
 
 /// Static shard descriptor parsed from the `--shards` CLI flag. Each
 /// shard owns the half-open layer range `[layer_start, layer_end)`.

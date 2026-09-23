@@ -8,9 +8,8 @@ use std::time::Instant;
 use larql_kv::EngineKind;
 
 use super::args::BenchArgs;
-use super::engine::{
-    argmax_token, format_engine_label, format_kv_memory_note, summarize_engine_result,
-};
+use super::engine::{argmax_token, format_engine_label, summarize_engine_result};
+use super::notes::{format_dispatch_note, format_kv_memory_note, format_step_split_note};
 use super::row::BenchRow;
 
 /// Run the KV-engine bench path for a single engine kind, with or
@@ -56,6 +55,10 @@ pub(super) fn run_engine(
 
     let is_quant = index.is_some();
 
+    // Read the backend's per-layer delegation answer BEFORE it moves
+    // into the engine — it decides whether a per-layer row is really a
+    // CPU measurement, and the engine owns the backend from here on.
+    let per_layer_is_host_delegated = backend.per_layer_is_host_delegated();
     let mut engine = kind.build_with_profiling(backend, args.profile);
     let info = engine.info();
     let label = format_engine_label(&info.name, &info.backend, &info.config, is_quant);
@@ -112,7 +115,16 @@ pub(super) fn run_engine(
     // `prefill_quant`). The router holds `&weights` too, so it's
     // also scoped to its branch.
     let max_steps = args.warmup + args.tokens;
+    // A measured step is the WHOLE token: engine forward + lm_head +
+    // next-token pick. The reference backend rows (`larql-metal` /
+    // `larql-cpu`) have always measured a whole token, and both land in
+    // the same `tok/s` column, so timing only the forward here made every
+    // engine look 2-3x faster than production for free — on qwen3-0.6b the
+    // excluded lm_head is ~60% of a short-context step. `head_ms_all`
+    // keeps the tail separable so the forward-only number is still
+    // recoverable from the row note.
     let mut decode_ms_all: Vec<f64> = Vec::with_capacity(max_steps);
+    let mut head_ms_all: Vec<f64> = Vec::with_capacity(max_steps);
     // `--ffn-policy` on the quant path: the router needs `&weights`
     // for Walk{k} FFN-tensor lookups, but `prefill_quant` needs
     // `&mut weights` for lazy dequant. Borrows conflict at the call
@@ -142,8 +154,12 @@ pub(super) fn run_engine(
                 .prefill_quant(weights, ffn, idx, token_ids, be)
                 .map_err(|e| format!("engine prefill (quant) failed: {e}"))?,
         };
-        let prefill_ms = t_pre.elapsed().as_secs_f64() * 1000.0;
+        // Seed the first token INSIDE the prefill span: the reference
+        // backends' `prefill_ms` encloses their first `lm_head_predict`
+        // (see `layer_graph::generate::cpu`), so excluding it here would
+        // reintroduce the same asymmetry in the prefill column.
         let last_token = pick_next(&hidden, weights);
+        let prefill_ms = t_pre.elapsed().as_secs_f64() * 1000.0;
         (hidden, prefill_ms, last_token)
     } else {
         // Dense path.
@@ -163,8 +179,9 @@ pub(super) fn run_engine(
         let hidden = engine
             .prefill(weights, ffn, token_ids)
             .map_err(|e| format!("engine prefill failed: {e}"))?;
-        let prefill_ms = t_pre.elapsed().as_secs_f64() * 1000.0;
+        // Same first-token-inside-prefill rule as the quant branch above.
         let last_token = pick_next(&hidden, weights);
+        let prefill_ms = t_pre.elapsed().as_secs_f64() * 1000.0;
         (hidden, prefill_ms, last_token)
     };
 
@@ -183,8 +200,12 @@ pub(super) fn run_engine(
                     .decode_step_quant(weights, ffn, idx, last_token, be)
                     .map_err(|e| format!("engine decode_step (quant) failed: {e}"))?,
             };
-            decode_ms_all.push(t.elapsed().as_secs_f64() * 1000.0);
+            let fwd_ms = t.elapsed().as_secs_f64() * 1000.0;
+            let t_head = Instant::now();
             last_token = pick_next(&hidden, weights);
+            let head_ms = t_head.elapsed().as_secs_f64() * 1000.0;
+            decode_ms_all.push(fwd_ms + head_ms);
+            head_ms_all.push(head_ms);
         }
     } else {
         let weight_ffn = WeightFfn { weights };
@@ -204,8 +225,12 @@ pub(super) fn run_engine(
             hidden = engine
                 .decode_step(weights, ffn, last_token)
                 .map_err(|e| format!("engine decode_step failed: {e}"))?;
-            decode_ms_all.push(t.elapsed().as_secs_f64() * 1000.0);
+            let fwd_ms = t.elapsed().as_secs_f64() * 1000.0;
+            let t_head = Instant::now();
             last_token = pick_next(&hidden, weights);
+            let head_ms = t_head.elapsed().as_secs_f64() * 1000.0;
+            decode_ms_all.push(fwd_ms + head_ms);
+            head_ms_all.push(head_ms);
         }
     }
 
@@ -215,7 +240,17 @@ pub(super) fn run_engine(
     let _ = hidden;
 
     let summary = summarize_engine_result(&decode_ms_all, args.warmup);
-    let note = format_kv_memory_note(engine.memory_bytes(), engine.cold_bytes(), kv_ref_bytes);
+    let head = summarize_engine_result(&head_ms_all, args.warmup);
+    // Query the dispatch shape AFTER the run — it is only decided at
+    // prefill, and it changes what the row means: a per-layer shape on a
+    // host-delegating backend is a CPU measurement wearing a GPU label.
+    let dispatch = format_dispatch_note(engine.dispatch_path(), per_layer_is_host_delegated);
+    let note = format!(
+        "{}{}  {}",
+        dispatch,
+        format_step_split_note(summary.avg_decode_ms, head.avg_decode_ms),
+        format_kv_memory_note(engine.memory_bytes(), engine.cold_bytes(), kv_ref_bytes),
+    );
 
     if args.verbose {
         eprintln!(

@@ -25,6 +25,18 @@ pub enum VindexError {
         needed: ExtractLevel,
         have: ExtractLevel,
     },
+    #[error(
+        "index.json declares version {found}, which this binary does not support; \
+         supported: {supported}"
+    )]
+    UnknownContainerGeneration { found: u32, supported: String },
+
+    #[error("this is a {found} index; that path requires the {required} loader")]
+    WrongContainerGeneration {
+        found: &'static str,
+        required: &'static str,
+    },
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("model error: {0}")]

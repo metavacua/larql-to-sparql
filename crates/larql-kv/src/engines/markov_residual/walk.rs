@@ -11,11 +11,13 @@ use larql_compute::ComputeBackend;
 use larql_vindex::VectorIndex;
 use ndarray::Array2;
 
-use super::compute::{last_row, recompute_kv, RsPrefillResult};
+use super::compute::{last_row, recompute_kv};
+use super::prefill::RsPrefillResult;
 use super::store::RsStore;
 use crate::profiler::EngineProfiler;
 use larql_inference::attention::run_attention_with_kv_backend;
 use larql_inference::attention::SharedKV;
+use larql_inference::forward::ple::precompute_per_layer_inputs;
 use larql_inference::forward::{embed_tokens_pub, run_ffn};
 use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
 
@@ -33,6 +35,8 @@ pub(super) fn rs_prefill_walk(
     let num_layers = weights.num_layers;
     let seq_len = token_ids.len();
     let mut h = embed_tokens_pub(&weights, token_ids);
+    // Empty on non-PLE archs — `ple_inputs.get(layer)` then yields `None`.
+    let ple_inputs = precompute_per_layer_inputs(&weights, &h, token_ids);
     let mut stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
     let be = Some(backend);
 
@@ -56,8 +60,13 @@ pub(super) fn rs_prefill_walk(
         let (h_post_attn, k, v) = run_attention_with_kv_backend(weights, &h, layer, be, None)
             .expect("attention failed during MarkovRS Q4K prefill");
         hot_kv_captured.push((k, v));
-        let (h_out, _) = run_ffn(&weights, &h_post_attn, layer, &walk_ffn, false);
-        h = h_out;
+        let (h_post_ffn, _) = run_ffn(&weights, &h_post_attn, layer, &walk_ffn, false);
+        h = crate::engines::apply_ple_and_layer_scalar(
+            &weights,
+            &h_post_ffn,
+            layer,
+            ple_inputs.get(layer),
+        );
     }
 
     let mut rs = RsStore {
@@ -158,6 +167,9 @@ pub(super) fn rs_decode_step_walk(
     let embed_us = t_embed_start
         .map(|t| t.elapsed().as_secs_f64() * 1e6)
         .unwrap_or(0.0);
+    // PLE inputs are per-token — recompute for this single-token decode
+    // step, matching the legacy `kv_decode_step_run` recipe exactly.
+    let ple_inputs = precompute_per_layer_inputs(&weights, &h_new, &[new_token_id]);
     let mut new_stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
 
     // Hoist WalkFfn out of the per-layer loop — see note in
@@ -185,14 +197,56 @@ pub(super) fn rs_decode_step_walk(
     // the layer loop and committed to the store at the end.
     let mut new_hot_kvs: Vec<SharedKV> = Vec::with_capacity(num_layers);
 
+    // The cold tier must be representable in K/V form before the
+    // cached-hot_kv fast path may fire: `cold_kv` can be legitimately
+    // absent while `cold_residuals` holds rows (dispatch fallback;
+    // eviction into a cold tier whose K/V could not be seeded — see
+    // `append_cold_overflow`). Branch 1 below reads only `cold_kv`, so
+    // without a re-seed it would attend hot-only and silently drop the
+    // cold context from every subsequent step. Re-derive the cold K/V
+    // from the residuals at `cold_abs_start` once; later steps pay a
+    // memcpy.
+    let mut rs = rs;
+    if rs.hot_kv.is_some() && rs.cold_kv.is_none() && rs.cold_len > 0 {
+        if let Some(cold) = &rs.cold_residuals {
+            let t_cold = if timing { Some(Instant::now()) } else { None };
+            let mut cold_kv: Vec<SharedKV> = Vec::with_capacity(num_layers);
+            for (layer, buf) in cold.iter().enumerate() {
+                let cold_logical = buf.slice(s![..rs.cold_len, ..]).to_owned();
+                cold_kv.push(recompute_kv(
+                    weights,
+                    &cold_logical,
+                    layer,
+                    rs.cold_abs_start,
+                    backend,
+                    Some(index),
+                )?);
+            }
+            if let Some(t) = t_cold {
+                recompute_cold_us += t.elapsed().as_secs_f64() * 1e6;
+            }
+            rs.cold_kv = Some(cold_kv);
+        }
+    }
+
     for layer in 0..num_layers {
-        let h_hot = &rs.stored[layer];
-        let s_hot = h_hot.shape()[0];
+        // `stored` / `hot_kv` / cold buffers are doubling-capacity (W8.2 /
+        // 2026-05-19 store migration): logical row counts are `hot_len` /
+        // `cold_len`, never `shape()[0]`. Capacity rows past the logical
+        // length are zeros — attending them poisons the softmax (score-0
+        // phantom rows) and shifts the hot rows' RoPE offsets.
+        let s_hot = rs.hot_len;
+        let h_hot = rs.stored[layer].slice(s![..s_hot, ..]);
         if layer == 0 {
             s_hot_first_layer = s_hot;
         }
         let hot_abs_start = abs_position.saturating_sub(s_hot);
-        let c_rows = rs.cold_kv.as_ref().map_or(0, |kv| kv[layer].0.shape()[0]);
+
+        // Number of cold rows included in this layer's attention prior —
+        // the offset the post-attention hot_kv capture must slice at.
+        // Set per branch below (path 3 includes `cold_len` cold rows even
+        // though `cold_kv` is None).
+        let cold_rows_in_prior;
 
         // Build prior_kv. Three paths, in order of preference:
         //   1. Cached hot_kv (+ optional cached cold_kv) — concat is
@@ -207,60 +261,85 @@ pub(super) fn rs_decode_step_walk(
         //      capture K/V yet.
         let (k_full, v_full) =
             if let (Some(hot_kv), maybe_cold) = (rs.hot_kv.as_ref(), rs.cold_kv.as_ref()) {
-                let (k_hot, v_hot) = &hot_kv[layer];
+                let (k_hot_buf, v_hot_buf) = &hot_kv[layer];
+                let k_hot = k_hot_buf.slice(s![..s_hot, ..]);
+                let v_hot = v_hot_buf.slice(s![..s_hot, ..]);
                 let t_concat = if timing { Some(Instant::now()) } else { None };
                 let pair = if let Some(cold_kv) = maybe_cold {
-                    let (k_cold, v_cold) = &cold_kv[layer];
-                    let c = k_cold.shape()[0];
-                    let kv_dim = k_cold.shape()[1];
+                    let (k_cold_buf, v_cold_buf) = &cold_kv[layer];
+                    let c = rs.cold_len;
+                    let kv_dim = k_cold_buf.shape()[1];
+                    cold_rows_in_prior = c;
                     let mut k_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
-                    k_combined.slice_mut(s![..c, ..]).assign(k_cold);
-                    k_combined.slice_mut(s![c.., ..]).assign(k_hot);
+                    k_combined
+                        .slice_mut(s![..c, ..])
+                        .assign(&k_cold_buf.slice(s![..c, ..]));
+                    k_combined.slice_mut(s![c.., ..]).assign(&k_hot);
                     let mut v_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
-                    v_combined.slice_mut(s![..c, ..]).assign(v_cold);
-                    v_combined.slice_mut(s![c.., ..]).assign(v_hot);
+                    v_combined
+                        .slice_mut(s![..c, ..])
+                        .assign(&v_cold_buf.slice(s![..c, ..]));
+                    v_combined.slice_mut(s![c.., ..]).assign(&v_hot);
                     (k_combined, v_combined)
                 } else {
-                    (k_hot.clone(), v_hot.clone())
+                    cold_rows_in_prior = 0;
+                    (k_hot.to_owned(), v_hot.to_owned())
                 };
                 if let Some(t) = t_concat {
                     concat_us += t.elapsed().as_secs_f64() * 1e6;
                 }
                 pair
             } else if let Some(cold_kv) = &rs.cold_kv {
-                let (k_cold, v_cold) = &cold_kv[layer];
+                let (k_cold_buf, v_cold_buf) = &cold_kv[layer];
                 let t_hot = if timing { Some(Instant::now()) } else { None };
-                let (k_hot, v_hot) =
-                    recompute_kv(weights, h_hot, layer, hot_abs_start, backend, Some(index))?;
+                let h_hot_owned = h_hot.to_owned();
+                let (k_hot, v_hot) = recompute_kv(
+                    weights,
+                    &h_hot_owned,
+                    layer,
+                    hot_abs_start,
+                    backend,
+                    Some(index),
+                )?;
                 if let Some(t) = t_hot {
                     recompute_hot_us += t.elapsed().as_secs_f64() * 1e6;
                 }
                 let t_concat = if timing { Some(Instant::now()) } else { None };
-                let c = k_cold.shape()[0];
-                let kv_dim = k_cold.shape()[1];
+                let c = rs.cold_len;
+                let kv_dim = k_cold_buf.shape()[1];
+                cold_rows_in_prior = c;
                 let mut k_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
-                k_combined.slice_mut(s![..c, ..]).assign(k_cold);
+                k_combined
+                    .slice_mut(s![..c, ..])
+                    .assign(&k_cold_buf.slice(s![..c, ..]));
                 k_combined.slice_mut(s![c.., ..]).assign(&k_hot);
                 let mut v_combined = Array2::<f32>::zeros((c + s_hot, kv_dim));
-                v_combined.slice_mut(s![..c, ..]).assign(v_cold);
+                v_combined
+                    .slice_mut(s![..c, ..])
+                    .assign(&v_cold_buf.slice(s![..c, ..]));
                 v_combined.slice_mut(s![c.., ..]).assign(&v_hot);
                 if let Some(t) = t_concat {
                     concat_us += t.elapsed().as_secs_f64() * 1e6;
                 }
                 (k_combined, v_combined)
             } else {
+                let s_cold = if rs.cold_residuals.is_some() {
+                    rs.cold_len
+                } else {
+                    0
+                };
                 let (h_full, full_abs_start) = match &rs.cold_residuals {
-                    Some(cold) if cold[layer].shape()[0] > 0 => {
-                        let h_cold = &cold[layer];
-                        let s_cold = h_cold.shape()[0];
+                    Some(cold) if s_cold > 0 => {
+                        let h_cold = cold[layer].slice(s![..s_cold, ..]);
                         let hidden = h_hot.shape()[1];
                         let mut combined = Array2::<f32>::zeros((s_cold + s_hot, hidden));
-                        combined.slice_mut(s![..s_cold, ..]).assign(h_cold);
-                        combined.slice_mut(s![s_cold.., ..]).assign(h_hot);
+                        combined.slice_mut(s![..s_cold, ..]).assign(&h_cold);
+                        combined.slice_mut(s![s_cold.., ..]).assign(&h_hot);
                         (combined, rs.cold_abs_start)
                     }
-                    _ => (h_hot.clone(), hot_abs_start),
+                    _ => (h_hot.to_owned(), hot_abs_start),
                 };
+                cold_rows_in_prior = s_cold;
                 let t_cold = if timing { Some(Instant::now()) } else { None };
                 let pair = recompute_kv(
                     weights,
@@ -312,13 +391,17 @@ pub(super) fn rs_decode_step_walk(
         }
 
         // Capture the new hot_kv slice for this layer.
-        // `new_kv_full` = (cold_kv ++ hot_kv ++ new_row). Slicing off
-        // `c_rows` (the cold portion, unchanged this step) leaves
-        // `hot_kv ++ new_row`, which is exactly the new hot K/V to
-        // cache for the next step.
+        // `new_kv_full` = (cold_prior ++ hot ++ new_row). Slicing off
+        // `cold_rows_in_prior` (the cold portion, unchanged this step)
+        // leaves `hot ++ new_row`, which is exactly the new hot K/V to
+        // cache for the next step. The offset must count the cold rows
+        // actually in the prior — path 3 folds `cold_len` recomputed
+        // cold rows in even though `cold_kv` is None; slicing from 0
+        // there would cache cold rows as hot, desyncing `hot_kv` from
+        // `stored`/`hot_len` (the store invariant, store.rs).
         let new_hot_kv = (
-            new_kv_full.0.slice(s![c_rows.., ..]).to_owned(),
-            new_kv_full.1.slice(s![c_rows.., ..]).to_owned(),
+            new_kv_full.0.slice(s![cold_rows_in_prior.., ..]).to_owned(),
+            new_kv_full.1.slice(s![cold_rows_in_prior.., ..]).to_owned(),
         );
         new_hot_kvs.push(new_hot_kv);
 
@@ -328,7 +411,10 @@ pub(super) fn rs_decode_step_walk(
         // bytes. Falls back to WalkFfn (and then dense WeightFfn) when
         // the backend doesn't have native quant support or the layer
         // isn't direct-matvec-eligible.
-        let h_out = larql_inference::vindex::ffn_decode_step_native(
+        // Both branches return the bare post-FFN hidden —
+        // `ffn_decode_step_native` is also `moe_ffn_block_cpu`'s pre-PLE
+        // dense slab — so the PLE + layer_scalar tail applies to either.
+        let h_post_ffn = larql_inference::vindex::ffn_decode_step_native(
             weights.canonical(),
             index,
             backend,
@@ -339,6 +425,12 @@ pub(super) fn rs_decode_step_walk(
             let (h, _) = run_ffn(&weights, &h_post_attn, layer, &walk_ffn, false);
             h
         });
+        let h_out = crate::engines::apply_ple_and_layer_scalar(
+            &weights,
+            &h_post_ffn,
+            layer,
+            ple_inputs.get(layer),
+        );
         if let Some(t) = t_ffn {
             ffn_us += t.elapsed().as_secs_f64() * 1e6;
         }
@@ -381,10 +473,14 @@ pub(super) fn rs_decode_step_walk(
 
     let mut updated_stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
     for (stored, new_row) in rs.stored.iter().zip(new_stored.iter()) {
-        let s_old = stored.shape()[0];
+        // Logical rows only — `stored` may be a capacity-padded buffer
+        // (dispatch-prefill fallback).
+        let s_old = rs.hot_len;
         let hidden_dim = stored.shape()[1];
         let mut combined = Array2::<f32>::zeros((s_old + 1, hidden_dim));
-        combined.slice_mut(s![..s_old, ..]).assign(stored);
+        combined
+            .slice_mut(s![..s_old, ..])
+            .assign(&stored.slice(s![..s_old, ..]));
         combined.slice_mut(s![s_old.., ..]).assign(new_row);
         updated_stored.push(combined);
     }
@@ -607,6 +703,193 @@ mod tests {
         .unwrap();
         assert_eq!(h.shape(), &[1, weights.hidden_size]);
         assert!(h.iter().all(|v| v.is_finite()));
+    }
+
+    // ── Doubling-capacity regression tests (2026-05-19 store migration) ──
+    //
+    // `cold_kv` / `cold_residuals` are capacity-padded buffers whose
+    // logical row count is `cold_len` (`store.rs`). A decode that reads
+    // `shape()[0]` instead attends zero-padded phantom K/V rows and
+    // recomputes hot K at shifted RoPE offsets. Each test decodes the
+    // same logical state twice — once over the padded buffers, once over
+    // buffers trimmed to exactly `cold_len` (the layout the
+    // pre-migration code assumed) — and requires bit-identical output.
+
+    /// Window / prompt sized so the prefill overflows: `cold_len = 2`
+    /// while the cold buffers are allocated at the doubling minimum
+    /// (8 rows), i.e. capacity strictly exceeds the logical length.
+    const PADDED_WINDOW: usize = 2;
+    const PADDED_PROMPT: [u32; 4] = [0, 1, 2, 3];
+    const PADDED_NEXT_TOKEN: u32 = 4;
+    /// Hidden-state tolerance between the cached-hot-K/V path and the
+    /// recompute-from-residuals path (same bound as the W2 parity test
+    /// in engine.rs — the two paths project K/V through different code
+    /// but must agree to fp rounding).
+    const CACHED_VS_RECOMPUTE_TOL: f32 = 1e-4;
+
+    fn prefill_padded_store(
+        weights: &larql_inference::ModelWeights,
+        index: &larql_vindex::VectorIndex,
+    ) -> RsStore {
+        let store = rs_prefill_walk(
+            larql_inference::WeightsView::dense(weights),
+            index,
+            &PADDED_PROMPT,
+            Some(PADDED_WINDOW),
+            &CpuBackend,
+        )
+        .store;
+        // Self-check: the fixture must actually be capacity-padded,
+        // otherwise these tests stop pinning the bug.
+        assert!(store.cold_kv.as_ref().unwrap()[0].0.shape()[0] > store.cold_len);
+        assert!(store.cold_residuals.as_ref().unwrap()[0].shape()[0] > store.cold_len);
+        store
+    }
+
+    /// Rebuild the cold buffers at exactly `cold_len` rows. Decode over
+    /// this store is correct under both the old and the fixed code, so
+    /// it is the parity reference for the capacity-padded twin.
+    fn with_trimmed_cold(mut store: RsStore) -> RsStore {
+        use ndarray::s;
+        let c = store.cold_len;
+        if let Some(cold) = store.cold_residuals.as_mut() {
+            for layer in cold.iter_mut() {
+                *layer = layer.slice(s![..c, ..]).to_owned();
+            }
+        }
+        if let Some(kv) = store.cold_kv.as_mut() {
+            for (k, v) in kv.iter_mut() {
+                *k = k.slice(s![..c, ..]).to_owned();
+                *v = v.slice(s![..c, ..]).to_owned();
+            }
+        }
+        store
+    }
+
+    fn decode_once(
+        weights: &larql_inference::ModelWeights,
+        index: &larql_vindex::VectorIndex,
+        store: RsStore,
+    ) -> (Array2<f32>, RsStore) {
+        rs_decode_step_walk(
+            larql_inference::WeightsView::dense(weights),
+            index,
+            PADDED_NEXT_TOKEN,
+            store,
+            &CpuBackend,
+            None,
+        )
+        .expect("decode")
+    }
+
+    fn assert_bits_eq(a: &Array2<f32>, b: &Array2<f32>, ctx: &str) {
+        let a_bits: Vec<u32> = a.iter().map(|v| v.to_bits()).collect();
+        let b_bits: Vec<u32> = b.iter().map(|v| v.to_bits()).collect();
+        assert_eq!(a_bits, b_bits, "{ctx}");
+    }
+
+    #[test]
+    fn decode_walk_padded_cold_kv_matches_trimmed_reference_cached_path() {
+        // Fast path (hot_kv + cold_kv cached): the cold concat must use
+        // `cold_len`, not the buffer capacity — otherwise 6 phantom
+        // zero-K/V rows join the softmax.
+        let weights = make_test_weights();
+        let index = make_test_vindex(&weights);
+        let padded = prefill_padded_store(&weights, &index);
+        let trimmed = with_trimmed_cold(prefill_padded_store(&weights, &index));
+        let (h_padded, _) = decode_once(&weights, &index, padded);
+        let (h_trimmed, _) = decode_once(&weights, &index, trimmed);
+        assert_bits_eq(
+            &h_padded,
+            &h_trimmed,
+            "cached path attended capacity slack instead of cold_len rows",
+        );
+    }
+
+    #[test]
+    fn decode_walk_padded_cold_kv_matches_trimmed_reference_hot_dropped() {
+        // Middle path (cold_kv only): same cold_len contract when the
+        // hot K/V is recomputed.
+        let weights = make_test_weights();
+        let index = make_test_vindex(&weights);
+        let mut padded = prefill_padded_store(&weights, &index);
+        padded.hot_kv = None;
+        let mut trimmed = with_trimmed_cold(prefill_padded_store(&weights, &index));
+        trimmed.hot_kv = None;
+        let (h_padded, _) = decode_once(&weights, &index, padded);
+        let (h_trimmed, _) = decode_once(&weights, &index, trimmed);
+        assert_bits_eq(
+            &h_padded,
+            &h_trimmed,
+            "cold_kv-only path attended capacity slack instead of cold_len rows",
+        );
+    }
+
+    #[test]
+    fn decode_walk_padded_cold_residuals_match_trimmed_reference_no_caches() {
+        // Slow path (neither cache): reading `shape()[0]` off the padded
+        // cold_residuals both injects phantom rows AND shifts the hot
+        // rows' RoPE offsets (`full_abs_start + padded_cold_rows`).
+        let weights = make_test_weights();
+        let index = make_test_vindex(&weights);
+        let mut padded = prefill_padded_store(&weights, &index);
+        padded.hot_kv = None;
+        padded.cold_kv = None;
+        let mut trimmed = with_trimmed_cold(prefill_padded_store(&weights, &index));
+        trimmed.hot_kv = None;
+        trimmed.cold_kv = None;
+        let (h_padded, _) = decode_once(&weights, &index, padded);
+        let (h_trimmed, _) = decode_once(&weights, &index, trimmed);
+        assert_bits_eq(
+            &h_padded,
+            &h_trimmed,
+            "no-cache path recomputed over capacity slack / wrong RoPE offsets",
+        );
+    }
+
+    #[test]
+    fn decode_walk_no_cache_step_leaves_hot_kv_usable_by_next_cached_step() {
+        // Path-3 hot_kv capture: with `s_cold` cold rows folded into the
+        // attention prior (cold_kv = None), the captured hot K/V must
+        // slice past them. Caching cold+hot+new as "hot" desyncs
+        // `hot_kv` from `stored`/`hot_len`, so the NEXT step's cached
+        // decode attends the wrong rows. Pin by value: step 2 cached
+        // must match step 2 recomputed-from-residuals.
+        let weights = make_test_weights();
+        let index = make_test_vindex(&weights);
+
+        let run_step2 = |drop_caches_before_step2: bool| -> Array2<f32> {
+            let mut store = prefill_padded_store(&weights, &index);
+            store.hot_kv = None;
+            store.cold_kv = None;
+            // Step 1 takes the no-cache path in both runs → identical
+            // state going into step 2.
+            let (_, mut rs2) = decode_once(&weights, &index, store);
+            if drop_caches_before_step2 {
+                rs2.hot_kv = None;
+                rs2.cold_kv = None;
+            }
+            let (h2, _) = rs_decode_step_walk(
+                larql_inference::WeightsView::dense(&weights),
+                &index,
+                PADDED_NEXT_TOKEN + 1,
+                rs2,
+                &CpuBackend,
+                None,
+            )
+            .expect("step 2");
+            h2
+        };
+
+        let h2_cached = run_step2(false);
+        let h2_recompute = run_step2(true);
+        for (a, b) in h2_cached.iter().zip(h2_recompute.iter()) {
+            assert!(
+                (a - b).abs() < CACHED_VS_RECOMPUTE_TOL,
+                "step-2 cached path diverged from recompute reference: \
+                 cached={a}, recompute={b} — hot_kv captured cold rows as hot"
+            );
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # FR3b — relation resolution: probe is phrasing-brittle, explicit rewrite wins
 
-**Date:** 2026-06-08. **Status:** ran (`examples/fr3_template_ablation.rs`, `examples/fr3_explicit_rewrite.rs` → `bench/aim-validation/fr3_{template_ablation,explicit_rewrite}_gemma3-4b.json`). Gemma-3-4B Q4K vindex. Follow-on to [`fr3-relation-address.md`](fr3-relation-address.md) — refines, doesn't overturn, the FR3 WIN.
+**Date:** 2026-06-08. **Status:** ran (`chris-experiments/larql_probes/examples/fleet_routing/fr3_template_ablation.rs`, `chris-experiments/larql_probes/examples/fleet_routing/fr3_explicit_rewrite.rs` → `bench/aim-validation/fr3_{template_ablation,explicit_rewrite}_gemma3-4b.json`). Gemma-3-4B Q4K vindex. Follow-on to [`fr3-relation-address.md`](fr3-relation-address.md) — refines, doesn't overturn, the FR3 WIN.
 
 ## Headline
 
@@ -53,13 +53,13 @@ Few-shot `word -> relation` over `{capital,currency,language[, none]}`, read top
 
 **Wiring wrinkle (the one real structural choice):** `RelationResolver` only dequantises layers `0..=probe_layer` (≈L10) → it **cannot run lm_head**, so Tier 2 must run via the **Session's already-loaded vindex** (`predict_kquant`/`InferenceWeights`, the same path INFER uses), not the resolver's partial setup. ~30 lines crossing the resolver→session boundary. Add an LQL knob if the explicit pass should be opt-in (it's a full forward per abstain).
 
-Harnesses to lift the prompt/matching from: `examples/fr3_explicit_rewrite.rs` (the few-shot frame + `none`-gated accept + prefix-matching over top-k).
+Harnesses to lift the prompt/matching from: `chris-experiments/larql_probes/examples/fleet_routing/fr3_explicit_rewrite.rs` (the few-shot frame + `none`-gated accept + prefix-matching over top-k).
 
 ## BUILD LANDED (2026-06-09)
 
 **Wired the two-tier resolver into `SELECT … FROM EDGES WHERE relation = …`, opt-in, default off = byte-identical.** When the exact/substring relation match returns nothing, `resolve_relation_synonym` runs Tier 1 (the cached residual probe, unchanged); on probe abstain it falls through (`.or_else`) to **Tier 2 — `resolve_relation_explicit`** (`crates/larql-lql/src/executor/query/select/edges.rs`):
 
-- **Few-shot frame lifted verbatim** from `examples/fr3_explicit_rewrite.rs` (`word -> relation` + `music -> none`), one **full forward** via `InferenceWeights::predict_dense` (the INFER path — for a Q4_K vindex this is exactly `predict_kquant`, lm_head included). The resolver's partial `0..=L10` dequant can't run lm_head, so Tier 2 goes through `InferenceWeights`, not the resolver's setup — the one structural wrinkle the pre-registration called out.
+- **Few-shot frame lifted verbatim** from `chris-experiments/larql_probes/examples/fleet_routing/fr3_explicit_rewrite.rs` (`word -> relation` + `music -> none`), one **full forward** via `InferenceWeights::predict_dense` (the INFER path — for a Q4_K vindex this is exactly `predict_kquant`, lm_head included). The resolver's partial `0..=L10` dequant can't run lm_head, so Tier 2 goes through `InferenceWeights`, not the resolver's setup — the one structural wrinkle the pre-registration called out.
 - **`none`-gated accept** (`match_relation_top1`, unit-tested): prefix-match top-1 against the candidate relations; `none` / out-of-domain → no match → abstain.
 - **Gated by `LARQL_FR3_EXPLICIT`** (full forward + model load per probe-abstain). Default off → SELECT is byte-identical to FR3 (probe-only).
 

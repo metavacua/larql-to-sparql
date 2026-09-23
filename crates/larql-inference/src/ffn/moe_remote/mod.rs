@@ -65,7 +65,7 @@ mod tests;
 pub use backend::RemoteMoeBackend;
 pub use config::{parse_unit_manifest, ShardConfig, UnitManifest, UnitShard};
 pub use error::RemoteMoeError;
-pub use ffn_adapter::RemoteMoeFfn;
+pub use ffn_adapter::{MoeFfn, RecordedRefusal, RefusalPolicy, RemoteMoeFfn};
 pub use multi_layer_wire::{
     decode_multi_layer_request, decode_multi_layer_request_q8k, decode_multi_layer_response,
     encode_multi_layer_request, encode_multi_layer_request_q8k, encode_multi_layer_response,

@@ -4,7 +4,7 @@
 **Aim-validation:** resolves the OPEN half of KU4 (V1 was falsified on dense; the
 MoE-within-expert variant was left open because the dense harness measures the
 wrong object on the 26B-A4B).
-**Harness:** `crates/larql-inference/examples/walk_ffn_v1_moe_within_expert.rs`
+**Harness:** `chris-experiments/larql_probes/examples/walk_ffn/walk_ffn_v1_moe_within_expert.rs`
 **Kernel hook:** `crates/larql-compute/src/cpu/ops/moe/within_expert.rs`
 **Model:** Gemma 4 26B-A4B (`output/gemma4-26b-a4b-q4k.vindex`), 30 layers (all
 MoE), 128 experts, top_k=8, **expert inter = 704**.

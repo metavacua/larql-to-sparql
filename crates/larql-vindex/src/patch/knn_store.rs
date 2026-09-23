@@ -6,12 +6,24 @@
 //! orthogonality constraint, no Hopfield bound — unlimited scale.
 //!
 //! Port of Python `RetrievalVindex` from ~/chris-source/chris-experiments/compilation/15_v11_model/vindex_build_wordnet_b.py.
+//!
+//! ## Unified retrieval (2026-07-31, review item 21)
+//!
+//! This type no longer owns a parallel scoring implementation. Keys
+//! are held as rows in the same [`GateOverlay`] structure that serves
+//! `PatchedVindex::gate_knn`'s gate overrides — one dot-product kernel,
+//! one per-layer snapshot cache, one set of width guards for both
+//! retrieval paths. What remains KnnStore-specific is the *policy*:
+//! entry metadata (`entity`/`relation`/`target`), L2-normalization on
+//! insert, and ranking by raw cosine descending (`gate_knn` ranks by
+//! `|score|` merged with base hits — different statistic, same kernel).
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::collections::HashMap;
 
-use ndarray::{Array1, Array2};
+use ndarray::Array1;
 use serde::{Deserialize, Serialize};
+
+use super::gate_overlay::GateOverlay;
 
 /// A single entry in the retrieval-override KNN store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,34 +44,19 @@ pub struct KnnEntry {
 
 /// Per-layer retrieval-override store. Entries are independent —
 /// no orthogonality constraint, no FFN-slot budget.
-#[derive(Debug)]
+///
+/// Storage invariant: `keys` holds one row per entry at
+/// `(layer, entry_index)`, index-aligned with `entries[layer]`. Every
+/// mutation that renumbers a layer's entries rebuilds that layer's
+/// rows.
+#[derive(Debug, Default, Clone)]
 pub struct KnnStore {
     /// layer -> Vec<KnnEntry>
     entries: HashMap<usize, Vec<KnnEntry>>,
-    /// Lazy-built L2-normalized key matrices for fast cosine GEMM.
-    key_matrices: Mutex<HashMap<usize, Array2<f32>>>,
-    /// Layers whose key_matrices need rebuilding.
-    dirty: Mutex<HashSet<usize>>,
-}
-
-impl Clone for KnnStore {
-    fn clone(&self) -> Self {
-        Self {
-            entries: self.entries.clone(),
-            key_matrices: Mutex::new(HashMap::new()),
-            dirty: Mutex::new(self.entries.keys().copied().collect()),
-        }
-    }
-}
-
-impl Default for KnnStore {
-    fn default() -> Self {
-        Self {
-            entries: HashMap::new(),
-            key_matrices: Mutex::new(HashMap::new()),
-            dirty: Mutex::new(HashSet::new()),
-        }
-    }
+    /// The unified retrieval structure (shared kernel with
+    /// `PatchedVindex::gate_knn`): L2-normalized keys as rows keyed
+    /// `(layer, entry_index)`.
+    keys: GateOverlay,
 }
 
 impl KnnStore {
@@ -76,7 +73,10 @@ impl KnnStore {
         confidence: f32,
     ) {
         let normalized = l2_normalize(&key);
-        self.entries.entry(layer).or_default().push(KnnEntry {
+        let layer_entries = self.entries.entry(layer).or_default();
+        self.keys
+            .insert(layer, layer_entries.len(), normalized.clone());
+        layer_entries.push(KnnEntry {
             key: normalized,
             target_id,
             target_token,
@@ -84,37 +84,37 @@ impl KnnStore {
             relation,
             confidence,
         });
-        self.dirty.lock().unwrap().insert(layer);
+    }
+
+    /// Remove all entries matching a predicate; layers whose entry
+    /// lists shrink get their key rows rebuilt (indices renumber).
+    fn remove_matching(&mut self, keep: impl Fn(&KnnEntry) -> bool) {
+        for (&layer, entries) in &mut self.entries {
+            let before = entries.len();
+            entries.retain(&keep);
+            if entries.len() != before {
+                self.keys.remove_layer(layer);
+                for (idx, entry) in entries.iter().enumerate() {
+                    self.keys.insert(layer, idx, entry.key.clone());
+                }
+            }
+        }
+        self.entries.retain(|_, v| !v.is_empty());
     }
 
     /// Remove all entries matching an entity name.
     pub fn remove_by_entity(&mut self, entity: &str) {
         let entity_lower = entity.to_lowercase();
-        for (layer, entries) in &mut self.entries {
-            let before = entries.len();
-            entries.retain(|e| e.entity.to_lowercase() != entity_lower);
-            if entries.len() != before {
-                self.dirty.lock().unwrap().insert(*layer);
-            }
-        }
-        self.entries.retain(|_, v| !v.is_empty());
+        self.remove_matching(|e| e.entity.to_lowercase() != entity_lower);
     }
 
     /// Remove entries matching entity + relation.
     pub fn remove_by_entity_relation(&mut self, entity: &str, relation: &str) {
         let entity_lower = entity.to_lowercase();
         let relation_lower = relation.to_lowercase();
-        for (layer, entries) in &mut self.entries {
-            let before = entries.len();
-            entries.retain(|e| {
-                e.entity.to_lowercase() != entity_lower
-                    || e.relation.to_lowercase() != relation_lower
-            });
-            if entries.len() != before {
-                self.dirty.lock().unwrap().insert(*layer);
-            }
-        }
-        self.entries.retain(|_, v| !v.is_empty());
+        self.remove_matching(|e| {
+            e.entity.to_lowercase() != entity_lower || e.relation.to_lowercase() != relation_lower
+        });
     }
 
     /// Top-1 KNN query at a layer. Returns (&entry, cosine_score).
@@ -135,32 +135,20 @@ impl KnnStore {
             _ => return Vec::new(),
         };
 
-        // Rebuild key matrix if dirty
-        {
-            let is_dirty = self.dirty.lock().unwrap().contains(&layer);
-            if is_dirty {
-                self.rebuild_layer(layer);
-            }
-        }
+        // L2-normalize query; keys are stored normalized, so the
+        // shared kernel's dot product IS the cosine.
+        let q_arr = Array1::from_vec(l2_normalize(residual));
+        let mut indexed = self.keys.score_layer(layer, &q_arr);
 
-        let matrices = self.key_matrices.lock().unwrap();
-        let key_matrix = match matrices.get(&layer) {
-            Some(m) => m,
-            None => return Vec::new(),
-        };
-
-        // L2-normalize query
-        let q = l2_normalize(residual);
-        let q_arr = Array1::from_vec(q);
-
-        // Cosine = normalized_keys @ normalized_query
-        let scores = key_matrix.dot(&q_arr);
-
-        // Top-K
-        let k_eff = k.min(scores.len());
-        let mut indexed: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
-        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        indexed.truncate(k_eff);
+        // Rank by raw cosine descending (NOT `|score|` — an
+        // anti-aligned key must not fire the override), NaN-tolerant,
+        // ties broken by insertion order for determinism.
+        indexed.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.0.cmp(&b.0))
+        });
+        indexed.truncate(k.min(entries.len()));
 
         indexed
             .into_iter()
@@ -205,36 +193,17 @@ impl KnnStore {
         &self.entries
     }
 
-    /// Rebuild the normalized key matrix for a layer.
-    fn rebuild_layer(&self, layer: usize) {
-        if let Some(entries) = self.entries.get(&layer) {
-            if entries.is_empty() {
-                self.key_matrices.lock().unwrap().remove(&layer);
-            } else {
-                let dim = entries[0].key.len();
-                let n = entries.len();
-                let mut matrix = Array2::<f32>::zeros((n, dim));
-                for (i, entry) in entries.iter().enumerate() {
-                    for (j, &v) in entry.key.iter().enumerate() {
-                        matrix[[i, j]] = v;
-                    }
-                }
-                self.key_matrices.lock().unwrap().insert(layer, matrix);
+    /// Construct from a fully-populated entries map. Used by
+    /// `super::knn_store_io::load`. Keys are assumed already
+    /// normalized (they were normalized on the original `add`).
+    pub(super) fn from_entries(entries: HashMap<usize, Vec<KnnEntry>>) -> Self {
+        let mut keys = GateOverlay::default();
+        for (&layer, layer_entries) in &entries {
+            for (idx, entry) in layer_entries.iter().enumerate() {
+                keys.insert(layer, idx, entry.key.clone());
             }
         }
-        self.dirty.lock().unwrap().remove(&layer);
-    }
-
-    /// Construct from a fully-populated entries map. Used by
-    /// `super::knn_store_io::load`. Rebuilds `key_matrices` lazily on
-    /// first query.
-    pub(super) fn from_entries(entries: HashMap<usize, Vec<KnnEntry>>) -> Self {
-        let dirty = entries.keys().copied().collect();
-        Self {
-            entries,
-            key_matrices: Mutex::new(HashMap::new()),
-            dirty: Mutex::new(dirty),
-        }
+        Self { entries, keys }
     }
 }
 
@@ -255,6 +224,61 @@ mod tests {
 
     fn make_key(dim: usize, seed: f32) -> Vec<f32> {
         (0..dim).map(|i| (i as f32 + seed).sin()).collect()
+    }
+
+    /// Regression (unification 2026-07-31): removal renumbers a
+    /// layer's entries, so the overlay key rows must be rebuilt
+    /// index-aligned — a stale row set would return the WRONG entry
+    /// for a matching key, not just a wrong count. Pin query
+    /// correctness after removal, not just `len()`.
+    #[test]
+    fn query_returns_correct_entry_after_removal_renumbers() {
+        let mut store = KnnStore::default();
+        let keys: Vec<Vec<f32>> = (0..3).map(|i| make_key(32, i as f32)).collect();
+        for (i, key) in keys.iter().enumerate() {
+            store.add(
+                26,
+                key.clone(),
+                40 + i as u32,
+                format!("tok{i}"),
+                format!("ent{i}"),
+                "rel".into(),
+                1.0,
+            );
+        }
+        // Warm the shared kernel's snapshot, then remove the FIRST
+        // entry so every survivor's index shifts down by one.
+        let _ = store.query_top1(26, &keys[2]);
+        store.remove_by_entity("ent0");
+        assert_eq!(store.len(), 2);
+        for i in [1usize, 2] {
+            let (entry, score) = store.query_top1(26, &keys[i]).expect("survivor must match");
+            assert_eq!(entry.entity, format!("ent{i}"), "index misalignment");
+            assert!(score > 0.99, "exact key must score ~1.0, got {score}");
+        }
+    }
+
+    /// Clone must carry the key rows over (the snapshot cache resets
+    /// lazily) — a clone that lost the retrieval rows would return
+    /// empty results while `len()` still reports entries.
+    #[test]
+    fn clone_preserves_query_results() {
+        let mut store = KnnStore::default();
+        let key = make_key(16, 1.0);
+        store.add(
+            26,
+            key.clone(),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            1.0,
+        );
+        let _ = store.query_top1(26, &key); // warm the original's cache
+        let cloned = store.clone();
+        let (entry, score) = cloned.query_top1(26, &key).expect("clone must retrieve");
+        assert_eq!(entry.target_token, "Paris");
+        assert!(score > 0.99);
     }
 
     #[test]

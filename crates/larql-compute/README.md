@@ -35,7 +35,7 @@ GPU→CPU bridge.
   and [`KvDispatch::coarse_decode_step_with_state_masked`](src/kv_dispatch/mod.rs).
 - `KvDispatch::read_kv_row_at` — on-demand readback of a single
   position's K/V from the backend's kv cache. Used by engines (e.g.
-  `UnlimitedContextEngine.close_window`) that dropped their CPU
+  `WindowedCheckpointEngine.close_window`) that dropped their CPU
   shadow.
 
 Default impls preserve `Full` behaviour everywhere; backends without

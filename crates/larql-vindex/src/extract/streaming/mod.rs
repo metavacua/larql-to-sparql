@@ -101,6 +101,10 @@ pub fn build_vindex_streaming(
         callbacks,
     )?;
 
+    // Runs first: a checkpoint carrying tensors nothing can address should
+    // fail in seconds, not after a multi-minute extraction that quietly
+    // produced a hollow vindex.
+    ctx.audit_tensor_coverage()?;
     ctx.write_gate_vectors()?;
     ctx.write_router_weights()?;
     ctx.write_embeddings()?;

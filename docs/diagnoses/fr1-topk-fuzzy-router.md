@@ -1,6 +1,6 @@
 # FR1 — top-k fuzzy entity router on a real LARQL vindex: VERDICT
 
-**Date:** 2026-06-07. **Status:** ran (`crates/larql-inference/examples/fr1_topk_fuzzy_router.rs` → `bench/aim-validation/fr1_topk_router_gemma3-4b.json`). Gemma-3-4B Q4K vindex, production `KnnStore` cosine-NN router, N=150 real countries, layer sweep {20,22,24,26}, judged in predictive units (recall@k / margin / confident-wrong — mean-cosine banned). Reproduces fleet E15 on the production path. Pre-registration: [`docs/fleet-routing-extensions.md`](../fleet-routing-extensions.md) §FR1.
+**Date:** 2026-06-07. **Status:** ran (`chris-experiments/larql_probes/examples/fleet_routing/fr1_topk_fuzzy_router.rs` → `bench/aim-validation/fr1_topk_router_gemma3-4b.json`). Gemma-3-4B Q4K vindex, production `KnnStore` cosine-NN router, N=150 real countries, layer sweep {20,22,24,26}, judged in predictive units (recall@k / margin / confident-wrong — mean-cosine banned). Reproduces fleet E15 on the production path. Pre-registration: [`docs/fleet-routing-extensions.md`](../fleet-routing-extensions.md) §FR1.
 
 ## Headline
 
@@ -45,7 +45,7 @@
 
 The fuzzy entity key is **real, strong, and answer-leak-free at L24-26** — and the production cosine-NN path already delivers it (better than a trained MLP). The defect is entirely in the **consumer**: a fixed-0.75 top-1 gate that fires on everything and injects an 11–84% confident-wrong rate. **Build greenlit**, scoped to: route at the resolved layer, replace the absolute gate with **top-k + verify + abstain**, parity-first. FR2 (symbolic-primary, this as the fuzzy fallback) is the natural wrapper.
 
-**Artifacts:** `crates/larql-inference/examples/fr1_topk_fuzzy_router.rs`, `bench/aim-validation/fr1_topk_router_gemma3-4b.json`.
+**Artifacts:** `chris-experiments/larql_probes/examples/fleet_routing/fr1_topk_fuzzy_router.rs`, `bench/aim-validation/fr1_topk_router_gemma3-4b.json`.
 
 ---
 

@@ -440,6 +440,7 @@ pub fn dispatch_full_pipeline(
                     softcap,
                     rotary_dim: layers[l].rotary_dim as u32,
                 },
+                layers[l].attn_sinks,
             );
             enc.end_encoding();
         }

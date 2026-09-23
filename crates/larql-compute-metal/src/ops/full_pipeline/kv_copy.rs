@@ -44,6 +44,8 @@ pub(super) fn populate_kv_one_layer(
         std::ptr::copy_nonoverlapping(v_src, v_dst, total_kv);
     }
     kv.layers[layer_idx].current_len = seq_len;
+    // Prefill wrote positions 0..seq_len, so the stream is at seq_len.
+    kv.layers[layer_idx].abs_position = seq_len;
 }
 
 /// Copy each layer's K/V scratch (post-RoPE) into the persistent KV
@@ -80,6 +82,7 @@ pub(super) fn populate_kv_after_commit(
             std::ptr::copy_nonoverlapping(v_src, v_dst, total_kv);
         }
         kv.layers[l].current_len = seq_len;
+        kv.layers[l].abs_position = seq_len;
     }
 }
 
@@ -105,6 +108,7 @@ mod tests {
             format: QuantFormat::Q4_K,
         };
         FullPipelineLayer {
+            attn_sinks: None,
             wq: q4w(),
             wk: q4w(),
             wv: q4w(),

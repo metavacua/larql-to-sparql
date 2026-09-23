@@ -145,6 +145,9 @@ fn parse_insert(rest: &str, line_num: usize) -> Result<VindexfileDirective, Vind
     })
 }
 
+/// The three keys a DELETE condition must bind, in canonical order.
+const DELETE_CONDITION_KEYS: [&str; 3] = ["entity", "relation", "target"];
+
 /// Parse DELETE entity = "x" AND relation = "y" AND target = "z"
 fn parse_delete(rest: &str, line_num: usize) -> Result<VindexfileDirective, VindexError> {
     // Support both tuple form and condition form
@@ -157,25 +160,47 @@ fn parse_delete(rest: &str, line_num: usize) -> Result<VindexfileDirective, Vind
         });
     }
 
-    // Parse key=value pairs: entity = "x" AND relation = "y" AND target = "z"
-    let mut entity = String::new();
-    let mut relation = String::new();
-    let mut target = String::new();
+    // Parse key=value pairs: entity = "x" AND relation = "y" AND target = "z".
+    // Every key must appear exactly once — a DELETE that silently accepted a
+    // missing key would match (and delete) far more than the author wrote.
+    let mut values: [Option<String>; 3] = [None, None, None];
 
     for part in rest.split(" AND ") {
         let part = part.trim();
-        if let Some((key, val)) = part.split_once('=') {
-            let key = key.trim().to_lowercase();
-            let val = val.trim().trim_matches('"').to_string();
-            match key.as_str() {
-                "entity" => entity = val,
-                "relation" => relation = val,
-                "target" => target = val,
-                _ => {}
-            }
+        let Some((key, val)) = part.split_once('=') else {
+            return Err(VindexError::Parse(format!(
+                "Vindexfile line {line_num}: DELETE condition {part:?} is not key = \"value\""
+            )));
+        };
+        let key = key.trim().to_lowercase();
+        let val = unquote(val.trim());
+        let Some(slot) = DELETE_CONDITION_KEYS.iter().position(|k| *k == key) else {
+            return Err(VindexError::Parse(format!(
+                "Vindexfile line {line_num}: unknown DELETE condition key {key:?} \
+                 (expected {DELETE_CONDITION_KEYS:?})"
+            )));
+        };
+        if values[slot].is_some() {
+            return Err(VindexError::Parse(format!(
+                "Vindexfile line {line_num}: duplicate DELETE condition key {key:?}"
+            )));
         }
+        values[slot] = Some(val);
     }
 
+    let missing: Vec<&str> = DELETE_CONDITION_KEYS
+        .iter()
+        .zip(values.iter())
+        .filter(|(_, v)| v.is_none())
+        .map(|(k, _)| *k)
+        .collect();
+    if !missing.is_empty() {
+        return Err(VindexError::Parse(format!(
+            "Vindexfile line {line_num}: DELETE condition missing key(s) {missing:?}"
+        )));
+    }
+
+    let [entity, relation, target] = values.map(|v| v.expect("all keys checked present"));
     Ok(VindexfileDirective::Delete {
         entity,
         relation,
@@ -183,12 +208,19 @@ fn parse_delete(rest: &str, line_num: usize) -> Result<VindexfileDirective, Vind
     })
 }
 
-/// Extract a parenthesised triple: ("a", "b", "c")
+/// Extract a parenthesised triple: ("a", "b", "c").
+///
+/// Splitting is quote-aware — a comma inside a double-quoted value
+/// (`("Acme, Inc", "hq", "London")`) does not separate fields.
 fn extract_triple(s: &str, line_num: usize) -> Result<(String, String, String), VindexError> {
     let s = s.trim();
     let inner = s.trim_start_matches('(').trim_end_matches(')');
 
-    let parts: Vec<&str> = inner.split(',').collect();
+    let parts = split_quoted_csv(inner).ok_or_else(|| {
+        VindexError::Parse(format!(
+            "Vindexfile line {line_num}: unbalanced quotes in tuple"
+        ))
+    })?;
     if parts.len() != 3 {
         return Err(VindexError::Parse(format!(
             "Vindexfile line {}: expected 3 values in tuple, got {}",
@@ -197,11 +229,42 @@ fn extract_triple(s: &str, line_num: usize) -> Result<(String, String, String), 
         )));
     }
 
-    Ok((
-        parts[0].trim().trim_matches('"').to_string(),
-        parts[1].trim().trim_matches('"').to_string(),
-        parts[2].trim().trim_matches('"').to_string(),
-    ))
+    Ok((unquote(&parts[0]), unquote(&parts[1]), unquote(&parts[2])))
+}
+
+/// Split on commas that are *outside* double-quoted spans. Returns
+/// `None` when the input ends inside an open quote (truncated value).
+fn split_quoted_csv(inner: &str) -> Option<Vec<String>> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    for c in inner.chars() {
+        match c {
+            '"' => {
+                in_quotes = !in_quotes;
+                current.push(c);
+            }
+            ',' if !in_quotes => {
+                parts.push(std::mem::take(&mut current));
+            }
+            _ => current.push(c),
+        }
+    }
+    if in_quotes {
+        return None;
+    }
+    parts.push(current);
+    Some(parts)
+}
+
+/// Trim whitespace, then strip one matched pair of surrounding double
+/// quotes (an interior quote or comma survives intact).
+fn unquote(s: &str) -> String {
+    let s = s.trim();
+    s.strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(s)
+        .to_string()
 }
 
 #[cfg(test)]
@@ -307,6 +370,83 @@ DELETE ("Entity", "relation", "target")
 PATCH ./patch.vlp
 "#;
         assert!(parse_vindexfile_str(input).is_err());
+    }
+
+    // ── quoted-comma + condition-form hardening ─────────────────────
+
+    /// A comma inside a quoted value is part of the value, not a field
+    /// separator. Regression: `extract_triple` used to split on bare
+    /// commas, so `"Acme, Inc"` mis-parsed as two fields.
+    #[test]
+    fn insert_preserves_quoted_comma() {
+        let input = "FROM ./b\nINSERT (\"Acme, Inc\", \"hq\", \"London\")\n";
+        let vf = parse_vindexfile_str(input).unwrap();
+        assert!(matches!(&vf.directives[1],
+            VindexfileDirective::Insert { entity, relation, target }
+            if entity == "Acme, Inc" && relation == "hq" && target == "London"
+        ));
+    }
+
+    #[test]
+    fn insert_rejects_unbalanced_quotes() {
+        let input = "FROM ./b\nINSERT (\"Acme, \"hq\", \"London\")\n";
+        let err = parse_vindexfile_str(input).unwrap_err();
+        assert!(err.to_string().contains("unbalanced quotes"), "{err}");
+    }
+
+    #[test]
+    fn insert_rejects_wrong_arity_even_with_quoted_commas() {
+        let input = "FROM ./b\nINSERT (\"a\", \"b\")\n";
+        let err = parse_vindexfile_str(input).unwrap_err();
+        assert!(err.to_string().contains("expected 3 values"), "{err}");
+    }
+
+    /// DELETE condition form must bind all three keys — a missing key
+    /// used to be silently accepted as an empty match-anything string.
+    #[test]
+    fn delete_condition_missing_key_is_error() {
+        let input = "FROM ./b\nDELETE entity = \"Acme\" AND relation = \"ceo\"\n";
+        let err = parse_vindexfile_str(input).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("missing key"), "{msg}");
+        assert!(msg.contains("target"), "{msg}");
+    }
+
+    #[test]
+    fn delete_condition_unknown_key_is_error() {
+        let input = "FROM ./b\nDELETE entity = \"A\" AND relation = \"r\" AND victim = \"t\"\n";
+        let err = parse_vindexfile_str(input).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown DELETE condition key"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn delete_condition_duplicate_key_is_error() {
+        let input = "FROM ./b\nDELETE entity = \"A\" AND entity = \"B\" AND target = \"t\"\n";
+        let err = parse_vindexfile_str(input).unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate DELETE condition key"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn delete_condition_malformed_clause_is_error() {
+        let input = "FROM ./b\nDELETE entity \"Acme\"\n";
+        let err = parse_vindexfile_str(input).unwrap_err();
+        assert!(err.to_string().contains("not key = \"value\""), "{err}");
+    }
+
+    /// Condition-form values keep quoted commas too.
+    #[test]
+    fn delete_condition_preserves_quoted_comma_value() {
+        let input = "FROM ./b\nDELETE entity = \"Acme, Inc\" AND relation = \"hq\" AND target = \"London\"\n";
+        let vf = parse_vindexfile_str(input).unwrap();
+        assert!(matches!(&vf.directives[1],
+            VindexfileDirective::Delete { entity, .. } if entity == "Acme, Inc"
+        ));
     }
 
     #[test]

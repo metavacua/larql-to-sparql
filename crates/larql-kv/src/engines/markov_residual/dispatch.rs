@@ -256,8 +256,12 @@ impl MarkovResidualEngine {
         rs.finalise_hot_len_after_clip();
         // 2026-05-19 audit fix: geometric-capacity cold append.
         rs.append_cold_overflow(overflow, evicted_hot_kv);
-        self.store = Some(rs);
         self.abs_position += 1;
+        // Keep the store's own position cursor in sync: a dispatch
+        // failure on a later step falls back to the walk path, which
+        // reads `rs.next_position` for RoPE.
+        rs.next_position = self.abs_position;
+        self.store = Some(rs);
         if self.profiling {
             self.profile.decode_total.record(t_total);
         }
@@ -439,6 +443,30 @@ mod tests {
         let rs = engine.store.as_ref().unwrap();
         assert_eq!(rs.hot_len, hot_len_before + 1);
         assert!(rs.hot_kv.is_some(), "hot_kv populated under Full mask");
+    }
+
+    #[test]
+    fn decode_step_via_dispatch_keeps_store_position_cursor_in_sync() {
+        // The store's `next_position` is what the walk path reads for
+        // RoPE when a dispatch failure forces a fallback mid-generation.
+        // If only `self.abs_position` advances, the fallback decodes at
+        // a position stale by however many dispatch steps ran.
+        set_w10_disable(false);
+        let (mut engine, weights, index) = fixture(Some(8));
+        engine
+            .try_prefill_via_dispatch(&weights, &index, &[0u32, 1])
+            .expect("prefill");
+        for tok in 2..5u32 {
+            engine
+                .decode_step_via_dispatch(&weights, &index, tok)
+                .expect("decode");
+            let rs = engine.store.as_ref().unwrap();
+            assert_eq!(
+                rs.next_position, engine.abs_position,
+                "store position cursor fell behind the dispatch cursor"
+            );
+        }
+        assert_eq!(engine.abs_position, 5);
     }
 
     #[test]

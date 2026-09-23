@@ -36,6 +36,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_fixtures;
 pub mod thresholds;
 
 /// Current spec version. Manifests with a different value are rejected

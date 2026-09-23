@@ -21,4 +21,5 @@ mod gate_vectors;
 mod index_json;
 mod model_weights;
 mod router_weights;
+mod tensor_audit;
 mod tokenizer;

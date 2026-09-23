@@ -193,7 +193,9 @@ impl MetalBackend {
 
         // RoPE
         {
-            let pos = kv_cache.layers[layer_idx].current_len as u32;
+            // ABSOLUTE stream position for RoPE — not occupancy, which a
+            // sliding window reduces.
+            let pos = kv_cache.layers[layer_idx].abs_position as u32;
             let hd = layer_head_dim as u32;
             let rdim = layer_rotary_dim as u32;
             let rope_pairs = (layer_rotary_dim / 2) as u64;
@@ -279,7 +281,7 @@ impl MetalBackend {
             );
             enc_b.end_encoding();
         }
-        kv_cache.layers[layer_idx].current_len += 1;
+        kv_cache.layers[layer_idx].advance_one();
 
         // ═══════════════════════════════════════════════════════════
         // ENCODER C: O projection → residual add (post-attention)

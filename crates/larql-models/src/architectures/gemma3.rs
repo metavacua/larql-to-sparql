@@ -12,6 +12,7 @@
 
 use crate::config::{Activation, ModelArchitecture, ModelConfig};
 use crate::multimodal::{MultiModalProtocol, PlaceholderProtocol, PrecomputedScaling, TokenBudget};
+use crate::tensor_keys::qk_norm;
 
 /// Gemma 3 sliding window pattern: every 6th layer (0-indexed: 5, 11, 17, ...)
 /// uses full attention, the rest use sliding window.
@@ -94,17 +95,11 @@ impl ModelArchitecture for Gemma3Arch {
     // ── Gemma 3 has QK norm ──
 
     fn attn_q_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.q_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_norm_key(&self, layer: usize) -> Option<String> {
-        Some(format!(
-            "{}self_attn.k_norm.weight",
-            self.layer_prefix(layer)
-        ))
+        qk_norm::k(&self.layer_prefix(layer))
     }
 
     // ── Gemma-specific behavior ──
@@ -211,6 +206,8 @@ mod tests {
             enable_moe_block: false,
             top_k_experts: None,
             moe_intermediate_size: None,
+            swiglu_limit: None,
+            norm_topk_prob: None,
             kv_lora_rank: None,
             q_lora_rank: None,
             qk_nope_head_dim: None,

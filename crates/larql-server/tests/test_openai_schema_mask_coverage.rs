@@ -97,7 +97,7 @@ fn build_mask_with_eos_token_ids_masks_eos_when_incomplete() {
         logits[3],
         f32::NEG_INFINITY,
         "EOS must be masked while FSM incomplete; got {:?}",
-        &logits
+        logits
     );
 }
 

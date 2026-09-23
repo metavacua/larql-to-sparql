@@ -6,7 +6,7 @@
 //! implementation, because there's no inherent method to delegate to.
 
 use super::VectorIndex;
-use crate::index::types::PatchOverrides;
+use crate::index::types::{OverrideSlot, PatchOverrides};
 
 impl PatchOverrides for VectorIndex {
     fn down_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
@@ -29,6 +29,30 @@ impl PatchOverrides for VectorIndex {
             .keys()
             .any(|(l, _)| *l == layer)
             || self.metadata.up_overrides.keys().any(|(l, _)| *l == layer)
+    }
+
+    /// The base index carries only up/down vector overrides (gate
+    /// overrides and tombstones live on `PatchedVindex`'s overlay), so
+    /// the enumeration is the sorted union of both override maps'
+    /// features at `layer` — never tombstoned.
+    fn override_slots_at(&self, layer: usize) -> Option<Vec<OverrideSlot>> {
+        let feats: std::collections::BTreeSet<usize> = self
+            .metadata
+            .up_overrides
+            .keys()
+            .chain(self.metadata.down_overrides.keys())
+            .filter(|(l, _)| *l == layer)
+            .map(|&(_, f)| f)
+            .collect();
+        Some(
+            feats
+                .into_iter()
+                .map(|feature| OverrideSlot {
+                    feature,
+                    tombstoned: false,
+                })
+                .collect(),
+        )
     }
 }
 
@@ -98,5 +122,38 @@ mod tests {
         for layer in 0..3 {
             assert!(!v.has_overrides_at(layer));
         }
+    }
+
+    /// Enumeration is the sorted, deduplicated union of the up and down
+    /// override maps at the layer — and never tombstoned (the base
+    /// index has no delete vocabulary).
+    #[test]
+    fn override_slots_at_unions_up_and_down_maps_sorted() {
+        let mut v = fresh();
+        v.metadata.down_overrides.insert((1, 7), vec![1.0]);
+        v.metadata.down_overrides.insert((1, 2), vec![1.0]);
+        v.metadata.up_overrides.insert((1, 2), vec![2.0]); // same slot as a down override
+        v.metadata.up_overrides.insert((1, 5), vec![2.0]);
+        v.metadata.up_overrides.insert((0, 9), vec![2.0]); // other layer — excluded
+
+        let slots = v.override_slots_at(1).expect("base index enumerates");
+        assert_eq!(
+            slots,
+            vec![
+                super::OverrideSlot {
+                    feature: 2,
+                    tombstoned: false
+                },
+                super::OverrideSlot {
+                    feature: 5,
+                    tombstoned: false
+                },
+                super::OverrideSlot {
+                    feature: 7,
+                    tombstoned: false
+                },
+            ]
+        );
+        assert_eq!(v.override_slots_at(2), Some(Vec::new()));
     }
 }

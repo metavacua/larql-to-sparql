@@ -13,11 +13,13 @@
 //! residuals, which is small but non-zero.
 
 pub mod codec;
-pub mod compute;
 pub(crate) mod dispatch;
 pub mod engine;
 pub(crate) mod executor;
 pub(crate) mod helpers;
+pub mod prefill;
+pub mod step;
+mod step_attention;
 pub mod store;
 pub mod walk;
 

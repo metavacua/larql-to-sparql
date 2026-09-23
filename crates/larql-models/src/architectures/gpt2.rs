@@ -12,6 +12,7 @@
 //! `mlp.down_proj.weight`, …), so this arch only overrides behavior flags.
 
 use crate::config::{Activation, FfnType, ModelArchitecture, ModelConfig, NormType};
+use crate::tensor_keys::attn_bias;
 
 pub struct Gpt2Arch {
     config: ModelConfig,
@@ -65,19 +66,19 @@ impl ModelArchitecture for Gpt2Arch {
 
     /// GPT-2 has bias on every projection (Conv1D layers carry bias).
     fn attn_q_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.q_proj.bias", self.layer_prefix(layer)))
+        attn_bias::q(&self.layer_prefix(layer))
     }
 
     fn attn_k_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.k_proj.bias", self.layer_prefix(layer)))
+        attn_bias::k(&self.layer_prefix(layer))
     }
 
     fn attn_v_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.v_proj.bias", self.layer_prefix(layer)))
+        attn_bias::v(&self.layer_prefix(layer))
     }
 
     fn attn_o_bias_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}self_attn.o_proj.bias", self.layer_prefix(layer)))
+        attn_bias::o(&self.layer_prefix(layer))
     }
 
     fn ffn_up_bias_key(&self, layer: usize) -> Option<String> {

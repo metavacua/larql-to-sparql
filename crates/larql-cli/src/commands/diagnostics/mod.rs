@@ -6,4 +6,5 @@
 //!
 //! See `crates/larql-cli/ROADMAP.md` P0 → "`larql parity`" for the design.
 
+pub mod moe_locality;
 pub mod parity;

@@ -15,7 +15,11 @@ const Q4K_HEADER_BYTES: usize = 16;
 
 /// Decode f16 bits to f32, preserving subnormals (matches Metal's
 /// `decode_f16_metal`, which uses the hardware `half` → `float` cast).
-fn f16_to_f32(bits: u16) -> f32 {
+///
+/// Public because it is the *only* correct f16 decoder in the workspace: the
+/// subnormal branch below fixes a 2× error that a from-scratch reimplementation
+/// reproduces almost every time. Reuse it rather than writing another.
+pub fn f16_to_f32(bits: u16) -> f32 {
     let sign = ((bits >> 15) & 1) as u32;
     let exp = ((bits >> 10) & 0x1F) as i32;
     let mant = (bits & 0x3FF) as u32;

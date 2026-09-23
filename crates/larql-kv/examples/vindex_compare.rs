@@ -37,7 +37,7 @@ fn parse_args() -> Args {
         reference: PathBuf::new(),
         candidate: PathBuf::new(),
         prompts_path: None,
-        model: "google/gemma-3-4b-it".into(),
+        model: String::new(),
         out: None,
         top_k: 5,
         max_seq_len: None,
@@ -101,7 +101,28 @@ At least one of --prompts or --prompt must be provided."
         );
         std::process::exit(1);
     }
+    a.model = resolve_model_id(a.model, &a.reference);
     a
+}
+
+/// The model id to use when `--model` was not given.
+///
+/// Asked of the artifact rather than defaulted to a constant. A hardcoded
+/// default silently disagrees with whatever vindex the user actually passed,
+/// and the disagreement surfaces far away — the wrong tokenizer yields
+/// plausible token ids and the first honest error arrives inside a dequant
+/// parser complaining about byte counts.
+fn resolve_model_id(model: String, vindex: &std::path::Path) -> String {
+    if !model.is_empty() {
+        return model;
+    }
+    larql_vindex::format::model_id_at(vindex).unwrap_or_else(|| {
+        eprintln!(
+            "{} records no model id in index.json — pass --model <id>",
+            vindex.display()
+        );
+        std::process::exit(2);
+    })
 }
 
 fn load_prompts(args: &Args) -> Vec<String> {

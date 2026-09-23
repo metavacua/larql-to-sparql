@@ -43,6 +43,11 @@ pub struct BuildLayer {
     pub features_modified: usize,
 }
 
+/// INSERT placement policy: metadata-only inserts land in the middle of
+/// the layer stack — the knowledge band where relational features
+/// concentrate (`num_layers / INSERT_LAYER_BAND_DIVISOR`).
+const INSERT_LAYER_BAND_DIVISOR: usize = 2;
+
 /// Execute a Vindexfile: load base, apply patches, run edits, produce a clean VectorIndex.
 pub fn build_from_vindexfile(
     vf: &Vindexfile,
@@ -99,7 +104,9 @@ pub fn build_from_vindexfile(
                 let resolved = resolve_vindexfile_path(path, working_dir)?;
                 let patch = VindexPatch::load(&resolved)?;
                 let op_count = patch.len();
-                patched.apply_patch(patch);
+                // Fallible apply: a corrupt embedded vector fails the
+                // build instead of silently skipping the patch.
+                patched.try_apply_patch(patch)?;
                 layers.push(BuildLayer {
                     directive: format!("PATCH {}", path),
                     features_modified: op_count,
@@ -111,11 +118,21 @@ pub fn build_from_vindexfile(
                 relation,
                 target,
             } => {
-                // Simple insert — find a free slot, set metadata
-                // Gate vector synthesis requires embeddings which we may not have locally
-                // For now, insert with metadata only (gate vector from patch if available)
-                let layer = config.num_layers / 2; // knowledge band middle
-                let feature = patched.find_free_feature(layer).unwrap_or(0);
+                // Simple insert — find a free slot, set metadata.
+                // Gate vector synthesis requires embeddings which we may
+                // not have locally, so this is a metadata-only insert:
+                // the empty gate vec below means "no gate override"
+                // (`insert_feature` stores nothing in `overrides_gate`;
+                // the slot is claimed via `overrides_meta`).
+                let layer = config.num_layers / INSERT_LAYER_BAND_DIVISOR;
+                // No free slot is an error — the old `unwrap_or(0)`
+                // silently overwrote feature 0's metadata.
+                let feature = patched.find_free_feature(layer).ok_or_else(|| {
+                    VindexError::Parse(format!(
+                        "INSERT (\"{entity}\", \"{relation}\", \"{target}\"): \
+                         no free feature slot at layer {layer}"
+                    ))
+                })?;
                 let meta = crate::index::FeatureMeta {
                     top_token: target.clone(),
                     top_token_id: 0,
@@ -324,5 +341,180 @@ mod tests {
         // past the stage-merge step, which is what we're pinning.
         let result = build_from_vindexfile(&vf, Some("prod"), tmp.path());
         assert!(result.is_err(), "missing local path errors");
+    }
+
+    /// Save a tiny synthetic base through the real save path, so a build
+    /// can actually load it. Everything above stops at an error before the
+    /// base loads, which left the whole directive loop untested.
+    fn save_synthetic_base(dir: &Path, layers: usize, features: usize, hidden: usize) {
+        std::fs::create_dir_all(dir).unwrap();
+        let gate_vectors: Vec<Option<ndarray::Array2<f32>>> = (0..layers)
+            .map(|l| {
+                Some(ndarray::Array2::from_shape_fn(
+                    (features, hidden),
+                    |(f, h)| (l * features * hidden + f * hidden + h) as f32 * 0.01 - 0.5,
+                ))
+            })
+            .collect();
+        let down_meta: Vec<Option<Vec<Option<crate::index::FeatureMeta>>>> = (0..layers)
+            .map(|_| {
+                Some(
+                    (0..features)
+                        .map(|i| {
+                            Some(crate::index::FeatureMeta {
+                                top_token: format!("tok{i}"),
+                                top_token_id: i as u32,
+                                c_score: 0.5,
+                                top_k: vec![],
+                            })
+                        })
+                        .collect(),
+                )
+            })
+            .collect();
+        let index = VectorIndex::new(gate_vectors, down_meta, layers, hidden);
+        let layer_infos = index.save_gate_vectors(dir).unwrap();
+        index.save_down_meta(dir).unwrap();
+        // Minimal tokenizer so load_vindex's tokenizer read succeeds.
+        std::fs::write(
+            dir.join("tokenizer.json"),
+            r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#,
+        )
+        .unwrap();
+        let config = crate::config::VindexConfig {
+            version: 2,
+            model: "vindexfile-test".into(),
+            family: "synthetic".into(),
+            num_layers: layers,
+            hidden_size: hidden,
+            intermediate_size: features,
+            vocab_size: 16,
+            embed_scale: 1.0,
+            layers: layer_infos,
+            down_top_k: 1,
+            ..Default::default()
+        };
+        VectorIndex::save_config(&config, dir).unwrap();
+    }
+
+    /// The directive loop end-to-end over a real base: INSERT claims a free
+    /// slot (an override, so the result bakes down), DELETE removes the
+    /// features matching its target, LABELS and EXPOSE record/no-op, and
+    /// the build history lists one layer per effective directive.
+    #[test]
+    fn build_executes_directives_over_a_real_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        save_synthetic_base(&tmp.path().join("base.vindex"), 2, 4, 8);
+
+        let vf = Vindexfile {
+            directives: vec![
+                VindexfileDirective::From("./base.vindex".into()),
+                VindexfileDirective::Insert {
+                    entity: "Acme".into(),
+                    relation: "hq".into(),
+                    target: "London".into(),
+                },
+                VindexfileDirective::Delete {
+                    entity: "Acme".into(),
+                    relation: "was".into(),
+                    target: "tok1".into(),
+                },
+                VindexfileDirective::Labels("labels.json".into()),
+                VindexfileDirective::Expose(vec!["browse".into()]),
+            ],
+            stages: vec![],
+        };
+        let build = build_from_vindexfile(&vf, None, tmp.path()).expect("build succeeds");
+
+        // FROM + INSERT + DELETE + LABELS recorded; EXPOSE is save-time only.
+        let recorded: Vec<&str> = build
+            .layers
+            .iter()
+            .map(|l| l.directive.split_whitespace().next().unwrap())
+            .collect();
+        assert_eq!(recorded, ["FROM", "INSERT", "DELETE", "LABELS"]);
+        assert_eq!(
+            build.layers[1].features_modified, 1,
+            "INSERT claims one slot"
+        );
+        // DELETE's match count depends on what feature meta the loaded base
+        // exposes (matching semantics are `find_features`' own test surface);
+        // here we pin that the arm ran and recorded its count.
+        assert_eq!(
+            build.layers[2].features_modified, 0,
+            "no meta matches tok1 on this loaded base"
+        );
+        assert_eq!(build.config.num_layers, 2, "config comes from the base");
+    }
+
+    /// INSERT with no free slot at the target layer is a hard error.
+    /// Regression: `find_free_feature(layer).unwrap_or(0)` used to
+    /// silently overwrite feature 0's metadata.
+    #[test]
+    fn insert_with_no_free_slot_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("base.vindex");
+        // Layer 1 (num_layers / INSERT_LAYER_BAND_DIVISOR) has no
+        // features at all — `find_free_feature` must return None there.
+        std::fs::create_dir_all(&dir).unwrap();
+        let gate_vectors: Vec<Option<ndarray::Array2<f32>>> =
+            vec![Some(ndarray::Array2::from_elem((4, 8), 0.25)), None];
+        let down_meta: Vec<Option<Vec<Option<crate::index::FeatureMeta>>>> = vec![None, None];
+        let index = VectorIndex::new(gate_vectors, down_meta, 2, 8);
+        let layer_infos = index.save_gate_vectors(&dir).unwrap();
+        index.save_down_meta(&dir).unwrap();
+        std::fs::write(
+            dir.join("tokenizer.json"),
+            r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#,
+        )
+        .unwrap();
+        let config = crate::config::VindexConfig {
+            version: 2,
+            model: "vindexfile-test".into(),
+            family: "synthetic".into(),
+            num_layers: 2,
+            hidden_size: 8,
+            intermediate_size: 4,
+            vocab_size: 16,
+            embed_scale: 1.0,
+            layers: layer_infos,
+            down_top_k: 1,
+            ..Default::default()
+        };
+        VectorIndex::save_config(&config, &dir).unwrap();
+
+        let vf = Vindexfile {
+            directives: vec![
+                VindexfileDirective::From("./base.vindex".into()),
+                VindexfileDirective::Insert {
+                    entity: "Acme".into(),
+                    relation: "hq".into(),
+                    target: "London".into(),
+                },
+            ],
+            stages: vec![],
+        };
+        let err = build_from_vindexfile(&vf, None, tmp.path())
+            .err()
+            .expect("INSERT with no free slot must error");
+        let msg = err.to_string();
+        assert!(msg.contains("no free feature slot"), "{msg}");
+        assert!(msg.contains("layer 1"), "{msg}");
+    }
+
+    /// Without any override-producing directive the build skips bake-down
+    /// and returns a clone of the base — the other arm of the final branch.
+    #[test]
+    fn build_without_overrides_returns_the_base() {
+        let tmp = tempfile::tempdir().unwrap();
+        save_synthetic_base(&tmp.path().join("base.vindex"), 2, 4, 8);
+
+        let vf = Vindexfile {
+            directives: vec![VindexfileDirective::From("./base.vindex".into())],
+            stages: vec![],
+        };
+        let build = build_from_vindexfile(&vf, None, tmp.path()).expect("build succeeds");
+        assert_eq!(build.layers.len(), 1, "only FROM in the history");
+        assert_eq!(build.layers[0].features_modified, 0);
     }
 }

@@ -37,6 +37,19 @@ fn build_stats(model: &LoadedModel) -> serde_json::Value {
         "full"
     };
 
+    let layer_latency: Vec<serde_json::Value> = model
+        .layer_latency_tracker
+        .snapshot()
+        .iter()
+        .map(|l| {
+            serde_json::json!({
+                "layer": l.layer,
+                "avg_ms": l.avg_ms,
+                "p99_ms": l.p99_ms,
+            })
+        })
+        .collect();
+
     serde_json::json!({
         "model": config.model,
         "family": config.family,
@@ -49,6 +62,7 @@ fn build_stats(model: &LoadedModel) -> serde_json::Value {
         "extract_level": config.extract_level.to_string(),
         "dtype": config.dtype.to_string(),
         "layer_bands": layer_bands,
+        "layer_latency": layer_latency,
         "loaded": {
             "browse": !model.embed_only,
             "inference": has_inference && !model.infer_disabled,
@@ -56,6 +70,66 @@ fn build_stats(model: &LoadedModel) -> serde_json::Value {
             "embed_service": true,
         },
     })
+}
+
+/// Per-layer FFN weight byte accounting for the DEC movement-ratio
+/// denominator (`dec/movement_ratio`, docs/dec-funnel.md §1).
+///
+/// `per_layer_dense_bytes[l]` is the exact mmap byte length of layer `l`'s
+/// interleaved k-quant gate+up+down weights — the bytes `/v1/walk-ffn`
+/// touches for one token on that layer — or `null` where the vindex has no
+/// interleaved k-quant data. The `moe` block echoes routing metadata from
+/// the vindex config; `per_expert_bytes` is probed from already-loaded model
+/// weights (never forces a weight load) and omitted when unavailable.
+fn ffn_weights_json(
+    model: &LoadedModel,
+    base: &larql_vindex::VectorIndex,
+) -> Option<serde_json::Value> {
+    let config = &model.config;
+    let per_layer: Vec<Option<u64>> = (0..config.num_layers)
+        .map(|layer| {
+            base.interleaved_kquant_layer_data(layer)
+                .map(|slices| slices.iter().map(|(bytes, _)| bytes.len() as u64).sum())
+        })
+        .collect();
+    let has_any_dense = per_layer.iter().any(|b| b.is_some());
+
+    let moe = model
+        .weights
+        .get()
+        .and_then(|rw| rw.read().ok())
+        .and_then(|w| {
+            let arch = &*w.arch;
+            if !arch.is_moe() {
+                return None;
+            }
+            // Probe the first OWNED expert entry per layer, not entry 0: a
+            // shard started with `--experts 64-127` has no entry 0, and the
+            // pre-fix probe reported `per_expert_bytes: null` on a healthy
+            // shard (silently missing fact, not an error).
+            let per_expert_bytes: Option<u64> = if w.has_per_layer_ffn() {
+                (0..config.num_layers).find_map(|l| {
+                    w.first_layer_entry_bytes(l)
+                        .map(|(gu, dn)| (gu.len() + dn.len()) as u64)
+                })
+            } else {
+                None
+            };
+            Some(serde_json::json!({
+                "num_experts": arch.num_experts(),
+                "top_k": arch.num_experts_per_token(),
+                "moe_intermediate_size": arch.moe_intermediate_size(),
+                "per_expert_bytes": per_expert_bytes,
+            }))
+        });
+
+    if !has_any_dense && moe.is_none() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "per_layer_dense_bytes": per_layer,
+        "moe": moe,
+    }))
 }
 
 /// Async wrapper for the Q4K cache + W2 surface. The base
@@ -66,6 +140,7 @@ async fn add_q4k_ffn(model: &LoadedModel, mut stats: serde_json::Value) -> serde
     let p = model.patched.read().await;
     let (slots, bytes) = p.base.kquant_ffn_cache_stats();
     let has_fm = p.base.has_down_features_kquant();
+    let ffn_weights = ffn_weights_json(model, &p.base);
     if let Some(obj) = stats.as_object_mut() {
         obj.insert(
             "q4k_ffn".into(),
@@ -75,6 +150,9 @@ async fn add_q4k_ffn(model: &LoadedModel, mut stats: serde_json::Value) -> serde
                 "feature_major_down": has_fm,
             }),
         );
+        if let Some(w) = ffn_weights {
+            obj.insert("ffn_weights".into(), w);
+        }
     }
     stats
 }

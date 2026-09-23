@@ -255,7 +255,7 @@ pub(super) fn cpu_lm_head_topk(
 /// constrained decoding — the sparse vindex KNN can't apply an arbitrary
 /// vocabulary mask because masked-out tokens might fall outside the top-K.
 /// Same compute kernel as [`backend_lm_head_topk`], just no truncation.
-pub(super) fn backend_lm_head_scores(
+pub(crate) fn backend_lm_head_scores(
     weights: &ModelWeights,
     query: &ndarray::Array1<f32>,
     backend: &dyn ComputeBackend,

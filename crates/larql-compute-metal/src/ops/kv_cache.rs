@@ -40,7 +40,17 @@ pub fn attention_span(t: u32, window_size: u32) -> u32 {
 pub struct LayerKVCache {
     pub k_cache: Buffer, // [max_seq, num_kv_heads, head_dim] f32
     pub v_cache: Buffer, // same
+    /// How many rows are currently stored — the span attention reads.
+    ///
+    /// This is **occupancy, not position**. The two were one field until
+    /// sliding windows needed them apart: a window drops the oldest rows,
+    /// so occupancy falls while the stream position keeps climbing. Using
+    /// this for RoPE would rewind every token after a window slid.
     pub current_len: usize,
+    /// Absolute stream position of the NEXT row to be written — what RoPE
+    /// must be computed at. Monotonic for the life of the sequence; never
+    /// reduced by eviction.
+    pub abs_position: usize,
     pub max_seq: usize,
     pub num_kv_heads: usize,
     pub head_dim: usize,
@@ -54,15 +64,59 @@ impl LayerKVCache {
             k_cache: bufs.output(size),
             v_cache: bufs.output(size),
             current_len: 0,
+            abs_position: 0,
             max_seq,
             num_kv_heads,
             head_dim,
         }
     }
 
-    /// Reset cache (for new prompt).
+    /// Reset cache (for new prompt) — both occupancy and position, since
+    /// a new prompt restarts the stream.
     pub fn clear(&mut self) {
         self.current_len = 0;
+        self.abs_position = 0;
+    }
+
+    /// Record one appended row: occupancy grows and the stream advances.
+    /// Kept together so a future append site cannot bump one and forget
+    /// the other — the failure that would show up as shifted RoPE many
+    /// tokens later.
+    pub fn advance_one(&mut self) {
+        self.current_len += 1;
+        self.abs_position += 1;
+    }
+
+    /// Drop all but the newest `window` rows, sliding the window forward.
+    ///
+    /// Occupancy falls to `window`; `abs_position` is deliberately
+    /// untouched, because the surviving rows keep the RoPE they were
+    /// written with and the next row still belongs at the position the
+    /// stream has actually reached. Softmax over keys is
+    /// order-independent, so nothing needs repairing after the move.
+    ///
+    /// Returns the number of rows dropped.
+    pub fn evict_to_window(&mut self, window: usize) -> usize {
+        if window == 0 || self.current_len <= window {
+            return 0;
+        }
+        let drop = self.current_len - window;
+        let row = self.num_kv_heads * self.head_dim;
+        for buf in [&self.k_cache, &self.v_cache] {
+            let ptr = buf.contents() as *mut f32;
+            if ptr.is_null() {
+                return 0;
+            }
+            // SAFETY: buffers are host-visible and sized `max_seq * row`;
+            // `current_len <= max_seq`, so both ranges are in bounds and
+            // `copy_within` semantics handle the overlap.
+            unsafe {
+                let slice = std::slice::from_raw_parts_mut(ptr, self.max_seq * row);
+                slice.copy_within(drop * row..self.current_len * row, 0);
+            }
+        }
+        self.current_len = window;
+        drop
     }
 }
 
@@ -272,6 +326,129 @@ mod tests {
         let d = Device::system_default().expect("Metal device available on test host");
         let bufs = BufferCache::new(&d);
         (bufs, d)
+    }
+
+    // ── occupancy vs absolute position ──────────────────────────────
+    //
+    // `current_len` used to be both "rows stored" and "stream position".
+    // A sliding window separates them: eviction lowers occupancy while
+    // the stream keeps advancing. If they re-merge, RoPE silently rewinds
+    // on every token after a window slides — which surfaces as fluent but
+    // wrong output, the worst failure shape to debug.
+
+    /// One row appended advances both counters together.
+    #[test]
+    fn advance_one_moves_occupancy_and_position_together() {
+        let (bufs, _d) = fresh_cache();
+        let mut c = LayerKVCache::new(&bufs, 8, 2, 4);
+        assert_eq!((c.current_len, c.abs_position), (0, 0));
+        c.advance_one();
+        c.advance_one();
+        assert_eq!((c.current_len, c.abs_position), (2, 2));
+    }
+
+    /// Eviction lowers occupancy and leaves the stream position alone.
+    /// This is the whole invariant the window rests on.
+    #[test]
+    fn eviction_lowers_occupancy_but_never_the_stream_position() {
+        let (bufs, _d) = fresh_cache();
+        let mut c = LayerKVCache::new(&bufs, 16, 2, 4);
+        for _ in 0..10 {
+            c.advance_one();
+        }
+        assert_eq!((c.current_len, c.abs_position), (10, 10));
+
+        let dropped = c.evict_to_window(4);
+        assert_eq!(dropped, 6);
+        assert_eq!(c.current_len, 4, "occupancy must fall to the window");
+        assert_eq!(
+            c.abs_position, 10,
+            "stream position must NOT rewind — the next row still belongs at 10"
+        );
+
+        // Appending after eviction continues the stream, it does not restart it.
+        c.advance_one();
+        assert_eq!((c.current_len, c.abs_position), (5, 11));
+    }
+
+    /// Eviction keeps the NEWEST rows, in order.
+    #[test]
+    fn eviction_keeps_the_newest_rows_in_order() {
+        let (bufs, _d) = fresh_cache();
+        let (kv_heads, head_dim) = (2usize, 4usize);
+        let row = kv_heads * head_dim;
+        let mut c = LayerKVCache::new(&bufs, 16, kv_heads, head_dim);
+
+        // Stamp each row with its index so survivors are identifiable.
+        let rows = 10usize;
+        unsafe {
+            for buf in [&c.k_cache, &c.v_cache] {
+                let ptr = buf.contents() as *mut f32;
+                let slice = std::slice::from_raw_parts_mut(ptr, 16 * row);
+                for r in 0..rows {
+                    for i in 0..row {
+                        slice[r * row + i] = r as f32;
+                    }
+                }
+            }
+        }
+        for _ in 0..rows {
+            c.advance_one();
+        }
+
+        let window = 4usize;
+        c.evict_to_window(window);
+
+        unsafe {
+            for buf in [&c.k_cache, &c.v_cache] {
+                let ptr = buf.contents() as *const f32;
+                let slice = std::slice::from_raw_parts(ptr, 16 * row);
+                for r in 0..window {
+                    let expected = (rows - window + r) as f32;
+                    assert_eq!(
+                        slice[r * row],
+                        expected,
+                        "row {r} after eviction should hold original row {expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A window at or above occupancy is a no-op — nothing moves, so the
+    /// unwindowed path pays nothing for the affordance existing.
+    #[test]
+    fn eviction_is_a_noop_when_the_window_cannot_bind() {
+        let (bufs, _d) = fresh_cache();
+        let mut c = LayerKVCache::new(&bufs, 8, 2, 4);
+        for _ in 0..3 {
+            c.advance_one();
+        }
+        assert_eq!(c.evict_to_window(3), 0);
+        assert_eq!(c.evict_to_window(99), 0);
+        assert_eq!((c.current_len, c.abs_position), (3, 3));
+    }
+
+    /// A zero window is refused rather than emptying the cache — the same
+    /// sentinel confusion that already cost a bug in the pipeline spec.
+    #[test]
+    fn a_zero_window_evicts_nothing() {
+        let (bufs, _d) = fresh_cache();
+        let mut c = LayerKVCache::new(&bufs, 8, 2, 4);
+        c.advance_one();
+        assert_eq!(c.evict_to_window(0), 0);
+        assert_eq!(c.current_len, 1);
+    }
+
+    /// A new prompt restarts the stream, so `clear` resets both.
+    #[test]
+    fn clear_resets_occupancy_and_position() {
+        let (bufs, _d) = fresh_cache();
+        let mut c = LayerKVCache::new(&bufs, 8, 2, 4);
+        c.advance_one();
+        c.advance_one();
+        c.clear();
+        assert_eq!((c.current_len, c.abs_position), (0, 0));
     }
 
     #[test]

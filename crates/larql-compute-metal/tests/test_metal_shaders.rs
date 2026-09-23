@@ -1063,6 +1063,16 @@ fn fused_attention_single_token() {
         4,
         &rotary_dim_val as *const u32 as *const std::ffi::c_void,
     );
+    // Buffers 14/15: attention sinks. Bound even when unused — Metal has
+    // no null buffer, and an unbound `has_sinks` would be read as garbage.
+    let no_sinks = [0.0f32];
+    enc.set_bytes(14, 4, no_sinks.as_ptr() as *const std::ffi::c_void);
+    let has_sinks_val = 0u32;
+    enc.set_bytes(
+        15,
+        4,
+        &has_sinks_val as *const u32 as *const std::ffi::c_void,
+    );
     enc.dispatch_thread_groups(
         metal::MTLSize::new(num_q as u64, seq_len as u64, 1),
         metal::MTLSize::new(256, 1, 1),
@@ -1370,6 +1380,7 @@ fn full_pipeline_seq1_produces_nonzero() {
     let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
 
     let layer = larql_compute::FullPipelineLayer {
+        attn_sinks: None,
         wq: larql_compute::QuantWeight {
             data: &wq_data,
             scales: Some(&q8_s_q),
@@ -1456,9 +1467,23 @@ fn full_pipeline_seq1_produces_nonzero() {
     assert!(result.is_some(), "full_pipeline_q4 should return Some");
     let output = result.unwrap();
     assert_eq!(output.len(), hidden);
+    // Finiteness is checked separately from magnitude. `v.abs() > 1e-6` is
+    // false for NaN, so a NaN-filled result used to fail here with the message
+    // "output should be nonzero" — which sent the investigation hunting for a
+    // zeroed buffer when in fact every element was NaN. See the construction
+    // lock in `backend::MetalBackend::with_options`.
+    let non_finite = output.iter().filter(|v| !v.is_finite()).count();
+    assert_eq!(
+        non_finite,
+        0,
+        "Pipeline output has {non_finite}/{} non-finite values; head={:?}",
+        output.len(),
+        &output[..output.len().min(8)]
+    );
     assert!(
         output.iter().any(|&v| v.abs() > 1e-6),
-        "Pipeline output should be nonzero"
+        "Pipeline output is finite but all-zero; head={:?}",
+        &output[..output.len().min(8)]
     );
 }
 

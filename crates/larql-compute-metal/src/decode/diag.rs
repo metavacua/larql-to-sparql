@@ -21,7 +21,7 @@ pub(super) fn log_decode_entry(
     inter: usize,
     layers: &[FullPipelineLayer],
 ) {
-    if !options::env_flag(options::ENV_DECODE_DEBUG) || call_n >= 3 {
+    if !options::decode_debug_enabled() || call_n >= 3 {
         return;
     }
     let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();

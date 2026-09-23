@@ -258,8 +258,12 @@ impl MarkovResidualCodecEngine {
             // Lossy codec → invalidate cold_kv.
             rs.cold_kv = None;
         }
-        self.store = Some(rs);
         self.abs_position += 1;
+        // Keep the store's own position cursor in sync: a dispatch
+        // failure on a later step falls back to the walk path, which
+        // reads `rs.next_position` for RoPE.
+        rs.next_position = self.abs_position;
+        self.store = Some(rs);
         if self.profiling {
             self.profile.decode_total.record(t_total);
         }
@@ -490,6 +494,29 @@ mod tests {
             n_after > n_before,
             "second decode should extend cold_encoded"
         );
+    }
+
+    #[test]
+    fn decode_step_via_dispatch_keeps_store_position_cursor_in_sync() {
+        // Twin of the markov_residual test: `rs.next_position` feeds the
+        // walk fallback's RoPE after a dispatch failure and must track
+        // `self.abs_position` step for step.
+        set_w10_disable(false);
+        let (mut engine, weights, index) = fixture(Some(8));
+        engine
+            .try_prefill_via_dispatch(&weights, &index, &[0u32, 1])
+            .expect("prefill");
+        for tok in 2..5u32 {
+            engine
+                .decode_step_via_dispatch(&weights, &index, tok)
+                .expect("decode");
+            let rs = engine.store.as_ref().unwrap();
+            assert_eq!(
+                rs.next_position, engine.abs_position,
+                "store position cursor fell behind the dispatch cursor"
+            );
+        }
+        assert_eq!(engine.abs_position, 5);
     }
 
     #[test]

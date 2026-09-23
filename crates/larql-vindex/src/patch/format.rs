@@ -184,24 +184,25 @@ impl VindexPatch {
 // ═══════════════════════════════════════════════════════════════
 
 /// Encode a gate vector (f32 slice) as base64 string.
+///
+/// Floats are serialised explicitly little-endian. All currently
+/// supported targets are LE, so this is byte-identical to the old
+/// native-endian encoder — it just makes `.vlp` payloads portable.
 pub fn encode_gate_vector(vec: &[f32]) -> String {
-    let bytes: &[u8] =
-        unsafe { std::slice::from_raw_parts(vec.as_ptr() as *const u8, vec.len() * 4) };
-    base64_encode(bytes)
+    base64_encode(&crate::format::le_floats::encode_f32_le(vec))
 }
 
 /// Decode a base64 string back to f32 vector.
 pub fn decode_gate_vector(b64: &str) -> Result<Vec<f32>, VindexError> {
     let bytes = base64_decode(b64)?;
-    if bytes.len() % 4 != 0 {
+    if bytes.len() % std::mem::size_of::<f32>() != 0 {
         return Err(VindexError::Parse(
             "gate vector bytes not aligned to f32".into(),
         ));
     }
-    let floats: Vec<f32> =
-        unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const f32, bytes.len() / 4) }
-            .to_vec();
-    Ok(floats)
+    // Explicit LE decode — the decoded byte Vec has no f32 alignment
+    // guarantee, so a `&[f32]` reinterpret-cast would be UB.
+    Ok(crate::format::le_floats::decode_f32_le(&bytes))
 }
 
 // Simple base64 (no external dependency). Used by `encode_gate_vector`
@@ -246,7 +247,13 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, VindexError> {
     let mut result = Vec::with_capacity(input.len() * 3 / 4);
     for chunk in input.chunks(4) {
         if chunk.len() < 4 {
-            break;
+            // Valid base64 is always a multiple of 4 chars ('=' padded).
+            // A trailing 1–3 char chunk is truncated input — silently
+            // dropping it would decode a shorter vector than encoded.
+            return Err(VindexError::Parse(format!(
+                "truncated base64: {} trailing chars (length must be a multiple of 4)",
+                chunk.len()
+            )));
         }
         let a = val(chunk[0])?;
         let b = val(chunk[1])?;
@@ -304,6 +311,40 @@ mod tests {
     fn decode_rejects_invalid_char() {
         let result = decode_gate_vector("!!!!");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_rejects_truncated_base64() {
+        // Regression: a trailing chunk of 1–3 chars used to be silently
+        // dropped. The nasty case: 4 full chunks decode to 12 bytes
+        // (exactly 3 f32s), so truncating a 4-float payload to 18 chars
+        // used to return Ok with a silently shorter vector — the f32
+        // alignment check couldn't catch it. Must be an error.
+        const FULL_CHUNK_CHARS: usize = 18; // 4 full chunks + 2 trailing
+        let full = encode_gate_vector(&[1.0f32, 2.0, 3.0, 4.0]);
+        let truncated = &full[..FULL_CHUNK_CHARS];
+        assert!(
+            decode_gate_vector(truncated).is_err(),
+            "silently-droppable truncation must fail"
+        );
+        // Any trailing 1–3 char chunk is truncated input, whatever the
+        // decoded prefix length.
+        let one_float = encode_gate_vector(&[1.0f32]);
+        for cut in 1..4 {
+            let t = &one_float[..one_float.len() - cut];
+            assert!(decode_gate_vector(t).is_err(), "{t:?} should fail");
+        }
+    }
+
+    #[test]
+    fn decode_from_unaligned_heap_buffer_is_exact() {
+        // The decoded byte Vec has no f32 alignment guarantee; the LE
+        // decode must be value-exact regardless of buffer alignment.
+        let vec: Vec<f32> = (0..17).map(|i| i as f32 * 0.37 - 3.0).collect();
+        let back = decode_gate_vector(&encode_gate_vector(&vec)).unwrap();
+        for (a, b) in vec.iter().zip(back.iter()) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
     }
 
     // ── PatchOp::key ─────────────────────────────────────────────────────

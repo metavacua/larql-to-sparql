@@ -72,7 +72,7 @@ measured):** tier-0 fires on *notation*, never on inferred intent — strong gly
 trailing `=`. Everything else is the designed fallthrough: deciding whether "9 - 5"
 is arithmetic is an engagement question and belongs to the model (tier-1 exhaust, or
 an FR3-style explicit classify), not to surface heuristics. Adversarial prose corpus:
-0 false fires (`examples/scanner_adversarial.rs`).
+0 false fires (`chris-experiments/larql_probes/examples/misc/scanner_adversarial.rs`).
 
 **Tier 1 — engagement probe (disguised math). DEMOTED (A11).** Ridge probe on the L8
 residual at the last prompt token, reading arithmetic-engagement exhaust (math vs

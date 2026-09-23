@@ -91,6 +91,16 @@ pub struct MetalBackend {
     //  `FfnKernels` (the `ffn` field).)
     /// KV cache for decode mode — initialized on first decode_token call.
     pub(crate) kv_cache: std::sync::Mutex<Option<ops::kv_cache::KVCache>>,
+    /// Engine-requested sliding window for the sequence currently being
+    /// decoded, or `NO_ENGINE_WINDOW` when unwindowed.
+    ///
+    /// Distinct from the architecture's own per-layer SWA, which comes
+    /// from the layer spec; the effective window is the narrower of the
+    /// two. Carried on the backend rather than threaded through
+    /// `build_arch_params` because it belongs to the *sequence*, not the
+    /// architecture — every call site that builds a layer spec would
+    /// otherwise have to learn about a caller's decode policy.
+    pub(crate) engine_window: std::sync::atomic::AtomicUsize,
     /// Pre-allocated MoE scratch for `decode_token_q4k_moe` — keyed
     /// by `(top_k, hidden, intermediate_size)`. Reused across decode
     /// calls so the ~15 buffer allocations (~120ms on Gemma 4 26B-A4B,
@@ -154,6 +164,35 @@ impl MetalBackend {
     /// Create a Metal backend with explicit options. Returns `None` if
     /// no Metal device is available.
     pub fn with_options(backend_options: BackendOptions) -> Option<Self> {
+        // Backend construction is serialised process-wide.
+        //
+        // Building a backend compiles the entire shader library from source
+        // (`new_library_with_source`) and then creates several dozen pipeline
+        // state objects, all against the shared `system_default()` device.
+        // Doing that from several threads at once intermittently yields a
+        // backend whose pipelines compute garbage: `full_pipeline_q4` returned
+        // an all-**NaN** hidden state in roughly one run in ten of
+        // `test_metal_shaders`, which constructs 54 backends concurrently.
+        // Serialising construction fixed it — 0 failures in 55 runs, against a
+        // ~10 % per-run rate before (P(fluke) ≈ 0.003).
+        //
+        // Two hypotheses were tested and refuted first, so this is not a
+        // guess at a symptom: zeroing every scratch buffer on hand-out did
+        // **not** help (so it is not an uninitialised-memory read), and the
+        // failure never reproduces under `--test-threads=1` (so it is not
+        // input- or dimension-dependent).
+        //
+        // The cost is nil where it matters: production builds one backend per
+        // process, and this is a cold path — the lock is uncontended outside
+        // test binaries. It is deliberately held across the whole function
+        // rather than just the library compile, because pipeline creation
+        // shares the same device and narrowing it would be re-guessing at
+        // which half is unsafe.
+        static BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _build_guard = BUILD_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
         let device = Device::system_default()?;
         let queue = device.new_command_queue();
 
@@ -242,6 +281,7 @@ impl MetalBackend {
             attention,
             ffn,
             kv_cache: std::sync::Mutex::new(None),
+            engine_window: std::sync::atomic::AtomicUsize::new(NO_ENGINE_WINDOW),
             moe_scratch: std::sync::Mutex::new(None),
             ple_inputs: std::sync::Mutex::new(None),
             f32_gemv_pipeline,
@@ -381,6 +421,42 @@ impl PleInputBuffer {
     }
 }
 
+impl MetalBackend {
+    /// Set the engine-requested window for the sequence being decoded.
+    /// `None` clears it. See [`MetalBackend::effective_window_for`].
+    pub(crate) fn set_engine_window(&self, window: Option<usize>) {
+        self.engine_window.store(
+            window.unwrap_or(NO_ENGINE_WINDOW),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    /// Narrow a layer's architectural window by the engine's, if any.
+    ///
+    /// Both use `0` for "unbounded", so this is a min over the non-zero
+    /// values. The narrower wins: an engine promising a 256-token window
+    /// must not attend further just because the architecture allows
+    /// 1024, and a sliding layer must not attend further just because
+    /// the engine is unwindowed.
+    pub(crate) fn effective_window_for(&self, arch_window: u32) -> u32 {
+        let engine = self
+            .engine_window
+            .load(std::sync::atomic::Ordering::Relaxed) as u32;
+        match (arch_window, engine) {
+            (0, e) => e,
+            (a, 0) => a,
+            (a, e) => a.min(e),
+        }
+    }
+}
+
+/// `engine_window` value meaning "no engine-imposed window".
+///
+/// Zero is the same sentinel the kernel uses for `window_size`, so the
+/// backend-side and shader-side notions of "unbounded" agree without a
+/// translation step.
+pub(crate) const NO_ENGINE_WINDOW: usize = 0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,5 +553,62 @@ mod tests {
         assert!(m.cache_size() == 0);
         // decode_flags is plain-data; just confirm it's accessible.
         let _flags = m.decode_flags;
+    }
+
+    /// Backends built concurrently must all compute correctly.
+    ///
+    /// Regression guard for the construction lock in [`MetalBackend::with_options`].
+    /// Without it, compiling the shader library and its pipeline states from
+    /// several threads at once against the shared device intermittently
+    /// produced a backend whose kernels returned NaN — about one run in ten of
+    /// the 54-backend `test_metal_shaders` binary.
+    ///
+    /// Being a race, this reproduces *probabilistically*: it is a net that
+    /// catches removal of the lock over repeated CI runs, not a deterministic
+    /// proof on any single one. Every thread runs the same deterministic op,
+    /// so a miscompiled pipeline shows up as either a non-finite value or a
+    /// disagreement with its peers.
+    #[test]
+    fn concurrently_constructed_backends_all_compute_correctly() {
+        const THREADS: usize = 8;
+        const N: usize = 64;
+
+        use larql_compute::backend::MatMul;
+        use ndarray::Array2;
+
+        let a = Array2::from_shape_fn((N, N), |(r, c)| ((r + c) as f32 * 0.01).sin());
+        let b = Array2::from_shape_fn((N, N), |(r, c)| ((r * 2 + c) as f32 * 0.02).cos());
+
+        let results: Vec<Array2<f32>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..THREADS)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let m = backend();
+                        m.matmul(a.view(), b.view())
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
+        let reference = &results[0];
+        for (t, got) in results.iter().enumerate() {
+            assert_eq!(got.shape(), &[N, N], "thread {t} returned the wrong shape");
+            let non_finite = got.iter().filter(|v| !v.is_finite()).count();
+            assert_eq!(
+                non_finite, 0,
+                "thread {t}: {non_finite} non-finite values — miscompiled pipeline"
+            );
+            // Same inputs, same kernel: every backend must agree exactly.
+            let max_diff = got
+                .iter()
+                .zip(reference.iter())
+                .map(|(g, r)| (g - r).abs())
+                .fold(0.0f32, f32::max);
+            assert!(
+                max_diff < 1e-5,
+                "thread {t} disagrees with thread 0 by {max_diff}"
+            );
+        }
     }
 }

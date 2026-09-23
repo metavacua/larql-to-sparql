@@ -36,6 +36,7 @@
 //! ```
 
 pub mod kernel_profile;
+pub mod mxfp4_layout;
 pub mod shader_bench;
 
 // Re-export the stage-level profiling types from decode::profile so callers

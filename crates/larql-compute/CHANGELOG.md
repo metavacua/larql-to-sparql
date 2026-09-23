@@ -4,6 +4,65 @@ Reverse-chronological ship log. Entries migrated from ROADMAP.md on
 2026-05-09; pre-2026-05-09 entries preserve the date and voice they were
 originally written in.
 
+## 2026-07-29
+
+### Bandwidth roofline measured; spin-pool E-core collapse found and fixed (3.3× on non-bench paths)
+
+Full writeup: [`docs/diagnoses/memory-bandwidth-roofline.md`](../../docs/diagnoses/memory-bandwidth-roofline.md).
+
+**Attainable bandwidth, measured** (M3 Max, AC, quiet). New probe
+`examples/membw_probe.rs`: **CPU cluster 127 GB/s** read — saturating at *two*
+threads (1t 76 → 2t 122 → flat to 16t) — against a **GPU 367 GB/s** (from the
+existing `diag_profile_kernels`' `f32_gemv` streaming 2.68 GB) and a 400 GB/s SoC
+spec. **The CPU cluster reaches 31% of the chip's bandwidth; the GPU reaches 92%,
+a 2.9× structural advantage that no CPU kernel can close.** The probe self-checks
+against the C12 issue-rate trap by running each arm DRAM- *and* cache-resident:
+`read` gives 11.4×, so the 127 is genuinely memory-limited; `copy` gives 1.05× and
+is reported as a **floor by design** (stores reach memory in both arms, so that
+control cannot isolate issue rate — do not "fix" it by loosening the threshold).
+
+**The standing "larql extracts ~47 GB/s" figure was stale.** It came from
+`bench_mt_shapes`, which hand-rolls `par_chunks_mut` over **rayon** — the geometry
+production ran until the spin pool landed 2026-06-13. New `bench_mt_production`
+arm calls the real entry point (`q4k_q8k_matvec_parallel`) at the same shapes:
+that same `kv_proj` shape runs at **98.7 GB/s**. Achieved on per-layer shapes is
+**64–116 GB/s = 50–91% of attainable, not 37%** — CPU decode is far closer to
+finished than the record implied, with ≤~1.6× theoretical headroom left.
+
+**Bug: 3.5× collapse on every non-bench path.** `spin_pool::global()` sized itself
+from `rayon::current_num_threads()`, and `configure_rayon_threads` is called from
+**exactly one place** — the CLI bench path, which picks 8 on Apple silicon.
+`larql run` / `larql serve` configure nothing and inherited
+`available_parallelism()` = 16 = 12 P + 4 E. The pool partitions chunks
+*statically*, so an efficiency core gets a performance core's share and the
+completion barrier waits on the slowest participant (rayon work-steals instead,
+which is why this is specific to the pool). At 65536×2816: **16 participants
+33 GiB/s, 12 → 124, 8 → 126.7**; end-to-end on the 26B, **10.6 tok/s at 16 vs
+37.3 at 8**. Fixed by capping `global()` at the performance-core count
+(`hw.nperflevels` / `hw.perflevel0.logicalcpu`), in the **library** rather than
+the CLI so larql-server and embedders get it too; an explicitly configured
+smaller count still wins. **Verified 10.6 → 34.9 tok/s (3.3×).** Bandwidth-bound
+decode gives up nothing — attainable read saturates at two threads, so the
+E-cores were contributing ~nothing before they became stragglers.
+
+Two things worth carrying forward. **The benchmark harness was structurally
+unable to observe this**: bench was the only path that set a thread count, so
+every historical spin-pool number (+28%, ~35 tok/s, "9% ahead of llama.cpp") was
+taken on the one configuration that avoids the bug. And **criterion's default
+sampling flattered it** — short runs showed 58.5 GiB/s where
+`--measurement-time 20` showed a consistent 33; use long sampling when the pool
+spins.
+
+`run_chunks` also moved from round-robin striding to contiguous blocks (equally
+static, so the `completed == num_chunks` barrier argument is untouched), pinned by
+`each_participant_runs_a_contiguous_block` since the existing exactly-once test
+passes under striding too. That was the *first* hypothesis — a strided owner walks
+the whole slab at an `n × chunk_bytes` stride and defeats the prefetcher — and it
+is **not** the fix: blocks alone did not close the gap, participant count did. It
+is kept for the prefetch property.
+
+Tests: 775 larql-compute (+1) / 1309 larql-inference / 766 larql-kv green.
+
 ## 2026-05-09
 
 ### QKV defuse promoted (Track D, +1.6 tok/s, magnitude undershoot)
@@ -122,7 +181,12 @@ Bench (Gemma 4 31B Q4K, M3 Max, single-machine localhost):
 
 Bottleneck at 6.5 tok/s: attention at 92ms/token (60%). Two-pass batch structure
 (capture pass + apply pass) doubles the local Metal attention cost. FFN at 60ms
-is at the 400 GB/s GPU bandwidth ceiling for 11.7 GB/token of Q4K weight reads.
+is near the GPU bandwidth ceiling for 11.7 GB/token of Q4K weight reads.
+
+> **Corrected 2026-07-29:** originally "at the 400 GB/s GPU bandwidth ceiling".
+> 400 GB/s is the SoC spec sheet; measured GPU-attainable read is **367 GB/s**
+> and the FFN kernels sit at 273–314 (74–85% of attainable). See
+> [`docs/diagnoses/memory-bandwidth-roofline.md`](../../docs/diagnoses/memory-bandwidth-roofline.md).
 
 **Build separation required**: `--features metal-experts` must NOT be used for
 `larql-cli` (causes 10.7 vs 18.9 tok/s regression on Gemma 4 26B-A4B due to Metal

@@ -137,7 +137,20 @@ fn predict_kquant_hidden_inner(
                 &h,
                 layer,
             ) {
-                if let Some(h_out) = ffn_backend.forward_moe_full_layer(layer, &h_post_attn) {
+                let moe_out = match ffn_backend.forward_moe_full_layer(layer, &h_post_attn) {
+                    Ok(out) => out,
+                    Err(refusal) => {
+                        // Same limitation as `ffn_or_moe_layer`: this loop
+                        // returns a hidden state, not a result. Named, not
+                        // silent.
+                        eprintln!(
+                            "[remote_ffn] layer {layer} refused ({}): {refusal}",
+                            refusal.kind()
+                        );
+                        None
+                    }
+                };
+                if let Some(h_out) = moe_out {
                     h = h_out;
                     weights.tensors.remove(&q_key);
                     weights.tensors.remove(&k_key);

@@ -31,12 +31,14 @@
 
 pub mod capability;
 pub mod decode;
+pub mod factory;
 pub mod helpers;
 pub mod matmul;
 pub mod quant_matvec;
 
 pub use capability::Capability;
 pub use decode::{DecodeBackend, DecodeStateDump, ProfileTimings, StateDumpMask};
+pub use factory::{backend_from_spec, BackendCtor, BackendKind, BackendSelectError};
 pub use helpers::{dot_proj_gpu, matmul_gpu};
 pub use matmul::{MatMul, MatMulOp};
 pub use quant_matvec::QuantMatVec;

@@ -95,10 +95,20 @@ pub fn metal_vs_cpu_debug() -> bool {
     cached_is_set(&CACHE, METAL_VS_CPU_DEBUG)
 }
 
-/// `LARQL_MOE_BATCH_MODE=<mode>` — override the auto-selected batch mode.
-/// Returns `None` when unset; the caller decides what's valid.
-pub fn moe_batch_mode() -> Option<String> {
+/// Uncached read of `LARQL_MOE_BATCH_MODE` — the cache initialiser, kept
+/// separate so tests can exercise the env parsing without pinning the
+/// process-wide cache.
+fn moe_batch_mode_uncached() -> Option<String> {
     std::env::var(MOE_BATCH_MODE).ok()
+}
+
+/// `LARQL_MOE_BATCH_MODE=<mode>` — override the auto-selected batch mode.
+/// Returns `None` when unset; the caller decides what's valid. Cached in a
+/// `OnceLock` like the sibling flags — this is hit from the gRPC unary
+/// `expert_batch` path once per request.
+pub fn moe_batch_mode() -> Option<&'static str> {
+    static CACHE: OnceLock<Option<String>> = OnceLock::new();
+    CACHE.get_or_init(moe_batch_mode_uncached).as_deref()
 }
 
 #[cfg(test)]
@@ -143,12 +153,24 @@ mod tests {
     }
 
     #[test]
-    fn moe_batch_mode_returns_none_when_unset_or_value_when_set() {
+    fn moe_batch_mode_uncached_returns_none_when_unset_or_value_when_set() {
+        // The uncached initialiser reflects the env directly; the public
+        // accessor pins whatever the process saw first (same OnceLock
+        // semantics as the sibling flags), so env round-trips are asserted
+        // on the initialiser only.
         std::env::remove_var(MOE_BATCH_MODE);
-        assert!(moe_batch_mode().is_none());
+        assert!(moe_batch_mode_uncached().is_none());
         std::env::set_var(MOE_BATCH_MODE, "stream");
-        assert_eq!(moe_batch_mode().as_deref(), Some("stream"));
+        assert_eq!(moe_batch_mode_uncached().as_deref(), Some("stream"));
         std::env::remove_var(MOE_BATCH_MODE);
+    }
+
+    #[test]
+    fn moe_batch_mode_cached_is_stable_across_calls() {
+        // Whatever the first call observed, later calls must return the
+        // identical cached value regardless of env churn in other tests.
+        let first = moe_batch_mode();
+        assert_eq!(moe_batch_mode(), first);
     }
 
     #[test]

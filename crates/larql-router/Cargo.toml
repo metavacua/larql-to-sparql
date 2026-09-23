@@ -16,6 +16,12 @@ path = "src/main.rs"
 
 [dependencies]
 larql-router-protocol = { path = "../larql-router-protocol" }
+# Walk-ffn wire constants + frame codec are single-sourced in
+# larql-inference (ROADMAP hardening item 16). The router imports
+# `BINARY_CT`/`BATCH_MARKER` from there instead of keeping drift-prone
+# local copies; DEC-1A's direction codecs (later phases) land in the
+# same module and will be consumed from here too.
+larql-inference = { path = "../larql-inference" }
 
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }

@@ -68,10 +68,7 @@ impl<'a> WalkFfn<'a> {
 
         // Element-wise activation. Mirrors `ffn_decode_step_native`'s
         // arch dispatch — GeluTanh for Gemma 3 / Gemma 4, SiLU otherwise.
-        let use_gelu = matches!(
-            arch.activation(),
-            larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
-        );
+        let use_gelu = arch.activation().uses_gelu_tanh_gate_up();
         let activation = if use_gelu {
             crate::ffn::gelu_tanh_gate_up(&gate, &up)
         } else {

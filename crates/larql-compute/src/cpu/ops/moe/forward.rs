@@ -53,9 +53,19 @@ pub fn cpu_moe_forward(
         return vec![0.0f32; hidden];
     }
 
-    let expert_input = moe_expert_input(h, moe, norm_offset, eps);
+    let mut expert_input = moe_expert_input(h, moe, norm_offset, eps);
     let router_in = moe_router_input(h, &expert_input, moe, norm_offset, eps);
     let (expert_indices, expert_weights) = moe_route_from_router_input(&router_in, moe);
+
+    // Latent-axis sparsity probe (`latent_mask.rs`) — opt-in, default off =
+    // byte-identical. Applied AFTER routing on purpose: the trained router
+    // must still choose the same experts with the same weights, so the probe
+    // reduces only the information fed to them, never the expert population.
+    // `router_in` is computed from the UNMASKED input above for that reason.
+    let latent_retained = super::latent_mask::active().map(|m| {
+        let retained = m.mask_in_place(&mut expert_input);
+        (m, retained)
+    });
     let debug_logits = if options::moe_debug_enabled() {
         let mut logits = matmul_vec(&router_in, moe.router_proj, num_experts, hidden);
         softmax(&mut logits);
@@ -275,6 +285,18 @@ pub fn cpu_moe_forward(
 
     let t_par = t_par_start.elapsed();
     let t_sum = std::time::Duration::ZERO;
+
+    // Both-sides variant of the latent probe: mask the SAME channels on the
+    // aggregated expert output, the analogue of masking the pooled latent
+    // before a shared up-projection. This is what makes `down` shrink too —
+    // input-side alone leaves a third of expert bytes fixed, capping the
+    // lever at 1.448× regardless of retention.
+    let mut expert_out = expert_out;
+    if let Some((m, retained)) = latent_retained.as_ref() {
+        if m.both_sides {
+            m.apply(&mut expert_out, retained);
+        }
+    }
 
     // Post-experts output policy (Gemma 4: `post_feedforward_layernorm_2`)
     let t_post_start = std::time::Instant::now();

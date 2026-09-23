@@ -35,6 +35,24 @@ pub(super) fn write_norms_and_router(
             arch.post_feedforward_layernorm_key(layer),
             arch.attn_q_norm_key(layer),
             arch.attn_k_norm_key(layer),
+            // Attention projection biases and sinks. Added 2026-07-29 —
+            // previously unrequested here, so architectures that declare
+            // biases (qwen, gpt2, starcoder2) lost them at extraction
+            // while the attention kernels kept asking for them, and
+            // GPT-OSS lost biases *and* sinks. See `docs/k3-funnel.md`
+            // §4.6.1.
+            arch.attn_q_bias_key(layer),
+            arch.attn_k_bias_key(layer),
+            arch.attn_v_bias_key(layer),
+            arch.attn_o_bias_key(layer),
+            arch.attn_sinks_key(layer),
+            // LayerNorm biases. Added 2026-07-31 for the same reason as the
+            // attention biases above: nothing named them, so GPT-2 and
+            // StarCoder2 lost the `β` of every `γ·x̂ + β` at extraction while
+            // the Metal `layer_norm` shader implemented `+ bias` and always
+            // took its no-bias variant. `None` for RMSNorm architectures.
+            arch.input_layernorm_bias_key(layer),
+            arch.post_attention_layernorm_bias_key(layer),
             // Gemma 4 per-layer scalar multiplier. Stored as a 0-D scalar
             // in safetensors, surfaced through WeightSource as a 1-element
             // vector. The forward path multiplies h by this value after
@@ -70,7 +88,13 @@ pub(super) fn write_norms_and_router(
         // MoE router + norms (hybrid MoE, e.g. Gemma 4 26B A4B).
         // router.proj.weight is 2D [num_experts, hidden] — flatten and store as "vector".
         // All other MoE keys are 1D vectors.
-        if arch.is_hybrid_moe() {
+        // Pure MoE (GraniteMoE, OLMoE) needs its router in the vector store
+        // too — the forward resolves it via `weights.vectors.get(router_key)`.
+        // Gating on hybrid alone wrote router_weights.bin (which only DESCRIBE
+        // reads) while leaving the forward's lookup empty, so the expert block
+        // silently found no weights. The 1D keys below are Gemma-4-specific
+        // and simply resolve to None elsewhere.
+        if arch.is_moe() || arch.is_hybrid_moe() {
             // 2D router projection — flatten
             if let Some(key) = arch.moe_router_key(layer) {
                 if let Some((data, _, _)) = source.get_tensor(&key) {
@@ -121,12 +145,21 @@ pub(super) fn write_norms_and_router(
         }
     }
 
-    // Final model norm (after last layer)
-    if let Some(data) = source.get_vector("norm.weight") {
+    // Final model norm (after last layer).
+    // Final norm, resolved through the accessor rather than a literal.
+    // Every reader (`layer_graph::logits`, `predict`, `trace::vocab`,
+    // `kquant_forward::cached`) uses `arch.final_norm_key()`, so a
+    // hardcoded key here agrees only as long as no architecture
+    // overrides it — at which point the writer would store under one
+    // name and the reader look for another, and the final norm would
+    // vanish silently. Same writer/reader split that lost the
+    // attention biases (`docs/k3-funnel.md` §4.6.1).
+    let final_norm_key = arch.final_norm_key().to_string();
+    if let Some(data) = source.get_vector(&final_norm_key) {
         let bytes = crate::config::dtype::encode_floats(&data, norms_dtype);
         norms_file.write_all(&bytes)?;
         norm_entries.push(WeightEntry {
-            key: "norm.weight".into(),
+            key: final_norm_key.clone(),
             kind: kind::VECTOR.into(),
             shape: vec![data.len()],
             offset: norms_offset,
@@ -134,6 +167,26 @@ pub(super) fn write_norms_and_router(
             file: NORMS_BIN.into(),
         });
         norms_offset += bytes.len() as u64;
+    }
+
+    // Final LayerNorm bias — `None` for RMSNorm architectures. Resolved
+    // through the accessor rather than a literal, unlike the weight above:
+    // an architecture whose final norm is not literally `norm.weight`
+    // already loses the weight here, which is its own latent gap.
+    if let Some(key) = arch.final_norm_bias_key() {
+        if let Some(data) = source.get_vector(&key) {
+            let bytes = crate::config::dtype::encode_floats(&data, norms_dtype);
+            norms_file.write_all(&bytes)?;
+            norm_entries.push(WeightEntry {
+                key,
+                kind: kind::VECTOR.into(),
+                shape: vec![data.len()],
+                offset: norms_offset,
+                length: bytes.len() as u64,
+                file: NORMS_BIN.into(),
+            });
+            norms_offset += bytes.len() as u64;
+        }
     }
 
     // Gemma 4 E2B PLE global projection norm (small vector).

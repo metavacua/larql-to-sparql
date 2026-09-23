@@ -21,8 +21,12 @@ pub mod manifest;
 pub mod mla_absorb;
 mod ple_sidecar;
 pub mod write_f32;
+#[cfg(test)]
+mod write_f32_tests;
 pub mod write_kquant;
 pub mod write_layers;
+#[cfg(test)]
+mod write_layers_parts_tests;
 
 pub(crate) use capabilities::ensure_extract_level_supported;
 

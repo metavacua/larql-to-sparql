@@ -1,0 +1,63 @@
+Loading output/gemma3-4b-q4k-v2.vindex ...
+
+R4 zero-out — 34 layers, 10240 features/layer, decode shape (seq_len=1)
+warm = mean of 30 after 5; cold = first call on a fresh backend
+
+  dense   cold   163214 µs   warm   135627 µs   (7.4 tok/s)   ref token 529
+
+  band        K arm            warm µs  vs dense   cold µs  sel µs/L    scan/L  top1  kernel / parity
+  last-4   2048 prod            135417     1.00×    295136    3067.1     585.8  ✓     reference (today)
+  last-4   2048 exact-pool      137049     0.99×    141391    4438.8     558.8  ✓     sparse:parallel_q4k_down
+  last-4   2048 oracle-par      126135     1.08×    127300    1111.0     573.2  ✓     oracle-par[sparse:parallel_q4k_down] ✓
+  last-4   2048 oracle-gath     135676     1.00×    129710       NaN       NaN  ✓     oracle-gath[sparse:gather_q4k] DIFF L30 residual delta 7.8430686 vs 7.857973 (rel 1.90e-3)
+           2048              router budget   10914 µs (2728.5 µs/layer over 4) | kernel bonus   -9542 µs
+  last-4   4096 prod            143758     0.94×    171997    3221.2     992.8  ✓     reference (today)
+  last-4   4096 exact-pool      165906     0.82×    148713    4671.9    1390.9  ✓     sparse:parallel_q4k_down
+  last-4   4096 oracle-par      140466     0.97×    148935    2152.7     928.2  ✓     oracle-par[sparse:parallel_q4k_down] ✓
+  last-4   4096 oracle-gath     145779     0.93×    140025       NaN       NaN  ✓     oracle-gath[sparse:gather_q4k] DIFF L30 residual delta 8.37194 vs 8.385002 (rel 1.56e-3)
+           4096              router budget   25439 µs (6359.8 µs/layer over 4) | kernel bonus   -5313 µs
+  last-4   6144 prod            136493     0.99×    140845    3137.7    1356.7  ✓     reference (today)
+  last-4   6144 exact-pool      140509     0.97×    138434    4337.1    1175.9  ✓     sparse:parallel_q4k_down
+  last-4   6144 oracle-par      145380     0.93×    133294    2894.1    1413.5  ✓     oracle-par[sparse:parallel_q4k_down] ✓
+  last-4   6144 oracle-gath     145865     0.93×    136514       NaN       NaN  ✓     oracle-gath[sparse:gather_q4k] DIFF L30 residual delta 8.570548 vs 8.588724 (rel 2.12e-3)
+           6144              router budget   -4871 µs (-1217.7 µs/layer over 4) | kernel bonus    -485 µs
+  last-9   2048 prod            146445     0.93×    361387    3122.6     598.0  ✓     reference (today)
+  last-9   2048 exact-pool      158552     0.86×    159974    4191.9     575.8  ✓     sparse:parallel_q4k_down
+  last-9   2048 oracle-par      137737     0.98×    154271    1167.5     593.2  ✓     oracle-par[sparse:parallel_q4k_down] ✓
+  last-9   2048 oracle-gath     136368     0.99×    140793       NaN       NaN  ✓     oracle-gath[sparse:gather_q4k] DIFF L25 residual delta 7.4153266 vs 7.434388 (rel 2.56e-3)
+           2048              router budget   20814 µs (2312.7 µs/layer over 9) | kernel bonus    1369 µs
+  last-9   4096 prod            168840     0.80×    144321    3421.2    1189.1  ✓     reference (today)
+  last-9   4096 exact-pool      177977     0.76×    167774    4496.8    1000.9  ✓     sparse:parallel_q4k_down
+  last-9   4096 oracle-par      211659     0.64×    166869    2227.5    1299.5  ✓     oracle-par[sparse:parallel_q4k_down] ✓
+  last-9   4096 oracle-gath     166411     0.82×    154115       NaN       NaN  ✓     oracle-gath[sparse:gather_q4k] DIFF L25 residual delta 8.180133 vs 8.195643 (rel 1.89e-3)
+           4096              router budget  -33682 µs (-3742.4 µs/layer over 9) | kernel bonus   45248 µs
+  last-9   6144 prod            154642     0.88×    182995    3179.7    1396.6  ✓     reference (today)
+  last-9   6144 exact-pool      157979     0.86×    161912    4126.6    1194.3  ✓     sparse:parallel_q4k_down
+  last-9   6144 oracle-par      147884     0.92×    135118    2702.2    1271.7  ✓     oracle-par[sparse:parallel_q4k_down] ✓
+  last-9   6144 oracle-gath     196704     0.69×    169024       NaN       NaN  ✓     oracle-gath[sparse:gather_q4k] DIFF L25 residual delta 8.696584 vs 8.711649 (rel 1.73e-3)
+           6144              router budget   10095 µs (1121.6 µs/layer over 9) | kernel bonus  -48820 µs
+  all      2048 prod            177199     0.77×   1323781    3034.0     592.3  ✓     reference (today)
+  all      2048 exact-pool      208985     0.65×    210087    3958.0     564.9  ✗     sparse:parallel_q4k_down
+  all      2048 oracle-par      106036     1.28×    103900     993.4     560.5  ✗     oracle-par[sparse:parallel_q4k_down] ✓
+  all      2048 oracle-gath     147981     0.92×    133955       NaN       NaN  ✗     oracle-gath[sparse:gather_q4k] DIFF L0 residual delta 49.400894 vs 49.655884 (rel 5.14e-3)
+           2048              router budget  102949 µs (3027.9 µs/layer over 34) | kernel bonus  -41945 µs
+  all      4096 prod            186314     0.73×    200611    2989.7     946.3  ✓     reference (today)
+  all      4096 exact-pool      216888     0.63×    214815    3872.6     920.3  ✓     sparse:parallel_q4k_down
+  all      4096 oracle-par      143641     0.94×    144377    1816.3     905.0  ✓     oracle-par[sparse:parallel_q4k_down] ✓
+  all      4096 oracle-gath     169599     0.80×    170633       NaN       NaN  ✓     oracle-gath[sparse:gather_q4k] DIFF L0 residual delta 52.630367 vs 52.870384 (rel 4.54e-3)
+           4096              router budget   73247 µs (2154.3 µs/layer over 34) | kernel bonus  -25958 µs
+  all      6144 prod            199516     0.68×    198627    3024.2    1325.6  ✓     reference (today)
+  all      6144 exact-pool      224378     0.60×    223784    3842.4    1188.7  ✓     sparse:parallel_q4k_down
+  all      6144 oracle-par      180578     0.75×    178640    2525.3    1200.6  ✓     oracle-par[sparse:parallel_q4k_down] ✓
+  all      6144 oracle-gath     146089     0.93×    144202       NaN       NaN  ✓     oracle-gath[sparse:gather_q4k] DIFF L0 residual delta 56.26633 vs 56.51462 (rel 4.39e-3)
+           6144              router budget   43800 µs (1288.2 µs/layer over 34) | kernel bonus   34489 µs
+
+  Analytic per-layer work (N = 10240 features):
+  K           exec rows   selection rows     exec/dense
+  2048             6144            10240          0.20×
+  4096            12288            10240          0.40×
+  6144            18432            10240          0.60×
+
+  Ceiling: on the sparse band at K=4096, oracle sparse can be at most 2.50×
+  cheaper than dense by row count. Anything short of that is gather
+  inefficiency, not selection cost.

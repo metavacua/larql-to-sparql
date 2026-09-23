@@ -23,7 +23,14 @@ pub(super) fn write_per_layer_moe_kquant(
     num_layers: usize,
 ) -> Result<(), VindexError> {
     let arch = source.arch();
-    if !(arch.is_hybrid_moe() && arch.expert_format() == larql_models::ExpertFormat::PackedBF16) {
+    // Gate on MoE-ness, not *hybrid* MoE. The packed quantiser only cares
+    // about the physical layout ([E, 2*inter, hidden] / [E, hidden, inter]),
+    // which pure-MoE models share with hybrid ones — GraniteMoE stacks its
+    // experts identically to Gemma 4. Requiring `is_hybrid_moe()` silently
+    // skipped every pure-MoE model: extraction still reported success and
+    // wrote a 0-byte expert store, which is the failure mode this gate is
+    // supposed to prevent.
+    if !(arch.is_moe() && arch.expert_format() == larql_models::ExpertFormat::PackedBF16) {
         return Ok(());
     }
 

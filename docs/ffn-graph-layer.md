@@ -121,7 +121,8 @@ use larql_inference::vindex::WalkFfn;
 let walk_ffn = WalkFfn::new(weights, &index, top_k);
 let result = predict_with_ffn(weights, tokenizer, &token_ids, 5, &walk_ffn);
 
-// With trace (for analysis — re-runs gate KNN lazily on take_trace)
+// With trace (for analysis — runtime records folded from the executed
+// path; take_trace() drains them, 2026-07-30 review item 17)
 let walk_ffn = WalkFfn::new_with_trace(weights, &index, top_k);
 let result = predict_with_ffn(weights, tokenizer, &token_ids, 5, &walk_ffn);
 let trace = walk_ffn.take_trace();
@@ -295,6 +296,6 @@ let model = InferenceModel::load_walk_only("google/gemma-3-4b-it")?;
 | `larql-vindex/examples/build_down_features.rs` | Feature-major down vector builder |
 | `larql-vindex/examples/build_up_features.rs` | Feature-major up vector builder |
 | `larql-inference/examples/bench_walk_inference.rs` | Walk benchmark (dense vs walk vs HNSW) |
-| `larql-inference/examples/walk_boundary_sweep.rs` | Correctness sweep (all 34 layers) |
+| `larql-inference/chris-experiments/larql_probes/examples/misc/walk_boundary_sweep.rs` | Correctness sweep (all 34 layers) |
 | `larql-inference/examples/profile_overhead.rs` | Forward pass bottleneck profiler |
 | `larql-inference/examples/memory_analysis.rs` | Memory profiling (RSS, mmap, walk-only) |

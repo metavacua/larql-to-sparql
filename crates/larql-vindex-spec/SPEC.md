@@ -10,6 +10,11 @@ semantic version. Tooling pins via Cargo; the integer
 `vindex_spec_version` in the manifest is the compatibility tag, not
 the evolution channel.
 
+Loader-side behaviour on corrupt artifacts — the error-not-panic
+guarantee, the safe-decline cases, the little-endian byte-order
+golden vectors, and the pinning test suite — is specified in the
+[v1 conformance contract](../larql-vindex/docs/conformance-v1.md).
+
 ## 1. Scope
 
 A *vindex* is a directory of mmap-friendly binary files (`*.bin`) plus
