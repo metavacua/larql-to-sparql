@@ -4,10 +4,8 @@
 use larql_models::{TopKEntry, WeightArray};
 
 use crate::error::VindexError;
-use crate::extract::build_helpers::{
-    build_whole_word_vocab, compute_gate_top_tokens, compute_offset_direction,
-};
-use crate::extract::constants::{FEATURE_PROJECTION_BATCH, FIRST_CONTENT_TOKEN_ID};
+use crate::extract::build_helpers::{build_whole_word_vocab, compute_gate_top_tokens};
+use crate::extract::constants::FEATURE_PROJECTION_BATCH;
 use crate::extract::stage_labels::*;
 
 use super::{knowledge_layer_range, BuildContext};
@@ -159,27 +157,19 @@ impl<'a> BuildContext<'a> {
                         // the RELATION between what activates the feature (entity)
                         // and what it outputs (target). France→Paris and
                         // Germany→Berlin share the same offset = "capital-of".
-                        if is_knowledge_layer
-                            && (top_token_id as usize) >= FIRST_CONTENT_TOKEN_ID
-                            && !gate_top_tokens.is_empty()
-                        {
-                            let gate_tok = &gate_top_tokens[feat];
-                            if let Some(offset) = compute_offset_direction(
-                                gate_tok,
-                                top_token_id as usize,
-                                self.weights,
+                        if is_knowledge_layer && !gate_top_tokens.is_empty() {
+                            self.cluster.collect(
+                                layer,
+                                feat,
+                                &gate_top_tokens[feat],
+                                top_token_id,
+                                &top_token,
+                                &top_k_entries,
+                                self.weights.embed.view(),
                                 self.tokenizer,
                                 self.hidden_size,
                                 self.vocab_size,
-                            ) {
-                                self.cluster_directions.extend_from_slice(&offset);
-                                self.cluster_features.push((layer, feat));
-                                let all_tokens: Vec<String> =
-                                    top_k_entries.iter().map(|e| e.token.clone()).collect();
-                                self.cluster_top_tokens.push(all_tokens.join("|"));
-                                self.cluster_input_tokens.push(gate_tok.clone());
-                                self.cluster_output_tokens.push(top_token.clone());
-                            }
+                            );
                         }
 
                         let feat_idx = feature_offset + feat;

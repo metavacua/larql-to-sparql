@@ -1,7 +1,7 @@
 //! Per-feature top whole-word token — the "what activates this
 //! feature" label used downstream by clustering.
 
-use larql_models::{FfnType, ModelWeights};
+use larql_models::ModelWeights;
 use ndarray::Array2;
 
 use crate::extract::constants::GATE_TOP_TOKEN_BATCH;
@@ -16,18 +16,25 @@ pub(crate) fn compute_gate_top_tokens(
     ww_ids: &[usize],
     ww_embed: &Array2<f32>,
 ) -> Vec<String> {
-    // Gated FFN routes through `ffn_gate`; non-gated FFN (GPT-2,
-    // StarCoder2) reuses `ffn_up` for the same per-feature input
-    // direction.
-    let gate_key = match weights.arch.ffn_type() {
-        FfnType::Gated => weights.arch.ffn_gate_key(layer),
-        FfnType::Standard => weights.arch.ffn_up_key(layer),
-    };
+    let gate_key = crate::extract::build::clustering_gate_key(weights.arch.as_ref(), layer);
     let w_gate = match weights.tensors.get(&gate_key) {
         Some(w) => w,
         None => return vec![String::new(); num_features],
     };
+    compute_gate_top_tokens_from_matrix(w_gate.view(), tokenizer, num_features, ww_ids, ww_embed)
+}
 
+/// Same as [`compute_gate_top_tokens`] but takes a view of the gate
+/// matrix directly (rows = features, cols = hidden). Used by the
+/// streaming extract path, which loads the gate matrix per-layer via
+/// its `tensor_source` rather than holding a full `ModelWeights`.
+pub(crate) fn compute_gate_top_tokens_from_matrix(
+    w_gate: ndarray::ArrayView2<f32>,
+    tokenizer: &tokenizers::Tokenizer,
+    num_features: usize,
+    ww_ids: &[usize],
+    ww_embed: &Array2<f32>,
+) -> Vec<String> {
     let mut tokens = vec![String::new(); num_features];
     let gbatch = GATE_TOP_TOKEN_BATCH;
     for gstart in (0..num_features).step_by(gbatch) {

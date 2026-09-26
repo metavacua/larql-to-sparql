@@ -26,7 +26,7 @@ use crate::extract::stage_labels::*;
 use std::io::BufWriter;
 use std::path::Path;
 
-use larql_models::{FfnType, ModelWeights};
+use larql_models::{FfnType, ModelArchitecture, ModelWeights};
 
 use crate::config::dtype::{write_floats, StorageDtype};
 use crate::config::VindexLayerInfo;
@@ -43,6 +43,19 @@ pub(super) fn knowledge_layer_range(family: &str, num_layers: usize) -> Option<(
         let end = bands.knowledge.1.saturating_add(1).min(num_layers);
         (start, end)
     })
+}
+
+/// Tensor key for the matrix that defines each feature's input
+/// direction — the "what activates this feature" side of the gate→down
+/// relation. Gated FFN routes through `ffn_gate`; non-gated FFN (GPT-2,
+/// StarCoder2) reuses `ffn_up` for the same role. Used by both the
+/// gate-vectors writer and the clustering gate-top-token computation,
+/// on both the in-memory and streaming paths.
+pub(super) fn clustering_gate_key(arch: &dyn ModelArchitecture, layer: usize) -> String {
+    match arch.ffn_type() {
+        FfnType::Gated => arch.ffn_gate_key(layer),
+        FfnType::Standard => arch.ffn_up_key(layer),
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -74,11 +87,7 @@ pub(super) struct BuildContext<'a> {
     pub(super) layer_infos: Vec<VindexLayerInfo>,
 
     // Stage 3 collects → Stage 4 drains (`run_clustering`).
-    pub(super) cluster_directions: Vec<f32>,
-    pub(super) cluster_features: Vec<(usize, usize)>,
-    pub(super) cluster_top_tokens: Vec<String>,
-    pub(super) cluster_input_tokens: Vec<String>,
-    pub(super) cluster_output_tokens: Vec<String>,
+    pub(super) cluster: ClusterData,
 
     /// Dense-only BitNet build: when set, `write_index_json` writes
     /// the weight manifest with attention + FFN projections skipped
@@ -111,11 +120,7 @@ impl<'a> BuildContext<'a> {
             dtype,
             down_top_k,
             layer_infos: Vec::new(),
-            cluster_directions: Vec::new(),
-            cluster_features: Vec::new(),
-            cluster_top_tokens: Vec::new(),
-            cluster_input_tokens: Vec::new(),
-            cluster_output_tokens: Vec::new(),
+            cluster: ClusterData::default(),
             dense_only: false,
         }
     }
@@ -177,12 +182,7 @@ impl<'a> BuildContext<'a> {
                 }
             } else {
                 // Dense: single feature-input-direction matrix per layer.
-                // Gated FFN routes through `ffn_gate`; non-gated FFN (GPT-2,
-                // StarCoder2) reuses `ffn_up` for the same role.
-                let gate_key = match self.weights.arch.ffn_type() {
-                    FfnType::Gated => self.weights.arch.ffn_gate_key(layer),
-                    FfnType::Standard => self.weights.arch.ffn_up_key(layer),
-                };
+                let gate_key = clustering_gate_key(self.weights.arch.as_ref(), layer);
                 let w_gate = match self.weights.tensors.get(&gate_key) {
                     Some(w) => w,
                     None => continue,
@@ -223,15 +223,9 @@ impl<'a> BuildContext<'a> {
     /// Drains the `cluster_*` accumulators.
     fn run_clustering(&mut self) -> Result<(), VindexError> {
         run_clustering_pipeline(
-            ClusterData {
-                directions: std::mem::take(&mut self.cluster_directions),
-                features: std::mem::take(&mut self.cluster_features),
-                top_tokens: std::mem::take(&mut self.cluster_top_tokens),
-                input_tokens: std::mem::take(&mut self.cluster_input_tokens),
-                output_tokens: std::mem::take(&mut self.cluster_output_tokens),
-            },
+            std::mem::take(&mut self.cluster),
             self.hidden_size,
-            self.weights,
+            self.weights.embed.view(),
             self.tokenizer,
             self.output_dir,
             self.callbacks,

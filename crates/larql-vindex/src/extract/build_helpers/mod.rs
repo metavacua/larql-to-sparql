@@ -34,7 +34,7 @@ mod vocab;
 
 // Re-exports preserving the pre-split path (`super::build_helpers::*`).
 pub(crate) use clustering::{run_clustering_pipeline, ClusterData};
-pub(crate) use gate_tops::compute_gate_top_tokens;
+pub(crate) use gate_tops::{compute_gate_top_tokens, compute_gate_top_tokens_from_matrix};
 pub(crate) use offset::compute_offset_direction;
 pub(crate) use timestamp::chrono_now;
 pub(crate) use vocab::build_whole_word_vocab;
