@@ -23,6 +23,10 @@ pub const MODEL_WEIGHTS_BIN: &str = "model_weights.bin";
 // ── Labels / clustering sidecars ───────────────────────────────────────
 pub const RELATION_CLUSTERS_JSON: &str = "relation_clusters.json";
 pub const FEATURE_CLUSTERS_JSONL: &str = "feature_clusters.jsonl";
+/// Probe-confirmed per-feature labels (key format `"layer:feature"`), the
+/// highest-priority label source at query time. Produced by a SEPARATE
+/// labeling/probe pass (the larql-knowledge pipeline), NOT by `larql extract`.
+/// Optional: when absent, queries fall back to cluster-level labels.
 pub const FEATURE_LABELS_JSON: &str = "feature_labels.json";
 
 // ── Embeddings + norms (always present) ────────────────────────────────

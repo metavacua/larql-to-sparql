@@ -136,7 +136,7 @@ model.vindex/
 ├── index.json                # VindexConfig: layers, sizes, checksums, provenance
 ├── tokenizer.json            # HuggingFace tokenizer
 ├── relation_clusters.json    # Cluster centres, labels, counts
-├── feature_labels.json       # Probe-confirmed labels
+├── feature_labels.json       # Probe-confirmed labels (optional; from a separate labeling pass, NOT larql extract)
 └── weight_manifest.json      # Weight file → offset mapping
 ```
 
@@ -623,7 +623,10 @@ Discovered relation clusters from offset-direction clustering:
 
 ### feature_labels.json
 
-Probe-confirmed labels (from the larql-knowledge pipeline):
+Probe-confirmed per-feature labels, produced by a SEPARATE labeling/probe pass
+(the larql-knowledge Python pipeline — `knowledge/build_feature_labels.py`, see
+`knowledge/README.md`), NOT by `larql extract`. Optional — when absent, `STATS` /
+`DESCRIBE` say so and queries fall back to cluster-level labels.
 ```json
 {
   "26:9515": "capital",

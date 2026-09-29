@@ -74,6 +74,12 @@ impl Session {
         let mut out = vec![entity.to_string()];
         if edges.is_empty() {
             out.push("  (no edges found)".into());
+            let has_probe_labels = self
+                .relation_classifier()
+                .is_some_and(|rc| rc.num_probe_labels() > 0);
+            if !has_probe_labels {
+                out.push("  (no feature_labels.json — per-feature probe labels not present; this vindex has only cluster-level labels)".into());
+            }
             return Ok(out);
         }
 
