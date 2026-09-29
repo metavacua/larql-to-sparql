@@ -17,8 +17,19 @@ Design (decoupled axes — see docs/superpowers + tracker discussion):
 
 Leg fields: name, hf, corpus_model, source_kind, op, level, flags, expect_quant,
 tokenizer_repo (only set for gguf legs).
+
+BitNet-2B-4T is opt-in (INCLUDE_BITNET2B=true / workflow_dispatch input
+`include_bitnet2b`), OFF by default. It's the only ~2B-parameter source here —
+everything else is <=1.5B — and it's the heaviest leg group by a wide margin:
+a ~5GB safetensors download for the 5 native+xform legs, plus a further GGUF
+I2_S download for the 3 ternary/dequant legs. A routine matrix run doesn't
+need to pay that cost every time; opt in explicitly when BitNet-specific
+coverage is actually the point of the run.
 """
 import json
+import os
+
+INCLUDE_BITNET2B = os.environ.get("INCLUDE_BITNET2B", "false").lower() == "true"
 
 SAFETENSORS = [
     ("qwen05",    "Qwen/Qwen2.5-Coder-0.5B-Instruct"),
@@ -26,12 +37,17 @@ SAFETENSORS = [
     ("smol360",   "HuggingFaceTB/SmolLM2-360M-Instruct"),
     ("qwen15",    "Qwen/Qwen2.5-1.5B-Instruct"),
     ("granite1b", "ibm-granite/granite-3.0-1b-a400m-instruct"),
-    ("bitnet2b",  "microsoft/bitnet-b1.58-2B-4T"),
 ]
+if INCLUDE_BITNET2B:
+    SAFETENSORS = SAFETENSORS + [("bitnet2b", "microsoft/bitnet-b1.58-2B-4T")]
 LEVELS = ["browse", "attention", "inference", "all"]
 
 # GGUF source for the convert/ternary path: (id, gguf repo, base repo w/ tokenizer)
-GGUF = [("bitnetgguf", "microsoft/bitnet-b1.58-2B-4T-gguf", "microsoft/bitnet-b1.58-2B-4T")]
+GGUF = (
+    [("bitnetgguf", "microsoft/bitnet-b1.58-2B-4T-gguf", "microsoft/bitnet-b1.58-2B-4T")]
+    if INCLUDE_BITNET2B
+    else []
+)
 
 
 def leg(name, hf, op, level="all", flags="", expect_quant="none",

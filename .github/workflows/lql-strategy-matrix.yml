@@ -20,6 +20,10 @@ on:
         description: "Fail the run if any conformance invariant is violated"
         type: boolean
         default: false
+      include_bitnet2b:
+        description: "Include BitNet-2B-4T legs (safetensors + GGUF ternary/dequant) -- heaviest source by far, off by default"
+        type: boolean
+        default: false
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
@@ -43,6 +47,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - id: gen
+        env:
+          # push/schedule carry no `inputs` context; default to excluded.
+          INCLUDE_BITNET2B: ${{ github.event.inputs.include_bitnet2b || 'false' }}
         run: |
           legs=$(python3 scripts/lql_matrix/gen_legs.py)
           echo "legs=$legs" >> "$GITHUB_OUTPUT"
