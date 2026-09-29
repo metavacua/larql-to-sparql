@@ -683,7 +683,7 @@ fn dequantize_per_expert_mxfp4(
     Ok(consumed)
 }
 
-pub(crate) fn normalize_key(key: &str, prefixes: &[&str]) -> String {
+pub fn normalize_key(key: &str, prefixes: &[&str]) -> String {
     for prefix in prefixes {
         if let Some(stripped) = key.strip_prefix(prefix) {
             return stripped.to_string();

@@ -1,7 +1,8 @@
 //! Numeric primitives used by the MoE forward pass.
 //!
-//! `pub(super)` keeps these module-private — `cpu_moe_forward` and the
-//! per-expert helpers share them, nothing outside `moe/` should.
+//! `pub(super)` keeps most helpers module-private. `rms_norm`, `rms_norm_no_weight`,
+//! `softmax`, and `top_k` are `pub` so larql-inference can share them for client-side
+//! MoE routing without duplicating the implementations.
 
 /// Dequantize a BF16 byte slice to f32.
 #[inline]
@@ -24,7 +25,7 @@ pub(super) fn bf16_to_f32(bytes: &[u8]) -> Vec<f32> {
 // conversion helper, but the bulk-extract shim is no longer needed.
 
 /// RMSNorm: out[i] = x[i] / rms(x) * (w[i] + offset)
-pub(super) fn rms_norm(x: &[f32], w: &[f32], eps: f32, offset: f32) -> Vec<f32> {
+pub fn rms_norm(x: &[f32], w: &[f32], eps: f32, offset: f32) -> Vec<f32> {
     if w.is_empty() || x.is_empty() {
         return x.to_vec();
     }
@@ -38,7 +39,7 @@ pub(super) fn rms_norm(x: &[f32], w: &[f32], eps: f32, offset: f32) -> Vec<f32> 
 /// Parameter-free RMSNorm (HF `Gemma4RMSNorm(with_scale=False)`): scales
 /// `x` by `1/sqrt(mean(x²) + eps)` with no learned weight. Used by the
 /// Gemma 4 router, whose norm has no `.weight` tensor on disk.
-pub(super) fn rms_norm_no_weight(x: &[f32], eps: f32) -> Vec<f32> {
+pub fn rms_norm_no_weight(x: &[f32], eps: f32) -> Vec<f32> {
     if x.is_empty() {
         return Vec::new();
     }
@@ -46,18 +47,8 @@ pub(super) fn rms_norm_no_weight(x: &[f32], eps: f32) -> Vec<f32> {
     x.iter().map(|v| v / rms).collect()
 }
 
-/// SiLU activation: x * sigmoid(x)
-#[inline]
-pub(super) fn silu(x: f32) -> f32 {
-    x / (1.0 + (-x).exp())
-}
-
-/// GELU with tanh approximation (Gemma 4 expert FFN activation).
-#[inline]
-pub(super) fn gelu_tanh(x: f32) -> f32 {
-    let c = 0.797_884_6_f32;
-    0.5 * x * (1.0 + (c * (x + 0.044715 * x * x * x)).tanh())
-}
+pub(super) use crate::cpu::ops::geglu::silu;
+pub(super) use crate::ffn::gelu_tanh;
 
 /// Compute y = W · x  (W is [out_rows, in_cols] row-major, x is [in_cols]).
 ///
@@ -116,7 +107,7 @@ pub(super) fn matmul_vec_into(
 }
 
 /// Softmax in-place.
-pub(super) fn softmax(v: &mut [f32]) {
+pub fn softmax(v: &mut [f32]) {
     let max = v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let mut sum = 0.0f32;
     for x in v.iter_mut() {
@@ -131,7 +122,7 @@ pub(super) fn softmax(v: &mut [f32]) {
 }
 
 /// Top-k indices by value (descending). Returns (indices, values).
-pub(super) fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
+pub fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
     let k = k.min(v.len());
     let mut indexed: Vec<(usize, f32)> = v.iter().copied().enumerate().collect();
     indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));

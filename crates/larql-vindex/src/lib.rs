@@ -26,6 +26,7 @@
 
 // ── Module structure ──
 pub mod clustering;
+pub mod label;
 pub mod config;
 pub mod describe;
 pub mod engine;

@@ -1,7 +1,7 @@
 syntax = "proto3";
 package larql.expert.v1;
 
-// ── Expert batch service ──────────────────────────────────────────────────────
+// ── Expert batch service ─────────────────────────────────────────────────────
 //
 // Runs a batch of MoE expert forward passes on the owning shard.
 // One unary RPC per shard per decode step — all layers packed into a single

@@ -15,7 +15,7 @@
 //!                          per-layer + per-(layer,expert) caches,
 //!                          and the HNSW-backed knn variants
 //!
-//! The `top_k_from_scores` impl method and the `top_k_by_abs` free
+//! The `top_k_from_scores` impl method and the `top_k_signed` free
 //! function live here so every submodule can share them without
 //! cross-importing siblings.
 
@@ -35,7 +35,7 @@ impl VectorIndex {
     /// allocation per token vs the previous Vec+select_nth approach. Mmap
     /// stays untouched — only the score-extract heap shrinks.
     pub(crate) fn top_k_from_scores(scores: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)> {
-        top_k_by_abs(scores.iter().copied(), top_k)
+        top_k_signed(scores.iter().copied(), top_k)
     }
 }
 
@@ -47,7 +47,7 @@ impl VectorIndex {
 /// Panics on NaN inputs to preserve the previous `partial_cmp(...).unwrap()`
 /// contract — gate scores from BLAS gemv are NaN-free as long as the
 /// inputs are.
-pub(super) fn top_k_by_abs<I>(scores: I, top_k: usize) -> Vec<(usize, f32)>
+pub(super) fn top_k_signed<I>(scores: I, top_k: usize) -> Vec<(usize, f32)>
 where
     I: IntoIterator<Item = f32>,
 {
@@ -58,30 +58,30 @@ where
         return Vec::new();
     }
 
-    /// Wrapper that orders by `|val|`. Inverted `Ord` so `BinaryHeap`
-    /// (max-heap by default) acts as a *min-heap on |val|*: `peek()`
-    /// gives the smallest |val| currently in the heap, which is the
-    /// candidate to evict when a bigger |val| arrives.
+    /// Wrapper that orders by signed `val`. Inverted `Ord` so `BinaryHeap`
+    /// (max-heap by default) acts as a *min-heap on val*: `peek()`
+    /// gives the smallest val currently in the heap, which is the
+    /// candidate to evict when a bigger val arrives.
     #[derive(Copy, Clone)]
-    struct AbsScore {
+    struct SignedScore {
         idx: usize,
         val: f32,
     }
-    impl PartialEq for AbsScore {
+    impl PartialEq for SignedScore {
         fn eq(&self, other: &Self) -> bool {
-            self.val.abs() == other.val.abs()
+            self.val == other.val
         }
     }
-    impl Eq for AbsScore {}
-    impl PartialOrd for AbsScore {
+    impl Eq for SignedScore {}
+    impl PartialOrd for SignedScore {
         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
             Some(self.cmp(other))
         }
     }
-    impl Ord for AbsScore {
+    impl Ord for SignedScore {
         fn cmp(&self, other: &Self) -> Ordering {
-            // Reversed: smaller |val| ranks higher → max-heap pops it first.
-            other.val.abs().partial_cmp(&self.val.abs()).unwrap()
+            // Reversed: smaller (signed) val ranks higher → max-heap pops it first.
+            other.val.partial_cmp(&self.val).unwrap()
         }
     }
 
@@ -92,24 +92,24 @@ where
     // layer would need a different data structure anyway).
     const HEAP_CAP_LIMIT: usize = 1 << 20;
     let cap = top_k.min(HEAP_CAP_LIMIT);
-    let mut heap: BinaryHeap<AbsScore> = BinaryHeap::with_capacity(cap);
+    let mut heap: BinaryHeap<SignedScore> = BinaryHeap::with_capacity(cap);
     for (i, v) in scores.into_iter().enumerate() {
         if heap.len() < top_k {
-            heap.push(AbsScore { idx: i, val: v });
-        } else if v.abs() > heap.peek().unwrap().val.abs() {
+            heap.push(SignedScore { idx: i, val: v });
+        } else if v > heap.peek().unwrap().val {
             heap.pop();
-            heap.push(AbsScore { idx: i, val: v });
+            heap.push(SignedScore { idx: i, val: v });
         }
     }
 
     let mut out: Vec<(usize, f32)> = heap.into_iter().map(|a| (a.idx, a.val)).collect();
-    out.sort_unstable_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+    out.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     out
 }
 
 #[cfg(test)]
 mod tests {
-    use super::top_k_by_abs;
+    use super::top_k_signed;
     use ndarray::Array1;
 
     // ── Per-(layer, expert) HNSW unit tests ──────────────────────────────
@@ -229,48 +229,49 @@ mod tests {
     }
 
     #[test]
-    fn top_k_by_abs_basic_ordering() {
+    fn top_k_signed_basic_ordering() {
         let scores: Vec<f32> = vec![0.1, -0.9, 0.5, 0.3];
-        let result = top_k_by_abs(scores, 2);
+        let result = top_k_signed(scores, 2);
         assert_eq!(result.len(), 2);
-        // Top-2 by |val|: index 1 (|-0.9|=0.9) then index 2 (|0.5|=0.5).
-        assert_eq!(result[0].0, 1);
-        assert!((result[0].1 - (-0.9)).abs() < 1e-6);
-        assert_eq!(result[1].0, 2);
+        // Top-2 by signed score: index 2 (0.5) then index 3 (0.3);
+        // the anti-activating -0.9 (index 1) is excluded.
+        assert_eq!(result[0].0, 2);
+        assert!((result[0].1 - 0.5).abs() < 1e-6);
+        assert_eq!(result[1].0, 3);
     }
 
     #[test]
-    fn top_k_by_abs_negative_values_selected_by_magnitude() {
+    fn top_k_signed_negative_values_not_selected_over_positives() {
         let scores: Vec<f32> = vec![1.0, -2.0, 0.5];
-        let result = top_k_by_abs(scores, 1);
+        let result = top_k_signed(scores, 1);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, 1); // |-2.0| is largest
+        assert_eq!(result[0].0, 0); // signed: 1.0 is largest; -2.0 (anti-activating) excluded
     }
 
     #[test]
-    fn top_k_by_abs_k_larger_than_input() {
+    fn top_k_signed_k_larger_than_input() {
         let scores: Vec<f32> = vec![1.0, 2.0];
-        let result = top_k_by_abs(scores, 10);
+        let result = top_k_signed(scores, 10);
         assert_eq!(result.len(), 2);
     }
 
     #[test]
-    fn top_k_by_abs_k_zero_returns_empty() {
+    fn top_k_signed_k_zero_returns_empty() {
         let scores: Vec<f32> = vec![1.0, 2.0, 3.0];
-        let result = top_k_by_abs(scores, 0);
+        let result = top_k_signed(scores, 0);
         assert!(result.is_empty());
     }
 
     #[test]
-    fn top_k_by_abs_empty_input_returns_empty() {
-        let result = top_k_by_abs(std::iter::empty::<f32>(), 5);
+    fn top_k_signed_empty_input_returns_empty() {
+        let result = top_k_signed(std::iter::empty::<f32>(), 5);
         assert!(result.is_empty());
     }
 
     #[test]
-    fn top_k_by_abs_result_sorted_descending() {
+    fn top_k_signed_result_sorted_descending() {
         let scores: Vec<f32> = vec![0.3, 0.1, 0.9, 0.5, 0.7];
-        let result = top_k_by_abs(scores, 3);
+        let result = top_k_signed(scores, 3);
         assert_eq!(result.len(), 3);
         for w in result.windows(2) {
             assert!(w[0].1.abs() >= w[1].1.abs(), "not sorted: {:?}", result);
@@ -283,6 +284,18 @@ mod tests {
         let arr = Array1::from_vec(vec![0.1f32, -0.9, 0.5]);
         let result = VectorIndex::top_k_from_scores(&arr, 2);
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].0, 1); // |-0.9| largest
+        assert_eq!(result[0].0, 2); // signed: 0.5 largest; -0.9 (anti-activating) excluded
+    }
+
+    #[test]
+    fn top_k_from_scores_ranks_by_signed_score_not_magnitude() {
+        use crate::index::VectorIndex;
+        // #88: the gate probe must rank by descending SIGNED score; a strongly
+        // anti-activating (large negative) feature must NOT outrank weaker
+        // activating (positive) features.
+        let arr = Array1::from_vec(vec![3.0f32, -10.0, 1.0, 2.0]);
+        let result = VectorIndex::top_k_from_scores(&arr, 2);
+        let idxs: Vec<usize> = result.iter().map(|(i, _)| *i).collect();
+        assert_eq!(idxs, vec![0, 3], "gate probe must rank by signed score, not |score|");
     }
 }

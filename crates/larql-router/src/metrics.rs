@@ -286,7 +286,7 @@ impl RouterMetrics {
         // `walk_ffn_duration_seconds` is a HistogramVec with no labels
         // today, but the constructor takes a `&[]` label set; pre-touch
         // it so gather() reports the bucket layout immediately.
-        let _ = walk_ffn_duration_seconds.with_label_values(&[]);
+        let _ = walk_ffn_duration_seconds.with_label_values::<&str>(&[]);
 
         Arc::new(Self {
             registry,

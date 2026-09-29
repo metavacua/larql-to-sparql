@@ -22,6 +22,8 @@ use std::io::{BufWriter, Write};
 
 use ndarray::Array2;
 
+pub(crate) use larql_models::loading::safetensors::normalize_key;
+
 use crate::error::VindexError;
 
 /// Mmap'd safetensors file — kept alive for the duration of extraction.
@@ -384,15 +386,6 @@ pub(super) fn get_tensor_f32(
     let arr = Array2::from_shape_vec((shape[0], shape[1]), data)
         .map_err(|e| VindexError::Parse(e.to_string()))?;
     Ok(Some(arr))
-}
-
-pub(super) fn normalize_key(key: &str, prefixes: &[&str]) -> String {
-    for prefix in prefixes {
-        if let Some(stripped) = key.strip_prefix(prefix) {
-            return stripped.to_string();
-        }
-    }
-    key.to_string()
 }
 
 #[cfg(test)]

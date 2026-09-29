@@ -470,6 +470,7 @@ mod tests {
             layer,
             feature,
             gate_score: gate,
+            cosine_score: 0.0,
             meta: meta(top, top_k),
         }
     }

@@ -183,7 +183,8 @@ message RelationsResponse {
 
 // ── Stats ──
 
-message StatsRequest {}
+message StatsRequest {
+}
 
 message LayerBands {
   repeated uint32 syntax = 1;
@@ -212,7 +213,8 @@ message StatsResponse {
 
 // ── Health ──
 
-message HealthRequest {}
+message HealthRequest {
+}
 
 message HealthResponse {
   string status = 1;

@@ -3,38 +3,8 @@
 //! Mirrors the Metal shader `q6k_matvec` exactly for cross-backend testing.
 //! Not optimised — scalar code intended as a correctness reference.
 
+use crate::cpu::ops::q4_common::f16_to_f32;
 use larql_models::quant::ggml::Q6_K_BLOCK_BYTES as Q6K_BLOCK_SIZE;
-
-/// Decode f16 bits to f32.
-fn f16_to_f32(bits: u16) -> f32 {
-    let sign = ((bits >> 15) & 1) as u32;
-    let exp = ((bits >> 10) & 0x1F) as i32;
-    let mant = (bits & 0x3FF) as u32;
-    if exp == 0 {
-        if mant == 0 {
-            return if sign == 1 { -0.0 } else { 0.0 };
-        }
-        let val = mant as f32 / 1024.0 * 2.0f32.powi(-14);
-        return if sign == 1 { -val } else { val };
-    }
-    if exp == 31 {
-        return if mant == 0 {
-            if sign == 1 {
-                f32::NEG_INFINITY
-            } else {
-                f32::INFINITY
-            }
-        } else {
-            f32::NAN
-        };
-    }
-    let val = (1.0 + mant as f32 / 1024.0) * 2.0f32.powi(exp - 15);
-    if sign == 1 {
-        -val
-    } else {
-        val
-    }
-}
 
 /// CPU Q6_K matvec: out[N] = Q6_K[N, K] @ x[K].
 ///

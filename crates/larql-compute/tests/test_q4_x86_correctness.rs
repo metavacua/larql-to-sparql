@@ -8,38 +8,8 @@
 //! the rationale.
 #![cfg(feature = "heavy_tests")]
 
+use larql_compute::cpu::ops::q4_common::f16_to_f32;
 use larql_compute::cpu::q4::{q4_matvec, q4_vecmat, quantize_q4_0, quantize_to_q8};
-
-/// Local f16→f32 (mirrors the decoder in q4_common.rs, not re-exported).
-fn f16_to_f32(bits: u16) -> f32 {
-    let sign = ((bits >> 15) & 1) as u32;
-    let exp = ((bits >> 10) & 0x1F) as i32;
-    let mant = (bits & 0x3FF) as u32;
-    if exp == 0 {
-        if mant == 0 {
-            return if sign == 1 { -0.0 } else { 0.0 };
-        }
-        let val = mant as f32 / 1024.0 * 2.0f32.powi(-14);
-        return if sign == 1 { -val } else { val };
-    }
-    if exp == 31 {
-        return if mant == 0 {
-            if sign == 1 {
-                f32::NEG_INFINITY
-            } else {
-                f32::INFINITY
-            }
-        } else {
-            f32::NAN
-        };
-    }
-    let val = (1.0 + mant as f32 / 1024.0) * 2.0f32.powi(exp - 15);
-    if sign == 1 {
-        -val
-    } else {
-        val
-    }
-}
 
 /// Dequantize a single Q4_0 row (blocks_per_row * 18 bytes) into f32.
 fn dequantize_q4_0_row(row: &[u8], hidden: usize) -> Vec<f32> {

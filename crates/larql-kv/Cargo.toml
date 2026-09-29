@@ -20,7 +20,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 ndarray = "0.16"
-zip = { version = "2", default-features = false }
+zip = { version = "3", default-features = false }
 
 rand = "0.8"
 rand_distr = "0.4"
@@ -48,7 +48,7 @@ default = []
 gpu = ["dep:larql-compute-metal", "larql-inference/gpu"]
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { workspace = true }
 tempfile = "3"
 
 [[bench]]

@@ -281,7 +281,7 @@ pub async fn handle_walk_ffn(
     // early errors.
     let timer = state.metrics.as_ref().map(|m| {
         m.walk_ffn_duration_seconds
-            .with_label_values(&[])
+            .with_label_values::<&str>(&[])
             .start_timer()
     });
     let result = handle_walk_ffn_inner(state.clone(), request).await;

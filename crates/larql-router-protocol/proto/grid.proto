@@ -1,7 +1,7 @@
 syntax = "proto3";
 package larql.grid.v1;
 
-// ── Service ───────────────────────────────────────────────────────────────────
+// ── Service ──────────────────────────────────────────────────────────────────
 
 service GridService {
   // Persistent bidirectional stream. Server keeps it open for its lifetime.
@@ -27,7 +27,7 @@ service GridService {
   rpc AssignRange(AssignRangeRequest) returns (AdminAck);
 }
 
-// ── Server → Router ───────────────────────────────────────────────────────────
+// ── Server → Router ──────────────────────────────────────────────────────────
 
 message ServerMessage {
   oneof payload {
@@ -105,7 +105,7 @@ message RefuseMsg {
   string reason      = 4;  // "insufficient_disk" | "wrong_arch" | "busy"
 }
 
-// ── Router → Server ───────────────────────────────────────────────────────────
+// ── Router → Server ──────────────────────────────────────────────────────────
 
 message RouterMessage {
   oneof payload {
@@ -143,9 +143,10 @@ message RejectMsg {
   string reason = 1;
 }
 
-// ── Status ────────────────────────────────────────────────────────────────────
+// ── Status ───────────────────────────────────────────────────────────────────
 
-message StatusRequest {}
+message StatusRequest {
+}
 
 message StatusResponse {
   repeated ModelCoverage models  = 1;
@@ -175,7 +176,8 @@ message Gap {
 
 message DrainRequest {
   string server_id = 1;
-  string reason    = 2;  // free-form, surfaced to the server as `UnassignMsg.reason`
+  // Free-form reason surfaced to the server as `UnassignMsg.reason`.
+  string reason    = 2;
 }
 
 message AssignRangeRequest {
@@ -193,13 +195,15 @@ message AssignRangeRequest {
 
 message AdminAck {
   bool ok = 1;
-  string message = 2;  // human-readable; empty on success when nothing useful to say
+  // Human-readable; empty on success when nothing useful to say.
+  string message = 2;
 }
 
 message ServerInfo {
   string server_id          = 1;
   string listen_url         = 2;
-  string state              = 3;  // "serving" | "available" | "loading" | "draining"
+  // "serving" | "available" | "loading" | "draining"
+  string state              = 3;
   string model_id           = 4;
   uint32 layer_start        = 5;
   uint32 layer_end          = 6;

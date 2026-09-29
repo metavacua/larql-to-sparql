@@ -56,6 +56,29 @@ fn feature_meta_returns_none_for_oob_layer() {
     assert!(v.feature_meta(99, 0).is_none());
 }
 
+// ── down_token_ids (no-decode id accessor) ──
+
+#[test]
+fn down_token_ids_returns_top_then_topk_ids_without_decode() {
+    let mut v = VectorIndex::empty(2, 4);
+    // No tokenizer is attached here — proving the path needs no decode.
+    v.metadata.down_meta[0] = Some(vec![
+        Some(FeatureMeta {
+            top_token: String::new(),
+            top_token_id: 5,
+            c_score: 0.5,
+            top_k: vec![
+                TopKEntry { token: String::new(), token_id: 7, logit: 0.1 },
+                TopKEntry { token: String::new(), token_id: 9, logit: 0.2 },
+            ],
+        }),
+        None,
+    ]);
+    assert_eq!(v.down_token_ids(0, 0), Some(vec![5, 7, 9]));
+    assert_eq!(v.down_token_ids(0, 1), None); // empty sibling slot
+    assert_eq!(v.down_token_ids(99, 0), None); // out-of-bounds layer
+}
+
 // ── num_features ──
 
 #[test]

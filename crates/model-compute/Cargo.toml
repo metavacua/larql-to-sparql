@@ -25,7 +25,7 @@ wasmtime = { version = "29", optional = true, default-features = false, features
 
 [dev-dependencies]
 wat = "1"
-criterion = "0.5"
+criterion = { workspace = true }
 
 [[bench]]
 name = "wasm_dispatch"
