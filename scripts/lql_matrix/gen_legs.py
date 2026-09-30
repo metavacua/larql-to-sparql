@@ -93,6 +93,26 @@ def main():
         legs.append(leg("bitnet2b.xform.fp4", "microsoft/bitnet-b1.58-2B-4T",
                         "quantize-fp4", level="inference", expect_quant="fp4"))
 
+    # 4. VINDEX3 — whole-checkpoint extraction. `--generation v3` has no level or
+    #    quant axis yet (both are REFUSED explicitly for --quant, but --level is
+    #    SILENTLY IGNORED rather than refused — a live bug, not a missing feature;
+    #    the sentinel leg below asserts against it so a future fix is caught, same
+    #    pattern as the q4k level-invariance sentinel above). GGUF has no V3 path
+    #    at all, so this axis only ever runs against SAFETENSORS. Deliberately run
+    #    through the SAME command corpus as V2 (no V3-only subset): statement
+    #    classes V3 doesn't support yet will legitimately refuse or error, and that
+    #    is itself the coverage signal — a red that should flip green as V3 gains
+    #    ground, not a case to filter out of the run.
+    for mid, hf in SAFETENSORS:
+        legs.append(leg(f"{mid}.v3", hf, "extract", level="",
+                        flags="--generation v3", expect_quant="none"))
+    #    level-ignored sentinel: --level is passed but silently has no effect under
+    #    --generation v3 today; the conformance oracle asserts this leg's feature
+    #    count equals the unscoped v3 leg's, which is the live-bug signature.
+    legs.append(leg("smol135.v3.level-sentinel-browse",
+                    "HuggingFaceTB/SmolLM2-135M-Instruct", "extract",
+                    level="browse", flags="--generation v3", expect_quant="none"))
+
     print(json.dumps(legs))
 
 

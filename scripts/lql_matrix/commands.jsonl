@@ -62,3 +62,13 @@
 {"id": "neg.parse_error", "cat": "negative", "lql": "USE \"{{VINDEX}}\"; NOT A VALID STATEMENT;"}
 {"id": "neg.unknown_verb", "cat": "negative", "lql": "USE \"{{VINDEX}}\"; FOOBAR;"}
 {"id": "neg.show_foobar", "cat": "negative", "lql": "USE \"{{VINDEX}}\"; SHOW FOOBAR;"}
+{"id": "infer.generate", "cat": "inference", "lql": "USE \"{{VINDEX}}\"; INFER \"The capital of France is\" GENERATE 5;"}
+{"id": "show.representations", "cat": "browse", "lql": "USE \"{{VINDEX}}\"; SHOW REPRESENTATIONS;"}
+{"id": "show.components", "cat": "browse", "lql": "USE \"{{VINDEX}}\"; SHOW COMPONENTS;"}
+{"id": "show.provenance", "cat": "browse", "lql": "USE \"{{VINDEX}}\"; SHOW PROVENANCE;"}
+{"id": "show.authority", "cat": "browse", "lql": "USE \"{{VINDEX}}\"; SHOW AUTHORITY;"}
+{"id": "insert.mode_compose", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; INSERT INTO EDGES (entity, relation, target) VALUES (\"John Coyle\", \"lives-in\", \"Colchester\") MODE COMPOSE;"}
+{"id": "compact.into_vindex", "cat": "compact", "lql": "USE \"{{VINDEX}}\"; COMPACT INTO VINDEX \"{{TMP}}/compact-out.vindex\";"}
+{"id": "diff.current_current", "cat": "lifecycle", "lql": "USE \"{{VINDEX}}\"; DIFF CURRENT CURRENT;"}
+{"id": "diff.current_current_physical", "cat": "lifecycle", "lql": "USE \"{{VINDEX}}\"; DIFF CURRENT CURRENT PHYSICAL;"}
+{"id": "merge.named", "cat": "mutation", "lql": "USE \"{{VINDEX}}\"; MERGE \"{{VINDEX}}\";"}
