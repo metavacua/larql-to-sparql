@@ -1,0 +1,100 @@
+# Smoke test for the lql-matrix HARNESS ITSELF (run_matrix.py + aggregate.py) on
+# a real GitHub runner — validates the CI-specific I/O the local box can't:
+# /usr/bin/time -v peak-RSS capture, err-signal overlay, provenance, full-log
+# artifacting, and aggregate rendering. Uses a STUB `larql` so it needs no
+# workspace build and no model — runs in ~1 min. Scoped to its own branch so it
+# never triggers the heavy extraction matrix (that's lql-strategy-matrix).
+name: lql-matrix-smoke
+
+on:
+  push:
+    branches: [lql-matrix-smoke]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install GNU time
+        run: sudo apt-get update && sudo apt-get install -y time
+
+      - name: Build stub larql + tiny corpus
+        run: |
+          mkdir -p stub out
+          cat > stub/larql <<'STUB'
+          #!/usr/bin/env bash
+          # Minimal stand-in for `larql`: handles `--version` and `lql <stmt>`.
+          if [ "$1" = "--version" ]; then echo "larql 0.0.0-smoke"; exit 0; fi
+          stmt="$2"
+          echo "Using: stub.vindex (smoke)"
+          case "$stmt" in
+            *FOOBAR*) echo "Error: Parse error: unknown verb" ;;  # exit 0 + error text
+            *BOOM*)   echo "kaboom" >&2; exit 3 ;;                 # hard non-zero exit
+            *)        echo "ok output line" ;;
+          esac
+          exit 0
+          STUB
+          chmod +x stub/larql
+          cat > stub/corpus.jsonl <<'CORPUS'
+          {"id":"ok.cell","cat":"browse","lql":"USE \"{{VINDEX}}\"; STATS;"}
+          {"id":"errtext.cell","cat":"negative","lql":"USE \"{{VINDEX}}\"; FOOBAR;"}
+          {"id":"err.cell","cat":"negative","lql":"USE \"{{VINDEX}}\"; BOOM;"}
+          CORPUS
+
+      - name: Run harness against stub
+        env:
+          LARQL_BIN: stub/larql
+          MODEL_ID: smoke-model
+          CELL_TIMEOUT: "60"
+        run: |
+          scripts/lql_matrix/run_matrix.sh smoke stub.vindex stub/corpus.jsonl out/results-smoke.jsonl
+
+      - name: Aggregate
+        run: python3 scripts/lql_matrix/aggregate.py "out/results-smoke.jsonl" smoke.md
+
+      - name: Assert harness I/O (RSS, err-signal, buckets, provenance, logs)
+        run: |
+          echo "=== results-smoke.jsonl ==="; cat out/results-smoke.jsonl
+          echo "=== smoke.md ==="; cat smoke.md
+          cat smoke.md >> "$GITHUB_STEP_SUMMARY"
+          python3 - <<'PY'
+          import json, os
+          rows = [json.loads(l) for l in open("out/results-smoke.jsonl")]
+          meta = next(r for r in rows if r.get("type") == "meta")
+          cells = {r["id"]: r for r in rows if r.get("type") != "meta"}
+
+          def check(name, cond):
+              assert cond, f"FAIL: {name}"
+              print(f"ok: {name}")
+
+          check("ok.cell clean",     cells["ok.cell"]["bucket"] == "ok" and cells["ok.cell"]["err_signal"] == 0)
+          check("errtext exit0+err", cells["errtext.cell"]["bucket"] == "ok" and cells["errtext.cell"]["err_signal"] == 1)
+          check("errtext err_line",  cells["errtext.cell"]["err_line"].startswith("Error:"))
+          check("err bucket exit3",  cells["err.cell"]["bucket"] == "err" and cells["err.cell"]["exit_code"] == 3)
+          check("peak_rss captured",  all(isinstance(cells[c]["peak_rss_kb"], int) and cells[c]["peak_rss_kb"] > 0 for c in cells))
+          check("stderr_tail present", all("stderr_tail" in cells[c] for c in cells))
+          check("provenance commit",  "commit" in meta and "larql_version" in meta)
+          check("full logs persisted", os.path.isfile("out/cells/smoke.err.cell.err") and os.path.isfile("out/cells/smoke.ok.cell.out"))
+          print("SMOKE PASSED")
+          PY
+
+      - name: Conformance oracle unit tests
+        run: |
+          python3 -m pip install --quiet pytest
+          python3 -m pytest scripts/lql_matrix/conformance_test.py -v
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke
+          retention-days: 1
+          path: |
+            out/results-smoke.jsonl
+            smoke.md
+            out/cells/
