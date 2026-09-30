@@ -141,12 +141,18 @@ def inv_no_crash(legs):
     out = []
     for name, lg in legs.items():
         if lg.produce and _is_crash(lg.produce):
-            out.append(Violation("no-crash", name, "produce",
-                                 f"produce crashed (exit {lg.produce.get('exit_code')})"))
+            detail = f"produce crashed (exit {lg.produce.get('exit_code')})"
+            stderr_head = lg.produce.get("stderr_head")
+            if stderr_head:
+                detail += f": {stderr_head[:200]!r}"
+            out.append(Violation("no-crash", name, "produce", detail))
         for cid, row in lg.cells.items():
             if _is_crash(row):
-                out.append(Violation("no-crash", name, cid,
-                                     f"panic/crash (exit {row.get('exit_code')})"))
+                detail = f"panic/crash (exit {row.get('exit_code')})"
+                el = row.get("err_line")
+                if el:
+                    detail += f": {el}"
+                out.append(Violation("no-crash", name, cid, detail))
     return out
 
 
@@ -162,10 +168,13 @@ def inv_produce(legs):
             continue
         if _produce_failed(lg):
             p = lg.produce or {}
-            out.append(Violation("produce", name, "produce",
-                                 f"produce failed: op={p.get('op')} exit={p.get('exit_code')} "
-                                 f"bucket={p.get('bucket')} (vindex not created; "
-                                 f"descriptor.produced={lg.descriptor.get('produced')})"))
+            detail = (f"produce failed: op={p.get('op')} exit={p.get('exit_code')} "
+                     f"bucket={p.get('bucket')} (vindex not created; "
+                     f"descriptor.produced={lg.descriptor.get('produced')})")
+            stderr_head = p.get("stderr_head")
+            if stderr_head:
+                detail += f" stderr: {stderr_head[:200]!r}"
+            out.append(Violation("produce", name, "produce", detail))
     return out
 
 

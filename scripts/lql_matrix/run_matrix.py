@@ -146,13 +146,22 @@ def main() -> None:
             with out_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
 
-            # The job LOG has no artifact-retention limit; the JSONL artifact
-            # does (1 day). err_line was already computed above for the row --
-            # print it here too, so the reason for ERR* survives in the log
-            # long after the artifact expires, instead of only the bare flag.
+            # The job LOG has no artifact-retention limit; the per-cell .out/.err
+            # files do (1 day, via the results-<leg> artifact). A one-line
+            # 200-char err_line is enough to scan the summary, but on an actual
+            # failure the FULL captured streams belong in the log too — not
+            # only in a file that a reader has to know to download and that
+            # expires in a day. Print the one-liner always; dump full streams
+            # additionally whenever the cell didn't cleanly succeed.
             flag = f" ERR* {row['err_line']!r}" if err_signal else ""
             print(f"[{level}] {cid} -> exit={rc} {bucket}{flag} "
                   f"{dur_ms}ms rss={peak_rss_kb}", file=sys.stderr)
+            if bucket != "ok" or err_signal:
+                print(f"::group::{level} {cid} stdout+stderr (exit={rc} {bucket})",
+                      file=sys.stderr)
+                print(so_txt, file=sys.stderr)
+                print(se_txt, file=sys.stderr)
+                print("::endgroup::", file=sys.stderr)
             n += 1
 
     print(f"wrote {n} rows + provenance to {out}", file=sys.stderr)

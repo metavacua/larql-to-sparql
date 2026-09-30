@@ -216,9 +216,28 @@ jobs:
             "$NAME" "$OP" "$LEVEL" "$FLAGS" "$ec" "$bucket" "$((end-start))" "${rss:-0}" "${vmb:-0}" \
             > "out/produce-${NAME}.json"
           echo "produce ${NAME}: exit=$ec bucket=$bucket rss=${rss:-?}kb vindex=${vmb:-?}MB"
+          # Raw stdout/stderr are captured to files for the artifact, but a
+          # non-ok produce is exactly the case where the actual larql error
+          # text must be a standard, always-visible part of THIS log — not
+          # something only recoverable by downloading a 1-day-retention
+          # artifact. Print it here, unfiltered.
+          if [ "$bucket" != "ok" ]; then
+            echo "::group::produce ${NAME} stdout"
+            cat "$O"
+            echo "::endgroup::"
+            echo "::group::produce ${NAME} stderr"
+            cat "$E"
+            echo "::endgroup::"
+          fi
           # descriptor: what did we actually get vs what we expected?
-          python3 scripts/lql_matrix/descriptor.py "$VINDEX" "$NAME" "$EXPECT_QUANT" \
-            > "out/descriptor-${NAME}.json" 2>/dev/null || echo '{"name":"'"$NAME"'","error":"descriptor failed"}' > "out/descriptor-${NAME}.json"
+          if ! python3 scripts/lql_matrix/descriptor.py "$VINDEX" "$NAME" "$EXPECT_QUANT" \
+                 > "out/descriptor-${NAME}.json" 2> "out/descriptor-${NAME}.err"; then
+            echo "::warning::descriptor.py failed for ${NAME} — see stderr below, not just the placeholder"
+            echo "::group::descriptor.py stderr (${NAME})"
+            cat "out/descriptor-${NAME}.err"
+            echo "::endgroup::"
+            printf '{"name":"%s","error":"descriptor failed"}\n' "$NAME" > "out/descriptor-${NAME}.json"
+          fi
           echo "descriptor:"; cat "out/descriptor-${NAME}.json"
           # weight-family inventory (which classes the recipe produced)
           MDIR="out/manifest-${NAME}"; mkdir -p "$MDIR"
