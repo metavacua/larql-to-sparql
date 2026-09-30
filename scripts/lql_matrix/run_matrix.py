@@ -146,7 +146,11 @@ def main() -> None:
             with out_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
 
-            flag = " ERR*" if err_signal else ""
+            # The job LOG has no artifact-retention limit; the JSONL artifact
+            # does (1 day). err_line was already computed above for the row --
+            # print it here too, so the reason for ERR* survives in the log
+            # long after the artifact expires, instead of only the bare flag.
+            flag = f" ERR* {row['err_line']!r}" if err_signal else ""
             print(f"[{level}] {cid} -> exit={rc} {bucket}{flag} "
                   f"{dur_ms}ms rss={peak_rss_kb}", file=sys.stderr)
             n += 1
