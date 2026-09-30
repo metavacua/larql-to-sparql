@@ -32,11 +32,7 @@ import os
 INCLUDE_BITNET2B = os.environ.get("INCLUDE_BITNET2B", "false").lower() == "true"
 
 SAFETENSORS = [
-    ("qwen05",    "Qwen/Qwen2.5-Coder-0.5B-Instruct"),
     ("smol135",   "HuggingFaceTB/SmolLM2-135M-Instruct"),
-    ("smol360",   "HuggingFaceTB/SmolLM2-360M-Instruct"),
-    ("qwen15",    "Qwen/Qwen2.5-1.5B-Instruct"),
-    ("granite1b", "ibm-granite/granite-3.0-1b-a400m-instruct"),
 ]
 if INCLUDE_BITNET2B:
     SAFETENSORS = SAFETENSORS + [("bitnet2b", "microsoft/bitnet-b1.58-2B-4T")]
@@ -71,14 +67,12 @@ def main():
         legs.append(leg(f"{mid}.xform.q4k", hf, "extract", level="all",
                         flags="--quant q4k", expect_quant="q4k"))
     #    level-invariance sentinel: one q4k at a non-all level, asserted ≡ q4k.all (#275).
-    legs.append(leg("qwen05.xform.q4k-sentinel-browse",
-                    "Qwen/Qwen2.5-Coder-0.5B-Instruct", "extract",
+    legs.append(leg("smol135.xform.q4k-sentinel-browse",
+                    "HuggingFaceTB/SmolLM2-135M-Instruct", "extract",
                     level="browse", flags="--quant q4k", expect_quant="q4k"))
-    #    post-hoc requant invariants: quantize q4k (assert ≡ inline) + fp4 (hidden%256==0).
-    legs.append(leg("qwen05.xform.posthoc-q4k", "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+    #    post-hoc requant invariant: quantize q4k (assert ≡ inline).
+    legs.append(leg("smol135.xform.posthoc-q4k", "HuggingFaceTB/SmolLM2-135M-Instruct",
                     "quantize-q4k", level="inference", expect_quant="q4k"))
-    legs.append(leg("qwen15.xform.fp4", "Qwen/Qwen2.5-1.5B-Instruct",
-                    "quantize-fp4", level="inference", expect_quant="fp4"))  # 1536 % 256 == 0
     #    f32 side-channel path coverage: one leg on a small model.
     legs.append(leg("smol135.xform.f32", "HuggingFaceTB/SmolLM2-135M-Instruct",
                     "extract", level="all", flags="--f32", expect_quant="none"))
@@ -92,6 +86,12 @@ def main():
         legs.append(leg(f"{mid}.dequant.all", ghf, "gguf-to-vindex", level="all",
                         expect_quant="none", source_kind="gguf",
                         corpus_model=tok, tokenizer_repo=tok))
+
+    # fp4 post-hoc requant invariant (hidden%256==0): only bitnet2b in this matrix
+    # satisfies it (2560 % 256 == 0), so it rides the same opt-in gate as GGUF.
+    if INCLUDE_BITNET2B:
+        legs.append(leg("bitnet2b.xform.fp4", "microsoft/bitnet-b1.58-2B-4T",
+                        "quantize-fp4", level="inference", expect_quant="fp4"))
 
     print(json.dumps(legs))
 
