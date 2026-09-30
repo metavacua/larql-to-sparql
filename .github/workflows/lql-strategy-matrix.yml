@@ -267,6 +267,11 @@ jobs:
           - { id: qwen15,    hf: "Qwen/Qwen2.5-1.5B-Instruct" }
           - { id: granite1b, hf: "ibm-granite/granite-3.0-1b-a400m-instruct" }
           - { id: bitnet2b,  hf: "microsoft/bitnet-b1.58-2B-4T" }
+    # This matrix is static YAML, not driven by gen_legs.py's own
+    # INCLUDE_BITNET2B gate -- without this, the bitnet2b entry above would
+    # download and run regardless of the toggle. Kept in the list (rather
+    # than removed) so `include_bitnet2b: true` still covers it.
+    if: matrix.model.id != 'bitnet2b' || github.event.inputs.include_bitnet2b == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
