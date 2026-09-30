@@ -49,5 +49,10 @@ def test_describe_v3_hollow_container_has_no_representations():
     d = D.describe_v3(idx, expect="none")
     assert d["num_representations"] == 0
     assert d["has_model_weights"] is False
-    assert d["quant_match"] is False
+    assert d["quant_match"] is True  # hollowness is completeness's finding, not quant's
     assert d["observed_quant"] is None
+
+
+def test_describe_v3_quant_expectation_other_than_none_mismatches():
+    d = D.describe_v3({"version": 4, "representations": {}, "profiles": []}, expect="q4k")
+    assert d["quant_match"] is False

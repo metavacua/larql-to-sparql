@@ -39,12 +39,9 @@ def describe_v2(idx, expect):
 
 def describe_v3(idx, expect):
     # Vindex3Index has no single quant/dtype scalar — quant is per-representation
-    # (RepresentationEntry.encoding). Report the distinct encodings observed;
-    # this matrix never requests --quant under --generation v3 (CLI refuses the
-    # combination today), so `quant_match` here only asserts "no representation
-    # claims an encoding" is false, i.e. something was actually produced — it is
-    # NOT yet a real match assertion the way V2's is. Extend once V3 quantization
-    # is reachable from this workflow.
+    # (RepresentationEntry.encoding). An encode is verbatim, so the only
+    # expectation this matrix can state is "none requested"; emptiness is
+    # inv_completeness's question (has_model_weights), not a quant mismatch.
     reps = idx.get("representations") or {}
     encodings = sorted({r.get("encoding") for r in reps.values() if r.get("encoding")})
     return {
@@ -57,7 +54,7 @@ def describe_v3(idx, expect):
         "hidden_size": idx.get("hidden_size"),
         "bitnet_layout": False,
         "observed_quant": "+".join(encodings) if encodings else None,
-        "quant_match": len(reps) > 0,
+        "quant_match": expect == "none",
         "num_representations": len(reps),
         "num_profiles": len(idx.get("profiles") or []),
     }

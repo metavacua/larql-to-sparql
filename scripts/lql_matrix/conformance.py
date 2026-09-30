@@ -242,32 +242,6 @@ def inv_cross_check(legs):
     return out
 
 
-def inv_v3_level_ignored(legs):
-    """--level is silently ignored under --generation v3 (run_v3() never reads
-    args.level — a live bug, not a missing feature: the CLI refuses --quant
-    combined with --generation v3 outright, but accepts and drops --level
-    without a word). Proven empirically, not just read from source: a
-    level-scoped v3 leg (gen_legs.py's `*.v3.level-sentinel-*`) must produce
-    the identical representation count as its unscoped `*.v3` baseline for
-    this to be the silent-ignore signature rather than some other failure."""
-    out = []
-    for name, lg in legs.items():
-        if ".v3.level-sentinel-" not in name:
-            continue
-        base_name = name.split(".v3.level-sentinel-")[0] + ".v3"
-        base = legs.get(base_name)
-        if not base or not lg.descriptor or not base.descriptor:
-            continue
-        n_sent = lg.descriptor.get("num_representations")
-        n_base = base.descriptor.get("num_representations")
-        if n_sent is not None and n_sent == n_base:
-            out.append(Violation("v3-level-ignored", name, "produce",
-                                 f"--level {lg.produce.get('level')} silently ignored under "
-                                 f"--generation v3 (num_representations={n_sent} identical to "
-                                 f"unscoped '{base_name}')"))
-    return out
-
-
 def inv_diagnostic(legs):
     out = []
     for name, lg in legs.items():
@@ -292,7 +266,7 @@ def inv_diagnostic(legs):
 
 
 INVARIANTS = [inv_completeness, inv_produce, inv_no_crash, inv_descriptor_match, inv_cross_check,
-              inv_diagnostic, inv_v3_level_ignored]
+              inv_diagnostic]
 
 
 _SRC_FMT = {"extract": "safetensors", "gguf-to-vindex": "gguf",

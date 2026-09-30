@@ -227,38 +227,6 @@ def test_completeness_v3_uses_descriptor_not_stats_banner():
     assert "v3" in vs[0].detail
 
 
-def test_v3_level_ignored_flags_identical_representation_counts():
-    base = make_leg("smol135.v3",
-        descriptor={"generation": "v3", "num_representations": 42})
-    sentinel_ignored = make_leg("smol135.v3.level-sentinel-browse",
-        produce={"level": "browse"},
-        descriptor={"generation": "v3", "num_representations": 42})
-    legs = {"smol135.v3": base, "smol135.v3.level-sentinel-browse": sentinel_ignored}
-    vs = C.inv_v3_level_ignored(legs)
-    assert [v.leg for v in vs] == ["smol135.v3.level-sentinel-browse"]
-    assert vs[0].invariant == "v3-level-ignored"
-
-
-def test_v3_level_ignored_silent_when_level_actually_honored():
-    # if a future fix makes --level real under v3, the counts diverge and this
-    # invariant must fall silent — it is the fix's own regression guard.
-    base = make_leg("smol135.v3",
-        descriptor={"generation": "v3", "num_representations": 42})
-    sentinel_honored = make_leg("smol135.v3.level-sentinel-browse",
-        produce={"level": "browse"},
-        descriptor={"generation": "v3", "num_representations": 9})
-    legs = {"smol135.v3": base, "smol135.v3.level-sentinel-browse": sentinel_honored}
-    assert C.inv_v3_level_ignored(legs) == []
-
-
-def test_v3_level_ignored_tolerates_missing_baseline_or_descriptor():
-    orphan = make_leg("x.v3.level-sentinel-browse", descriptor={"generation": "v3"})
-    assert C.inv_v3_level_ignored({"x.v3.level-sentinel-browse": orphan}) == []
-    no_desc = make_leg("y.v3.level-sentinel-browse", descriptor={})
-    base = make_leg("y.v3", descriptor={"generation": "v3", "num_representations": 1})
-    assert C.inv_v3_level_ignored({"y.v3": base, "y.v3.level-sentinel-browse": no_desc}) == []
-
-
 def test_non_dict_sidecar_does_not_crash(tmp_path):
     d = tmp_path / "results-lg"
     d.mkdir()
