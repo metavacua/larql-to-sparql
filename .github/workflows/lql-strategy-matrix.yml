@@ -13,7 +13,7 @@ name: lql-strategy-matrix
 
 on:
   push:
-    branches: [lql-strategy-matrix]
+    branches: [port/lql-strategy-matrix]
   workflow_dispatch:
     inputs:
       strict:
