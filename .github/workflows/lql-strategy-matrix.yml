@@ -24,6 +24,10 @@ on:
         description: "Include BitNet-2B-4T legs (safetensors + GGUF ternary/dequant) -- heaviest source by far, off by default"
         type: boolean
         default: false
+      include_mistral7b:
+        description: "Run the Mistral-7B-v0.1 goldens against the real model (~14.5 GB download) -- off by default"
+        type: boolean
+        default: false
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
 
@@ -272,6 +276,18 @@ jobs:
           python3 -c "import json,os,sys; d=sys.argv[1]; print(json.dumps({f: os.path.getsize(os.path.join(d,f)) for f in os.listdir(d)}) if os.path.isdir(d) else '{}')" \
             "$VINDEX" > "$MDIR/listing.json" 2>/dev/null || echo '{}' > "$MDIR/listing.json"
 
+      # Uploaded before the corpus runs, so the real-artifact tests see the
+      # vindex exactly as produced. A leg that failed to produce uploads
+      # nothing; the consuming job then fails on the missing artifact.
+      - name: Upload vindex for real-artifact tests
+        if: contains(fromJSON('["smol135base.v3","smol135base.native.all","smol135base.xform.q4k"]'), matrix.leg.name)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vindex-${{ matrix.leg.name }}
+          path: out/${{ matrix.leg.name }}.vindex
+          retention-days: 1
+          if-no-files-found: warn
+
       - name: Run LQL command corpus (${{ matrix.leg.name }})
         run: |
           VINDEX="out/${NAME}.vindex"
@@ -447,3 +463,185 @@ jobs:
             presence.json
             q8.json
             q8.md
+
+  # #[ignore]d tests that need a real artifact, run against the SmolLM2-135M
+  # (Apache-2.0) vindexes this workflow just produced:
+  #   - self-consistency tests: each compares two computations on the SAME
+  #     artifact, so any admissible model qualifies and a failure is a defect;
+  #   - a negative control: the Mistral-7B-v0.1 goldens pointed at SmolLM2.
+  #     A golden that a mismatched model passes cannot discriminate, so this
+  #     must fail — and on the golden's own assertion, not on loading.
+  # Release profile: the test profile is unoptimised and these run real
+  # forward passes. Paths are absolute because cargo runs each test binary
+  # from its crate's directory.
+  real-artifact-tests:
+    needs: matrix
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ART: ${{ github.workspace }}/art
+      CARGO_TEST: cargo test --release --no-default-features
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install BLAS
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-realart-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-realart-release-
+      - uses: actions/download-artifact@v4
+        with: { name: vindex-smol135base.v3, path: art/smol135base.v3 }
+      - uses: actions/download-artifact@v4
+        with: { name: vindex-smol135base.native.all, path: art/smol135base.native.all }
+      - uses: actions/download-artifact@v4
+        with: { name: vindex-smol135base.xform.q4k, path: art/smol135base.xform.q4k }
+      - name: Build test binaries
+        run: $CARGO_TEST -p larql-vindex -p larql-inference --no-run
+
+      - name: V3 — batched and stepped attention bit-identical (LARQL_V3_CONTAINER)
+        id: v3_kv
+        continue-on-error: true
+        env: { LARQL_V3_CONTAINER: "${{ github.workspace }}/art/smol135base.v3" }
+        run: $CARGO_TEST -p larql-vindex --lib -- --ignored --exact --nocapture format::vindex3::opplan::exec::tests::attention_kv_parity::real_container_batched_and_stepped_attention_agree_per_position
+      - name: V3 — production and reference backends agree (LARQL_V3_CONTAINER)
+        id: v3_carrier
+        continue-on-error: true
+        env: { LARQL_V3_CONTAINER: "${{ github.workspace }}/art/smol135base.v3" }
+        run: $CARGO_TEST -p larql-vindex --lib -- --ignored --exact --nocapture format::vindex3::opplan::exec::tests::carrier_write_real::real_container_witnesses_and_capture_cost
+      - name: V3 — recording does not change logits (LARQL_V3_CONTAINER)
+        id: v3_record
+        continue-on-error: true
+        env: { LARQL_V3_CONTAINER: "${{ github.workspace }}/art/smol135base.v3" }
+        run: $CARGO_TEST -p larql-inference --lib -- --ignored --exact --nocapture vindex3::tests::record::record_basics::s8_real_container_record_writes_and_replays
+      - name: V3 — calibration matches direct recomputation (CAL1_CONTAINER)
+        id: v3_cal
+        continue-on-error: true
+        env: { CAL1_CONTAINER: "${{ github.workspace }}/art/smol135base.v3" }
+        run: $CARGO_TEST -p larql-vindex --lib -- --ignored --exact --nocapture format::vindex3::represent::calibration::tests::tests_basics::calibration_real_layer_inputs_match_independent_decode_observation
+      - name: V2 — MEMIT single fact (LARQL_VINDEX_PATH, float weights)
+        id: v2_memit
+        continue-on-error: true
+        env: { LARQL_VINDEX_PATH: "${{ github.workspace }}/art/smol135base.native.all" }
+        run: $CARGO_TEST -p larql-inference --lib -- --ignored --exact --nocapture forward::memit::tests::run_memit_single_fact_produces_delta
+      - name: V2 — generate (LARQL_VINDEX_PATH, Q4K)
+        id: v2_generate
+        continue-on-error: true
+        env: { LARQL_VINDEX_PATH: "${{ github.workspace }}/art/smol135base.xform.q4k" }
+        run: $CARGO_TEST -p larql-inference --lib -- --ignored --nocapture layer_graph::generate::tests::generate_
+
+      - name: Negative control — Mistral-7B goldens against SmolLM2 must fail on the assertion
+        id: negative
+        continue-on-error: true
+        run: |
+          # The golden looks its vindex up by name; the variable name keeps the
+          # dot from `mistral-7b-v0.1-q4k`, so it is set through env(1).
+          expect_mismatch() {
+            label=$1; marker=$2; shift 2
+            set +e
+            out=$(env "LARQL_VINDEX_MISTRAL_7B_V0.1_Q4K=$ART/smol135base.xform.q4k" \
+                      LARQL_ARCH_STRICT=1 "$@" 2>&1)
+            ec=$?
+            set -e
+            echo "$out"
+            if [ "$ec" -eq 0 ]; then
+              echo "::error::$label: SmolLM2 PASSED a Mistral golden — the golden does not discriminate"
+              return 1
+            fi
+            if echo "$out" | grep -qE "$marker"; then
+              echo "$label: failed on the golden's assertion, as a negative control must"
+              { echo "### $label (SmolLM2 against the Mistral pin)"; echo '```'
+                echo "$out" | grep -E -A4 "$marker"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+              return 0
+            fi
+            echo "::error::$label: failed, but not on the golden's assertion (a load or run failure)"
+            return 1
+          }
+          rc=0
+          expect_mismatch logits_golden_mistral_7b_cpu "top-5 set mismatch|top-1 logit drift" \
+            $CARGO_TEST -p larql-inference --test test_logits_goldens -- --ignored --exact --nocapture logits_golden_mistral_7b_cpu || rc=1
+          expect_mismatch arch_mistral_7b_cpu "does not contain expected substring" \
+            $CARGO_TEST -p larql-inference --test test_arch_golden -- --ignored --exact --nocapture arch_mistral_7b_cpu || rc=1
+          exit $rc
+
+      - name: Report + fail loud if any check failed
+        if: always()
+        run: |
+          {
+            echo "## Real-artifact tests (SmolLM2-135M vindexes from this run)"
+            echo "| check | outcome |"
+            echo "|---|---|"
+            echo "| V3 attention batched = stepped | ${{ steps.v3_kv.outcome }} |"
+            echo "| V3 production = reference backend | ${{ steps.v3_carrier.outcome }} |"
+            echo "| V3 recording leaves logits unchanged | ${{ steps.v3_record.outcome }} |"
+            echo "| V3 calibration = direct recomputation | ${{ steps.v3_cal.outcome }} |"
+            echo "| V2 MEMIT single fact | ${{ steps.v2_memit.outcome }} |"
+            echo "| V2 generate (Q4K) | ${{ steps.v2_generate.outcome }} |"
+            echo "| negative control: Mistral goldens reject SmolLM2 | ${{ steps.negative.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for o in "${{ steps.v3_kv.outcome }}" "${{ steps.v3_carrier.outcome }}" \
+                   "${{ steps.v3_record.outcome }}" "${{ steps.v3_cal.outcome }}" \
+                   "${{ steps.v2_memit.outcome }}" "${{ steps.v2_generate.outcome }}" \
+                   "${{ steps.negative.outcome }}"; do
+            [ "$o" = success ] || exit 1
+          done
+
+  # The expected-model arm of the Mistral goldens: the same two tests against
+  # the real mistralai/Mistral-7B-v0.1 (Apache-2.0), so the pass here and the
+  # SmolLM2 failure above can be compared. Opt-in: the checkpoint is ~14.5 GB
+  # on a runner with ~14 GB free, so the preinstalled SDKs are removed first.
+  # The file notes the non-gemma3 pins may predate an lm_head path change; a
+  # failure here may be a stale pin, and its text says which kind it is.
+  mistral-expected-goldens:
+    needs: build
+    if: github.event.inputs.include_mistral7b == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      VINDEX: ${{ github.workspace }}/mistral-7b-v0.1-q4k.vindex
+      CARGO_TEST: cargo test --release --no-default-features
+    steps:
+      - name: Free disk
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: larql-bin
+          path: bin
+      - name: Prep
+        run: |
+          chmod +x bin/larql
+          sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Download mistralai/Mistral-7B-v0.1 (safetensors only)
+        run: |
+          python -m pip install --quiet huggingface_hub
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('mistralai/Mistral-7B-v0.1', allow_patterns=['*.safetensors','*.json','tokenizer.model'])"
+          df -h /
+      - name: Extract mistral-7b-v0.1-q4k
+        run: |
+          /usr/bin/time -v ./bin/larql extract mistralai/Mistral-7B-v0.1 -o "$VINDEX" --quant q4k
+          du -sh "$VINDEX"
+      - name: Drop the checkpoint before building tests
+        run: |
+          rm -rf ~/.cache/huggingface
+          df -h /
+      - name: Mistral goldens against the real model (must pass)
+        run: |
+          rc=0
+          env "LARQL_VINDEX_MISTRAL_7B_V0.1_Q4K=$VINDEX" LARQL_ARCH_STRICT=1 \
+            $CARGO_TEST -p larql-inference --test test_logits_goldens -- --ignored --exact --nocapture logits_golden_mistral_7b_cpu || rc=1
+          env "LARQL_VINDEX_MISTRAL_7B_V0.1_Q4K=$VINDEX" LARQL_ARCH_STRICT=1 \
+            $CARGO_TEST -p larql-inference --test test_arch_golden -- --ignored --exact --nocapture arch_mistral_7b_cpu || rc=1
+          exit $rc
